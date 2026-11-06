@@ -102,9 +102,9 @@ public class CecilInjectedFieldInitializerTests
         string patch = Read("patches/runtime/VSEssentials/Vintagestory/Essentials/AStar.cs.patch");
 
         Assert.DoesNotMatch(
-            new Regex(@"readonly PathNode\[\]\s*optimumNodePool\s*=\s*new PathNode\[4096\];"),
+            new Regex(@"PathNode\s+scratchNode\s*=\s*new\s+PathNode"),
             patch);
-        Assert.Contains("optimumNodePool ??= new PathNode[4096];", patch);
+        Assert.Contains("scratchNode ??= new PathNode(start);", patch);
     }
 
     [Fact]

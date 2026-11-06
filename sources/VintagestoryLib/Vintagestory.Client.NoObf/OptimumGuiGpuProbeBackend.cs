@@ -35,6 +35,7 @@ namespace Vintagestory.Client.NoObf
 		private static SkiaGlBindings cachedBindings;
 		private static GRGlInterface cachedGlInterface;
 		private static GRContext cachedContext;
+		private static RecordedGpuBlur cachedBlur;
 		private static int persistentScratchFramebuffer;
 		private static int persistentIsolatedVertexArray;
 		private static readonly object contextLock = new object();
@@ -81,6 +82,11 @@ namespace Vintagestory.Client.NoObf
 			cachedDeviceIdentity = null;
 			lock (contextLock)
 			{
+				if (cachedBlur != null)
+				{
+					try { cachedBlur.Dispose(); } catch { }
+					cachedBlur = null;
+				}
 				AbandonAndDisposeContext(ref cachedContext);
 				if (cachedGlInterface != null)
 				{
@@ -368,6 +374,7 @@ namespace Vintagestory.Client.NoObf
 
 						IntPtr operationContext = CurrentContextHandle();
 						GRContext context;
+						RecordedGpuBlur blur;
 						bool abandonOnExit = false;
 						lock (contextLock)
 						{
@@ -375,6 +382,11 @@ namespace Vintagestory.Client.NoObf
 							// and the post-render checks always run, so a reset in between still fails the upload closed.
 							if (cachedContext == null || cachedContextHandle != operationContext || cachedContextThreadId != expectedContextThreadId)
 							{
+								if (cachedBlur != null)
+								{
+									try { cachedBlur.Dispose(); } catch { }
+									cachedBlur = null;
+								}
 								AbandonAndDisposeContext(ref cachedContext);
 								if (cachedGlInterface != null)
 								{
@@ -400,7 +412,10 @@ namespace Vintagestory.Client.NoObf
 							{
 								cachedBindings.SetIsolatedVertexArray(persistentIsolatedVertexArray);
 							}
+							cachedBlur ??= new RecordedGpuBlur(cachedContext);
+							cachedBlur.ResetPerUploadState();
 							context = cachedContext;
+							blur = cachedBlur;
 						}
 
 						try
@@ -412,17 +427,14 @@ namespace Vintagestory.Client.NoObf
 							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
 							{
 								if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								using (var blur = new RecordedGpuBlur(context))
-								{
-									if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-									// One flush-and-submit covers this surface and any offscreen blur work. Each further
-									// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
-									// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
-									// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
-									// from this upload are still caught after the state restore below.
-									context.Flush(submit: true, synchronous: false);
-									rendered = true;
-								}
+								if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
+								// One flush-and-submit covers this surface and any offscreen blur work. Each further
+								// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
+								// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
+								// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
+								// from this upload are still caught after the state restore below.
+								context.Flush(submit: true, synchronous: false);
+								rendered = true;
 							}
 						}
 						catch
@@ -438,10 +450,12 @@ namespace Vintagestory.Client.NoObf
 							{
 								lock (contextLock)
 								{
+									if (ReferenceEquals(cachedBlur, blur)) cachedBlur = null;
 									cachedContext = null;
 									cachedContextHandle = IntPtr.Zero;
 								}
 								context.AbandonContext(releaseResources);
+								try { blur?.Dispose(); } catch { }
 							}
 						}
 					}

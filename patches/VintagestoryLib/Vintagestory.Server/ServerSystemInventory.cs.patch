@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
-index 19f5199..536bbc5 100644
+index 19f5199..cba04ad 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemInventory.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index 19f5199..536bbc5 100644
  using Vintagestory.API.Server;
  using Vintagestory.Common;
  
-@@ -205,10 +207,14 @@ internal class ServerSystemInventory : ServerSystem
+@@ -205,14 +207,30 @@ internal class ServerSystemInventory : ServerSystem
  		}
  	}
  
@@ -23,8 +23,39 @@ index 19f5199..536bbc5 100644
 +		{
 +			return;
 +		}
++		bool hasSkippedDirtyClient = false;
  		foreach (ConnectedClient value in server.Clients.Values)
  		{
  			if (!value.IsPlayingClient)
  			{
++				if (!hasSkippedDirtyClient && value.Player?.inventoryMgr?.Inventories != null)
++				{
++					foreach (InventoryBase value2 in value.Player.inventoryMgr.Inventories.Values)
++					{
++						if (value2.IsDirty)
++						{
++							hasSkippedDirtyClient = true;
++							break;
++						}
++					}
++				}
  				continue;
+ 			}
+ 			foreach (InventoryBase value2 in value.Player.inventoryMgr.Inventories.Values)
+ 			{
+ 				if (!value2.IsDirty)
+@@ -242,10 +260,14 @@ internal class ServerSystemInventory : ServerSystem
+ 		foreach (InventoryBase item in dirtySlots2Clear)
+ 		{
+ 			item.dirtySlots.Clear();
+ 		}
+ 		dirtySlots2Clear.Clear();
++		if (hasSkippedDirtyClient)
++		{
++			OptimumApiBridge.MarkInventoryDirty();
++		}
+ 	}
+ 
+ 	public override void OnPlayerJoin(ServerPlayer player)
+ 	{
+ 		foreach (InventoryBase value in player.inventoryMgr.Inventories.Values)

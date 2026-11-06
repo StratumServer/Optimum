@@ -1,0 +1,73 @@
+diff --git a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
+index c3fe425..8d21b1b 100644
+--- a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
++++ b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
+@@ -75,10 +75,11 @@ namespace Vintagestory.Essentials
+ 
+             NodesChecked = 0;
+ 
+             PathNode startNode = new PathNode(start);
+             PathNode targetNode = new PathNode(endOrAvoidPos);
++            PathNode scratch = scratchNode ??= new PathNode(start);
+             
+             var distSq = modeMinFleeDistance * modeMinFleeDistance;
+ 
+             openSet.Clear();
+             closedSet.Clear();
+@@ -112,30 +113,38 @@ namespace Vintagestory.Essentials
+ 
+                 for (int i = 0; i < Cardinal.ALL.Length; i++)
+                 {
+                     Cardinal card = Cardinal.ALL[i];
+ 
+-                    PathNode neighbourNode = new PathNode(nearestNode, card);
++                    scratch.Set(nearestNode.X + card.Normali.X, nearestNode.Y + card.Normali.Y, nearestNode.Z + card.Normali.Z);
++                    scratch.dimension = nearestNode.dimension;
++                    scratch.gCost = 0f;
++                    scratch.hCost = 0f;
++                    scratch.Parent = null;
++                    scratch.pathLength = 0;
++                    scratch.HeapIndex = 0;
++                    scratch.Action = EnumTraverseAction.Walk;
+ 
+                     float extraCost = 0;
+-                    PathNode existingNeighbourNode = openSet.TryFindValue(neighbourNode);
++                    PathNode existingNeighbourNode = openSet.TryFindValue(scratch);
+                     if (!(existingNeighbourNode is null))   // we have to do a null check using "is null" due to foibles in PathNode.Equals()
+                     {
+                         // if it is already in openSet, update the gCost and parent if this nearestNode gives a shorter route to it
+-                        float baseCostToNeighbour = nearestNode.gCost + nearestNode.distanceTo(neighbourNode);
++                        float baseCostToNeighbour = nearestNode.gCost + nearestNode.distanceTo(scratch);
+                         if (existingNeighbourNode.gCost > baseCostToNeighbour + 0.0001f)
+                         {
+-                            if (traversable(neighbourNode, stepHeight, maxFallHeight, entityCollBox, card, ref extraCost) && existingNeighbourNode.gCost > baseCostToNeighbour + extraCost + 0.0001f)
++                            if (traversable(scratch, stepHeight, maxFallHeight, entityCollBox, card, ref extraCost) && existingNeighbourNode.gCost > baseCostToNeighbour + extraCost + 0.0001f)
+                             {
+                                 UpdateNode(nearestNode, existingNeighbourNode, extraCost);
+                             }
+                         }
+                     }
+-                    else if (!closedSet.Contains(neighbourNode))
++                    else if (!closedSet.Contains(scratch))
+                     {
+-                        if (traversable(neighbourNode, stepHeight, maxFallHeight, entityCollBox, card, ref extraCost))
++                        if (traversable(scratch, stepHeight, maxFallHeight, entityCollBox, card, ref extraCost))
+                         {
++                            PathNode neighbourNode = new PathNode(scratch);
+                             UpdateNode(nearestNode, neighbourNode, extraCost);
+                             
+                             neighbourNode.hCost = modeMinFleeDistance > 0 ? 1 + modeMinFleeDistance - neighbourNode.distanceTo(targetNode) : neighbourNode.distanceTo(targetNode);
+                             openSet.Add(neighbourNode);
+                         }
+@@ -161,10 +170,11 @@ namespace Vintagestory.Essentials
+ 
+ 
+         protected readonly Vec3d tmpVec = new Vec3d();
+         protected readonly BlockPos tmpPos = new BlockPos(API.Config.Dimensions.WillSetLater);
+         protected Cuboidd tmpCub = new Cuboidd();
++        protected PathNode scratchNode;
+ 
+         protected bool traversable(PathNode node, float stepHeight, int maxFallHeight, Cuboidf entityCollBox, Cardinal fromDir, ref float extraCost)
+         {
+             tmpVec.Set(node.X + centerOffsetX, node.Y, node.Z + centerOffsetZ);
+             tmpPos.dimension = node.dimension;

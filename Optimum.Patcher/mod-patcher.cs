@@ -58,9 +58,7 @@ public static class ModPatcher
                 ],
                 ["Vintagestory.Essentials.AStar"] =
                 [
-                    "optimumNodePool",
-                    "optimumNodePoolIndex",
-                    "OptimumRentNode",
+                    "scratchNode",
                 ],
                 ["Vintagestory.GameContent.EntityShapeRenderer"] =
                 [
