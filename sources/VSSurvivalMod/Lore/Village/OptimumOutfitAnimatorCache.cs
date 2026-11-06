@@ -45,6 +45,18 @@ namespace Vintagestory.GameContent
 
         public static bool Enabled => OptimumConfig.EntityOutfitAnimatorCacheEnabled;
 
+        public static string BuildKey(string outfitKey, CompositeShape[] overlays, string[] willDisableElements)
+        {
+            if (outfitKey == null) return null;
+            string overlaysStr = overlays != null && overlays.Length > 0
+                ? string.Join(",", (IEnumerable<CompositeShape>)overlays)
+                : "";
+            string disabledStr = willDisableElements != null && willDisableElements.Length > 0
+                ? string.Join(",", willDisableElements)
+                : "";
+            return outfitKey + "|ov:" + overlaysStr + "|dis:" + disabledStr;
+        }
+
         /// <summary>
         /// On a cache hit, builds the animator from the cached RootElements/RootPoses/Animations
         /// (skipping the full element-tree walk) and wires it up on entity.AnimManager, exactly

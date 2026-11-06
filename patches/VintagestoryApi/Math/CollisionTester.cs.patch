@@ -1,14 +1,14 @@
 diff --git a/VintagestoryApi/Math/CollisionTester.cs b/VintagestoryApi/Math/CollisionTester.cs
-index b06b0dc..76fa1a7 100644
+index b06b0dc..8bc8017 100644
 --- a/VintagestoryApi/Math/CollisionTester.cs
 +++ b/VintagestoryApi/Math/CollisionTester.cs
-@@ -46,10 +46,27 @@ namespace Vintagestory.API.MathTools
+@@ -46,10 +46,40 @@ namespace Vintagestory.API.MathTools
          /// <param name="newPosition"></param>
          /// <param name="stepHeight"></param>
          /// <param name="yExtra">Default 1 for the extra high collision boxes of fences</param>
          public void ApplyTerrainCollision(Entity entity, EntityPos entityPos, float dtFactor, ref Vec3d newPosition, float stepHeight = 1, float yExtra = 1)
          {
-+            // Optimum: fast path for stationary entities.
++            // Optimum: fast path for stationary entities resting on solid ground.
 +            // Zero motion means pushOut returns 0 and newPosition equals entityPos.
 +            // Skip the block accessor scan and collision loops for idle creatures.
 +            // Players excluded (client movement validation). Items excluded (ground contact rendering).
@@ -18,10 +18,23 @@ index b06b0dc..76fa1a7 100644
 +                if (motion.X == 0 && motion.Y == 0 && motion.Z == 0
 +                    && !entity.FeetInLiquid && !entity.Swimming && !entity.InLava && !entity.IsOnFire)
 +                {
-+                    entity.CollidedVertically = false;
-+                    entity.CollidedHorizontally = false;
-+                    newPosition.Set(entityPos.X, entityPos.Y, entityPos.Z);
-+                    return;
++                    if (entity.CollidedVertically)
++                    {
++                        var blockAccessor = entity.World?.BlockAccessor;
++                        if (blockAccessor != null)
++                        {
++                            tmpPos.Set((int)Math.Floor(entityPos.X), (int)Math.Floor(entityPos.Y - 0.05), (int)Math.Floor(entityPos.Z));
++                            tmpPos.SetDimension(entityPos.Dimension);
++                            Block blockBelow = blockAccessor.GetBlock(tmpPos);
++                            if (blockBelow != null && blockBelow.SideSolid[BlockFacing.UP.Index])
++                            {
++                                entity.CollidedVertically = true;
++                                entity.CollidedHorizontally = false;
++                                newPosition.Set(entityPos.X, entityPos.Y, entityPos.Z);
++                                return;
++                            }
++                        }
++                    }
 +                }
 +            }
 +

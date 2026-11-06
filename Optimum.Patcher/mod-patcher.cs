@@ -55,6 +55,7 @@ public static class ModPatcher
                 ["Vintagestory.GameContent.EntityBehaviorCollectEntities"] =
                 [
                     "OptimumCollectStrideInterval",
+                    "partitionUtil",
                 ],
                 ["Vintagestory.Essentials.AStar"] =
                 [
@@ -108,6 +109,10 @@ public static class ModPatcher
                     "optimumTargetSurfaceWindZ",
                     "optimumHasWind",
                 ],
+                ["Vintagestory.GameContent.EntityBehaviorRepulseAgents"] =
+                [
+                    "isWithinRepulseRange",
+                ],
                 ["Vintagestory.GameContent.WeatherSimulationSound"] =
                 [
                     "lastSetWindVolumeLeafy",
@@ -145,6 +150,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockEntityParticleEmitter", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
+                new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "UpdateColSelBoxes", 0),
                 new("Vintagestory.Essentials.AStar", "FindPathOrEscapePath", 9),
                 new(
                     "Vintagestory.Essentials.PathNode",

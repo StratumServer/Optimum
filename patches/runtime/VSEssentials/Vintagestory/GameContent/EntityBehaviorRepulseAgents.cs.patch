@@ -13,7 +13,47 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.c
  
  namespace Vintagestory.GameContent;
  
-@@ -79,10 +80,21 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+@@ -22,10 +23,12 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+ 
+ 	protected double touchdist;
+ 
+ 	private IClientWorldAccessor cworld;
+ 
++	private bool isWithinRepulseRange;
++
+ 	public double ownPosRepulseX;
+ 
+ 	public double ownPosRepulseY;
+ 
+ 	public double ownPosRepulseZ;
+@@ -59,10 +62,26 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+ 	}
+ 
+ 	public override void UpdateColSelBoxes()
+ 	{
+ 		touchdist = entity.touchDistance;
++		if (cworld != null)
++		{
++			Entity plr = cworld.Player?.Entity;
++			if (plr != null && entity != plr)
++			{
++				double dx = entity.Pos.X - plr.Pos.X;
++				double dz = entity.Pos.Z - plr.Pos.Z;
++				double maxRepulseDist = (entity.CollisionBox.X2 - entity.CollisionBox.X1) * 0.5 + 4.0;
++				double maxRepulseDistSq = maxRepulseDist * maxRepulseDist;
++				isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);
++			}
++			else
++			{
++				isWithinRepulseRange = true;
++			}
++		}
+ 	}
+ 
+ 	public void AfterPhysicsTick()
+ 	{
+ 		Entity obj = entity;
+@@ -79,10 +98,19 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
  		Entity entity = base.entity;
  		if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable)
  		{
@@ -21,9 +61,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.c
  		}
 +		if (OptimumConfig.RepulsionGateEnabled && cworld != null && entity != cworld.Player.Entity)
 +		{
-+			double dx = entity.Pos.X - cworld.Player.Entity.Pos.X;
-+			double dz = entity.Pos.Z - cworld.Player.Entity.Pos.Z;
-+			if (dx * dx + dz * dz > OptimumConfig.RepulsionDistanceSq)
++			if (!isWithinRepulseRange)
 +			{
 +				OptimumDiagnostics.RepulseAgents.Skip();
 +				return;

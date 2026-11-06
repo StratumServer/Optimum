@@ -294,17 +294,9 @@ namespace Vintagestory.Client.NoObf
 						failureReason = "gpu-probe-not-passed";
 						return false;
 					}
-					// Keep pre-existing engine errors out of the candidate operation. The probe's caller
-					// performs the normal upload error check if this returns false.
-					string preexistingErrors = DrainPreexistingGlErrors();
-					if (preexistingErrors != null)
-					{
-						if (ForceSkiaCpuFallbackForTest)
-							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-								"preexisting-gl-errors:" + preexistingErrors, out candidateTexture, out failureReason);
-						failureReason = "preexisting-gl-errors:" + preexistingErrors;
-						return false;
-					}
+					// Drain pre-existing engine errors before capturing state so post-render
+					// error checks only catch errors produced by the candidate render itself.
+					DrainPreexistingGlErrors();
 
 					GlStateSnapshot state = null;
 					int texture = 0, framebuffer = 0, isolatedVertexArray = 0;
