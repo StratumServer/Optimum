@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/Weather/WeatherSystemClient.cs b/VSEssentials/Systems/Weather/WeatherSystemClient.cs
-index 2bde537..f184d06 100644
+index 2bde537..ce192dd 100644
 --- a/VSEssentials/Systems/Weather/WeatherSystemClient.cs
 +++ b/VSEssentials/Systems/Weather/WeatherSystemClient.cs
 @@ -125,10 +125,22 @@ namespace Vintagestory.GameContent
@@ -112,3 +112,15 @@ index 2bde537..f184d06 100644
                  flatFogd += (targetFlatFogd - flatFogd) * dt;
                  capi.Ambient.CurrentModifiers["weather"].FlatFogDensity.Weight = flatFogd;
              }
+@@ -341,10 +379,11 @@ namespace Vintagestory.GameContent
+         public override void Dispose()
+         {
+             base.Dispose();
+ 
+             simSounds?.Dispose();
++            simParticles?.Dispose();
+         }
+ 
+ 
+         public double RenderOrder => -0.1;
+         public int RenderRange => 999;

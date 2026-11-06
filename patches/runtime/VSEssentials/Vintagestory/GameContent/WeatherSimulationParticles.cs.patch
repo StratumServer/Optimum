@@ -1,7 +1,7 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
 --- a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
 +++ b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
-@@ -17,10 +17,14 @@ public class WeatherSimulationParticles
+@@ -17,10 +17,43 @@ public class WeatherSimulationParticles
  
  	private static int[,] lowResRainHeightMap;
  
@@ -11,12 +11,55 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
 +
 +	private int optimumLastHeightmapCenterZ = int.MinValue;
 +
++	private void OnBlockChanged(BlockPos pos, Block oldBlock)
++	{
++		if (Math.Abs(pos.X - optimumLastHeightmapCenterX) <= 32 && Math.Abs(pos.Z - optimumLastHeightmapCenterZ) <= 32)
++		{
++			optimumLastHeightmapCenterX = int.MinValue;
++			optimumLastHeightmapCenterZ = int.MinValue;
++		}
++	}
++
++	private void ResetHeightMapCache()
++	{
++		optimumLastHeightmapCenterX = int.MinValue;
++		optimumLastHeightmapCenterZ = int.MinValue;
++		if (lowResRainHeightMap != null)
++		{
++			Array.Clear(lowResRainHeightMap, 0, lowResRainHeightMap.Length);
++		}
++	}
++
++	public void Dispose()
++	{
++		if (capi?.Event != null)
++		{
++			capi.Event.BlockChanged -= OnBlockChanged;
++			capi.Event.LeaveWorld -= ResetHeightMapCache;
++		}
++		ResetHeightMapCache();
++	}
++
  	public static int waterColor;
  
  	public static int lowStabColor;
  
  	public int rainParticleColor;
-@@ -307,17 +311,22 @@ public class WeatherSimulationParticles
+@@ -210,10 +243,13 @@ public class WeatherSimulationParticles
+ 		capi.Ambient.CurrentModifiers["desertstorm"] = desertStormAmbient;
+ 	}
+ 
+ 	public void Initialize()
+ 	{
++		ResetHeightMapCache();
++		capi.Event.BlockChanged += OnBlockChanged;
++		capi.Event.LeaveWorld += ResetHeightMapCache;
+ 		lblock = capi.World.GetBlock(new AssetLocation("water-still-7"));
+ 		if (lblock != null)
+ 		{
+ 			capi.Event.RegisterAsyncParticleSpawner(asyncParticleSpawn);
+ 			capi.Event.RegisterRenderer(new DummyRenderer
+@@ -307,17 +343,22 @@ public class WeatherSimulationParticles
  		particlePos.Set(capi.World.Player.Entity.Pos.X, rainMapHeightAt, capi.World.Player.Entity.Pos.Z);
  		int color = capi.World.ApplyColorMapOnRgba(lblock.ClimateColorMapResolved, lblock.SeasonColorMapResolved, -1, (int)particlePos.X, (int)particlePos.Y, (int)particlePos.Z, flipRb: false);
  		byte[] array = ColorUtil.ToBGRABytes(color);

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
-index 59421c6..141d4aa 100644
+index 59421c6..70af32e 100644
 --- a/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
 +++ b/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs
 @@ -1,8 +1,10 @@
@@ -36,7 +36,7 @@ index 59421c6..141d4aa 100644
  
          public double RenderOrder => 1;
          public int RenderRange => 99;
-@@ -90,11 +104,62 @@ namespace Vintagestory.API.Common
+@@ -90,11 +104,52 @@ namespace Vintagestory.API.Common
          {
              if (animator == null || renderer == null || (api as ICoreClientAPI)?.IsGamePaused == true) return; // not initialized yet
  
@@ -51,21 +51,11 @@ index 59421c6..141d4aa 100644
 +                    double dz = position.Z - plrPos.Z;
 +                    double distSq = dx * dx + dz * dz;
 +
-+                    if (distSq > AnimLodFarSq)
-+                    {
-+                        OptimumDiagnostics.AnimBlockLodFar.Skip();
-+                        return;
-+                    }
 +                    if (distSq > AnimLodNearSq)
 +                    {
-+                        _animFrameCounter++;
-+                        if (_animPhase < 0)
++                        _animDeferredDt += deltaTime;
++                        if (_animDeferredDt < 1f / 15f)
 +                        {
-+                            _animPhase = OptimumAnimLod.Phase((int)position.X, (int)position.Y, (int)position.Z);
-+                        }
-+                        if (!OptimumAnimLod.MidTierDue(_animFrameCounter, _animPhase))
-+                        {
-+                            _animDeferredDt = Math.Min(_animDeferredDt + deltaTime, 0.25f);
 +                            OptimumDiagnostics.AnimBlockLodMid.Skip();
 +                            return;
 +                        }

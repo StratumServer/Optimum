@@ -42,6 +42,7 @@ namespace Cairo
             internal int SaveDepth;
             internal bool Unqualified;
             internal bool AntialiasConfigured = true;
+            internal RecordedGuiClip[] CachedClipSnapshot;
             internal ContextState (Status status, object identity = null) { Identity = identity ?? new object (); Graphics = new ManagedGraphicsState (status); }
         }
         readonly ConditionalWeakTable<Context, ContextState> contextStates = new ConditionalWeakTable<Context, ContextState> ();
@@ -87,12 +88,20 @@ namespace Cairo
 		// Cairo's default antialias mode maps to Skia's antialias-on paint, so helper operations using that default are qualified too.
 		bool antialiasConfigured { get => currentState.AntialiasConfigured; set => currentState.AntialiasConfigured = value; }
 
+		RecordedGuiClip[] GetClipSnapshot()
+		{
+			if (currentState.CachedClipSnapshot != null)
+				return currentState.CachedClipSnapshot;
+			return currentState.CachedClipSnapshot = (clips.Count == 0 ? Array.Empty<RecordedGuiClip>() : clips.ToArray());
+		}
+
 		internal void ResetContextState ()
 		{
 			if (State != SurfaceRecordingState.Recording)
 				throw new InvalidOperationException ("Only a live managed recording target can reset its Context state.");
 			ReplaceGraphicsState (new ManagedGraphicsState (surface.ManagedStatus));
 			clips.Clear ();
+			currentState.CachedClipSnapshot = null;
 			savedClips.Clear ();
 			savedAntialias.Clear ();
 			saveDepth = 0;
@@ -237,7 +246,7 @@ namespace Cairo
 			// until the recorder has an equivalent mask compositor.
 			if (alpha != 1 && graphicsState.Operator is Operator.Clear or Operator.Source
 				or Operator.In or Operator.Out or Operator.DestIn or Operator.DestAtop) return false;
-			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, clips.ToArray(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture(), maskSurface: maskSurface, maskPattern: maskPattern, maskBinding: maskBinding, maskX: maskX, maskY: maskY);
+			RecordedGuiDrawing drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, GetClipSnapshot(), alpha: alpha, sourceMatrix: sourceMatrix, sourceSnapshot: currentSource?.Capture(), maskSurface: maskSurface, maskPattern: maskPattern, maskBinding: maskBinding, maskX: maskX, maskY: maskY);
 			if (!Add(new Command(c => drawing.Replay(c, replay), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
 			if (clearsPath) graphicsState.NewPath();
@@ -263,10 +272,10 @@ namespace Cairo
 		if (State != SurfaceRecordingState.Recording) return false;
 		if (Faulted) return true;
 			var clip = new RecordedGuiClip(graphicsState);
-			clips.Add(clip); resources.Add(new RecordedResource(clip));
+			clips.Add(clip); currentState.CachedClipSnapshot = null; resources.Add(new RecordedResource(clip));
 			return RecordNative(preserve ? c => c.ClipPreserve() : c => c.Clip(), stateUpdate: preserve ? null : s => s.NewPath());
 		}
-		internal bool RecordResetClip() { clips.Clear(); return RecordNative(c => c.ResetClip()); }
+		internal bool RecordResetClip() { clips.Clear(); currentState.CachedClipSnapshot = null; return RecordNative(c => c.ResetClip()); }
 
 		/// <summary>cairo_in_clip: whether a user-space point is visible through every recorded clip and inside the surface.</summary>
 		internal bool InClip(double x, double y)
@@ -326,7 +335,7 @@ namespace Cairo
 				textState.MoveTo(point.X, point.Y);
 				SkiaTextPath.AppendText(textState, decoded);
 				textState.TryGetCurrentPoint(out double endX, out double endY);
-				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(),
+				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(),
 					textPath: RecordedGuiDrawing.CopyPath(textState), sourceMatrix: sourceMatrix,
 					sourceSnapshot: currentSource?.Capture());
 				drawing.Paint.IsAntialias = options.Antialias != Antialias.None;
@@ -350,7 +359,7 @@ namespace Cairo
 					using var blobBuilder = new SKTextBlobBuilder();
 					blobBuilder.AddPositionedRun(glyphs, font, positions);
 					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a GDI-positioned Windows text run.");
-					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(), sourceMatrix: sourceMatrix,
 						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
 						textInkClip: textInkClip);
 					blob = null;
@@ -380,7 +389,7 @@ namespace Cairo
 					using var blobBuilder = new SKTextBlobBuilder();
 					blobBuilder.AddPositionedRun(glyphs, font, positions);
 					blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to build a Fontconfig-hinted text run.");
-					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+					drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(), sourceMatrix: sourceMatrix,
 						sourceSnapshot: currentSource?.Capture(), text: decoded, textBlob: blob, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
 						textInkClip: textInkClip);
 					blob = null;
@@ -388,7 +397,7 @@ namespace Cairo
 			} else {
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.TextMeasurement))
 					advance = font.MeasureText(decoded);
-				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+				drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(), sourceMatrix: sourceMatrix,
 						sourceSnapshot: currentSource?.Capture(), text: decoded, textFont: font, textX: (float)(point.X + trans.X), textY: (float)(point.Y + trans.Y),
 						textInkClip: textInkClip);
 			}
@@ -466,7 +475,7 @@ namespace Cairo
 				ManagedGraphicsState textState = graphicsState.CloneForGroup();
 				textState.NewPath();
 				SkiaTextPath.AppendGlyphs(textState, copy);
-				var outlinedDrawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(),
+				var outlinedDrawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(),
 					textPath: RecordedGuiDrawing.CopyPath(textState), sourceMatrix: sourceMatrix,
 					sourceSnapshot: currentSource?.Capture());
 				outlinedDrawing.Paint.IsAntialias = options.Antialias != Antialias.None;
@@ -487,7 +496,7 @@ namespace Cairo
 			using var blobBuilder = new SKTextBlobBuilder();
 			blobBuilder.AddPositionedRun(glyphIndices, font, positions);
 			SKTextBlob blob = blobBuilder.Build() ?? throw new InvalidOperationException("Skia failed to create a positioned glyph run.");
-			var drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, clips.ToArray(), sourceMatrix: sourceMatrix,
+			var drawing = RecordedGuiDrawing.Capture(graphicsState, width, height, false, false, GetClipSnapshot(), sourceMatrix: sourceMatrix,
 				sourceSnapshot: currentSource?.Capture(), textBlob: blob);
 			if (!Add(new Command(c => drawing.Replay(c, target => target.ShowGlyphs(copy)), drawing))) { drawing.Dispose(); return false; }
 			resources.Add(new RecordedResource(drawing));
@@ -630,8 +639,8 @@ namespace Cairo
 		{
 			return RecordDrawing(c => c.Fill(), clearsPath: true);
 		}
-		internal bool RecordSave () { Antialias antialias = graphicsState.Antialias; bool recorded = RecordNative(c => c.Save(), stateUpdate: s => s.Save()); if (recorded) { savedClips.Push(clips.ToArray()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
-		internal bool RecordRestore () { if (saveDepth == 0) return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore());  savedAntialias.Pop(); clips.Clear(); clips.AddRange(savedClips.Pop()); saveDepth--; return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore()); }
+		internal bool RecordSave () { Antialias antialias = graphicsState.Antialias; bool recorded = RecordNative(c => c.Save(), stateUpdate: s => s.Save()); if (recorded) { savedClips.Push(GetClipSnapshot()); savedAntialias.Push(antialias); saveDepth++; } return recorded; }
+		internal bool RecordRestore () { if (saveDepth == 0) return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore());  savedAntialias.Pop(); clips.Clear(); currentState.CachedClipSnapshot = null; clips.AddRange(savedClips.Pop()); currentState.CachedClipSnapshot = null; saveDepth--; return RecordNative(c => c.Restore(), stateUpdate: s => s.Restore()); }
 		internal bool RecordAntialias (Antialias value)
 		{
 			bool recorded = Add (new Command (CommandKind.SetAntialias, (double)value));
