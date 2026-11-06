@@ -55,8 +55,9 @@ public class ThrottleAndCacheBatchCoverageTests
 
         Assert.Contains("ListenerMoveThresholdSq = 0.0025", source);
         Assert.Contains("ListenerDirThresholdSq = 0.000001f", source);
-        Assert.Contains("ListenerRefreshFrames = 10", source);
-        Assert.Contains("_listenerFramesSinceUpdate >= ListenerRefreshFrames", source);
+        Assert.Contains("ddy * ddy", source);
+        Assert.Contains("ListenerRefreshInterval = 0.1f", source);
+        Assert.Contains("_listenerTimeSinceUpdate >= ListenerRefreshInterval", source);
     }
 
     [Fact]
@@ -80,15 +81,15 @@ public class ThrottleAndCacheBatchCoverageTests
     public void WindSpeedAndFogLightThrottlesAlreadyShipped()
     {
         // The implementation has one wind lookup. Verify that it remains
-        // inside the four-frame throttle rather than running every frame.
+        // inside the delta-time throttle rather than running every frame.
         string source = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch");
         Assert.Contains("doWindLookup", source);
 
         const string windLookup = "WeatherDataAtPlayer.GetWindSpeed(plrPosd.Y);";
         Assert.Equal(1, source.Split(windLookup, StringSplitOptions.None).Length - 1);
 
-        Assert.Contains("private const int WindUpdateInterval = 4;", source);
-        Assert.Contains("_windFrameCounter % WindUpdateInterval == 0", source);
+        Assert.Contains("private const float WindUpdateInterval = 1f / 15f;", source);
+        Assert.Contains("optimumWindAccum >= WindUpdateInterval", source);
     }
 
     [Fact]

@@ -239,6 +239,7 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "_lastSortPlayerPos",
         "_lastSortYaw",
+        "queueNeedsSort",
         "tesselators",
         "uploadHandoff",
         "PrimaryTesselator",

@@ -62,6 +62,7 @@ public static class ModPatcher
                 ],
                 ["Vintagestory.GameContent.EntityShapeRenderer"] =
                 [
+                    "optimumShaderCompatibleByType",
                     "optimumShaderStateCompatible",
                     "optimumActiveLightBatchId",
                     "optimumBaseLightBatchId",
@@ -84,6 +85,7 @@ public static class ModPatcher
                     "optimumUpperLightSun",
                     "OptimumLightSampleCount",
                     "OptimumShaderStateCompatible",
+                    "IsOptimumShaderStateCompatible",
                     "GetOptimumLightSampleCoordinates",
                     "SetOptimumLightSample",
                     "ActivateOptimumLightBatch",
@@ -97,7 +99,7 @@ public static class ModPatcher
                 ],
                 ["Vintagestory.GameContent.WeatherSystemClient"] =
                 [
-                    "optimumWindFrameCounter",
+                    "optimumWindAccum",
                     "optimumTargetWindX",
                     "optimumTargetWindY",
                     "optimumTargetWindZ",

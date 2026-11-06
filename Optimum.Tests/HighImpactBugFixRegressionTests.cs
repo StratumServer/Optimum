@@ -232,6 +232,98 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+#if !NO_DONOR
+    [Fact]
+    public void ChunkTesselatorManager_SortsNewlyEnqueuedChunksWhenPlayerStandsStill()
+    {
+        FieldInfo queueNeedsSortField = typeof(ChunkTesselatorManager).GetField("queueNeedsSort", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(queueNeedsSortField);
+        Assert.Equal(typeof(bool), queueNeedsSortField.FieldType);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"queueNeedsSort\"", programSource);
+
+        string patchSource = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch");
+        Assert.Contains("if (moved || (plr != null && queueNeedsSort))", patchSource);
+        Assert.Contains("queueNeedsSort = false;", patchSource);
+        Assert.Contains("queueNeedsSort = true;", patchSource);
+    }
+
+    [Fact]
+    public void SystemRenderEntities_ScalesShadowCullThresholdAndFrustumRadiusByEntitySphereRadius()
+    {
+        string patchSource = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch");
+        Assert.Contains("double shadowRadius = Math.Max(3.0, (double)entity.FrustumSphereRadius);", patchSource);
+        Assert.Contains("double radiusScale = shadowRadius / 3.0;", patchSource);
+        Assert.Contains("* (radiusScale * radiusScale)", patchSource);
+        Assert.Contains("SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, shadowRadius)", patchSource);
+    }
+
+    [Fact]
+    public void SystemSoundEngine_TracksVerticalViewComponentAndUsesDeltaTimeRefreshInterval()
+    {
+        FieldInfo dirYField = typeof(SystemSoundEngine).GetField("_lastListenerDirY", BindingFlags.Instance | BindingFlags.NonPublic);
+        FieldInfo timeField = typeof(SystemSoundEngine).GetField("_listenerTimeSinceUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(dirYField);
+        Assert.NotNull(timeField);
+        Assert.Equal(typeof(float), dirYField.FieldType);
+        Assert.Equal(typeof(float), timeField.FieldType);
+
+        string patchSource = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch");
+        Assert.Contains("float ddy = viewVector.Y - _lastListenerDirY;", patchSource);
+        Assert.Contains("ddx * ddx + ddy * ddy + ddz * ddz >= ListenerDirThresholdSq", patchSource);
+        Assert.Contains("_listenerTimeSinceUpdate += deltaTime;", patchSource);
+        Assert.Contains("_listenerTimeSinceUpdate >= ListenerRefreshInterval", patchSource);
+    }
+#endif
+
+    [Fact]
+    public void EntityShapeRenderer_CachesReflectionPerTypeAndBypassesBudgetForLocalPlayer()
+    {
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs.patch"));
+        Assert.Contains("private static ConcurrentDictionary<Type, bool> optimumShaderCompatibleByType;", runtimePatch);
+        Assert.Contains("private static bool IsOptimumShaderStateCompatible(Type rendererType)", runtimePatch);
+        Assert.Contains("optimumShaderStateCompatible = IsOptimumShaderStateCompatible(GetType());", runtimePatch);
+        Assert.Contains("entity.EntityId == capi.World.Player?.Entity?.EntityId || OptimumDiagnostics.TryConsumeEntityTesselationBudget()", runtimePatch);
+
+        string modPatcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("\"optimumShaderCompatibleByType\"", modPatcher);
+        Assert.Contains("\"IsOptimumShaderStateCompatible\"", modPatcher);
+    }
+
+    [Fact]
+    public void WeatherSystemClient_UsesDeltaTimeAccumulatorForWindThrottle()
+    {
+        string sourcePatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch");
+        Assert.Contains("private float optimumWindAccum;", sourcePatch);
+        Assert.Contains("private const float WindUpdateInterval = 1f / 15f;", sourcePatch);
+        Assert.Contains("optimumWindAccum += dt;", sourcePatch);
+        Assert.Contains("optimumWindAccum = 0f;", sourcePatch);
+
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSystemClient.cs.patch"));
+        Assert.Contains("private float optimumWindAccum;", runtimePatch);
+        Assert.Contains("optimumWindAccum += dt;", runtimePatch);
+        Assert.Contains("optimumWindAccum >= 1f / 15f", runtimePatch);
+        Assert.Contains("optimumWindAccum = 0f;", runtimePatch);
+
+        string modPatcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("\"optimumWindAccum\"", modPatcher);
+        Assert.DoesNotContain("\"optimumWindFrameCounter\"", modPatcher);
+    }
+
+    [Fact]
+    public void BlockEntityParticleEmitter_ScalesDistanceCutoffByParticleSizeUpTo128Blocks()
+    {
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs.patch"));
+        Assert.Contains("if (!plrPos.InRangeOf(Pos, 16384f))", runtimePatch);
+        Assert.Contains("advancedParticleProperties.Size.avg + Math.Abs(advancedParticleProperties.Size.var)", runtimePatch);
+        Assert.Contains("float maxDist = Math.Min(128f, 48f * maxParticleSize);", runtimePatch);
+        Assert.Contains("if (!plrPos.InRangeOf(Pos, maxDist * maxDist))", runtimePatch);
+    }
+
     private sealed class DelegatingDropsBehavior : BlockBehavior
     {
         private readonly System.Func<ItemStack[]> provider;
