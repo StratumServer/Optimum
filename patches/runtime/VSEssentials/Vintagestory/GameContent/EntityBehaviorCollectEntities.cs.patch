@@ -1,7 +1,7 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 --- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
-@@ -9,10 +9,14 @@ using Vintagestory.API.Server;
+@@ -9,16 +9,22 @@ using Vintagestory.API.Server;
  namespace Vintagestory.GameContent;
  
  [DocumentAsJson]
@@ -16,32 +16,106 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
  	private int lastCollectedEntityIndex;
  
  	private Vec3d tmp = new Vec3d();
-@@ -45,15 +49,28 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
- 		{
- 			if (waitTicks-- > 0 || (player != null && player.WorldData.CurrentGameMode == EnumGameMode.Spectator))
- 			{
- 				return;
+ 
++	private EntityPartitioning partitionUtil;
++
+ 	private float itemsPerSecond = 23f;
+ 
+ 	private float unconsumedDeltaTime;
+ 
+ 	public override void OnGameTick(float deltaTime)
+@@ -38,58 +44,57 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
  			}
-+			int stride = OptimumCollectStrideInterval;
-+			if (stride > 1)
-+			{
-+				long tickIndex = base.entity.World.ElapsedMilliseconds / 33L;
-+				if ((tickIndex + base.entity.EntityId) % stride != 0L)
+ 		}
+ 		if (base.entity.IsActivityRunning("invulnerable"))
+ 		{
+ 			waitTicks = 3;
++			return;
+ 		}
+-		else
++		if (waitTicks-- > 0 || (player != null && player.WorldData.CurrentGameMode == EnumGameMode.Spectator))
+ 		{
+-			if (waitTicks-- > 0 || (player != null && player.WorldData.CurrentGameMode == EnumGameMode.Spectator))
++			return;
++		}
++		tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
++		partitionUtil ??= base.entity.World?.Api?.ModLoader?.GetModSystem<EntityPartitioning>();
++		deltaTime = Math.Min(1f, deltaTime + unconsumedDeltaTime);
++		bool collectedAny = false;
++		while (deltaTime - 1f / itemsPerSecond > 0f)
++		{
++			Entity targetItem = null;
++			if (partitionUtil != null)
+ 			{
+-				return;
++				partitionUtil.WalkEntities(tmp, 1.5, delegate(Entity e)
 +				{
-+					optimumAccumulatedDelta += deltaTime;
-+					return;
-+				}
-+				deltaTime += optimumAccumulatedDelta;
-+				optimumAccumulatedDelta = 0f;
++					if (entityMatcher(e))
++					{
++						targetItem = e;
++						return false;
++					}
++					return true;
++				}, EnumEntitySearchType.Inanimate);
 +			}
- 			tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
- 			Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
- 			if (entitiesAround.Length == 0)
++			else
++			{
++				Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
++				if (entitiesAround.Length != 0)
++				{
++					targetItem = entitiesAround[0];
++				}
+ 			}
+-			tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
+-			Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
+-			if (entitiesAround.Length == 0)
++			if (targetItem == null)
  			{
  				unconsumedDeltaTime = 0f;
-+				waitTicks = 2;
  				return;
  			}
- 			deltaTime = Math.Min(1f, deltaTime + unconsumedDeltaTime);
- 			while (deltaTime - 1f / itemsPerSecond > 0f)
+-			deltaTime = Math.Min(1f, deltaTime + unconsumedDeltaTime);
+-			while (deltaTime - 1f / itemsPerSecond > 0f)
++			if (!OnFoundCollectible(targetItem))
  			{
+-				Entity entity = null;
+-				int i;
+-				for (i = 0; i < entitiesAround.Length; i++)
+-				{
+-					if (entitiesAround[i] != null && i >= lastCollectedEntityIndex)
+-					{
+-						entity = entitiesAround[i];
+-						break;
+-					}
+-				}
+-				if (entity == null)
+-				{
+-					entity = entitiesAround[0];
+-					i = 0;
+-				}
+-				if (entity == null)
+-				{
+-					return;
+-				}
+-				if (!OnFoundCollectible(entity))
+-				{
+-					lastCollectedEntityIndex = (lastCollectedEntityIndex + 1) % entitiesAround.Length;
+-				}
+-				else
+-				{
+-					entitiesAround[i] = null;
+-				}
+-				deltaTime -= 1f / itemsPerSecond;
++				unconsumedDeltaTime = 0f;
++				return;
+ 			}
+-			unconsumedDeltaTime = deltaTime;
++			collectedAny = true;
++			deltaTime -= 1f / itemsPerSecond;
+ 		}
++		unconsumedDeltaTime = collectedAny ? deltaTime : 0f;
+ 	}
+ 
+ 	public virtual bool OnFoundCollectible(Entity foundEntity)
+ 	{
+ 		ItemStack itemStack = foundEntity.OnCollected(entity);

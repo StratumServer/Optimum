@@ -1,8 +1,9 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
-index 19b1334..65dcf75 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
-@@ -124,54 +124,150 @@ public class EntityDressedHumanoid : EntityHumanoid
+@@ -122,58 +122,155 @@ public class EntityDressedHumanoid : EntityHumanoid
+ 		foreach (KeyValuePair<string, CompositeTexture> texture in Api.World.GetEntityType(Code).Client.Textures)
+ 		{
  			fastSmallDictionary[texture.Key] = texture.Value;
  			texture.Value.Bake(coreClientAPI.Assets);
  		}
@@ -163,6 +164,7 @@ index 19b1334..65dcf75 100644
 -			foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
 +			entityShape.RemoveElements(willDisableElements);
 +		}
++		optimumAnimatorCacheKey = OptimumOutfitAnimatorCache.BuildKey(optimumAnimatorCacheKey, cshape?.Overlays, willDisableElements);
 +		if (optimumAnimatorCacheKey == null || !OptimumOutfitAnimatorCache.TryApply(optimumAnimatorCacheKey, Api, this, entityShape, AnimManager.Animator?.Animations, requirePosesOnServer, willDisableElements, new string[1] { "head" }))
 +		{
 +			AnimManager.LoadAnimator(World.Api, this, entityShape, AnimManager.Animator?.Animations, requirePosesOnServer, willDisableElements, "head");
@@ -179,3 +181,5 @@ index 19b1334..65dcf75 100644
  	}
  
  	private CompositeTexture CreateCompositeTexture(AssetLocation loc, ICoreClientAPI capi, SourceStringComponents sourceForLogging)
+ 	{
+ 		CompositeTexture compositeTexture = new CompositeTexture(loc);

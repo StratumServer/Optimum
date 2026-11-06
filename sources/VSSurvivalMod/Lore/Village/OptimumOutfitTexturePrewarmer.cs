@@ -37,6 +37,19 @@ namespace Vintagestory.GameContent
         public override void StartClientSide(ICoreClientAPI api)
         {
             api.Event.LevelFinalize += () => Prewarm(api);
+            api.Event.LeaveWorld += ClearCaches;
+        }
+
+        public override void Dispose()
+        {
+            ClearCaches();
+            base.Dispose();
+        }
+
+        private static void ClearCaches()
+        {
+            OptimumOutfitShapeCache.Clear();
+            OptimumOutfitAnimatorCache.Clear();
         }
 
         private void Prewarm(ICoreClientAPI capi)

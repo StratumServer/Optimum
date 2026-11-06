@@ -324,6 +324,102 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("if (!plrPos.InRangeOf(Pos, maxDist * maxDist))", runtimePatch);
     }
 
+#if !NO_DONOR
+    [Fact]
+    public void OptimumGuiGpuProbeBackend_DrainsPreexistingGlErrorsWithoutAbortingCandidateRender()
+    {
+        string backendSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryLib/Vintagestory.Client.NoObf/OptimumGuiGpuProbeBackend.cs"));
+        Assert.Contains("DrainPreexistingGlErrors();", backendSource);
+        Assert.DoesNotContain("string preexistingErrors = DrainPreexistingGlErrors();\n\t\t\t\t\tif (preexistingErrors != null)", backendSource);
+        Assert.DoesNotContain("failureReason = \"preexisting-gl-errors:\"", backendSource);
+    }
+#endif
+
+    [Fact]
+    public void CollisionTester_PreservesVerticalCollisionOnStationaryRestingEntitiesWithSolidGround()
+    {
+        string patchSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Math/CollisionTester.cs.patch"));
+        Assert.Contains("if (entity.CollidedVertically)", patchSource);
+        Assert.Contains("Block blockBelow = blockAccessor.GetBlock(tmpPos);", patchSource);
+        Assert.Contains("if (blockBelow != null && blockBelow.SideSolid[BlockFacing.UP.Index])", patchSource);
+        Assert.Contains("entity.CollidedVertically = true;", patchSource);
+        Assert.DoesNotContain("entity.CollidedVertically = false;", patchSource);
+    }
+
+    [Fact]
+    public void EntityBehaviorRepulseAgents_PrecalculatesRepulsionRangeInUpdateColSelBoxes()
+    {
+        string modPatcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("\"isWithinRepulseRange\"", modPatcher);
+        Assert.Contains("new(\"Vintagestory.GameContent.EntityBehaviorRepulseAgents\", \"UpdateColSelBoxes\", 0)", modPatcher);
+
+        string sourcePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs.patch"));
+        Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", sourcePatch);
+        Assert.Contains("if (!isWithinRepulseRange && entity != cworld.Player?.Entity)", sourcePatch);
+
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs.patch"));
+        Assert.Contains("private bool isWithinRepulseRange;", runtimePatch);
+        Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", runtimePatch);
+        Assert.Contains("if (!isWithinRepulseRange)", runtimePatch);
+    }
+
+    [Fact]
+    public void EntityBehaviorCollectEntities_UsesSpatialPartitioningWithoutWaitTicksBackoff()
+    {
+        string modPatcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("\"partitionUtil\"", modPatcher);
+
+        string sourcePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Behavior/BehaviorCollectEntities.cs.patch"));
+        Assert.Contains("partitionUtil.WalkEntities(tmp, 1.5", sourcePatch);
+        Assert.Contains("EnumEntitySearchType.Inanimate", sourcePatch);
+        Assert.DoesNotContain("waitTicks = 2;", sourcePatch);
+
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs.patch"));
+        Assert.Contains("partitionUtil.WalkEntities(tmp, 1.5", runtimePatch);
+        Assert.Contains("EnumEntitySearchType.Inanimate", runtimePatch);
+        Assert.DoesNotContain("waitTicks = 2;", runtimePatch);
+    }
+
+    [Fact]
+    public void ICoreClientAPI_ExposesFirstClassIsTesselationThreadProperty()
+    {
+        MethodInfo method = typeof(ICoreClientAPI).GetMethod("IsTesselationThread", BindingFlags.Public | BindingFlags.Instance);
+        Assert.NotNull(method);
+        Assert.Equal(typeof(bool), method.ReturnType);
+        ParameterInfo[] parameters = method.GetParameters();
+        Assert.Single(parameters);
+        Assert.Equal(typeof(int), parameters[0].ParameterType);
+
+        string cookingPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSSurvivalMod/Systems/Cooking/MealMeshCache.cs.patch"));
+        Assert.Contains("capi.IsTesselationThread(Environment.CurrentManagedThreadId)", cookingPatch);
+    }
+
+    [Fact]
+    public void OptimumOutfitCache_InvalidatesOnWorldLeaveAndIncludesOverlaysInKey()
+    {
+        string prewarmerSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VSSurvivalMod/Lore/Village/OptimumOutfitTexturePrewarmer.cs"));
+        Assert.Contains("api.Event.LeaveWorld += ClearCaches;", prewarmerSource);
+        Assert.Contains("public override void Dispose()", prewarmerSource);
+        Assert.Contains("OptimumOutfitShapeCache.Clear();", prewarmerSource);
+        Assert.Contains("OptimumOutfitAnimatorCache.Clear();", prewarmerSource);
+
+        string animatorSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VSSurvivalMod/Lore/Village/OptimumOutfitAnimatorCache.cs"));
+        Assert.Contains("public static string BuildKey(string outfitKey, CompositeShape[] overlays, string[] willDisableElements)", animatorSource);
+
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs.patch"));
+        Assert.Contains("optimumAnimatorCacheKey = OptimumOutfitAnimatorCache.BuildKey(optimumAnimatorCacheKey, cshape?.Overlays, willDisableElements);", runtimePatch);
+    }
+
     private sealed class DelegatingDropsBehavior : BlockBehavior
     {
         private readonly System.Func<ItemStack[]> provider;
