@@ -22,8 +22,6 @@ namespace Cairo
 		internal RecordedGuiClip[] Clips;
 		internal bool PaintAll;
 		bool saturate;
-		SKBlender integerBlender;
-		RecordedGeometryCoverage geometryCoverage;
 		SKImage image;
 		SKImage maskImage;
 		RecordedGuiDrawing maskPatternDrawing;
@@ -134,8 +132,7 @@ half4 main(float2 p) {
 						sourceMatrix: maskState.SourceMatrix, sourceSnapshot: maskBinding?.Capture());
 				}
 				result.Path = textPath ?? (paintAll || textFont != null || textBlob != null ? null :
-					context.Antialias == Antialias.None && context.HasCurves ? CopyFlatPath(context) :
-					context.Antialias == Antialias.Fast && !stroke ? RecordedCoarseGeometry.QuantizeFast(context) : CopyPath(context));
+					context.Antialias == Antialias.None && context.HasCurves ? CopyFlatPath(context) : CopyPath(context));
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.CaptureState)) {
 					if (result.Path != null) result.Path.FillType = context.FillRule == FillRule.EvenOdd ? SKPathFillType.EvenOdd : SKPathFillType.Winding;
 					result.Paint = new SKPaint {
@@ -149,14 +146,9 @@ half4 main(float2 p) {
 					};
 					result.saturate = context.Operator == Operator.Saturate;
 					if (result.saturate) result.Paint.Blender = RecordedCairoSaturate.Blender;
-					result.integerBlender = RecordedCairoIntegerBlend.For(context.Operator);
-					if (result.integerBlender != null) result.Paint.Blender = result.integerBlender;
 				}
 				if (stroke) result.SetDash(context);
 				if (stroke && result.Paint.StrokeWidth > 0) {
-					// Rasterize a stroke's union once. Ganesh's analytic stroke path can
-					// blend retraced segments twice (a closed two-point caret becomes
-					// alpha 191 instead of Cairo's 128 at a half-covered pixel).
 					var outline = RecordedPreparationCache.StrokeOutline(result.Path, result.Paint, result.dashIntervals, result.dashOffset);
 					if (outline != null) {
 						result.Path.Dispose(); result.Path = outline;
@@ -164,15 +156,6 @@ half4 main(float2 p) {
 						result.Paint.PathEffect = null;
 					}
 				}
-				if (stroke && result.Paint.Style == SKPaintStyle.Fill && context.Antialias != Antialias.None &&
-					RecordedGeometryCoverage.Needed(result.dashIntervals, context.Matrix, result.Paint.StrokeCap))
-					result.geometryCoverage = RecordedGeometryCoverage.Capture(result.Path, context.Matrix, targetWidth, targetHeight);
-				if (result.Path != null && context.Antialias == Antialias.None && context.HasCurves) {
-					SKPath sampled = RecordedCoarseGeometry.Aliased(result.Path, context.Matrix, targetWidth, targetHeight);
-					result.Path.Dispose(); result.Path = sampled;
-				}
-				if (!stroke && result.Path != null && context.Antialias == Antialias.Fast)
-					result.geometryCoverage = RecordedCoarseGeometry.Fast(result.Path, context.Matrix, targetWidth, targetHeight);
 				using (SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.SourceCapture)) {
 				Pattern source = context.SourcePattern;
 				SurfacePattern nearestSurface = source as SurfacePattern;
@@ -342,18 +325,16 @@ half4 main(float2 p) {
 			if (coverage == null || Paint.Shader != null || sourceSnapshot != null) return;
 			// Composite byte-rounded glyph coverage through the existing image
 			// shader; Ganesh's runtime-blender text path can erase an Intel frame.
-			integerBlender = null;
 			Paint.BlendMode = Blend(op);
 		}
 
-		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate && integerBlender == null &&
+		internal bool CanUseLcdCompositor => (TextBlob != null || TextFont != null) && Paint.Shader == null && !saturate &&
 			sourceSnapshot == null && (Paint.BlendMode == SKBlendMode.SrcOver || Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Screen ||
 				TextCoverage != null && (Paint.BlendMode == SKBlendMode.Difference || Paint.BlendMode == SKBlendMode.Exclusion));
 
 		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height, PointD deviceOffset = default)
 		{
 			if (target == null) throw new ArgumentNullException(nameof(target));
-			if (geometryCoverage != null && (Paint.BlendMode == SKBlendMode.Src || Paint.BlendMode == SKBlendMode.Clear)) { DrawGeometrySourceOrClear(target, deviceOffset); return false; }
 			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
 			if (TextCoverage != null && gpu == null) {
 				double targetLeft = TextCoverageOrigin.X + deviceOffset.X;
@@ -443,28 +424,16 @@ half4 main(float2 p) {
 				// the shape, where the source is transparent. Composite the shape as a layer so the operator sees that whole area.
 				SKBlendMode operation = Paint.BlendMode;
 				bool unbounded = !PaintAll && (operation == SKBlendMode.SrcIn || operation == SKBlendMode.SrcOut || operation == SKBlendMode.DstIn || operation == SKBlendMode.DstATop);
-				bool useGeometryCoverage = geometryCoverage != null && operation != SKBlendMode.Src && operation != SKBlendMode.Clear;
-				bool layered = !sourceOnly && (unbounded || maskImage != null || maskPatternDrawing != null || useGeometryCoverage);
+				bool layered = !sourceOnly && (unbounded || maskImage != null || maskPatternDrawing != null);
 				if (layered) {
 				using var layerPaint = new SKPaint { BlendMode = operation };
 				if (saturate) layerPaint.Blender = RecordedCairoSaturate.Blender;
-				if (integerBlender != null) layerPaint.Blender = integerBlender;
 				canvas.SaveLayer(layerPaint);
 				Paint.BlendMode = SKBlendMode.SrcOver;
 				}
 				try {
 				if (sourceOnly) canvas.DrawPaint(Paint);
-				else if (useGeometryCoverage) {
-					int coverageSave = canvas.Save();
-					try {
-						canvas.ResetMatrix(); canvas.Scale(outputScale); canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
-						canvas.ClipRect(geometryCoverage.Bounds, SKClipOperation.Intersect, false);
-						canvas.SetMatrix(drawMatrix); canvas.DrawPaint(Paint);
-						canvas.ResetMatrix(); canvas.Scale(outputScale); canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
-						using var coveragePaint = new SKPaint { BlendMode = SKBlendMode.DstIn };
-						canvas.DrawImage(geometryCoverage.Image, geometryCoverage.Bounds.Left, geometryCoverage.Bounds.Top, coveragePaint);
-					} finally { canvas.RestoreToCount(coverageSave); }
-				} else if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
+				else if (TextBlob != null) canvas.DrawText(TextBlob, TextX, TextY, Paint);
 				else if (TextFont != null) {
 					if (IntPtr.Size == 4) DrawRecordedText(canvas, Text, TextX, TextY, TextFont, Paint);
 					else canvas.DrawText(Text, TextX, TextY, TextFont, Paint);
@@ -484,7 +453,7 @@ half4 main(float2 p) {
 					canvas.DrawPaint(maskPaint);
 					canvas.Restore();
 				}
-				} finally { if (layered) { Paint.BlendMode = operation; if (saturate) Paint.Blender = RecordedCairoSaturate.Blender; if (integerBlender != null) Paint.Blender = integerBlender; canvas.Restore(); } }
+				} finally { if (layered) { Paint.BlendMode = operation; if (saturate) Paint.Blender = RecordedCairoSaturate.Blender; canvas.Restore(); } }
 			} finally {
 				canvas.RestoreToCount(save);
 				if (dependencyShader != null) { Paint.Shader = null; dependencyShader.Dispose(); }
@@ -501,47 +470,6 @@ half4 main(float2 p) {
 		static void DrawRecordedText(SKCanvas canvas, string text, float x, float y, SKFont font, SKPaint paint)
 		{
 			canvas.DrawText(text, x, y, font, paint);
-		}
-
-		static readonly Lazy<SKRuntimeEffect> geometrySourceEffect = new Lazy<SKRuntimeEffect>(() => {
-			var effect = SKRuntimeEffect.CreateShader(@"
-uniform shader sourceImage;
-uniform shader destinationImage;
-uniform shader coverageImage;
-uniform float2 coverageOrigin;
-uniform int clearOperator;
-half4 main(float2 p) {
-    half4 destination = destinationImage.eval(p);
-    half4 source = clearOperator != 0 ? half4(0) : sourceImage.eval(p);
-    half coverage = coverageImage.eval(p - coverageOrigin).a;
-    return mix(destination, source, coverage);
-}", out string errors);
-			return effect ?? throw new InvalidOperationException("Skia could not create the stroke coverage compositor: " + errors);
-		}, true);
-
-		void DrawGeometrySourceOrClear(SKSurface target, PointD deviceOffset)
-		{
-			using var destinationImage = target.Snapshot();
-			using var source = SKSurface.Create(new SKImageInfo(destinationImage.Width, destinationImage.Height, SKColorType.Bgra8888, SKAlphaType.Premul));
-			SKBlendMode operation = Paint.BlendMode;
-			try { Paint.BlendMode = SKBlendMode.Src; DrawCore(source.Canvas, null, deviceOffset, sourceOnly: true); }
-			finally { Paint.BlendMode = operation; }
-			using var sourceImage = source.Snapshot();
-			using var sourceShader = sourceImage.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
-			using var destinationShader = destinationImage.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
-			using var coverageShader = geometryCoverage.Image.ToShader(SKShaderTileMode.Decal, SKShaderTileMode.Decal);
-			SKRuntimeEffect effect = geometrySourceEffect.Value;
-			var children = new SKRuntimeEffectChildren(effect) { ["sourceImage"] = sourceShader, ["destinationImage"] = destinationShader, ["coverageImage"] = coverageShader };
-			var uniforms = new SKRuntimeEffectUniforms(effect) { ["clearOperator"] = operation == SKBlendMode.Clear ? 1 : 0,
-				["coverageOrigin"] = new float[] { geometryCoverage.Bounds.Left + (float)deviceOffset.X, geometryCoverage.Bounds.Top + (float)deviceOffset.Y } };
-			using var shader = effect.ToShader(uniforms, children);
-			using var paint = new SKPaint { Shader = shader, BlendMode = SKBlendMode.Src };
-			int save = target.Canvas.Save();
-			try {
-				target.Canvas.ResetMatrix(); target.Canvas.Translate((float)deviceOffset.X, (float)deviceOffset.Y);
-				foreach (var clip in Clips) target.Canvas.ClipPath(clip.Path, SKClipOperation.Intersect, clip.Antialias);
-				target.Canvas.ResetMatrix(); target.Canvas.DrawPaint(paint);
-			} finally { target.Canvas.RestoreToCount(save); }
 		}
 
 		internal void DrawLcdTextCpu(SKSurface target, SKRuntimeEffect effect, int width, int height, PointD deviceOffset = default)
@@ -887,7 +815,7 @@ half4 main(float2 p) {
 			} catch { result.Dispose(); throw; }
 		}
 		static SKPoint Point(IntPtr data, int index) => new SKPoint((float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16)), (float)BitConverter.Int64BitsToDouble(Marshal.ReadInt64(data, index * 16 + 8)));
-		public void Dispose() { Path?.Dispose(); geometryCoverage?.Dispose(); TextCoverage?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); maskImage?.Dispose(); maskPatternDrawing?.Dispose(); maskReplayPattern?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
+		public void Dispose() { Path?.Dispose(); TextCoverage?.Dispose(); TextFont?.Dispose(); TextBlob?.Dispose(); dash?.Dispose(); Paint?.Dispose(); shader?.Dispose(); image?.Dispose(); maskImage?.Dispose(); maskPatternDrawing?.Dispose(); maskReplayPattern?.Dispose(); nativeSource?.Dispose(); nativeImage?.Dispose(); sourceSnapshot?.Dispose(); }
 
 		static SKImage CaptureMask(ImageSurface surface)
 		{

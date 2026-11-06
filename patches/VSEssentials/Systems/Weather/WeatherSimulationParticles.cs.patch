@@ -1,0 +1,78 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
+index 93ab467..73c1425 100644
+--- a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
++++ b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
+@@ -67,6 +67,38 @@ namespace Vintagestory.GameContent
+         static int[,] lowResRainHeightMap = new int[16, 16];
+         static BlockPos centerPos = new BlockPos(API.Config.Dimensions.NormalWorld);
+ 
++        private int optimumLastHeightmapCenterX = int.MinValue;
++        private int optimumLastHeightmapCenterZ = int.MinValue;
++
++        private void OnBlockChanged(BlockPos pos, Block oldBlock)
++        {
++            if (Math.Abs(pos.X - optimumLastHeightmapCenterX) <= 32 && Math.Abs(pos.Z - optimumLastHeightmapCenterZ) <= 32)
++            {
++                optimumLastHeightmapCenterX = int.MinValue;
++                optimumLastHeightmapCenterZ = int.MinValue;
++            }
++        }
++
++        private void ResetHeightMapCache()
++        {
++            optimumLastHeightmapCenterX = int.MinValue;
++            optimumLastHeightmapCenterZ = int.MinValue;
++            if (lowResRainHeightMap != null)
++            {
++                Array.Clear(lowResRainHeightMap, 0, lowResRainHeightMap.Length);
++            }
++        }
++
++        public void Dispose()
++        {
++            if (capi?.Event != null)
++            {
++                capi.Event.BlockChanged -= OnBlockChanged;
++                capi.Event.LeaveWorld -= ResetHeightMapCache;
++            }
++            ResetHeightMapCache();
++        }
++
+         #region Particle
+ 
+         public static int waterColor = ColorUtil.ToRgba(230, 128, 178, 255);
+@@ -242,6 +274,9 @@ namespace Vintagestory.GameContent
+ 
+         public void Initialize()
+         {
++            ResetHeightMapCache();
++            capi.Event.BlockChanged += OnBlockChanged;
++            capi.Event.LeaveWorld += ResetHeightMapCache;
+             lblock = capi.World.GetBlock(new AssetLocation("water-still-7"));
+ 
+             if (lblock != null)
+@@ -370,14 +405,19 @@ namespace Vintagestory.GameContent
+             onwaterSplashParticleColor = ColorUtil.ToRgba(94, col[0], col[1], col[2]);
+ 
+             centerPos.Set((int)particlePos.X, 0, (int)particlePos.Z);
+-            for (int lx = 0; lx < 16; lx++)
++            if (Math.Abs(centerPos.X - optimumLastHeightmapCenterX) >= 4 || Math.Abs(centerPos.Z - optimumLastHeightmapCenterZ) >= 4)
+             {
+-                int dx = (lx - 8) * 4;
+-                for (int lz = 0; lz < 16; lz++)
++                optimumLastHeightmapCenterX = centerPos.X;
++                optimumLastHeightmapCenterZ = centerPos.Z;
++                for (int lx = 0; lx < 16; lx++)
+                 {
+-                    int dz = (lz - 8) * 4;
++                    int dx = (lx - 8) * 4;
++                    for (int lz = 0; lz < 16; lz++)
++                    {
++                        int dz = (lz - 8) * 4;
+ 
+-                    lowResRainHeightMap[lx, lz] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + dx, centerPos.Z + dz);
++                        lowResRainHeightMap[lx, lz] = capi.World.BlockAccessor.GetRainMapHeightAt(centerPos.X + dx, centerPos.Z + dz);
++                    }
+                 }
+             }
+ 
