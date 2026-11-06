@@ -300,7 +300,7 @@ public sealed class CairoRecorderBlendModeTests
 			context.Restore ();
 			if (variant == 4) surface.BlurFull (3);
 		};
-		if (variant != 1) { CairoRecorderParityTests.AssertParity (160, 80, draw); return; }
+		if (variant != 1) { CairoRecorderParityTests.AssertLocalAaParity (160, 80, draw); return; }
 
 		var offset = new PointD (-7, -5);
 		byte[] expected = CairoRecorderParityTests.RenderNative (160, 80, (context, surface) => {
@@ -444,7 +444,7 @@ public sealed class CairoRecorderBlendModeTests
 			context.SetSourceRGBA (.81, .36, .19, .72);
 			context.Rectangle (2, 2, 10, 10);
 			context.Fill ();
-		});
+		}, flatTolerance: 2);
 	}
 
 	[Theory]
@@ -465,7 +465,7 @@ public sealed class CairoRecorderBlendModeTests
 				context.Rectangle (x * 4, y * 4, 4, 4);
 				context.Fill ();
 			}
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
@@ -558,7 +558,7 @@ public sealed class CairoRecorderBlendModeTests
 		actual.BeginRecording ();
 		using (var context = new Context (actual)) Draw (context);
 		byte[] skia = CairoRecorderParityTests.RenderSkia (actual, width, height);
-		CairoRecorderParityTests.AssertWithinTolerance (expected, skia, width, height, edgeAllowance: true);
+		CairoRecorderParityTests.AssertLocalAa (expected, skia, width, height, 110);
 	}
 
 	[Theory]

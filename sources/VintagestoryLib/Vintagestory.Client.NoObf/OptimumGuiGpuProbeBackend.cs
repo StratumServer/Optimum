@@ -174,8 +174,7 @@ namespace Vintagestory.Client.NoObf
 						return "Optimum Skia GL probe skipped: " + probeResetReason + "; GUI rendering stays on the recorded display list until a new context is confirmed.";
 					if (!MatchesCertifiedDevice())
 					{
-						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
-						return "Optimum Skia GL probe skipped: current OpenGL context does not match the prelaunch-certified device/context; GUI rendering remains vanilla.";
+						return "Optimum Skia GL probe skipped: current OpenGL context is not eligible for GPU GUI rendering; GUI rendering remains vanilla.";
 					}
 					if (Interlocked.CompareExchange(ref attempted, 1, 0) != 0)
 						return null;
@@ -268,7 +267,6 @@ namespace Vintagestory.Client.NoObf
 							"test-forced-gpu-preflight-failure", out candidateTexture, out failureReason);
 					if (!MatchesCertifiedDevice())
 					{
-						Vintagestory.API.Config.OptimumConfig.RevokeGuiGpuCertification();
 						if (ForceSkiaCpuFallbackForTest)
 							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
 								"current-device-or-context-mismatch", out candidateTexture, out failureReason);
@@ -747,13 +745,14 @@ namespace Vintagestory.Client.NoObf
 					GL.GetInteger(GetPName.ContextFlags, out identity.ContextFlags);
 					identity.Usable = !string.IsNullOrWhiteSpace(identity.Vendor) && identity.Vendor != "unknown" &&
 						!string.IsNullOrWhiteSpace(identity.Renderer) && identity.Renderer != "unknown" &&
-						!string.IsNullOrWhiteSpace(identity.Version) && identity.Version != "unknown";
+						!string.IsNullOrWhiteSpace(identity.Version) && identity.Version != "unknown" &&
+						!OptimumGuiGpuProbe.IsSoftwareRenderer(identity.Renderer);
 					if (handle != IntPtr.Zero && identity.Usable) cachedDeviceIdentity = identity;
 				}
-				// The certificate itself can be granted or revoked at any time, so it is always re-evaluated (no GL calls).
-				return identity.Usable &&
+				return identity.Usable && (
+					Vintagestory.API.Config.OptimumConfig.GuiGpuCertificationWaived ||
 					Vintagestory.API.Config.OptimumConfig.GuiGpuDeviceMatches(identity.Vendor, identity.Renderer, identity.Version,
-						identity.Major, identity.Minor, identity.ProfileMask, identity.ContextFlags);
+						identity.Major, identity.Minor, identity.ProfileMask, identity.ContextFlags));
 			}
 			catch
 			{
