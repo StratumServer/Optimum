@@ -420,6 +420,59 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("optimumAnimatorCacheKey = OptimumOutfitAnimatorCache.BuildKey(optimumAnimatorCacheKey, cshape?.Overlays, willDisableElements);", runtimePatch);
     }
 
+    [Fact]
+    public void WeatherSimulationParticles_ResetsHeightmapOnBlockChangeAndLeaveWorld()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs.patch"));
+        Assert.Contains("capi.Event.BlockChanged += OnBlockChanged;", patch);
+        Assert.Contains("capi.Event.LeaveWorld += ResetHeightMapCache;", patch);
+        Assert.Contains("optimumLastHeightmapCenterX = int.MinValue;", patch);
+        Assert.Contains("Array.Clear(lowResRainHeightMap, 0, lowResRainHeightMap.Length);", patch);
+    }
+
+    [Fact]
+    public void AnimationUtil_DoesNotFreezeAt48mAndAccumulatesDeltaTimeAt15Hz()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Model/Animation/AnimationUtil.cs.patch"));
+        Assert.Contains("if (distSq > AnimLodNearSq)", patch);
+        Assert.Contains("_animDeferredDt += deltaTime;", patch);
+        Assert.Contains("if (_animDeferredDt < 1f / 15f)", patch);
+        Assert.DoesNotContain("if (distSq > AnimLodFarSq)", patch);
+    }
+
+    [Fact]
+    public void EntityItemRenderer_ScalesCullDistanceWithViewportResolution()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs.patch"));
+        Assert.Contains("Math.Max(64.0, 64.0 * ((double)capi.Render.FrameHeight / 1080.0))", patch);
+        Assert.Contains("dx * dx + dz * dz > maxDist * maxDist", patch);
+    }
+
+    [Fact]
+    public void GlStateSnapshot_EliminatesPerCaptureAllocationsViaThreadStaticReuse()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryLib/Vintagestory.Client.NoObf/OptimumGuiGpuProbeBackend.cs"));
+        Assert.Contains("[ThreadStatic]", source);
+        Assert.Contains("private static GlStateSnapshot pooledInstance;", source);
+        Assert.Contains("GlStateSnapshot snapshot = pooledInstance ??= new GlStateSnapshot();", source);
+        Assert.Contains("snapshot.CaptureState();", source);
+    }
+
+    [Fact]
+    public void SurfaceRecorder_SharesClipSnapshotAcrossConsecutiveDrawCommands()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/Cairo/wrapper/SurfaceRecorder.cs"));
+        Assert.Contains("internal RecordedGuiClip[] CachedClipSnapshot;", source);
+        Assert.Contains("RecordedGuiClip[] GetClipSnapshot()", source);
+        Assert.Contains("currentState.CachedClipSnapshot = (clips.Count == 0 ? Array.Empty<RecordedGuiClip>() : clips.ToArray());", source);
+        Assert.Contains("RecordedGuiDrawing.Capture(graphicsState, width, height, stroke, paintAll, GetClipSnapshot()", source);
+    }
+
     private sealed class DelegatingDropsBehavior : BlockBehavior
     {
         private readonly System.Func<ItemStack[]> provider;

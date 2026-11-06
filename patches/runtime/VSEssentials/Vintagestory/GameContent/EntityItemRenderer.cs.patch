@@ -1,7 +1,7 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
 --- a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs
-@@ -62,10 +62,16 @@ public class EntityItemRenderer : EntityRenderer
+@@ -62,10 +62,17 @@ public class EntityItemRenderer : EntityRenderer
  	{
  		if ((isShadowPass && !entity.IsRendered) || entityitem.Itemstack == null)
  		{
@@ -9,7 +9,8 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityItemRenderer.cs b/VSEss
  		}
 +		double dx = entity.Pos.X - capi.World.Player.Entity.Pos.X;
 +		double dz = entity.Pos.Z - capi.World.Player.Entity.Pos.Z;
-+		if (dx * dx + dz * dz > 4096.0)
++		double maxDist = Math.Max(64.0, 64.0 * ((double)capi.Render.FrameHeight / 1080.0));
++		if (dx * dx + dz * dz > maxDist * maxDist)
 +		{
 +			return;
 +		}

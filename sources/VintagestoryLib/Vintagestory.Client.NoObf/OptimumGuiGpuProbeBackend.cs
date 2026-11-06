@@ -1071,65 +1071,80 @@ namespace Vintagestory.Client.NoObf
 						cachedSamplerObjectsSupported = glMajor > 3 || (glMajor == 3 && glMinor >= 3);
 					}
 
-					private readonly int readFramebuffer;
-					private readonly int drawFramebuffer;
-					private readonly int renderbuffer;
-					private readonly int activeTexture;
-					private int[] unitIndices;
-					private int[] textureBindings;
-					private int[] samplerBindings;
+					[ThreadStatic]
+					private static GlStateSnapshot pooledInstance;
+
+					private int readFramebuffer;
+					private int drawFramebuffer;
+					private int renderbuffer;
+					private int activeTexture;
+					private int[] unitIndices = new int[32];
+					private int[] textureBindings = new int[32];
+					private int[] samplerBindings = new int[32];
 					private int unitCount;
 					private bool lateCaptureFailed;
-					private readonly bool samplerObjectsSupported;
-					private readonly int currentProgram;
-					private readonly int vertexArray;
-					private readonly int arrayBuffer;
-					private readonly int pixelPackBuffer;
-					private readonly int pixelUnpackBuffer;
-					private readonly int packAlignment;
-					private readonly int unpackAlignment;
-					private readonly int packRowLength;
-					private readonly int packSkipRows;
-					private readonly int packSkipPixels;
-					private readonly int unpackRowLength;
-					private readonly int unpackSkipRows;
-					private readonly int unpackSkipPixels;
+					private bool samplerObjectsSupported;
+					private int currentProgram;
+					private int vertexArray;
+					private int arrayBuffer;
+					private int pixelPackBuffer;
+					private int pixelUnpackBuffer;
+					private int packAlignment;
+					private int unpackAlignment;
+					private int packRowLength;
+					private int packSkipRows;
+					private int packSkipPixels;
+					private int unpackRowLength;
+					private int unpackSkipRows;
+					private int unpackSkipPixels;
 					private readonly int[] viewport = new int[4];
 					private readonly int[] scissorBox = new int[4];
 					private readonly bool[] colorMask = new bool[4];
-					private readonly bool scissorEnabled;
-					private readonly bool blendEnabled;
-					private readonly bool depthEnabled;
-					private readonly bool stencilEnabled;
-					private readonly bool cullEnabled;
-					private readonly bool framebufferSrgbEnabled;
-					private readonly bool rasterizerDiscardEnabled;
-					private readonly bool supportsRasterizerDiscard;
-					private readonly bool depthWriteEnabled;
-					private readonly int frontStencilFunction;
-					private readonly int frontStencilReference;
-					private readonly int frontStencilValueMask;
-					private readonly int frontStencilWriteMask;
-					private readonly int frontStencilFail;
-					private readonly int frontStencilDepthFail;
-					private readonly int frontStencilDepthPass;
-					private readonly int backStencilFunction;
-					private readonly int backStencilReference;
-					private readonly int backStencilValueMask;
-					private readonly int backStencilWriteMask;
-					private readonly int backStencilFail;
-					private readonly int backStencilDepthFail;
-					private readonly int backStencilDepthPass;
-					private readonly int frontFaceDirection;
-					private readonly int blendSourceRgb;
-					private readonly int blendDestinationRgb;
-					private readonly int blendSourceAlpha;
-					private readonly int blendDestinationAlpha;
-					private readonly int blendEquationRgb;
-					private readonly int blendEquationAlpha;
+					private bool scissorEnabled;
+					private bool blendEnabled;
+					private bool depthEnabled;
+					private bool stencilEnabled;
+					private bool cullEnabled;
+					private bool framebufferSrgbEnabled;
+					private bool rasterizerDiscardEnabled;
+					private bool supportsRasterizerDiscard;
+					private bool depthWriteEnabled;
+					private int frontStencilFunction;
+					private int frontStencilReference;
+					private int frontStencilValueMask;
+					private int frontStencilWriteMask;
+					private int frontStencilFail;
+					private int frontStencilDepthFail;
+					private int frontStencilDepthPass;
+					private int backStencilFunction;
+					private int backStencilReference;
+					private int backStencilValueMask;
+					private int backStencilWriteMask;
+					private int backStencilFail;
+					private int backStencilDepthFail;
+					private int backStencilDepthPass;
+					private int frontFaceDirection;
+					private int blendSourceRgb;
+					private int blendDestinationRgb;
+					private int blendSourceAlpha;
+					private int blendDestinationAlpha;
+					private int blendEquationRgb;
+					private int blendEquationAlpha;
 					private readonly float[] clearColor = new float[4];
 
 					private GlStateSnapshot()
+					{
+						EnsureStaticCapabilities();
+					}
+
+					internal static GlStateSnapshot Capture()
+					{
+						GlStateSnapshot snapshot = pooledInstance ??= new GlStateSnapshot();
+						snapshot.CaptureState();
+						return snapshot;
+					}
+
+					private void CaptureState()
 					{
 						EnsureStaticCapabilities();
 						supportsRasterizerDiscard = cachedSupportsRasterizerDiscard;
@@ -1141,9 +1156,15 @@ namespace Vintagestory.Client.NoObf
 						GL.GetInteger((GetPName)0x84E0, out activeTexture);
 
 						int eagerUnits = eagerUnitCount;
-						unitIndices = new int[eagerUnits + 4];
-						textureBindings = new int[eagerUnits + 4];
-						samplerBindings = samplerObjectsSupported ? new int[eagerUnits + 4] : Array.Empty<int>();
+						if (unitIndices.Length < eagerUnits + 4)
+						{
+							int newCap = Math.Max(unitIndices.Length * 2, eagerUnits + 4);
+							Array.Resize(ref unitIndices, newCap);
+							Array.Resize(ref textureBindings, newCap);
+							if (samplerObjectsSupported) Array.Resize(ref samplerBindings, newCap);
+						}
+						unitCount = 0;
+						lateCaptureFailed = false;
 						try
 						{
 							for (int i = 0; i < eagerUnits; i++)
@@ -1153,7 +1174,7 @@ namespace Vintagestory.Client.NoObf
 								CaptureCurrentUnit(unit);
 							}
 						}
-					finally { GL.ActiveTexture((TextureUnit)activeTexture); }
+						finally { GL.ActiveTexture((TextureUnit)activeTexture); }
 
 						GL.GetInteger((GetPName)0x8B8D, out currentProgram);
 						GL.GetInteger((GetPName)0x85B5, out vertexArray);
@@ -1180,8 +1201,6 @@ namespace Vintagestory.Client.NoObf
 						framebufferSrgbEnabled = GL.IsEnabled((EnableCap)0x8DB9);
 						rasterizerDiscardEnabled = supportsRasterizerDiscard && GL.IsEnabled((EnableCap)0x8C89);
 						depthWriteEnabled = GL.GetBoolean((GetPName)0x0B72);
-						// Not captured: GL_DEPTH_FUNC and GL_CULL_FACE_MODE. Neither this backend nor Ganesh ever sets them
-						// (GrGLInterface has no glDepthFunc; GrGLGpu never calls glCullFace, it only toggles GL_CULL_FACE).
 						GL.GetInteger((GetPName)0x0B46, out frontFaceDirection);
 						GL.GetInteger((GetPName)0x0B92, out frontStencilFunction);
 						GL.GetInteger((GetPName)0x0B97, out frontStencilReference);
@@ -1280,7 +1299,6 @@ namespace Vintagestory.Client.NoObf
 						eagerUnitIndices[eagerUnitCount++] = unit;
 					}
 
-					internal static GlStateSnapshot Capture() => new GlStateSnapshot();
 					internal bool SupportsRasterizerDiscard => supportsRasterizerDiscard;
 
 					internal int CreateIsolatedVertexArray()
