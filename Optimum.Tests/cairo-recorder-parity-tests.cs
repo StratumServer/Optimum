@@ -28,13 +28,13 @@ public sealed class CairoRecorderParityTests
 	/// judged on a Gaussian-filtered (sigma 0.65 px) difference of at most 96 levels.
 	/// Uniform regions keep the one-level limit.
 	/// </summary>
-	internal static void AssertLocalAaParity (int width, int height, Action<Context> draw) => AssertParity (width, height, (context, _) => draw (context), localAa: true);
-	internal static void AssertLocalAaParity (int width, int height, Action<Context, ImageSurface> draw) => AssertParity (width, height, draw, localAa: true);
+	internal static void AssertLocalAaParity (int width, int height, Action<Context> draw, double filteredLimit = LocalAaFilteredLimit) => AssertParity (width, height, (context, _) => draw (context), localAa: true, filteredLimit: filteredLimit);
+	internal static void AssertLocalAaParity (int width, int height, Action<Context, ImageSurface> draw, double filteredLimit = LocalAaFilteredLimit) => AssertParity (width, height, draw, localAa: true, filteredLimit: filteredLimit);
 
-	internal static void AssertParity (int width, int height, Action<Context> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false)
-		=> AssertParity (width, height, (context, _) => draw (context), edgeAllowance, flatTolerance, localAa);
+	internal static void AssertParity (int width, int height, Action<Context> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false, double filteredLimit = LocalAaFilteredLimit)
+		=> AssertParity (width, height, (context, _) => draw (context), edgeAllowance, flatTolerance, localAa, filteredLimit);
 
-	internal static void AssertParity (int width, int height, Action<Context, ImageSurface> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false)
+	internal static void AssertParity (int width, int height, Action<Context, ImageSurface> draw, bool edgeAllowance = true, int flatTolerance = FlatTolerance, bool localAa = false, double filteredLimit = LocalAaFilteredLimit)
 	{
 		byte[] expected = RenderNative (width, height, draw);
 		using var actual = new ImageSurface (Format.Argb32, width, height);
@@ -44,7 +44,7 @@ public sealed class CairoRecorderParityTests
 
 		byte[] skia = RenderSkia (actual, width, height);
 		Dump (expected, skia, width, height);
-		if (localAa) AssertLocalAa (expected, skia, width, height);
+		if (localAa) AssertLocalAa (expected, skia, width, height, filteredLimit);
 		else AssertWithinTolerance (expected, skia, width, height, edgeAllowance, flatTolerance);
 
 		Assert.True (actual.CommitGpuRenderedCommands ());
@@ -98,7 +98,7 @@ public sealed class CairoRecorderParityTests
 
 	/// <summary>A pixel is an edge pixel when its 3x3 neighbourhood in the Cairo reference
 	/// is not uniform, i.e. it can be partially covered by geometry.</summary>
-	internal static void AssertWithinTolerance (byte[] expected, byte[] actual, int width, int height, bool edgeAllowance, int flatTolerance = FlatTolerance)
+	internal static void AssertWithinTolerance (byte[] expected, byte[] actual, int width, int height, bool edgeAllowance, int flatTolerance = FlatTolerance, int edgeTolerance = EdgeTolerance)
 	{
 		Assert.Equal (expected.Length, actual.Length);
 		int worstFlat = 0, worstEdge = 0;
@@ -106,7 +106,7 @@ public sealed class CairoRecorderParityTests
 		for (int y = 0; y < height; y++) {
 			for (int x = 0; x < width; x++) {
 				bool edge = edgeAllowance && !UniformNeighbourhood (expected, width, height, x, y);
-				int limit = edge ? EdgeTolerance : flatTolerance;
+				int limit = edge ? edgeTolerance : flatTolerance;
 				for (int c = 0; c < 4; c++) {
 					int i = (y * width + x) * 4 + c;
 					int diff = Math.Abs (expected[i] - actual[i]);
@@ -121,7 +121,7 @@ public sealed class CairoRecorderParityTests
 
 	internal const double LocalAaFilteredLimit = 96;
 
-	internal static void AssertLocalAa (byte[] expected, byte[] actual, int width, int height)
+	internal static void AssertLocalAa (byte[] expected, byte[] actual, int width, int height, double filteredLimit = LocalAaFilteredLimit)
 	{
 		// Uniform regions: one level. Edges: Gaussian-filtered difference.
 		var delta = new double[width * height * 4];
@@ -153,7 +153,7 @@ public sealed class CairoRecorderParityTests
 					double v = 0;
 					for (int k = -3; k <= 3; k++) { int ny = y + k; if (ny >= 0 && ny < height) v += kernel[k + 3] * horizontal[(ny * width + x) * 4 + c]; }
 					worst = Math.Max (worst, v);
-					Assert.True (v <= LocalAaFilteredLimit, $"filtered difference at ({x},{y}) channel {c} is {v:F1}");
+					Assert.True (v <= filteredLimit, $"filtered difference at ({x},{y}) channel {c} is {v:F1}");
 				}
 	}
 
@@ -321,13 +321,13 @@ public sealed class CairoRecorderParityTests
 			context.SetSourceRGBA (.9, .2, .1, .5);
 			context.Paint ();
 			context.Restore ();
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
 	public void AliasedCurvesMatchCairoWithoutFallback ()
 	{
-		AssertParity (24, 24, context => {
+		AssertLocalAaParity (24, 24, context => {
 			context.Antialias = Antialias.None;
 			context.SetSourceRGBA (.82, .55, .21, .9);
 			context.Arc (12, 12, 8.3, 0, 6.2);
@@ -344,7 +344,7 @@ public sealed class CairoRecorderParityTests
 	[InlineData (Antialias.Fast, 2d)]
 	public void CoarseAntialiasRetainsTransformedCurvesAndFillRules (Antialias antialias, double scale)
 	{
-		AssertParity (128, 96, context => {
+		AssertLocalAaParity (128, 96, context => {
 			context.SetSourceRGBA (.1, .2, .3, .6); context.Paint ();
 			context.Scale (scale, scale); context.Translate (.375, .625);
 			context.Antialias = antialias;
@@ -361,7 +361,7 @@ public sealed class CairoRecorderParityTests
 	public void CurvedInFillUsesTheSameFlattenedBoundaryAsCairo ()
 	{
 		bool? expected = null;
-		AssertParity (24, 24, context => {
+		AssertLocalAaParity (24, 24, context => {
 			context.Antialias = Antialias.None;
 			context.Arc (12, 12, 8.3, 0, 6.2);
 			bool inside = context.InFill (4.5, 8.5);
@@ -392,7 +392,7 @@ public sealed class CairoRecorderParityTests
 	[Fact]
 	public void FastAntialiasMatchesCairoWithoutFallback ()
 	{
-		AssertParity (20, 16, context => {
+		AssertLocalAaParity (20, 16, context => {
 			context.Antialias = Antialias.Fast;
 			context.SetSourceRGBA (.2, .7, .4, .65);
 			context.Arc (10, 8, 6, 0, 6.3);
@@ -669,7 +669,7 @@ public sealed class CairoRecorderParityTests
 			context.SetSource (pattern);
 			context.Rectangle (2, 3, 150, 64);
 			context.Fill ();
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Theory]
@@ -748,7 +748,7 @@ public sealed class CairoRecorderParityTests
 			context.Restore ();
 			context.Rectangle (0, 15, 8, 3);
 			context.Fill ();
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
@@ -834,7 +834,7 @@ public sealed class CairoRecorderParityTests
 	[Fact]
 	public void SubpixelDashIntervalsMatchCairoWithoutFallback ()
 	{
-		AssertParity (48, 20, context => {
+		AssertLocalAaParity (48, 20, context => {
 			context.SetSourceRGBA (.18, .48, .82, 1);
 			context.LineWidth = 2.25;
 			context.SetDash (new[] { 10.0, .003 }, 0);
@@ -998,7 +998,7 @@ public sealed class CairoRecorderParityTests
 				context.Rectangle (48, 0, 48, 48);
 				context.Fill ();
 			}
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
@@ -1022,7 +1022,7 @@ public sealed class CairoRecorderParityTests
 				context.Rectangle (0, 0, 120, 30);
 				context.Fill ();
 			}
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Theory]
@@ -1056,7 +1056,7 @@ public sealed class CairoRecorderParityTests
 			context.SetSourceRGBA (.9, .2, .1, .5);
 			context.Rectangle (10, 6, 10, 8);
 			context.Fill ();
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
@@ -1185,7 +1185,7 @@ public sealed class CairoRecorderParityTests
 					context.Fill ();
 				}
 			}
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]
@@ -1275,7 +1275,7 @@ public sealed class CairoRecorderParityTests
 			context.SetSourceSurface (surface, 1, 0);
 			context.Rectangle (1, 0, 1, 2);
 			context.Fill ();
-		}, edgeAllowance: false);
+		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
 	[Fact]

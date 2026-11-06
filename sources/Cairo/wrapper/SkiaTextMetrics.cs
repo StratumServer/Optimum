@@ -101,7 +101,10 @@ namespace Cairo
 				if (useWindowsAdvances) {
 					measure.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
 					Array.Copy(windowsAdvances, widths, widths.Length);
-				} else if (advanceFont != null) font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
+				} else if (advanceFont != null) {
+					advanceFont.GetGlyphWidths(glyphs, widths, null);
+					font.GetGlyphWidths(glyphs, new float[glyphs.Length], bounds);
+				}
 				else measure.GetGlyphWidths(glyphs, widths, bounds);
 				float x = 0;
 				float left = float.MaxValue, top = float.MaxValue, right = float.MinValue, bottom = float.MinValue;
