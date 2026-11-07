@@ -1,0 +1,32 @@
+diff --git a/VintagestoryApi/Datastructures/FastMemoryStream.cs b/VintagestoryApi/Datastructures/FastMemoryStream.cs
+--- a/VintagestoryApi/Datastructures/FastMemoryStream.cs
++++ b/VintagestoryApi/Datastructures/FastMemoryStream.cs
+@@ -65,22 +65,14 @@ namespace Vintagestory.API.Datastructures
+ 
+     public override int Read(byte[] destBuffer, int offset, int count)
+     {
+-        // Local objects for quicker reference inside the potentially long loop
+         long origPosition = Position;
+-        long bufferlength = this.bufferlength;
+-        byte[] streamBuffer = this.buffer;
++        int available = (int)Math.Max(0, bufferlength - origPosition);
++        int toRead = Math.Min(count, available);
++        if (toRead <= 0) return 0;
+ 
+-        for (int i = 0; i < count; i++)
+-        {
+-            if (origPosition + i >= bufferlength)
+-            {
+-                Position += i;
+-                return i;
+-            }
+-            destBuffer[offset + i] = streamBuffer[origPosition + i];
+-        }
+-        Position += count;
+-        return count;
++        Buffer.BlockCopy(this.buffer, (int)origPosition, destBuffer, offset, toRead);
++        Position = origPosition + toRead;
++        return toRead;
+     }
+ 
+     public override bool CanSeek => false;
