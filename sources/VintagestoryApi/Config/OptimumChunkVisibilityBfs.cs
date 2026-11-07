@@ -133,7 +133,7 @@ public sealed class OptimumChunkVisibilityBfs
         // Seed: the camera chunk. Always visible and always the BFS root, even when
         // it is outside the frustum (the player is inside it) or embedded in solid.
         long rootKey = Pack(camCx, camCy, camCz);
-        visitedDirMask[rootKey] = 0;
+        visitedDirMask[rootKey] = 0x3F;
         if (graph.ChunkExists(camCx, camCy, camCz))
         {
             graph.MarkVisible(camCx, camCy, camCz);
@@ -145,12 +145,11 @@ public sealed class OptimumChunkVisibilityBfs
         while (queue.Count > 0)
         {
             Node cur = queue.Dequeue();
-            byte curMask = visitedDirMask.TryGetValue(Pack(cur.Cx, cur.Cy, cur.Cz), out byte m) ? m : (byte)0;
 
             for (int dir = 0; dir < 6; dir++)
             {
-                // (1) Never-go-back: skip a direction whose opposite the flood already used.
-                if ((curMask & (1 << Opposite[dir])) != 0)
+                // (1) Never-go-back: skip stepping back to the immediate parent chunk we entered from.
+                if (cur.FromFace != NoFace && dir == cur.FromFace)
                 {
                     continue;
                 }
@@ -176,40 +175,42 @@ public sealed class OptimumChunkVisibilityBfs
                     continue;
                 }
 
+                int inFace = Opposite[dir];
+                byte inMask = (byte)(1 << inFace);
                 long nkey = Pack(nx, ny, nz);
-                byte newMask = (byte)(curMask | (1 << dir));
 
-                if (visitedDirMask.TryGetValue(nkey, out byte existing))
+                if (visitedDirMask.TryGetValue(nkey, out byte seenMask))
                 {
-                    // Already visited. Merge the arrival direction so a later, differently
-                    // routed expansion from this chunk is not wrongly blocked by never-go-back.
-                    byte merged = (byte)(existing | newMask);
-                    if (merged != existing)
+                    if ((seenMask & inMask) != 0)
                     {
-                        visitedDirMask[nkey] = merged;
+                        continue;
                     }
-                    continue;
+                    visitedDirMask[nkey] = (byte)(seenMask | inMask);
+                }
+                else
+                {
+                    visitedDirMask[nkey] = inMask;
+
+                    // (3) Frustum cull LAST (most expensive filter).
+                    if (!graph.IsInFrustum(nx, ny, nz))
+                    {
+                        frustumCulled++;
+                        continue;
+                    }
+
+                    if (graph.ChunkExists(nx, ny, nz))
+                    {
+                        graph.MarkVisible(nx, ny, nz);
+                        visited++;
+                    }
                 }
 
-                // (3) Frustum cull LAST (most expensive filter).
                 if (!graph.IsInFrustum(nx, ny, nz))
                 {
-                    // Record it as visited-with-mask so we don't repeatedly re-test it,
-                    // but do not mark visible and do not expand its neighbours.
-                    visitedDirMask[nkey] = newMask;
-                    frustumCulled++;
                     continue;
                 }
 
-                visitedDirMask[nkey] = newMask;
-
-                if (graph.ChunkExists(nx, ny, nz))
-                {
-                    graph.MarkVisible(nx, ny, nz);
-                    visited++;
-                }
-
-                queue.Enqueue(new Node(nx, ny, nz, Opposite[dir]));
+                queue.Enqueue(new Node(nx, ny, nz, inFace));
                 enqueued++;
             }
         }
