@@ -335,7 +335,7 @@ half4 main(float2 p) {
 		internal bool Draw(SKSurface target, RecordedGpuBlur gpu, SKRuntimeEffect lcdEffect, int width, int height, PointD deviceOffset = default)
 		{
 			if (target == null) throw new ArgumentNullException(nameof(target));
-			if (!CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
+			if (gpu != null || !CanUseLcdCompositor) { DrawCore(target.Canvas, gpu, deviceOffset); return false; }
 			if (TextCoverage != null && gpu == null) {
 				double targetLeft = TextCoverageOrigin.X + deviceOffset.X;
 				double targetTop = TextCoverageOrigin.Y + deviceOffset.Y;
