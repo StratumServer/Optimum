@@ -280,4 +280,79 @@ public sealed class GamePatcherTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task PatchRejectsIncompatibleGameVersionDeclaredInRequest()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/game");
+        probe.AddFile("/game/VintagestoryLib.dll", "lib");
+        probe.AddFile("/game/VintagestoryAPI.dll", "api");
+
+        var patcher = new GamePatcher(probe, new StubRuntimeValidator(), _ => "1.21.0");
+
+        var result = await patcher.PatchAsync(new PatchRequest(
+            "/game",
+            SupportedGameVersions: ["1.20.4", "1.20.5"]));
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.UnsupportedVersion, result.Reason);
+        Assert.Contains("incompatible game version", result.Message);
+        Assert.Contains("detected Vintage Story 1.21.0", result.Message);
+        Assert.Contains("1.20.4, 1.20.5", result.Message);
+        Assert.False(((ISystemProbe)probe).DirectoryExists("/game/.optimum/vanilla"));
+    }
+
+    [Fact]
+    public async Task PatchRejectsIncompatibleGameVersionDeclaredInOverlayManifest()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/game");
+        probe.AddFile("/game/VintagestoryLib.dll", "lib");
+        probe.AddFile("/game/VintagestoryAPI.dll", "api");
+
+        probe.AddDirectory("/overlay");
+        string manifestJson = """
+        {
+          "optimumVersion": "1.0.0",
+          "supportedGameVersions": ["1.20.4"],
+          "rid": "linux-x64"
+        }
+        """;
+        probe.AddFile("/overlay/optimum-manifest.json", manifestJson);
+
+        var patcher = new GamePatcher(probe, new StubRuntimeValidator(), _ => "1.22.7");
+
+        var result = await patcher.PatchAsync(new PatchRequest(
+            "/game",
+            OverlayDirectory: "/overlay"));
+
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.UnsupportedVersion, result.Reason);
+        Assert.Contains("incompatible game version", result.Message);
+        Assert.Contains("detected Vintage Story 1.22.7", result.Message);
+        Assert.Contains("1.20.4", result.Message);
+        Assert.False(((ISystemProbe)probe).DirectoryExists("/game/.optimum/vanilla"));
+    }
+
+    [Fact]
+    public async Task PatchAllowsCompatibleGameVersion()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/game");
+        probe.AddFile("/game/VintagestoryLib.dll", "lib");
+        probe.AddFile("/game/VintagestoryAPI.dll", "api");
+
+        var patcher = new GamePatcher(probe, new StubRuntimeValidator(), _ => "1.20.4");
+
+        var result = await patcher.PatchAsync(new PatchRequest(
+            "/game",
+            SupportedGameVersions: ["1.20.4", "1.20.5"]));
+
+        // Should pass version check and fail on missing patcher/donor rather than version mismatch
+        Assert.False(result.Ok);
+        Assert.Equal(FailureReason.BadInput, result.Reason);
+        Assert.Contains("Optimum.Patcher", result.Message);
+        Assert.False(((ISystemProbe)probe).DirectoryExists("/game/.optimum/vanilla"));
+    }
 }
