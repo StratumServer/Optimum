@@ -1,0 +1,63 @@
+diff --git a/VSEssentials/Systems/Weather/CloudRenderer.cs b/VSEssentials/Systems/Weather/CloudRenderer.cs
+index 9fb4264..6055755 100644
+--- a/VSEssentials/Systems/Weather/CloudRenderer.cs
++++ b/VSEssentials/Systems/Weather/CloudRenderer.cs
+@@ -116,11 +116,12 @@ namespace Vintagestory.GameContent
+             windOffsetZ %= CloudTileSize;
+ 
+             offThreadState.Set(mainThreadState);
+             committedState.Set(mainThreadState);
+ 
+-            InitCloudTiles((8 * capi.World.Player.WorldData.DesiredViewDistance));
++            lastViewDistance = capi.World.Player.WorldData.DesiredViewDistance;
++            InitCloudTiles((8 * lastViewDistance));
+             LoadCloudModel();
+ 
+             
+             capi.Settings.AddWatcher<int>("viewDistance", OnViewDistanceChanged);
+ 
+@@ -182,12 +183,21 @@ namespace Vintagestory.GameContent
+             capi.Shader.RegisterFileShaderProgram("clouds", prog);
+ 
+             return prog.Compile();
+         }
+ 
++        private int lastViewDistance = -1;
++
+         private void OnViewDistanceChanged(int newValue)
+         {
++            if (lastViewDistance >= MaxCloudViewDistance && newValue >= MaxCloudViewDistance)
++            {
++                lastViewDistance = newValue;
++                return;
++            }
++
++            lastViewDistance = newValue;
+             requireTileRebuild = true;
+         }
+ 
+ 
+         #region Render, Tick
+@@ -352,17 +362,21 @@ namespace Vintagestory.GameContent
+         }
+         #endregion
+ 
+ 
+         #region Init/Setup, Rebuild
++        public const int MaxCloudViewDistance = 512;
++        public const int MaxCloudDistance = 8 * MaxCloudViewDistance;
++
+         public void InitCloudTiles(int viewDistance)
+         {
+             // 1 cloud tile = 30 blocks
+             // Min amount of cloud tiles = 5*5
+             // Also we'll display clouds triple as far as block view distance
+ 
+-            CloudTileLength = GameMath.Clamp(viewDistance / CloudTileSize, 20, 200);
++            int effectiveDistance = Math.Min(viewDistance, MaxCloudDistance);
++            CloudTileLength = GameMath.Clamp(effectiveDistance / CloudTileSize, 20, 200);
+ 
+             QuantityCloudTiles = CloudTileLength * CloudTileLength;
+             Tiles = new CloudTile[QuantityCloudTiles];
+             tempTiles = new CloudTile[QuantityCloudTiles];
+ 
