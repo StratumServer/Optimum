@@ -115,6 +115,100 @@ namespace Optimum.Tests;
 		}
 	}
 
+	[Fact]
+	public void GuiRenderBackend_DefaultsToSkiaGpuAndCascadesFallbackToSkiaCpuThenCairoWithPersistence()
+	{
+		string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-gui-backend-cascade-" + Guid.NewGuid().ToString("N"));
+		System.IO.Directory.CreateDirectory(dir);
+		bool originalEnabled = Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled;
+		string originalBackend = Vintagestory.API.Config.OptimumConfig.GuiRenderBackend;
+		try
+		{
+			Vintagestory.API.Config.OptimumConfig.SetDataPath(dir);
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-gpu", save: false);
+			Vintagestory.API.Config.OptimumConfig.Load();
+
+			Assert.Equal("skia-gpu", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested);
+			Assert.True(OptimumGuiGpuProbe.RenderingRequested);
+
+			Assert.True(Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure());
+			Assert.Equal("skia-cpu", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested);
+			Assert.True(OptimumGuiGpuProbe.RenderingRequested);
+
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-gpu", save: false);
+			Vintagestory.API.Config.OptimumConfig.Load();
+			Assert.Equal("skia-cpu", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested);
+
+			Assert.True(Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure());
+			Assert.Equal("cairo", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-gpu", save: false);
+			Vintagestory.API.Config.OptimumConfig.Load();
+			Assert.Equal("cairo", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+		}
+		finally
+		{
+			Vintagestory.API.Config.OptimumConfig.GuiRenderBackend = originalBackend;
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = originalEnabled;
+			Vintagestory.API.Config.OptimumConfig.SetDataPath(null!);
+			try { System.IO.Directory.Delete(dir, true); } catch { }
+		}
+	}
+
+	[Fact]
+	public void GuiRenderBackend_RespectsManualUserSelectionAndDowngradesManualSkiaCpuToCairoOnFailure()
+	{
+		string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "optimum-gui-backend-manual-" + Guid.NewGuid().ToString("N"));
+		System.IO.Directory.CreateDirectory(dir);
+		bool originalEnabled = Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled;
+		string originalBackend = Vintagestory.API.Config.OptimumConfig.GuiRenderBackend;
+		try
+		{
+			Vintagestory.API.Config.OptimumConfig.SetDataPath(dir);
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-cpu", save: true);
+
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-gpu", save: false);
+			Vintagestory.API.Config.OptimumConfig.Load();
+			Assert.Equal("skia-cpu", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled);
+			Assert.True(Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested);
+			Assert.True(OptimumGuiGpuProbe.RenderingRequested);
+
+			Assert.False(Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure());
+			Assert.Equal("skia-cpu", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+
+			Assert.True(Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure());
+			Assert.Equal("cairo", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+
+			Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend("skia-gpu", save: false);
+			Vintagestory.API.Config.OptimumConfig.Load();
+			Assert.Equal("cairo", Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
+			Assert.False(OptimumGuiGpuProbe.RenderingRequested);
+		}
+		finally
+		{
+			Vintagestory.API.Config.OptimumConfig.GuiRenderBackend = originalBackend;
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled = originalEnabled;
+			Vintagestory.API.Config.OptimumConfig.SetDataPath(null!);
+			try { System.IO.Directory.Delete(dir, true); } catch { }
+		}
+	}
+
 	private static byte[] CreateExpectedReadback()
 	{
 		byte[] pixels = new byte[8 * 8 * 4];

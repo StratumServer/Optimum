@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..252075c 100644
+index 4d08f84..ac67865 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
@@ -101,7 +101,7 @@ index 4d08f84..252075c 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1752,309 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1752,318 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -138,6 +138,7 @@ index 4d08f84..252075c 100644
 +		AddOptimumSwitchRow("optimum-entitylightbatch", "optimum-entitylightbatch-tooltip", onOptimumEntityLightBatchChanged, "optEntityLightBatch");
 +		AddOptimumSwitchRow("optimum-entityshadercache", "optimum-entityshadercache-tooltip", onOptimumEntityShaderCacheChanged, "optEntityShaderCache");
 +		AddOptimumDropdownRow("optimum-renderscale", "optimum-renderscale-tooltip", new string[] { "1.0", "0.85", "0.77", "0.67" }, new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, 0, onOptimumRenderScaleChanged, "optRenderScale");
++		AddOptimumDropdownRow("optimum-guigpu", "optimum-guigpu-tooltip", new string[] { "skia-gpu", "skia-cpu", "cairo" }, new string[] { "Skia GPU", "Skia CPU", "Cairo" }, 0, onOptimumGuiRenderBackendChanged, "optGuiRenderBackend");
 +		AddOptimumSwitchRow("optimum-godrayscap", "optimum-godrayscap-tooltip", onOptimumGodRaysCapChanged, "optGodRaysCap");
 +#if OPTIMUM_GREEDY_MESH
 +		AddOptimumSwitchRow("optimum-greedymesh", "optimum-greedymesh-tooltip", onOptimumGreedyMeshChanged, "optGreedyMesh");
@@ -186,6 +187,13 @@ index 4d08f84..252075c 100644
 +		((GuiElementSwitch)optimumControls["optEntityShaderCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
 +		int renderScaleIdx = Vintagestory.API.Config.OptimumConfig.RenderScale >= 1.0f ? 0 : Vintagestory.API.Config.OptimumConfig.RenderScale >= 0.85f ? 1 : Vintagestory.API.Config.OptimumConfig.RenderScale >= 0.77f ? 2 : 3;
 +		((GuiElementDropDown)optimumControls["optRenderScale"]).SetSelectedIndex(renderScaleIdx);
++		string guiBackend = Vintagestory.API.Config.OptimumConfig.NormalizeGuiRenderBackend(Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
++		if (!Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled && string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaGpu, StringComparison.Ordinal))
++		{
++			guiBackend = Vintagestory.API.Config.OptimumConfig.GuiRenderBackendCairo;
++		}
++		int guiBackendIdx = string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaGpu, StringComparison.Ordinal) ? 0 : string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaCpu, StringComparison.Ordinal) ? 1 : 2;
++		((GuiElementDropDown)optimumControls["optGuiRenderBackend"]).SetSelectedIndex(guiBackendIdx);
 +		((GuiElementSwitch)optimumControls["optGodRaysCap"]).SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
 +#if OPTIMUM_GREEDY_MESH
 +		((GuiElementSwitch)optimumControls["optGreedyMesh"]).SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
@@ -393,6 +401,7 @@ index 4d08f84..252075c 100644
 +		handler.ReloadShaders();
 +	}
 +	private void onOptimumGodRaysCapChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("GodRaysSampleCap")) return; Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
++	private void onOptimumGuiRenderBackendChanged(string code, bool selected) { Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend(code, save: true); }
 +	private void onOptimumEntityLightBatchChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityLightBatch")) return; Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityShaderStateCache")) return; Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -411,7 +420,7 @@ index 4d08f84..252075c 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2129,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2138,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

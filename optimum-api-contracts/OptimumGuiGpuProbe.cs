@@ -13,8 +13,10 @@ namespace Vintagestory.API.Client
 		/// <summary>True only when configured and the current GL context passed the backend probe.</summary>
 		public static bool GuiRenderingEnabled => Vintagestory.API.Config.OptimumConfig.EffectiveGuiGpuRender;
 
-		/// <summary>True when the Skia GUI renderer was explicitly enabled; GPU certification only selects Ganesh versus CPU.</summary>
-		public static bool RenderingRequested => Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested;
+		/// <summary>True when the Skia GUI renderer (GPU or CPU) is active; GPU certification only selects Ganesh versus CPU.</summary>
+		public static bool RenderingRequested =>
+			Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested ||
+			Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested;
 
 		internal static bool IsSoftwareRenderer(string renderer)
 		{
