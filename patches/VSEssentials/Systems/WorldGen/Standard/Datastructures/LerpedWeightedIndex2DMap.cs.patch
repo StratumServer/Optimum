@@ -1,0 +1,47 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/Datastructures/LerpedWeightedIndex2DMap.cs b/VSEssentials/Systems/WorldGen/Standard/Datastructures/LerpedWeightedIndex2DMap.cs
+--- a/VSEssentials/Systems/WorldGen/Standard/Datastructures/LerpedWeightedIndex2DMap.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/Datastructures/LerpedWeightedIndex2DMap.cs
+@@ -96,35 +96,35 @@ namespace Vintagestory.ServerMods
+         /// <summary>
+         /// Does lerp calculations using a working array provided by the caller (thread-safe).  The working array should be twice as long as the output array
+         /// </summary>
+         public float[] WeightsAt(float x, float z, float[] output)
+         {
+-            for (int i = 0; i < output.Length; i++)
+-            {
+-                output[i] = 0;
+-            }
++            Array.Clear(output, 0, output.Length);
+ 
+             int posXLeft = (int)Math.Floor(x - 0.5f) + topleftPadding;
+             int posXRight = posXLeft + 1;
+ 
+             int posZLeft = (int)Math.Floor(z - 0.5f) + topleftPadding;
+             int posZRight = posZLeft + 1;
+ 
+             float fx = x - (posXLeft - topleftPadding + 0.5f);
+             float fz = z - (posZLeft - topleftPadding + 0.5f);
+ 
++            int rowLeft = posZLeft * sizeX;
++            int rowRight = posZRight * sizeX;
++
+             HalfBiLerp(   // Top
+-                groups[posZLeft * sizeX + posXLeft],
+-                groups[posZLeft * sizeX + posXRight],
++                groups[rowLeft + posXLeft],
++                groups[rowLeft + posXRight],
+                 fx,
+                 output,
+                 (1 - fz)
+             );
+ 
+             HalfBiLerp(    // Bottom
+-                groups[posZRight * sizeX + posXLeft],
+-                groups[posZRight * sizeX + posXRight],
++                groups[rowRight + posXLeft],
++                groups[rowRight + posXRight],
+                 fx,
+                 output,
+                 fz
+             );
+ 
