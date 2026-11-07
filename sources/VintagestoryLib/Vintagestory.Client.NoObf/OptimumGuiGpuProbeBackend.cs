@@ -164,7 +164,7 @@ namespace Vintagestory.Client.NoObf
 
 		public static string TryRunOnce(int expectedContextThreadId)
 				{
-					if (!OptimumGuiGpuProbe.Enabled && !OptimumGuiGpuProbe.RenderingRequested)
+					if (!OptimumGuiGpuProbe.Enabled && !Vintagestory.API.Config.OptimumConfig.GuiGpuRenderRequested)
 						return null;
 					if (Environment.CurrentManagedThreadId != expectedContextThreadId)
 						return "Optimum Skia GL probe skipped: caller is not on the context-owning thread.";
@@ -174,7 +174,8 @@ namespace Vintagestory.Client.NoObf
 						return "Optimum Skia GL probe skipped: " + probeResetReason + "; GUI rendering stays on the recorded display list until a new context is confirmed.";
 					if (!MatchesCertifiedDevice())
 					{
-						return "Optimum Skia GL probe skipped: current OpenGL context is not eligible for GPU GUI rendering; GUI rendering remains vanilla.";
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
+						return "Optimum Skia GL probe skipped: current OpenGL context is not eligible for GPU GUI rendering; downgraded GUI backend to skia-cpu.";
 					}
 					if (Interlocked.CompareExchange(ref attempted, 1, 0) != 0)
 						return null;
@@ -182,6 +183,7 @@ namespace Vintagestory.Client.NoObf
 					if (preexistingErrors != null)
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return "Optimum Skia GL probe skipped before mutation; preexisting GL errors were consumed: " + preexistingErrors;
 					}
 
@@ -190,11 +192,13 @@ namespace Vintagestory.Client.NoObf
 					if (!IsOpenGl3OrNewer(version))
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return "Optimum Skia GL probe skipped; renderer=" + renderer + "; GL=" + version + "; reason=OpenGL 3.0 or newer is required for state capture.";
 					}
 					if (OptimumGuiGpuProbe.IsSoftwareRenderer(renderer))
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return "Optimum Skia GL probe skipped; renderer=" + renderer + "; GL=" + version + "; reason=software OpenGL renderers are not enabled for GPU GUI rendering.";
 					}
 					try
@@ -203,6 +207,7 @@ namespace Vintagestory.Client.NoObf
 						if (!RunProbe(out readbackFailure))
 						{
 							Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+							Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 							return "Optimum Skia GL probe failed; renderer=" + renderer + "; GL=" + version + "; reason=" + readbackFailure;
 						}
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(true);
@@ -211,6 +216,7 @@ namespace Vintagestory.Client.NoObf
 					catch (Exception exception)
 					{
 						Vintagestory.API.Config.OptimumConfig.SetGuiGpuBackendProbePassed(false);
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return "Optimum Skia GL probe failed; renderer=" + renderer + "; GL=" + version + "; reason=" + exception.GetType().Name + ": " + exception.Message;
 					}
 				}
@@ -262,35 +268,37 @@ namespace Vintagestory.Client.NoObf
 						failureReason = resetReason;
 						return false;
 					}
+					if (Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested)
+					{
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"skia-cpu-configured", out candidateTexture, out failureReason);
+					}
 					if (ForceSkiaCpuPreflightFallbackForTest)
+					{
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
 							"test-forced-gpu-preflight-failure", out candidateTexture, out failureReason);
+					}
 					if (!MatchesCertifiedDevice())
 					{
-						if (ForceSkiaCpuFallbackForTest)
-							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-								"current-device-or-context-mismatch", out candidateTexture, out failureReason);
-						failureReason = "current-device-or-context-mismatch";
-						return false;
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"current-device-or-context-mismatch", out candidateTexture, out failureReason);
 					}
 					if (!IsOpenGl3OrNewer(cachedDeviceIdentity?.Version ?? SafeGetString(StringName.Version)))
 					{
-						if (ForceSkiaCpuFallbackForTest)
-							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-								"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
-						failureReason = "OpenGL 3.0 or newer is required for state capture";
-						return false;
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
 					}
 					// Once the one-shot probe ran, TryRunOnce only repeats the checks above (one more reset-status
 					// read, a driver round trip) and returns null; skip it.
 					if (Volatile.Read(ref attempted) == 0) TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
-						if (ForceSkiaCpuFallbackForTest)
-							return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
-								"gpu-probe-not-passed", out candidateTexture, out failureReason);
-						failureReason = "gpu-probe-not-passed";
-						return false;
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+							"gpu-probe-not-passed", out candidateTexture, out failureReason);
 					}
 					// Drain pre-existing engine errors before capturing state so post-render
 					// error checks only catch errors produced by the candidate render itself.
@@ -505,8 +513,9 @@ namespace Vintagestory.Client.NoObf
 					// A failed Ganesh render can still publish this display list without
 					// entering the legacy Cairo materialization path. Rasterize with Skia's
 					// CPU backend, then upload those pixels into the candidate GL texture.
-					if (!rendered && failureReason != null && failureReason.StartsWith("candidate-render-exception:", StringComparison.Ordinal))
+					if (!rendered && renderResetReason == null && failureReason != null)
 					{
+						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						string gpuFailure = failureReason;
 						try
 						{
@@ -518,6 +527,7 @@ namespace Vintagestory.Client.NoObf
 						catch (Exception exception)
 						{
 							rendered = false;
+							Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure();
 							failureReason = "gpu-render-and-skia-cpu-upload-failed:" + gpuFailure + ";" + exception.GetType().Name + ":" + exception.Message;
 						}
 					}
@@ -526,6 +536,10 @@ namespace Vintagestory.Client.NoObf
 					{
 						candidateTexture = texture;
 						return true;
+					}
+					if (renderResetReason == null)
+					{
+						Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure();
 					}
 					if (failureReason == null) failureReason = rendered
 						? "display-list-commit-failed:state=" + surface.RecordingState + ";trigger=" + (surface.FirstMaterializationTrigger ?? "none")
@@ -565,6 +579,7 @@ namespace Vintagestory.Client.NoObf
 					catch (Exception exception)
 					{
 						if (texture != 0) try { GL.DeleteTextures(1, ref texture); } catch { }
+						Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure();
 						failureReason = "skia-cpu-fallback-failed:gpu-preflight=" + gpuFailure + ";" + exception.GetType().Name + ":" + exception.Message;
 						return false;
 					}

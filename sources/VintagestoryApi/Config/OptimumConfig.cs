@@ -61,8 +61,15 @@ public static class OptimumConfig
     /// </summary>
     public static bool GreedyMeshEnabled = false;
 
-    /// <summary>Requests the experimental static GUI GPU renderer; the effective value also requires a successful current-context probe.</summary>
-    public static bool GuiGpuRenderEnabled = false;
+    public const string GuiRenderBackendSkiaGpu = "skia-gpu";
+    public const string GuiRenderBackendSkiaCpu = "skia-cpu";
+    public const string GuiRenderBackendCairo = "cairo";
+
+    /// <summary>Requests the static GUI GPU renderer; the effective value also requires a successful current-context probe.</summary>
+    public static bool GuiGpuRenderEnabled = true;
+
+    /// <summary>Selected GUI rendering backend ("skia-gpu", "skia-cpu", or "cairo"). Automatically downgrades and persists on backend failure.</summary>
+    public static string GuiRenderBackend = GuiRenderBackendSkiaGpu;
 
     /// <summary>
     /// Caps the greedy merge span. Merged quads tile the texture via a
@@ -563,7 +570,68 @@ public static class OptimumConfig
     private static string? _shaderCompatibilityFingerprint;
     private static string? _dataPath;
 
+    public static string NormalizeGuiRenderBackend(string? backend)
+    {
+        if (string.Equals(backend, GuiRenderBackendSkiaCpu, StringComparison.OrdinalIgnoreCase))
+            return GuiRenderBackendSkiaCpu;
+        if (string.Equals(backend, GuiRenderBackendCairo, StringComparison.OrdinalIgnoreCase))
+            return GuiRenderBackendCairo;
+        return GuiRenderBackendSkiaGpu;
+    }
+
+    public static void SetGuiRenderBackend(string? backend, bool save = false)
+    {
+        string normalized = NormalizeGuiRenderBackend(backend);
+        GuiRenderBackend = normalized;
+        GuiGpuRenderEnabled = string.Equals(normalized, GuiRenderBackendSkiaGpu, StringComparison.Ordinal);
+        if (save)
+        {
+            Save();
+        }
+    }
+
+    public static bool DowngradeGuiRenderBackend(string targetBackend)
+    {
+        string normalizedTarget = NormalizeGuiRenderBackend(targetBackend);
+        string current = GetEffectiveConfiguredGuiRenderBackend();
+        if (GetGuiRenderBackendRank(normalizedTarget) >= GetGuiRenderBackendRank(current))
+        {
+            return false;
+        }
+
+        SetGuiRenderBackend(normalizedTarget, save: true);
+        return true;
+    }
+
+    public static bool OnGuiGpuBackendFailure() => DowngradeGuiRenderBackend(GuiRenderBackendSkiaCpu);
+
+    public static bool OnGuiSkiaCpuBackendFailure() => DowngradeGuiRenderBackend(GuiRenderBackendCairo);
+
+    private static string GetEffectiveConfiguredGuiRenderBackend()
+    {
+        string normalized = NormalizeGuiRenderBackend(GuiRenderBackend);
+        if (GuiGpuRenderEnabled)
+        {
+            return GuiRenderBackendSkiaGpu;
+        }
+        if (string.Equals(normalized, GuiRenderBackendSkiaGpu, StringComparison.Ordinal))
+        {
+            return GuiRenderBackendCairo;
+        }
+        return normalized;
+    }
+
+    private static int GetGuiRenderBackendRank(string backend) => backend switch
+    {
+        GuiRenderBackendSkiaGpu => 2,
+        GuiRenderBackendSkiaCpu => 1,
+        _ => 0,
+    };
+
     public static bool GuiGpuRenderRequested => GuiGpuRenderEnabled || environmentGuiGpuRender;
+
+    public static bool GuiSkiaCpuRequested => !GuiGpuRenderRequested &&
+        string.Equals(NormalizeGuiRenderBackend(GuiRenderBackend), GuiRenderBackendSkiaCpu, StringComparison.Ordinal);
 
     private static int guiGpuCertificationRevoked;
     public static bool GuiGpuCertificationWaived { get; set; } = true;
@@ -927,6 +995,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.EntityOutfitTexturePrewarm), EntityOutfitTexturePrewarmEnabled.ToString()),
         (nameof(OptimumConfigData.GreedyMeshEnabled), GreedyMeshEnabled.ToString()),
         (nameof(OptimumConfigData.GuiGpuRenderEnabled), GuiGpuRenderEnabled.ToString()),
+        (nameof(OptimumConfigData.GuiRenderBackend), GetEffectiveConfiguredGuiRenderBackend()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeWidth), GreedyMeshMaxMergeWidth.ToString()),
         (nameof(OptimumConfigData.GreedyMeshMaxMergeHeight), GreedyMeshMaxMergeHeight.ToString()),
         (nameof(OptimumConfigData.GreedyMeshLightTolerance), GreedyMeshLightTolerance.ToString()),
@@ -1027,7 +1096,18 @@ public static class OptimumConfig
             EntityOutfitAnimatorCacheEnabled = data.EntityOutfitAnimatorCache;
             EntityOutfitTexturePrewarmEnabled = data.EntityOutfitTexturePrewarm;
             GreedyMeshEnabled = data.GreedyMeshEnabled;
-            GuiGpuRenderEnabled = data.GuiGpuRenderEnabled;
+            if (string.IsNullOrWhiteSpace(data.GuiRenderBackend))
+            {
+                SetGuiRenderBackend(data.GuiGpuRenderEnabled ? GuiRenderBackendSkiaGpu : GuiRenderBackendCairo);
+            }
+            else if (string.Equals(data.GuiRenderBackend, GuiRenderBackendSkiaGpu, StringComparison.OrdinalIgnoreCase) && !data.GuiGpuRenderEnabled)
+            {
+                SetGuiRenderBackend(GuiRenderBackendCairo);
+            }
+            else
+            {
+                SetGuiRenderBackend(data.GuiRenderBackend);
+            }
             // Clamped to the tile-count encoding's ceiling (3 bits, max 8)
             // so a hand-edited optimum.json can't request a merge wider
             // than the shader can tile.
@@ -1078,6 +1158,10 @@ public static class OptimumConfig
     {
         if (_configPath == null) return;
 
+        string effectiveGuiBackend = GetEffectiveConfiguredGuiRenderBackend();
+        GuiRenderBackend = effectiveGuiBackend;
+        GuiGpuRenderEnabled = string.Equals(effectiveGuiBackend, GuiRenderBackendSkiaGpu, StringComparison.Ordinal);
+
         var data = new OptimumConfigData
         {
             EntityShadowCull = EntityShadowCull,
@@ -1107,6 +1191,7 @@ public static class OptimumConfig
             EntityOutfitTexturePrewarm = EntityOutfitTexturePrewarmEnabled,
             GreedyMeshEnabled = GreedyMeshEnabled,
             GuiGpuRenderEnabled = GuiGpuRenderEnabled,
+            GuiRenderBackend = GuiRenderBackend,
             GreedyMeshMaxMergeWidth = GreedyMeshMaxMergeWidth,
             GreedyMeshMaxMergeHeight = GreedyMeshMaxMergeHeight,
             GreedyMeshLightTolerance = GreedyMeshLightTolerance,
@@ -1208,7 +1293,8 @@ internal sealed class OptimumConfigData
     public bool EntityOutfitAnimatorCache { get; set; } = false;
     public bool EntityOutfitTexturePrewarm { get; set; } = false;
     public bool GreedyMeshEnabled { get; set; } = false;
-    public bool GuiGpuRenderEnabled { get; set; } = false;
+    public bool GuiGpuRenderEnabled { get; set; } = true;
+    public string? GuiRenderBackend { get; set; }
     public int GreedyMeshMaxMergeWidth { get; set; } = 8;
     public int GreedyMeshMaxMergeHeight { get; set; } = 8;
     public int GreedyMeshLightTolerance { get; set; } = 0;
