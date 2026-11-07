@@ -1,0 +1,208 @@
+diff --git a/VintagestoryApi/Common/Model/Shape/Shape.cs b/VintagestoryApi/Common/Model/Shape/Shape.cs
+index 61ac3c6..eadb292 100644
+--- a/VintagestoryApi/Common/Model/Shape/Shape.cs
++++ b/VintagestoryApi/Common/Model/Shape/Shape.cs
+@@ -54,6 +54,10 @@ namespace Vintagestory.API.Common
+ 
+         public Dictionary<int, AnimationJoint> JointsById = new Dictionary<int, AnimationJoint>();
+ 
++        private readonly object jointsLock = new object();
++        private HashSet<string> resolvedRequiredJoints;
++        public bool JointsResolved { get; private set; }
++
+         // This is never used anywhere. AnimatorBase.cs loads those separatly anyway
+         //public Dictionary<string, AttachmentPoint> AttachmentPointsByCode = new Dictionary<string, AttachmentPoint>();
+ 
+@@ -415,89 +419,127 @@ namespace Vintagestory.API.Common
+             var Animations = this.Animations;
+             if (Animations == null) return;
+ 
+-            if (elementsByName == null)
++            lock (jointsLock)
+             {
+-                elementsByName = new Dictionary<string, ShapeElement>(Elements.Length);
+-                CollectElements(Elements, elementsByName, new HashSet<string>(), errorLogger, shapeName);
+-            }
+-
+-            int jointCount = 0;
+-
+-            HashSet<string> AnimatedElements = new HashSet<string>();
+-
+-            HashSet<string> animationCodes = new HashSet<string>();
+-
+-            int version = -1;
+-            bool errorLogged = false;
+-
+-            for (int i = 0; i < Animations.Length; i++)
+-            {
+-                Animation anim = Animations[i];
+-
+-                if (!animationCodes.Add(anim.Code))
++                if (JointsResolved)
+                 {
+-                    errorLogger?.Warning("Shape {0}: Two or more animations use the same code '{1}'. This will lead to undefined behavior.", shapeName, anim.Code);
++                    bool allRequiredResolved = true;
++                    if (requireJointsForElements != null && requireJointsForElements.Length > 0)
++                    {
++                        if (resolvedRequiredJoints == null)
++                        {
++                            allRequiredResolved = false;
++                        }
++                        else
++                        {
++                            for (int i = 0; i < requireJointsForElements.Length; i++)
++                            {
++                                if (!resolvedRequiredJoints.Contains(requireJointsForElements[i]))
++                                {
++                                    allRequiredResolved = false;
++                                    break;
++                                }
++                            }
++                        }
++                    }
++
++                    if (allRequiredResolved) return;
+                 }
+ 
+-                if (version == -1) version = anim.Version;
+-                else if (version != anim.Version)
++                if (elementsByName == null)
+                 {
+-                    if (!errorLogged) errorLogger?.Error("Shape {0} has mixed animation versions. This will cause incorrect animation blending.", shapeName);
+-                    errorLogged = true;
++                    elementsByName = new Dictionary<string, ShapeElement>(Elements.Length);
++                    CollectElements(Elements, elementsByName, new HashSet<string>(), errorLogger, shapeName);
+                 }
+ 
+-                var KeyFrames = anim.KeyFrames;
+-                for (int j = 0; j < KeyFrames.Length; j++)
++                int jointCount = 0;
++
++                HashSet<string> AnimatedElements = new HashSet<string>();
++
++                HashSet<string> animationCodes = new HashSet<string>();
++
++                int version = -1;
++                bool errorLogged = false;
++
++                for (int i = 0; i < Animations.Length; i++)
+                 {
+-                    AnimationKeyFrame kf = KeyFrames[j];
+-                    foreach (var key in kf.Elements.Keys) AnimatedElements.Add(key);
+-                    kf.Resolve(elementsByName);
++                    Animation anim = Animations[i];
++
++                    if (!animationCodes.Add(anim.Code))
++                    {
++                        errorLogger?.Warning("Shape {0}: Two or more animations use the same code '{1}'. This will lead to undefined behavior.", shapeName, anim.Code);
++                    }
++
++                    if (version == -1) version = anim.Version;
++                    else if (version != anim.Version)
++                    {
++                        if (!errorLogged) errorLogger?.Error("Shape {0} has mixed animation versions. This will cause incorrect animation blending.", shapeName);
++                        errorLogged = true;
++                    }
++
++                    var KeyFrames = anim.KeyFrames;
++                    for (int j = 0; j < KeyFrames.Length; j++)
++                    {
++                        AnimationKeyFrame kf = KeyFrames[j];
++                        foreach (var key in kf.Elements.Keys) AnimatedElements.Add(key);
++                        kf.Resolve(elementsByName);
++                    }
+                 }
+-            }
+ 
+-            foreach (ShapeElement elem in elementsByName.Values)
+-            {
+-                elem.JointId = 0;
+-            }
+-
+-            int maxDepth = 0;
+-
+-            foreach (string code in AnimatedElements)
+-            {
+-                elementsByName.TryGetValue(code, out ShapeElement elem);
+-                if (elem == null) continue;
+-                AnimationJoint joint = new AnimationJoint() { JointId = ++jointCount, Element = elem };
+-                JointsById[jointCount] = joint;
+-
+-                maxDepth = Math.Max(maxDepth, elem.CountParents());
+-            }
+-
+-            // Currently used to require a joint for the head for head control, but not really used because
+-            // the player head also happens to be using in animations so it has a joint anyway
+-            foreach (string elemName in requireJointsForElements)
+-            {
+-                if (!AnimatedElements.Contains(elemName))
++                foreach (ShapeElement elem in elementsByName.Values)
+                 {
+-                    ShapeElement elem = GetElementByName(elemName);
++                    elem.JointId = 0;
++                }
++
++                int maxDepth = 0;
++
++                foreach (string code in AnimatedElements)
++                {
++                    elementsByName.TryGetValue(code, out ShapeElement elem);
+                     if (elem == null) continue;
+-
+                     AnimationJoint joint = new AnimationJoint() { JointId = ++jointCount, Element = elem };
+-                    JointsById[joint.JointId] = joint;
++                    JointsById[jointCount] = joint;
++
+                     maxDepth = Math.Max(maxDepth, elem.CountParents());
+                 }
+-            }
+ 
+-
+-
+-            // Iteratively and recursively assign the lowest depth to highest depth joints to all elements
+-            // prevents that we overwrite a child joint id with a parent joint id
+-            for (int depth = 0; depth <= maxDepth; depth++)
+-            {
+-                foreach (AnimationJoint joint in JointsById.Values)
++                // Currently used to require a joint for the head for head control, but not really used because
++                // the player head also happens to be using in animations so it has a joint anyway
++                foreach (string elemName in requireJointsForElements)
+                 {
+-                    if (joint.Element.CountParents() != depth) continue;
++                    if (!AnimatedElements.Contains(elemName))
++                    {
++                        ShapeElement elem = GetElementByName(elemName);
++                        if (elem == null) continue;
+ 
+-                    joint.Element.SetJointId(joint.JointId);
++                        AnimationJoint joint = new AnimationJoint() { JointId = ++jointCount, Element = elem };
++                        JointsById[joint.JointId] = joint;
++                        maxDepth = Math.Max(maxDepth, elem.CountParents());
++                    }
++                }
++
++
++
++                // Iteratively and recursively assign the lowest depth to highest depth joints to all elements
++                // prevents that we overwrite a child joint id with a parent joint id
++                for (int depth = 0; depth <= maxDepth; depth++)
++                {
++                    foreach (AnimationJoint joint in JointsById.Values)
++                    {
++                        if (joint.Element.CountParents() != depth) continue;
++
++                        joint.Element.SetJointId(joint.JointId);
++                    }
++                }
++
++                JointsResolved = true;
++                if (requireJointsForElements != null && requireJointsForElements.Length > 0)
++                {
++                    resolvedRequiredJoints ??= new HashSet<string>();
++                    for (int i = 0; i < requireJointsForElements.Length; i++)
++                    {
++                        resolvedRequiredJoints.Add(requireJointsForElements[i]);
++                    }
+                 }
+             }
+         }
