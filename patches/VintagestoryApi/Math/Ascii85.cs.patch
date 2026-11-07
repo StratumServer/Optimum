@@ -1,12 +1,15 @@
 diff --git a/VintagestoryApi/Math/Ascii85.cs b/VintagestoryApi/Math/Ascii85.cs
-index ec93c87..2a9839d 100644
+index ec93c87..a63b67f 100644
 --- a/VintagestoryApi/Math/Ascii85.cs
 +++ b/VintagestoryApi/Math/Ascii85.cs
-@@ -20,39 +20,41 @@ namespace Vintagestory.API.MathTools
+@@ -18,149 +18,199 @@ namespace Vintagestory.API.MathTools
+         /// <param name="bytes">The bytes to encode.</param>
+         /// <returns>An Ascii85-encoded string representing the input byte array.</returns>
          public static string Encode(byte[] bytes)
          {
              if (bytes == null)
-                 throw new ArgumentNullException("bytes");
+-                throw new ArgumentNullException("bytes");
++                throw new ArgumentNullException(nameof(bytes));
  
 -            // preallocate a StringBuilder with enough room to store the encoded bytes
 -            StringBuilder sb = new StringBuilder(bytes.Length * 5 / 4);
@@ -22,60 +25,76 @@ index ec93c87..2a9839d 100644
 -                // build a 32-bit value from the bytes
 -                value |= ((uint)b) << (24 - (count * 8));
 -                count++;
-+                int pos = 0;
-+                int count = 0;
-+                uint value = 0;
++                int writePos = 0;
++                int i = 0;
++                Span<char> scratch = stackalloc char[5];
  
 -                // every 32 bits, convert the previous 4 bytes into 5 Ascii85 characters
 -                if (count == 4)
-+                for (int i = 0; i < state.Length; i++)
++                while (i <= state.Length - 4)
                  {
 -                    if (value == 0)
 -                        sb.Append('z');
--                    else
++                    uint val = ((uint)state[i] << 24) | ((uint)state[i + 1] << 16) |
++                               ((uint)state[i + 2] << 8) | state[i + 3];
++                    if (val == 0)
++                    {
++                        chars[writePos++] = 'z';
++                    }
+                     else
 -                        EncodeValue(sb, value, 0);
 -                    count = 0;
 -                    value = 0;
-+                    value |= ((uint)state[i]) << (24 - (count * 8));
-+                    count++;
-+
-+                    if (count == 4)
 +                    {
-+                        if (value == 0)
++                        uint v = val;
++                        for (int k = 4; k >= 0; k--)
 +                        {
-+                            chars[pos++] = 'z';
++                            scratch[k] = (char)((v % 85) + c_firstCharacter);
++                            v /= 85;
 +                        }
-+                        else
-+                        {
-+                            EncodeValueInline(chars, ref pos, value, 0);
-+                        }
-+                        count = 0;
-+                        value = 0;
++                        scratch.CopyTo(chars.Slice(writePos, 5));
++                        writePos += 5;
 +                    }
++                    i += 4;
                  }
 -            }
  
 -            // encode any remaining bytes (that weren't a multiple of 4)
 -            if (count > 0)
 -                EncodeValue(sb, value, 4 - count);
--
++                int rem = state.Length - i;
++                if (rem > 0)
++                {
++                    uint val = 0;
++                    for (int j = 0; j < rem; j++)
++                    {
++                        val |= (uint)state[i + j] << (24 - 8 * j);
++                    }
+ 
 -            return sb.ToString();
-+                if (count > 0)
-+                    EncodeValueInline(chars, ref pos, value, 4 - count);
++                    int charsToWrite = rem + 1;
++                    uint v = val;
++                    for (int k = 4; k >= 0; k--)
++                    {
++                        scratch[k] = (char)((v % 85) + c_firstCharacter);
++                        v /= 85;
++                    }
++                    scratch.Slice(0, charsToWrite).CopyTo(chars.Slice(writePos, charsToWrite));
++                }
 +            });
          }
  
          /// <summary>
          /// Decodes the specified Ascii85 string into the corresponding byte array.
          /// </summary>
-@@ -61,106 +63,154 @@ namespace Vintagestory.API.MathTools
+         /// <param name="encoded">The Ascii85 string.</param>
+         /// <returns>The decoded byte array.</returns>
          public static byte[] Decode(string encoded)
          {
              if (encoded == null)
-                 throw new ArgumentNullException("encoded");
- 
--            // preallocate a memory stream with enough capacity to hold the decoded data
--            using (MemoryStream stream = new MemoryStream(encoded.Length * 4 / 5))
+-                throw new ArgumentNullException("encoded");
++                throw new ArgumentNullException(nameof(encoded));
++
 +            // Optimum: pre-calculate exact decoded length, single allocation
 +            int decodedLength = GetDecodedLength(encoded);
 +            byte[] result = new byte[decodedLength];
@@ -83,7 +102,9 @@ index ec93c87..2a9839d 100644
 +
 +            int count = 0;
 +            uint value = 0;
-+
+ 
+-            // preallocate a memory stream with enough capacity to hold the decoded data
+-            using (MemoryStream stream = new MemoryStream(encoded.Length * 4 / 5))
 +            for (int i = 0; i < encoded.Length; i++)
              {
 -                // walk the input string
@@ -92,8 +113,7 @@ index ec93c87..2a9839d 100644
 -                foreach (char ch in encoded)
 +                char ch = encoded[i];
 +                if (ch == 'z' && count == 0)
-                 {
--                    if (ch == 'z' && count == 0)
++                {
 +                    // four zero bytes
 +                    result[writePos++] = 0;
 +                    result[writePos++] = 0;
@@ -101,8 +121,9 @@ index ec93c87..2a9839d 100644
 +                    result[writePos++] = 0;
 +                }
 +                else if (ch < c_firstCharacter || ch > c_lastCharacter)
-+                {
-+                    throw new FormatException("Invalid character '" + ch + "' in Ascii85 block.");
+                 {
+-                    if (ch == 'z' && count == 0)
++                    throw new FormatException($"Invalid character '{ch}' in Ascii85 block.");
 +                }
 +                else
 +                {
@@ -110,7 +131,9 @@ index ec93c87..2a9839d 100644
                      {
 -                        // handle "z" block specially
 -                        DecodeValue(stream, value, 0);
-+                        checked { value += (uint)(s_powersOf85[count] * (ch - c_firstCharacter)); }
++                        uint digit = (uint)(ch - c_firstCharacter);
++                        uint add = checked(s_powersOf85[count] * digit);
++                        value = checked(value + add);
                      }
 -                    else if (ch < c_firstCharacter || ch > c_lastCharacter)
 +                    catch (OverflowException ex)
@@ -119,11 +142,7 @@ index ec93c87..2a9839d 100644
 +                        throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
                      }
 -                    else
-+
-+                    count++;
-+
-+                    if (count == 5)
-                     {
+-                    {
 -                        // build a 32-bit value from the input characters
 -                        try
 -                        {
@@ -133,9 +152,10 @@ index ec93c87..2a9839d 100644
 -                        {
 -                            throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
 -                        }
--
+ 
 -                        count++;
--
++                    count++;
+ 
 -                        // every five characters, convert the characters into the equivalent byte array
 -                        if (count == 5)
 -                        {
@@ -143,24 +163,35 @@ index ec93c87..2a9839d 100644
 -                            count = 0;
 -                            value = 0;
 -                        }
++                    if (count == 5)
++                    {
 +                        result[writePos++] = (byte)(value >> 24);
-+                        result[writePos++] = (byte)((value >> 16) & 0xFF);
-+                        result[writePos++] = (byte)((value >> 8) & 0xFF);
-+                        result[writePos++] = (byte)(value & 0xFF);
++                        result[writePos++] = (byte)(value >> 16);
++                        result[writePos++] = (byte)(value >> 8);
++                        result[writePos++] = (byte)value;
 +                        count = 0;
 +                        value = 0;
                      }
                  }
--
++            }
+ 
 -                if (count == 1)
 -                {
 -                    throw new FormatException("The final Ascii85 block must contain more than one character.");
 -                }
 -                else if (count > 1)
--                {
++            if (count == 1)
++            {
++                throw new FormatException("The final Ascii85 block must contain more than one character.");
++            }
++            else if (count > 1)
++            {
++                for (int padding = count; padding < 5; padding++)
+                 {
 -                    // decode any remaining characters
 -                    for (int padding = count; padding < 5; padding++)
--                    {
++                    try
+                     {
 -                        try
 -                        {
 -                            checked { value += 84 * s_powersOf85[padding]; }
@@ -169,68 +200,59 @@ index ec93c87..2a9839d 100644
 -                        {
 -                            throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
 -                        }
--                    }
--                    DecodeValue(stream, value, 5 - count);
--                }
--
--                return stream.ToArray();
-             }
-+
-+            if (count == 1)
-+            {
-+                throw new FormatException("The final Ascii85 block must contain more than one character.");
-+            }
-+            else if (count > 1)
-+            {
-+                for (int padding = count; padding < 5; padding++)
-+                {
-+                    try
-+                    {
-+                        checked { value += 84 * s_powersOf85[padding]; }
++                        value = checked(value + 84u * s_powersOf85[padding]);
 +                    }
 +                    catch (OverflowException ex)
 +                    {
 +                        throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
-+                    }
-+                }
-+                int bytesToWrite = count - 1;
-+                if (bytesToWrite >= 1) result[writePos++] = (byte)(value >> 24);
-+                if (bytesToWrite >= 2) result[writePos++] = (byte)((value >> 16) & 0xFF);
-+                if (bytesToWrite >= 3) result[writePos++] = (byte)((value >> 8) & 0xFF);
-+            }
+                     }
+-                    DecodeValue(stream, value, 5 - count);
+                 }
+-
+-                return stream.ToArray();
++                result[writePos++] = (byte)(value >> 24);
++                if (count > 2) result[writePos++] = (byte)(value >> 16);
++                if (count > 3) result[writePos++] = (byte)(value >> 8);
+             }
 +
 +            return result;
          }
  
 -        // Writes the Ascii85 characters for a 32-bit value to a StringBuilder.
 -        private static void EncodeValue(StringBuilder sb, uint value, int paddingBytes)
-+        // Optimum: inline encode directly into span, zero char[] allocations
-+        private static void EncodeValueInline(Span<char> chars, ref int pos, uint value, int paddingBytes)
++        // Optimum: pre-calculate exact encoded string length
++        private static int GetEncodedLength(byte[] bytes)
          {
 -            char[] encoded = new char[5];
 -
-+            Span<char> encoded = stackalloc char[5];
-             for (int index = 4; index >= 0; index--)
+-            for (int index = 4; index >= 0; index--)
++            int length = 0;
++            int i = 0;
++            while (i <= bytes.Length - 4)
              {
-                 encoded[index] = (char)((value % 85) + c_firstCharacter);
-                 value /= 85;
+-                encoded[index] = (char)((value % 85) + c_firstCharacter);
+-                value /= 85;
++                if ((bytes[i] | bytes[i + 1] | bytes[i + 2] | bytes[i + 3]) == 0)
++                    length += 1;
++                else
++                    length += 5;
++                i += 4;
              }
  
 -            if (paddingBytes != 0)
 -                Array.Resize(ref encoded, 5 - paddingBytes);
 -
 -            sb.Append(encoded);
-+            int charsToWrite = 5 - paddingBytes;
-+            for (int i = 0; i < charsToWrite; i++)
-+            {
-+                chars[pos++] = encoded[i];
-+            }
++            int rem = bytes.Length - i;
++            if (rem > 0)
++                length += rem + 1;
++            return length;
          }
  
 -        // Writes the bytes of a 32-bit value to a stream.
 -        private static void DecodeValue(Stream stream, uint value, int paddingChars)
-+        // Optimum: pre-calculate exact encoded string length
-+        private static int GetEncodedLength(byte[] bytes)
++        // Optimum: pre-calculate exact decoded byte length and validate input
++        private static int GetDecodedLength(string encoded)
          {
 -            stream.WriteByte((byte)(value >> 24));
 -            if (paddingChars == 3)
@@ -242,35 +264,6 @@ index ec93c87..2a9839d 100644
 -            if (paddingChars == 1)
 -                return;
 -            stream.WriteByte((byte)(value & 0xFF));
-+            int fullGroups = bytes.Length / 4;
-+            int remainder = bytes.Length % 4;
-+
-+            // Count 'z' replacements for zero groups
-+            int zCount = 0;
-+            int normalGroups = 0;
-+            int count = 0;
-+            uint value = 0;
-+            for (int i = 0; i < bytes.Length; i++)
-+            {
-+                value |= ((uint)bytes[i]) << (24 - (count * 8));
-+                count++;
-+                if (count == 4)
-+                {
-+                    if (value == 0) zCount++;
-+                    else normalGroups++;
-+                    count = 0;
-+                    value = 0;
-+                }
-+            }
-+
-+            int length = zCount + normalGroups * 5;
-+            if (remainder > 0) length += remainder + 1;
-+            return length;
-+        }
-+
-+        // Optimum: pre-calculate exact decoded byte length
-+        private static int GetDecodedLength(string encoded)
-+        {
 +            int length = 0;
 +            int count = 0;
 +            for (int i = 0; i < encoded.Length; i++)
@@ -280,7 +273,7 @@ index ec93c87..2a9839d 100644
 +                {
 +                    length += 4;
 +                }
-+                else
++                else if (ch >= c_firstCharacter && ch <= c_lastCharacter)
 +                {
 +                    count++;
 +                    if (count == 5)
@@ -289,8 +282,15 @@ index ec93c87..2a9839d 100644
 +                        count = 0;
 +                    }
 +                }
++                else
++                {
++                    throw new FormatException($"Invalid character '{ch}' in Ascii85 block.");
++                }
 +            }
-+            if (count > 1) length += count - 1;
++            if (count == 1)
++                throw new FormatException("The final Ascii85 block must contain more than one character.");
++            if (count > 1)
++                length += count - 1;
 +            return length;
          }
  

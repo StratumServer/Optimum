@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+using Optimum.Patcher;
 using Xunit;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Util;
@@ -101,7 +104,7 @@ public class StratumPortTests
 
     #region Ascii85 Tests
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_EmptyArray()
     {
         byte[] input = Array.Empty<byte>();
@@ -110,7 +113,7 @@ public class StratumPortTests
         Assert.Equal(input, decoded);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_SingleByte()
     {
         byte[] input = new byte[] { 0x42 };
@@ -119,7 +122,7 @@ public class StratumPortTests
         Assert.Equal(input, decoded);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_FourBytes()
     {
         byte[] input = new byte[] { 0x01, 0x02, 0x03, 0x04 };
@@ -128,7 +131,7 @@ public class StratumPortTests
         Assert.Equal(input, decoded);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_ZeroBlock()
     {
         byte[] input = new byte[] { 0, 0, 0, 0 };
@@ -138,7 +141,7 @@ public class StratumPortTests
         Assert.Equal(input, decoded);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_LargeData()
     {
         byte[] input = new byte[1024];
@@ -149,13 +152,143 @@ public class StratumPortTests
         Assert.Equal(input, decoded);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void Ascii85_EncodeDecodeRoundtrip_MixedZeroAndNonZero()
     {
         byte[] input = new byte[] { 0, 0, 0, 0, 1, 2, 3, 4, 0, 0, 0, 0, 5, 6, 7 };
         string encoded = Ascii85.Encode(input);
         byte[] decoded = Ascii85.Decode(encoded);
         Assert.Equal(input, decoded);
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0xFF })]
+    [InlineData(new byte[] { 0xFF, 0x80 })]
+    [InlineData(new byte[] { 0xFF, 0x80, 0x01 })]
+    [InlineData(new byte[] { 0x80, 0x00, 0x00, 0x01, 0xFE, 0xDC })]
+    public void Ascii85_EncodeDecodeRoundtrip_TailLengthsAndHighBitBytes(byte[] input)
+    {
+        string encoded = Ascii85.Encode(input);
+        byte[] decoded = Ascii85.Decode(encoded);
+        Assert.Equal(input, decoded);
+    }
+
+    [Theory]
+    [InlineData("abc~e")]
+    [InlineData("abzde")]
+    [InlineData("a")]
+    [InlineData("z!")]
+    [InlineData("uuuuu")]
+    [InlineData("uuuu")]
+    public void Ascii85_Decode_InvalidOrOverflowInput_ThrowsFormatException(string invalidEncoded)
+    {
+        Assert.Throws<FormatException>(() => Ascii85.Decode(invalidEncoded));
+    }
+
+    [Fact]
+    public void Ascii85_Decode_MaxUInt32Group_ReturnsFour0xFFBytes()
+    {
+        byte[] expected = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF };
+        string encoded = Ascii85.Encode(expected);
+        Assert.Equal("s8W-!", encoded);
+        Assert.Equal(expected, Ascii85.Decode(encoded));
+    }
+
+    [Fact]
+    public void Ascii85_GetDecodedLength_ValidatesFormatAndEncodeValueInlineIsRemoved()
+    {
+        System.Reflection.MethodInfo? encodeValueInline = typeof(Ascii85).GetMethod(
+            "EncodeValueInline",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.Null(encodeValueInline);
+
+        System.Reflection.MethodInfo? getDecodedLength = typeof(Ascii85).GetMethod(
+            "GetDecodedLength",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(getDecodedLength);
+
+        var invalidCharEx = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => getDecodedLength!.Invoke(null, new object[] { "abzde" }));
+        Assert.IsType<FormatException>(invalidCharEx.InnerException);
+
+        var trailingSingleEx = Assert.Throws<System.Reflection.TargetInvocationException>(
+            () => getDecodedLength!.Invoke(null, new object[] { "z!" }));
+        Assert.IsType<FormatException>(trailingSingleEx.InnerException);
+    }
+
+    [Fact]
+    public void OptimumApiBridge_Ascii85EncodeAndDecode_MatchAscii85()
+    {
+        byte[] payload = new byte[] { 0, 0, 0, 0, 0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03 };
+        string encoded = OptimumApiBridge.Ascii85Encode(payload);
+        Assert.Equal(Ascii85.Encode(payload), encoded);
+        Assert.Equal(payload, OptimumApiBridge.Ascii85Decode(encoded));
+    }
+
+    [Fact]
+    public void ApiPatcher_PatchAscii85_RewritesEncodeAndDecodeToCallBridge()
+    {
+        using ModuleDefinition module = ModuleDefinition.CreateModule("VintagestoryAPI", ModuleKind.Dll);
+        var ascii85 = new TypeDefinition(
+            "Vintagestory.API.MathTools",
+            "Ascii85",
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed,
+            module.TypeSystem.Object);
+        module.Types.Add(ascii85);
+
+        var byteArrayType = new ArrayType(module.TypeSystem.Byte);
+        var encode = new MethodDefinition(
+            "Encode",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            module.TypeSystem.String);
+        encode.Parameters.Add(new ParameterDefinition("bytes", ParameterAttributes.None, byteArrayType));
+        encode.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        encode.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        encode.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        ascii85.Methods.Add(encode);
+
+        var decode = new MethodDefinition(
+            "Decode",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            byteArrayType);
+        decode.Parameters.Add(new ParameterDefinition("encoded", ParameterAttributes.None, module.TypeSystem.String));
+        decode.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        decode.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        decode.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        ascii85.Methods.Add(decode);
+
+        var encodeBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.Ascii85Encode), new[] { typeof(byte[]) })!);
+        var decodeBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.Ascii85Decode), new[] { typeof(string) })!);
+
+        int patched = ApiPatcher.PatchAscii85(module, encodeBridge, decodeBridge);
+
+        Assert.Equal(2, patched);
+        Assert.Empty(encode.Body.Variables);
+        Assert.Collection(
+            encode.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(encodeBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        Assert.Empty(decode.Body.Variables);
+        Assert.Collection(
+            decode.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(decodeBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        Assert.Empty(IlStackVerifier.VerifyModule(module));
+        Assert.Empty(SelfConsistencyVerifier.VerifySelfReferences(module));
     }
 
     #endregion
