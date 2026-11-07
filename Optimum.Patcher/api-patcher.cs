@@ -87,6 +87,10 @@ public static class ApiPatcher
             method.Name == "Ascii85Encode" && method.Parameters.Count == 1);
         var ascii85Decode = bridge.Methods.Single(method =>
             method.Name == "Ascii85Decode" && method.Parameters.Count == 1);
+        var registryObjectFirstCodePart = bridge.Methods.Single(method =>
+            method.Name == "RegistryObjectFirstCodePart" && method.Parameters.Count == 2);
+        var registryObjectLastCodePart = bridge.Methods.Single(method =>
+            method.Name == "RegistryObjectLastCodePart" && method.Parameters.Count == 2);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -113,6 +117,10 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(ascii85Encode),
             vanilla.MainModule.ImportReference(ascii85Decode));
+        int registryObjectMethods = PatchRegistryObjectCodeParts(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(registryObjectFirstCodePart),
+            vanilla.MainModule.ImportReference(registryObjectLastCodePart));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -227,7 +235,7 @@ public static class ApiPatcher
                 $"{headControllerFallback} head controller pose fallback, " +
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
-                $"{ascii85Methods} Ascii85 methods, " +
+                $"{ascii85Methods} Ascii85 methods, {registryObjectMethods} RegistryObject code part methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
@@ -277,6 +285,58 @@ public static class ApiPatcher
         };
         var processor = body.GetILProcessor();
         processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
+    }
+
+    internal static int PatchRegistryObjectCodeParts(
+        ModuleDefinition module,
+        MethodReference firstCodePartBridge,
+        MethodReference lastCodePartBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.RegistryObject";
+        var registryObject = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var firstCodePart = registryObject.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "FirstCodePart" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+            method.ReturnType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{typeName}.FirstCodePart(int) is missing from the vanilla API.");
+
+        var lastCodePart = registryObject.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "LastCodePart" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+            method.ReturnType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{typeName}.LastCodePart(int) is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(firstCodePart, firstCodePartBridge);
+        RewriteTwoArgForwarder(lastCodePart, lastCodePartBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName}.FirstCodePart(int) + LastCodePart(int) -> OptimumApiBridge");
+        return 2;
+    }
+
+    private static void RewriteTwoArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
         processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
         processor.Append(Instruction.Create(OpCodes.Ret));
         target.Body = body;
