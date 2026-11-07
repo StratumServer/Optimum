@@ -57,4 +57,54 @@ public static class SymlinkComponentCheck
     }
 
     public static bool IsClean(ISystemProbe probe, string path) => FirstSymlinkComponent(probe, path) is null;
+
+    /// <summary>
+    /// Returns the first path component within <paramref name="rootDir"/> (walking upwards from
+    /// <paramref name="path"/> up to <paramref name="rootDir"/>) that is a symbolic link.
+    /// Ancestor directories above <paramref name="rootDir"/> are not flagged.
+    /// </summary>
+    public static string? FirstSymlinkUnderRoot(ISystemProbe probe, string path, string rootDir)
+    {
+        string canonicalRoot = InstallPathGuard.Canonical(probe, rootDir);
+        string? current = InstallPathGuard.Canonical(probe, path);
+
+        while (!string.IsNullOrEmpty(current) && !InstallPathGuard.PathEquals(probe, current, canonicalRoot))
+        {
+            if (probe.PathExists(current) && probe.IsSymbolicLink(current))
+                return current;
+
+            string? parent = ParentOf(current);
+            if (parent is null || parent == current)
+                break;
+            current = parent;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Verifies whether writing to <paramref name="destinationPath"/> remains strictly contained
+    /// within <paramref name="gameRootDir"/> without following escaping symbolic links.
+    /// </summary>
+    public static bool IsContainedWithinRoot(ISystemProbe probe, string destinationPath, string gameRootDir, out string? escapingComponent)
+    {
+        escapingComponent = null;
+        string canonicalRoot = InstallPathGuard.Canonical(probe, gameRootDir);
+        string canonicalDest = InstallPathGuard.Canonical(probe, destinationPath);
+
+        if (!InstallPathGuard.IsWithinOrEqual(probe, canonicalDest, canonicalRoot))
+        {
+            escapingComponent = destinationPath;
+            return false;
+        }
+
+        string? symlink = FirstSymlinkUnderRoot(probe, destinationPath, gameRootDir);
+        if (symlink is not null)
+        {
+            escapingComponent = symlink;
+            return false;
+        }
+
+        return true;
+    }
 }

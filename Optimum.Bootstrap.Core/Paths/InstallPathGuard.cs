@@ -163,8 +163,11 @@ public static partial class InstallPathGuard
         return hasGame && !hasOptimum;
     }
 
-    private static string Canonical(ISystemProbe probe, string path)
+    internal static string Canonical(ISystemProbe probe, string path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+            return string.Empty;
+
         string trimmed = path.Trim();
 
         if (ProbeMatchesHost(probe))
@@ -173,9 +176,11 @@ public static partial class InstallPathGuard
             catch (ArgumentException) { /* fall through to string normalization */ }
         }
 
+        char sep = probe.Os == OsKind.Windows ? '\\' : '/';
+        trimmed = CollapseRelativeSegments(trimmed, sep);
+
         if (probe.Os == OsKind.Windows)
         {
-            trimmed = trimmed.Replace('/', '\\');
             if (WindowsDriveRoot().IsMatch(trimmed))
                 return trimmed.Length == 2 ? trimmed + "\\" : trimmed;
             return trimmed.TrimEnd('\\');
@@ -183,6 +188,49 @@ public static partial class InstallPathGuard
 
         trimmed = trimmed.Replace('\\', '/').TrimEnd('/');
         return trimmed.Length == 0 ? "/" : trimmed;
+    }
+
+    internal static string CollapseRelativeSegments(string path, char sep)
+    {
+        bool isAbsolute = path.StartsWith('/') || path.StartsWith('\\');
+        bool hasWindowsDrive = path.Length >= 2 && char.IsLetter(path[0]) && path[1] == ':';
+        string prefix = string.Empty;
+
+        if (hasWindowsDrive)
+        {
+            prefix = path[..2];
+            path = path[2..];
+            if (path.StartsWith('/') || path.StartsWith('\\'))
+            {
+                prefix += sep;
+                path = path.TrimStart('/', '\\');
+            }
+        }
+        else if (isAbsolute)
+        {
+            prefix = sep.ToString();
+        }
+
+        string[] parts = path.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries);
+        var stack = new List<string>(parts.Length);
+
+        foreach (string part in parts)
+        {
+            if (part == ".")
+                continue;
+            if (part == "..")
+            {
+                if (stack.Count > 0)
+                    stack.RemoveAt(stack.Count - 1);
+            }
+            else
+            {
+                stack.Add(part);
+            }
+        }
+
+        string joined = string.Join(sep, stack);
+        return prefix + joined;
     }
 
     private static bool ProbeMatchesHost(ISystemProbe probe) => probe.Os switch
@@ -195,10 +243,10 @@ public static partial class InstallPathGuard
     private static StringComparison Comparison(ISystemProbe probe) =>
         probe.Os == OsKind.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    private static bool PathEquals(ISystemProbe probe, string a, string b) =>
+    internal static bool PathEquals(ISystemProbe probe, string a, string b) =>
         string.Equals(a, b, Comparison(probe));
 
-    private static bool IsWithinOrEqual(ISystemProbe probe, string child, string parent)
+    internal static bool IsWithinOrEqual(ISystemProbe probe, string child, string parent)
     {
         if (PathEquals(probe, child, parent))
             return true;

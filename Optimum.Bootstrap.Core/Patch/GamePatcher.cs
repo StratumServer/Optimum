@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
+using Optimum.Bootstrap.Core.Paths;
 using Optimum.Bootstrap.Core.Platform;
 
 namespace Optimum.Bootstrap.Core.Patch;
@@ -401,13 +402,26 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         return PatchResult.Success(gameDir, restored);
     }
 
+    private bool CopySafeFile(string source, string destination, string gameDir, IBuildObserver? observer = null)
+    {
+        if (!SymlinkComponentCheck.IsContainedWithinRoot(probe, destination, gameDir, out string? escaping))
+        {
+            observer?.Log(LogLevel.Warn,
+                $"Refusing to write to {destination}: destination path escapes game root {gameDir} via symbolic link at {escaping}");
+            return false;
+        }
+
+        CopyFile(source, destination);
+        return true;
+    }
+
     private void DeployOverlayAssets(string? overlayDir, string gameDir, IBuildObserver? observer)
     {
         // 1. Copy Optimum.Api.Contracts.dll to gameDir
         string? contractsSrc = ResolveDonor(overlayDir, gameDir, "Optimum.Api.Contracts.dll", "VintagestoryAPI.Contracts.dll");
         if (contractsSrc is not null && probe.FileExists(contractsSrc))
         {
-            CopyFile(contractsSrc, Path.Combine(gameDir, "Optimum.Api.Contracts.dll"));
+            CopySafeFile(contractsSrc, Path.Combine(gameDir, "Optimum.Api.Contracts.dll"), gameDir, observer);
         }
 
         // 1b. The patched API calls Skia helpers in the candidate Cairo wrapper.
@@ -418,7 +432,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         {
             string cairoDst = Path.Combine(gameDir, "Lib", "cairo-sharp.dll");
             BackupCairoWrapperAsset(gameDir, cairoDst);
-            CopyFile(cairoSrc, cairoDst);
+            CopySafeFile(cairoSrc, cairoDst, gameDir, observer);
         }
 
         // 2. Copy the assembly referenced by the patched VSEssentials.dll.
@@ -427,7 +441,7 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         {
             string gameContentDst = Path.Combine(gameDir, "Optimum.GameContent.dll");
             BackupGameContentAsset(gameDir, gameContentDst);
-            CopyFile(gameContentSrc, gameContentDst);
+            CopySafeFile(gameContentSrc, gameContentDst, gameDir, observer);
         }
 
         // 3. Overlay shaders
@@ -435,10 +449,18 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (shadersSrc is not null && probe.DirectoryExists(shadersSrc))
         {
             string shadersDst = Path.Combine(gameDir, "assets", "game", "shaders");
-            EnsureDirectory(shadersDst);
-            foreach (string file in probe.EnumerateFiles(shadersSrc, "*"))
+            if (!SymlinkComponentCheck.IsContainedWithinRoot(probe, shadersDst, gameDir, out string? escaping))
             {
-                CopyFile(file, Path.Combine(shadersDst, Path.GetFileName(file)));
+                observer?.Log(LogLevel.Warn,
+                    $"Refusing to deploy shaders to {shadersDst}: destination path escapes game root {gameDir} via symbolic link at {escaping}");
+            }
+            else
+            {
+                EnsureDirectory(shadersDst);
+                foreach (string file in probe.EnumerateFiles(shadersSrc, "*"))
+                {
+                    CopySafeFile(file, Path.Combine(shadersDst, Path.GetFileName(file)), gameDir, observer);
+                }
             }
         }
 
@@ -447,11 +469,22 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (langSrc is not null && probe.DirectoryExists(langSrc))
         {
             string langDst = Path.Combine(gameDir, "assets", "game", "lang");
-            EnsureDirectory(langDst);
-            foreach (string file in probe.EnumerateFiles(langSrc, "*.json"))
+            if (!SymlinkComponentCheck.IsContainedWithinRoot(probe, langDst, gameDir, out string? escaping))
             {
-                string dstFile = Path.Combine(langDst, Path.GetFileName(file));
-                MergeJsonFile(file, dstFile);
+                observer?.Log(LogLevel.Warn,
+                    $"Refusing to deploy language files to {langDst}: destination path escapes game root {gameDir} via symbolic link at {escaping}");
+            }
+            else
+            {
+                EnsureDirectory(langDst);
+                foreach (string file in probe.EnumerateFiles(langSrc, "*.json"))
+                {
+                    string dstFile = Path.Combine(langDst, Path.GetFileName(file));
+                    if (SymlinkComponentCheck.IsContainedWithinRoot(probe, dstFile, gameDir, out _))
+                    {
+                        MergeJsonFile(file, dstFile);
+                    }
+                }
             }
         }
 
@@ -460,10 +493,18 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (darkVisionPatchesSrc is not null && probe.DirectoryExists(darkVisionPatchesSrc))
         {
             string darkVisionPatchesDst = Path.Combine(gameDir, "assets", "darkvision", "config", "shaderpatches");
-            EnsureDirectory(darkVisionPatchesDst);
-            foreach (string file in probe.EnumerateFiles(darkVisionPatchesSrc, "*.txt"))
+            if (!SymlinkComponentCheck.IsContainedWithinRoot(probe, darkVisionPatchesDst, gameDir, out string? escaping))
             {
-                CopyFile(file, Path.Combine(darkVisionPatchesDst, Path.GetFileName(file)));
+                observer?.Log(LogLevel.Warn,
+                    $"Refusing to deploy darkvision patches to {darkVisionPatchesDst}: destination path escapes game root {gameDir} via symbolic link at {escaping}");
+            }
+            else
+            {
+                EnsureDirectory(darkVisionPatchesDst);
+                foreach (string file in probe.EnumerateFiles(darkVisionPatchesSrc, "*.txt"))
+                {
+                    CopySafeFile(file, Path.Combine(darkVisionPatchesDst, Path.GetFileName(file)), gameDir, observer);
+                }
             }
         }
 
@@ -473,8 +514,10 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         if (launcherSrc is not null && probe.FileExists(launcherSrc))
         {
             string launcherDst = Path.Combine(gameDir, launcherName);
-            CopyFile(launcherSrc, launcherDst);
-            MakeExecutable(launcherDst);
+            if (CopySafeFile(launcherSrc, launcherDst, gameDir, observer))
+            {
+                MakeExecutable(launcherDst);
+            }
         }
 
         // If run.sh exists, ensure executable
