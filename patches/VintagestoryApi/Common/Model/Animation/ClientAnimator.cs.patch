@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
-index 9636237..6cda901 100644
+index 9636237e..f85ba174 100644
 --- a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
 +++ b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
 @@ -1,7 +1,8 @@
@@ -11,7 +11,23 @@ index 9636237..6cda901 100644
  using Vintagestory.API.Client;
  using Vintagestory.API.Common.Entities;
  using Vintagestory.API.Config;
-@@ -321,11 +322,19 @@ namespace Vintagestory.API.Common
+@@ -162,13 +163,13 @@ namespace Vintagestory.API.Common
+         protected virtual void initMatrices(int maxJointId)
+         {
+             // Matrices are only required on client side; and from 1.20.5 limited to the MaxJointId (x16) in length to avoid wasting RAM
+             var identMat = ClientAnimator.identMat;
+             var defaultPoseMatrices = new float[16 * maxJointId];
+-            for (int i = 0; i < defaultPoseMatrices.Length; i++)
++            for (int i = 0; i < defaultPoseMatrices.Length; i += 16)
+             {
+-                defaultPoseMatrices[i] = identMat[i % 16];
++                Buffer.BlockCopy(identMat, 0, defaultPoseMatrices, i * sizeof(float), 16 * sizeof(float));
+             }
+             TransformationMatricesDefaultPose = defaultPoseMatrices;
+             TransformationMatrices = new float[defaultPoseMatrices.Length];
+         }
+ 
+@@ -321,17 +322,27 @@ namespace Vintagestory.API.Common
              base.OnFrame(activeAnimationsByAnimCode, dt);
          }
  
@@ -32,19 +48,103 @@ index 9636237..6cda901 100644
  
              int animVersion = 0;
  
-@@ -385,10 +394,15 @@ namespace Vintagestory.API.Common
-                 for (int i = 0; i < 16; i++)
+-            for (int j = 0; j < activeAnimCount; j++)
++            int safeAnimCount = Math.Min(activeAnimCount, MaxConcurrentAnimations);
++
++            for (int j = 0; j < safeAnimCount; j++)
+             {
+                 RunningAnimation anim = CurAnims[j];
+ 
+                 weightsByAnimationAndElement[0][j] = anim.ElementWeights;
+ 
+@@ -369,25 +380,24 @@ namespace Vintagestory.API.Common
+             {
+                 for (int jointidMul16 = 0; jointidMul16 < TransformationMatrices.Length; jointidMul16 += 16)    // radfast 20.2.25:  jointIdMul16 is (jointId * 16); I think this is the highest performance way to loop through this, taking account of the many array bounds checks
                  {
-                     animMatrix[i] = cachedMatrix[i];
+                     if (jointsById.ContainsKey(jointidMul16 / 16)) continue;
+ 
+-                for (int j = 0; j < 16; j++)
+-                {
+-                        TransformationMatrices[jointidMul16 + j] = identMat[j];
+-                    }
++                    Buffer.BlockCopy(identMat, 0, TransformationMatrices, jointidMul16 * sizeof(float), 16 * sizeof(float));
                  }
              }
+ 
+             foreach (var val in AttachmentPointByCode)
+             {
+                 var cachedMatrix = val.Value.CachedPose.AnimModelMatrix;
+                 var animMatrix = val.Value.AnimModelMatrix;
+-                for (int i = 0; i < 16; i++)
+-                {
+-                    animMatrix[i] = cachedMatrix[i];
+-                }
++                Buffer.BlockCopy(cachedMatrix, 0, animMatrix, 0, 16 * sizeof(float));
++            }
 +
 +            if (measureAnimation)
 +            {
 +                OptimumDiagnostics.RecordEntityAnimationMatrixTicks(Stopwatch.GetTimestamp() - startedAt);
-+            }
+             }
          }
  
  
  
-         // Careful when changing around stuff in here, this is a recursively called method
+@@ -422,12 +432,17 @@ namespace Vintagestory.API.Common
+                 float weightSum = 0f;
+ #if DEBUG
+                 StringBuilder sb = null;
+                 if (EleWeightDebug) sb = new StringBuilder();
+ #endif
+-                for (int animIndex = 0; animIndex < activeAnimCount; animIndex++)
++                int safeAnimCount = Math.Min(activeAnimCount, MaxConcurrentAnimations);
++
++                for (int animIndex = 0; animIndex < safeAnimCount; animIndex++)
+                 {
++                    if (childPoseIndex >= weightsByAnimationAndElement[animIndex].Length)
++                        continue;
++
+                     RunningAnimation anim = CurAnims[animIndex];
+ 
+                     ShapeElementWeights sew = weightsByAnimationAndElement[animIndex][childPoseIndex];
+ 
+                     if (sew.BlendMode != EnumAnimationBlendMode.Add)
+@@ -445,12 +460,15 @@ namespace Vintagestory.API.Common
+                     if (eleWeights.ContainsKey(elem.Name)) eleWeights[elem.Name] += sb.ToString();
+                     else eleWeights[elem.Name] = sb.ToString();
+                 }
+ #endif
+ 
+-                for (int animIndex = 0; animIndex < activeAnimCount; animIndex++)
++                for (int animIndex = 0; animIndex < safeAnimCount; animIndex++)
+                 {
++                    if (childPoseIndex >= weightsByAnimationAndElement[animIndex].Length)
++                        continue;
++
+                     RunningAnimation anim = CurAnims[animIndex];
+                     ShapeElementWeights sew = weightsByAnimationAndElement[animIndex][childPoseIndex];
+                     anim.CalcBlendedWeight(weightSum / sew.Weight, sew.BlendMode);
+ 
+                     ElementPose nowFramePose = nowKeyFrameByAnimation[animIndex][childPoseIndex];
+@@ -487,18 +505,15 @@ namespace Vintagestory.API.Common
+                         var transformationMatrices = TransformationMatrices;
+                         if (index + 16 > transformationMatrices.Length)     // Check we have space for this joint: we normally should, if MaxJointId was correct, but a mod could have modified the shape or something
+                         {
+                             var transformationMatricesDefault = this.TransformationMatricesDefaultPose;
+                             initMatrices(elem.JointId + 1);    // This replaces the matrices in both fields, but our local references are still the old populated matrices
+-                            Array.Copy(transformationMatrices, this.TransformationMatrices, transformationMatrices.Length);
+-                            Array.Copy(transformationMatricesDefault, this.TransformationMatricesDefaultPose, transformationMatricesDefault.Length);
++                            Buffer.BlockCopy(transformationMatrices, 0, this.TransformationMatrices, 0, transformationMatrices.Length * sizeof(float));
++                            Buffer.BlockCopy(transformationMatricesDefault, 0, this.TransformationMatricesDefaultPose, 0, transformationMatricesDefault.Length * sizeof(float));
+                             transformationMatrices = this.TransformationMatrices;
+                         }
+-                        for (int i = 0; i < 16; i++)
+-                        {
+-                            transformationMatrices[index + i] = tmpMatrixLocal[i];
+-                        }
++                        Buffer.BlockCopy(tmpMatrixLocal, 0, transformationMatrices, index * sizeof(float), 16 * sizeof(float));
+ 
+                         jointsDone.Add(elem.JointId);
+                     }
+                 }
+ 

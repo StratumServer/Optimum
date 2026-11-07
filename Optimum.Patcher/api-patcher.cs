@@ -97,6 +97,8 @@ public static class ApiPatcher
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 3);
         var evolvingNatFloatEquals = bridge.Methods.Single(method =>
             method.Name == "EvolvingNatFloatEquals" && method.Parameters.Count == 2);
+        var clientAnimatorInitMatrices = bridge.Methods.Single(method =>
+            method.Name == "ClientAnimatorInitMatrices" && method.Parameters.Count == 2);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -134,6 +136,9 @@ public static class ApiPatcher
         int evolvingNatFloatOperators = PatchEvolvingNatFloat(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(evolvingNatFloatEquals));
+        int clientAnimatorPatched = PatchClientAnimator(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(clientAnimatorInitMatrices));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -208,6 +213,11 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 2 EvolvingNatFloat equality operators patched, applied {evolvingNatFloatOperators}.");
+        }
+        if (clientAnimatorPatched != 4)
+        {
+            throw new InvalidOperationException(
+                $"Expected 4 ClientAnimator patches (1 initMatrices + 3 clamps), applied {clientAnimatorPatched}.");
         }
         if (guiCompositionMetrics != 1)
         {
@@ -472,6 +482,57 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.op_Equality + op_Inequality + Equals(EvolvingNatFloat) -> OptimumApiBridge");
         return 2;
+    }
+
+    internal static int PatchClientAnimator(ModuleDefinition module, MethodReference initMatricesBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.ClientAnimator";
+        var clientAnimator = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var initMatrices = clientAnimator.Methods.SingleOrDefault(m =>
+            m.Name == "initMatrices" &&
+            m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{typeName}.initMatrices(int) is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(initMatrices, initMatricesBridge);
+
+        var maxConcurrentAnimationsField = clientAnimator.Fields.SingleOrDefault(f =>
+            f.Name == "MaxConcurrentAnimations" && f.IsStatic)
+            ?? throw new InvalidOperationException($"{typeName}.MaxConcurrentAnimations is missing from the vanilla API.");
+
+        var mathMinMethod = module.ImportReference(
+            typeof(Math).GetMethod(nameof(Math.Min), new[] { typeof(int), typeof(int) })!)
+            ?? throw new InvalidOperationException("System.Math.Min(int, int) is missing.");
+
+        int clampedSites = 0;
+        foreach (var method in clientAnimator.Methods.Where(m => m.Name == "calculateMatrices"))
+        {
+            if (!method.HasBody) continue;
+            var instructions = method.Body.Instructions;
+            var processor = method.Body.GetILProcessor();
+
+            for (int i = 0; i < instructions.Count; i++)
+            {
+                var ins = instructions[i];
+                if (ins.OpCode == OpCodes.Ldfld &&
+                    ins.Operand is FieldReference fr &&
+                    fr.Name == "activeAnimCount")
+                {
+                    var ldMax = Instruction.Create(OpCodes.Ldsfld, maxConcurrentAnimationsField);
+                    var callMin = Instruction.Create(OpCodes.Call, mathMinMethod);
+
+                    processor.InsertAfter(ins, ldMax);
+                    processor.InsertAfter(ldMax, callMin);
+                    i += 2;
+                    clampedSites++;
+                }
+            }
+        }
+
+        Console.WriteLine($"  API PATCHED: {typeName}.initMatrices -> OptimumApiBridge + {clampedSites} activeAnimCount clamps");
+        return 1 + clampedSites;
     }
 
     private static void RewriteTwoArgNegatedForwarder(MethodDefinition target, MethodReference bridgeMethod)
