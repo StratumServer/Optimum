@@ -1,0 +1,56 @@
+diff --git a/VSSurvivalMod/Systems/WorldGen/Standard/ChunkGen/6.GenStructures/Story/GenStoryStructures.cs b/VSSurvivalMod/Systems/WorldGen/Standard/ChunkGen/6.GenStructures/Story/GenStoryStructures.cs
+--- a/VSSurvivalMod/Systems/WorldGen/Standard/ChunkGen/6.GenStructures/Story/GenStoryStructures.cs
++++ b/VSSurvivalMod/Systems/WorldGen/Standard/ChunkGen/6.GenStructures/Story/GenStoryStructures.cs
+@@ -376,10 +376,26 @@ namespace Vintagestory.GameContent
+ 
+                 struc.MaxSpawnDistX = (int)(struc.MaxSpawnDistX * distScale);
+                 struc.MaxSpawnDistZ = (int)(struc.MaxSpawnDistZ * distScale);
+             }
+ 
++            int maxUsableHeight = api.World.BlockAccessor.MapSizeY - 2;
++            var validStructures = new List<WorldGenStoryStructure>();
++            foreach (var struc in scfg.Structures)
++            {
++                if (struc.schematicData != null && struc.schematicData.SizeY > maxUsableHeight)
++                {
++                    api.Logger.Warning($"Story structure {struc.Code} height ({struc.schematicData.SizeY}) exceeds usable world height ({maxUsableHeight}). It will not be generated.");
++                    continue;
++                }
++                validStructures.Add(struc);
++            }
++            if (validStructures.Count != scfg.Structures.Length)
++            {
++                scfg.Structures = validStructures.ToArray();
++            }
++
+             DetermineStoryStructures();
+             // reset strucRand after DetermineStoryStructures was run
+             strucRand.SetWorldSeed(api.WorldManager.Seed + 1095);
+         }
+ 
+@@ -743,10 +759,25 @@ namespace Vintagestory.GameContent
+                     StoryStructureInstancesDirty = true;
+ 
+                     startPos.Y = strucloc.Y1;
+                 }
+ 
++                int maxY = api.World.BlockAccessor.MapSizeY;
++                if (strucloc.Y1 < 1)
++                {
++                    strucloc.Y1 = 1;
++                    strucloc.Y2 = strucloc.Y1 + structure.schematicData.SizeY;
++                    StoryStructureInstancesDirty = true;
++                }
++                if (strucloc.Y2 > maxY - 1)
++                {
++                    strucloc.Y2 = maxY - 1;
++                    strucloc.Y1 = Math.Max(1, strucloc.Y2 - structure.schematicData.SizeY);
++                    StoryStructureInstancesDirty = true;
++                }
++                startPos.Y = strucloc.Y1;
++
+                 Block rockBlock = null;
+                 if (structure.resolvedRockTypeRemaps != null)
+                 {
+                     if (string.IsNullOrEmpty(strucInst.RockBlockCode))
+                     {

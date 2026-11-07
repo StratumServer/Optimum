@@ -257,6 +257,8 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.GearRenderer", "updateSuperMechState", 2),
                 new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateCustomFloatBuffer", 0),
                 new("Vintagestory.GameContent.BEBehaviorMicroblockSnowCover", "buildSnowCuboids", 1),
+                new("Vintagestory.GameContent.GenStoryStructures", "InitWorldGen", 0),
+                new("Vintagestory.GameContent.GenStoryStructures", "OnChunkColumnGen", 1),
             ]);
     }
 
