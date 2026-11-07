@@ -1,0 +1,113 @@
+diff --git a/VintagestoryApi/Math/Noise/NewNormalizedSimplexFractalNoise.cs b/VintagestoryApi/Math/Noise/NewNormalizedSimplexFractalNoise.cs
+--- a/VintagestoryApi/Math/Noise/NewNormalizedSimplexFractalNoise.cs
++++ b/VintagestoryApi/Math/Noise/NewNormalizedSimplexFractalNoise.cs
+@@ -126,13 +126,21 @@ namespace Vintagestory.API.MathTools
+ 
+         public struct ColumnNoise
+         {
+-            OctaveEntry[] orderedOctaveEntries;
+-            PastEvaluation[] pastEvaluations;
++            [ThreadStatic] private static OctaveEntry[] threadOctaves;
++            [ThreadStatic] private static PastEvaluation[] threadPastEvals;
++            [ThreadStatic] private static double[] threadMaxValues;
++            [ThreadStatic] private static int[] threadOrder;
++
++            private OctaveEntry[] orderedOctaveEntries;
++            private PastEvaluation[] pastEvaluations;
++            private int nUsedOctaves;
+ 
+             public double UncurvedBound { get; private set; }
+             public double BoundMin { get; private set; }
+             public double BoundMax { get; private set; }
+ 
++            public int UsedOctaves => nUsedOctaves;
++
+             struct OctaveEntry
+             {
+                 public long Seed;
+@@ -147,9 +155,20 @@ namespace Vintagestory.API.MathTools
+             public ColumnNoise(NewNormalizedSimplexFractalNoise terrainNoise, double relativeYFrequency, double[] amplitudes, double[] thresholds, double noiseX, double noiseZ)
+             {
+                 int nAvailableOctaves = terrainNoise.frequencies.Length;
+-                int nUsedOctaves = 0;
+-                double[] maxValues = new double[nAvailableOctaves];
+-                int[] order = new int[nAvailableOctaves];
++
++                if (threadOctaves == null || threadOctaves.Length < nAvailableOctaves)
++                {
++                    int newSize = Math.Max(48, nAvailableOctaves);
++                    threadOctaves = new OctaveEntry[newSize];
++                    threadPastEvals = new PastEvaluation[newSize];
++                    threadMaxValues = new double[newSize];
++                    threadOrder = new int[newSize];
++                }
++
++                double[] maxValues = threadMaxValues;
++                int[] order = threadOrder;
++
++                int nUsedOctavesLocal = 0;
+                 double bound = 0;
+                 for (int i = nAvailableOctaves - 1; i >= 0; i--)
+                 {
+@@ -161,8 +180,8 @@ namespace Vintagestory.API.MathTools
+                     if (maxValues[i] == 0) continue;
+ 
+                     // Descending order: Biggest octaves first, so we can rule out layers sooner.
+-                    order[nUsedOctaves] = i;
+-                    for (int j = nUsedOctaves - 1; j >= 0; j--)
++                    order[nUsedOctavesLocal] = i;
++                    for (int j = nUsedOctavesLocal - 1; j >= 0; j--)
+                     {
+                         if (maxValues[order[j + 1]] > maxValues[order[j]])
+                         {
+@@ -171,17 +190,18 @@ namespace Vintagestory.API.MathTools
+                             order[j + 1] = temp;
+                         }
+                     }
+-                    nUsedOctaves++;
++                    nUsedOctavesLocal++;
+                 }
+                 this.UncurvedBound = bound;
+                 this.BoundMin = NoiseValueCurve(-bound);
+                 this.BoundMax = NoiseValueCurve(bound);
++                this.nUsedOctaves = nUsedOctavesLocal;
++
++                this.orderedOctaveEntries = threadOctaves;
++                this.pastEvaluations = threadPastEvals;
+ 
+-                // Fill out noise generators in order
+-                this.orderedOctaveEntries = new OctaveEntry[nUsedOctaves];
+-                this.pastEvaluations = new PastEvaluation[nUsedOctaves];
+                 double uncertaintySum = 0;
+-                for (int j = nUsedOctaves - 1; j >= 0; j--)
++                for (int j = nUsedOctavesLocal - 1; j >= 0; j--)
+                 {
+                     int i = order[j];
+                     uncertaintySum += maxValues[i];
+@@ -212,7 +232,7 @@ namespace Vintagestory.API.MathTools
+                 const double maxYSlope = NewSimplexNoiseLayer.MaxYSlope_ImprovedXZ;
+                 double valueTempMin = inverseCurvedThresholder;
+                 double valueTempMax = inverseCurvedThresholder;
+-                for (int j = 0; j < orderedOctaveEntries.Length; j++)
++                for (int j = 0; j < nUsedOctaves; j++)
+                 {
+                     // Exit if we couldn't possibly trigger an early return within this loop.
+                     if (!(valueTempMax <= 0) && !(valueTempMin >= 0)) break;
+@@ -230,7 +250,7 @@ namespace Vintagestory.API.MathTools
+                     valueTempMax += ApplyThresholding(Math.Min( 1, pastEvaluations[j].Value + deltaY * maxYSlope) * octaveEntry.Amplitude, octaveEntry.Threshold, octaveEntry.SmoothingFactor);
+                 }
+ 
+-                for (int j = 0; j < orderedOctaveEntries.Length; j++)
++                for (int j = 0; j < nUsedOctaves; j++)
+                 {
+                     ref readonly OctaveEntry octaveEntry = ref orderedOctaveEntries[j];
+ 
+@@ -252,7 +272,7 @@ namespace Vintagestory.API.MathTools
+             public double Noise(double y)
+             {
+                 double value = 0.0;
+-                for (int j = 0; j < orderedOctaveEntries.Length; j++)
++                for (int j = 0; j < nUsedOctaves; j++)
+                 {
+                     ref readonly OctaveEntry octaveEntry = ref orderedOctaveEntries[j];
+ 
