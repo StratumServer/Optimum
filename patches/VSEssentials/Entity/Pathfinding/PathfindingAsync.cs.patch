@@ -1,18 +1,42 @@
 diff --git a/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs b/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
+index 48a886b..5b43a4a 100644
 --- a/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
 +++ b/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
-@@ -59,8 +59,9 @@
+@@ -52,18 +52,27 @@ namespace Vintagestory.Essentials
+             // This is called immediately prior to ticking entities on the main server thread
+             // So normally all-but-one of the queued pathfinding tasks should be complete before the entities are next ticked
+             // (there may be one task still in progress in the off-thread processor)
+ 
+             int initialCount = PathfinderTasks.Count;
+-            if (initialCount > 1)   // If it's only one, leave it for the off-thread to do later - seems sometimes there is one slow one (150ms) left, no idea why, maybe lock contention?
++            if (initialCount > 5)   // Only assist when background thread is falling behind
+             {
                  api.World.FrameProfiler.Enter("ai-pathfinding-overflow " + initialCount);
-                 int maxCount = 1000;
+-                int maxCount = 1000;
++                int maxCount = 2;
                  PathfinderTask task;
 -                while ((task = Next()) != null && maxCount-- > 0)
 +                while (maxCount > 0 && (task = Next()) != null)
                  {
+-                    task.waypoints = astar_mainthread.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance);
 +                    maxCount--;
-                     task.waypoints = astar_mainthread.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance);
++                    try
++                    {
++                        task.waypoints = astar_mainthread.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance, task.CreatureType);
++                    }
++                    catch (Exception e)
++                    {
++                        task.waypoints = null;
++                        api.World.Logger.Error("Exception thrown during main thread pathfinding. Will ignore. Exception: {0}", e.ToString());
++                    }
                      task.Finished = true;
                      if (isShuttingDown) break;
-@@ -83,8 +84,9 @@
+                     if (api.World.FrameProfiler.Enabled) api.World.FrameProfiler.Mark("path d:" + task.searchDepth + " r:" + (task.waypoints == null ? "fail" : task.waypoints.Count.ToString()) + " s:" + task.startBlockPos + " e:" + task.targetBlockPos + " w:" + task.collisionBox.Width);
+                 }
+                 api.World.FrameProfiler.Leave();
+@@ -81,12 +90,13 @@ namespace Vintagestory.Essentials
+         /// </summary>
+         /// <param name="astar"></param>
          public void ProcessQueue(AStar astar, int maxCount)
          {
              PathfinderTask task;
@@ -23,3 +47,5 @@ diff --git a/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs b/VSEssentials/
                  try
                  {
                      task.waypoints = astar.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance, task.CreatureType);
+                 } catch (Exception e)
+                 {

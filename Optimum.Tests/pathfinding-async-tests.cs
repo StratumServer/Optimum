@@ -42,5 +42,11 @@ public sealed class PathfindingAsyncTests
         string patchedContent = PatchReader.ReadPatchedContent(patchPath);
         Assert.Contains("while (maxCount > 0 && (task = Next()) != null)", patchedContent);
         Assert.DoesNotContain("while ((task = Next()) != null && maxCount-- > 0)", patchedContent);
+
+        // Verify main thread throttling and creature type correctness
+        Assert.Contains("if (initialCount > 5)", patchedContent);
+        Assert.Contains("int maxCount = 2;", patchedContent);
+        Assert.Contains("task.waypoints = astar_mainthread.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance, task.CreatureType);", patchedContent);
+        Assert.Contains("Exception thrown during main thread pathfinding", patchedContent);
     }
 }
