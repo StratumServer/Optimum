@@ -1,10 +1,8 @@
 diff --git a/VSEssentials/Systems/EntityPartitioning.cs b/VSEssentials/Systems/EntityPartitioning.cs
-index a0aa3b8..9eb2035 100644
+index a0aa3b8..64cb0c6 100644
 --- a/VSEssentials/Systems/EntityPartitioning.cs
 +++ b/VSEssentials/Systems/EntityPartitioning.cs
-@@ -21,10 +21,28 @@ namespace Vintagestory.GameContent
-         public EntityPartitionChunk()
-         {
+@@ -23,6 +23,24 @@ namespace Vintagestory.GameContent
              Entities = new List<Entity>[EntityPartitioning.partitionsLength * EntityPartitioning.partitionsLength];
          }
  
@@ -29,11 +27,7 @@ index a0aa3b8..9eb2035 100644
          public List<Entity> Add(Entity e, int gridIndex)
          {
              List<Entity> list = e.IsCreature ?
-                 FetchOrCreateList(ref Entities[gridIndex]) :
-                 FetchOrCreateList(ref (InanimateEntities ??= new List<Entity>[EntityPartitioning.partitionsLength * EntityPartitioning.partitionsLength])[gridIndex]);
-@@ -70,10 +88,12 @@ namespace Vintagestory.GameContent
-         /// <summary>
-         /// The key is the chunkIndex3d (including dimension Y value) so that different dimensions are partitioned into separate EntityPartitionChunk
+@@ -72,6 +90,8 @@ namespace Vintagestory.GameContent
          /// </summary>
          public Dictionary<long, EntityPartitionChunk> Partitions = new Dictionary<long, EntityPartitionChunk>();
  
@@ -42,11 +36,7 @@ index a0aa3b8..9eb2035 100644
          const int chunkSize = GlobalConstants.ChunkSize;
  
  
-         /// <summary>
-         /// Updated every frame. The largest hitbox length of all loaded entities.
-@@ -132,10 +152,18 @@ namespace Vintagestory.GameContent
-             long chunkMapSizeX = api.World.BlockAccessor.MapSizeX / chunkSize;
-             long chunkMapSizeZ = api.World.BlockAccessor.MapSizeZ / chunkSize;
+@@ -134,6 +154,14 @@ namespace Vintagestory.GameContent
              double largestTouchDistance = 0;
  
              var Partitions = this.Partitions;
@@ -61,11 +51,7 @@ index a0aa3b8..9eb2035 100644
              Partitions.Clear();
  
              foreach (var entity in entities)
-             {
-                 if (entity.IsCreature)
-@@ -150,27 +178,55 @@ namespace Vintagestory.GameContent
-                 int gridIndex = (z / gridSizeInBlocks) % partitionsLength * partitionsLength + (x / gridSizeInBlocks) % partitionsLength;
-                 if (gridIndex < 0) continue;    // entities could be outside the map edge
+@@ -152,23 +180,51 @@ namespace Vintagestory.GameContent
  
                  long nowInChunkIndex3d = MapUtil.Index3dL(x / chunkSize, (int)pos.InternalY / chunkSize, z / chunkSize, chunkMapSizeX, chunkMapSizeZ);
  
@@ -123,5 +109,118 @@ index a0aa3b8..9eb2035 100644
          }
  
          private void OnSwitchedGameMode(IServerPlayer player)
+@@ -187,11 +243,7 @@ namespace Vintagestory.GameContent
+         /// </summary>
+         public Entity GetNearestInteractableEntity(Vec3d position, double radius, ActionConsumable<Entity> matches = null)
          {
-             RePartitionPlayer(player.Entity);
+-            if (matches == null)
+-            {
+-                return GetNearestEntity(position, radius, (e) => e.IsInteractable, EnumEntitySearchType.Creatures);
+-            }
+-            return GetNearestEntity(position, radius, (e) => matches(e) && e.IsInteractable, EnumEntitySearchType.Creatures);
++            return FindNearestEntityInternal(position, radius, matches, true, EnumEntitySearchType.Creatures);
+         }
+ 
+         /// <summary>
+@@ -199,40 +251,76 @@ namespace Vintagestory.GameContent
+         /// </summary>
+         public Entity GetNearestEntity(Vec3d position, double radius, ActionConsumable<Entity> matches, EnumEntitySearchType searchType)
+         {
+-            Entity nearestEntity = null;
++            return FindNearestEntityInternal(position, radius, matches, false, searchType);
++        }
++
++        private Entity FindNearestEntityInternal(Vec3d position, double radius, ActionConsumable<Entity> matches, bool requireInteractable, EnumEntitySearchType searchType)
++        {
++            var blockAccessor = api.World.BlockAccessor;
++            long chunkMapSizeX = blockAccessor.MapSizeX / chunkSize;
++            long chunkMapSizeZ = blockAccessor.MapSizeZ / chunkSize;
++
++            int gridXMax = blockAccessor.MapSizeX / gridSizeInBlocks - 1;
++            int cyTop = blockAccessor.MapSizeY / chunkSize - 1;
++            int gridZMax = blockAccessor.MapSizeZ / gridSizeInBlocks - 1;
++
++            double centerPosX = position.X;
++            double centerPosY = position.Y;
++            double centerPosZ = position.Z;
++
++            int mingx = (int)GameMath.Clamp((centerPosX - radius) / gridSizeInBlocks, 0, gridXMax);
++            int maxgx = (int)GameMath.Clamp((centerPosX + radius) / gridSizeInBlocks, 0, gridXMax);
++
++            int mincy = (int)GameMath.Clamp((centerPosY - radius) / chunkSize, 0, cyTop);
++            int maxcy = (int)GameMath.Clamp((centerPosY + radius) / chunkSize, 0, cyTop);
++
++            int mingz = (int)GameMath.Clamp((centerPosZ - radius) / gridSizeInBlocks, 0, gridZMax);
++            int maxgz = (int)GameMath.Clamp((centerPosZ + radius) / gridSizeInBlocks, 0, gridZMax);
++
+             double radiusSq = radius * radius;
+             double nearestDistanceSq = radiusSq;
++            Entity nearestEntity = null;
+ 
+-            if (api is ICoreClientAPI)
++            var Partitions = this.Partitions;
++            EntityPartitionChunk partitionChunk = null;
++            long lastIndex3d = -1;
++            const int partitionsPerChunk = (chunkSize / gridSizeInBlocks);
++
++            for (int cy = mincy; cy <= maxcy; cy++)
+             {
+-                WalkEntities(position.X, position.Y, position.Z, radius, (e) =>
++                for (int gridZ = mingz; gridZ <= maxgz; gridZ++)
+                 {
+-                    if (matches(e))
++                    int cz = gridZ / partitionsPerChunk;
++                    int indexBase = (gridZ % partitionsLength) * partitionsLength;
++                    long index3d = MapUtil.Index3dL(0, cy, cz, chunkMapSizeX, chunkMapSizeZ);
++
++                    for (int gridX = mingx; gridX <= maxgx; gridX++)
+                     {
+-                        double distSq = e.Pos.SquareDistanceTo(position);
+-                        if (distSq < nearestDistanceSq)
++                        if (index3d + gridX / partitionsPerChunk != lastIndex3d)
+                         {
+-                            nearestDistanceSq = distSq;
+-                            nearestEntity = e;
++                            lastIndex3d = index3d + gridX / partitionsPerChunk;
++                            Partitions.TryGetValue(lastIndex3d, out partitionChunk);
++                        }
++                        if (partitionChunk == null) continue;
++
++                        List<Entity> entities = searchType == EnumEntitySearchType.Creatures ? partitionChunk.Entities[indexBase + gridX % partitionsLength] : partitionChunk.InanimateEntities?[indexBase + gridX % partitionsLength];
++                        if (entities == null) continue;
++
++                        int count = entities.Count;
++                        for (int i = 0; i < count; i++)
++                        {
++                            Entity entity = entities[i];
++                            if (requireInteractable && !entity.IsInteractable) continue;
++
++                            double distSq = entity.Pos.SquareDistanceTo(position);
++                            if (distSq < nearestDistanceSq && (matches == null || matches(entity)))
++                            {
++                                nearestDistanceSq = distSq;
++                                nearestEntity = entity;
++                            }
+                         }
+                     }
+-
+-                    return true;
+-                }, null, searchType);
+-            } else
+-            {
+-                WalkEntities(position.X, position.Y, position.Z, radius, (e) =>
+-                {
+-                    double distSq = e.Pos.SquareDistanceTo(position);
+-
+-                    if (distSq < nearestDistanceSq && matches(e))
+-                    {
+-                        nearestDistanceSq = distSq;
+-                        nearestEntity = e;
+-                    }
+-
+-                    return true;
+-                }, null, searchType);
++                }
+             }
+ 
+             return nearestEntity;
