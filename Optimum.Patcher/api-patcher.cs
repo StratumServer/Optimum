@@ -91,6 +91,10 @@ public static class ApiPatcher
             method.Name == "RegistryObjectFirstCodePart" && method.Parameters.Count == 2);
         var registryObjectLastCodePart = bridge.Methods.Single(method =>
             method.Name == "RegistryObjectLastCodePart" && method.Parameters.Count == 2);
+        var wildcardUtilMatchTwoArg = bridge.Methods.Single(method =>
+            method.Name == "WildcardUtilMatch" && method.Parameters.Count == 2);
+        var wildcardUtilMatchThreeArg = bridge.Methods.Single(method =>
+            method.Name == "WildcardUtilMatch" && method.Parameters.Count == 3);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -121,6 +125,10 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(registryObjectFirstCodePart),
             vanilla.MainModule.ImportReference(registryObjectLastCodePart));
+        int wildcardUtilMethods = PatchWildcardUtil(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(wildcardUtilMatchTwoArg),
+            vanilla.MainModule.ImportReference(wildcardUtilMatchThreeArg));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -181,6 +189,16 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 Ascii85 methods patched, applied {ascii85Methods}.");
         }
+        if (registryObjectMethods != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 RegistryObject methods patched, applied {registryObjectMethods}.");
+        }
+        if (wildcardUtilMethods != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 WildcardUtil methods patched, applied {wildcardUtilMethods}.");
+        }
         if (guiCompositionMetrics != 1)
         {
             throw new InvalidOperationException(
@@ -236,6 +254,7 @@ public static class ApiPatcher
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
                 $"{ascii85Methods} Ascii85 methods, {registryObjectMethods} RegistryObject code part methods, " +
+                $"{wildcardUtilMethods} WildcardUtil methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
@@ -337,6 +356,62 @@ public static class ApiPatcher
         var processor = body.GetILProcessor();
         processor.Append(Instruction.Create(OpCodes.Ldarg_0));
         processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
+    }
+
+    internal static int PatchWildcardUtil(
+        ModuleDefinition module,
+        MethodReference matchTwoArgBridge,
+        MethodReference matchThreeArgBridge)
+    {
+        const string typeName = "Vintagestory.API.Util.WildcardUtil";
+        var wildcardUtil = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var matchTwoArg = wildcardUtil.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "Match" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+            method.Parameters[1].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+            method.ReturnType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException($"{typeName}.Match(AssetLocation, AssetLocation) is missing from the vanilla API.");
+
+        var matchThreeArg = wildcardUtil.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "Match" &&
+            method.Parameters.Count == 3 &&
+            method.Parameters[0].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+            method.Parameters[1].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+            method.Parameters[2].ParameterType is ArrayType { ElementType.MetadataType: MetadataType.String } &&
+            method.ReturnType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException($"{typeName}.Match(AssetLocation, AssetLocation, string[]) is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(matchTwoArg, matchTwoArgBridge);
+        RewriteThreeArgForwarder(matchThreeArg, matchThreeArgBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName}.Match(AssetLocation, AssetLocation) + Match(..., string[]) -> OptimumApiBridge");
+        return 2;
+    }
+
+    private static void RewriteThreeArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_2));
         processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
         processor.Append(Instruction.Create(OpCodes.Ret));
         target.Body = body;
