@@ -71,5 +71,15 @@ public class SymlinkComponentCheckTests
         string path = "/home/tester/vintagestory/assets/../../etc/passwd";
         Assert.False(SymlinkComponentCheck.IsContainedWithinRoot(probe, path, root, out string? escaping));
         Assert.NotNull(escaping);
+
+        // Also verify on macOS probe
+        var macProbe = new FakeSystemProbe { Os = Optimum.Bootstrap.Core.Platform.OsKind.MacOs };
+        macProbe.AddDirectory("/Users/tester/vintagestory");
+        Assert.False(SymlinkComponentCheck.IsContainedWithinRoot(macProbe, "/Users/tester/vintagestory/assets/../../etc/passwd", "/Users/tester/vintagestory", out _));
+
+        // And Windows probe
+        var winProbe = new FakeSystemProbe { Os = Optimum.Bootstrap.Core.Platform.OsKind.Windows };
+        winProbe.AddDirectory(@"C:\Games\vintagestory");
+        Assert.False(SymlinkComponentCheck.IsContainedWithinRoot(winProbe, @"C:\Games\vintagestory\assets\..\..\Windows\System32", @"C:\Games\vintagestory", out _));
     }
 }
