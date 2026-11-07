@@ -1,0 +1,25 @@
+diff --git a/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs b/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
+--- a/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
++++ b/VSEssentials/Entity/Pathfinding/PathfindingAsync.cs
+@@ -59,8 +59,9 @@
+                 api.World.FrameProfiler.Enter("ai-pathfinding-overflow " + initialCount);
+                 int maxCount = 1000;
+                 PathfinderTask task;
+-                while ((task = Next()) != null && maxCount-- > 0)
++                while (maxCount > 0 && (task = Next()) != null)
+                 {
++                    maxCount--;
+                     task.waypoints = astar_mainthread.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance);
+                     task.Finished = true;
+                     if (isShuttingDown) break;
+@@ -83,8 +84,9 @@
+         public void ProcessQueue(AStar astar, int maxCount)
+         {
+             PathfinderTask task;
+-            while ((task = Next()) != null && maxCount-- > 0)
++            while (maxCount > 0 && (task = Next()) != null)
+             {
++                maxCount--;
+                 try
+                 {
+                     task.waypoints = astar.FindPathAsWaypoints(task.startBlockPos, task.targetBlockPos, task.modeMinFleeDistance, task.maxFallHeight, task.stepHeight, task.collisionBox, task.searchDepth, task.mhdistanceTolerance, task.CreatureType);
