@@ -33,4 +33,12 @@ public class ConsentNoticeTests
     {
         Assert.Equal("--acknowledge-decompile", ConsentNotice.AcknowledgeFlag);
     }
+
+    [Fact]
+    public void ParagraphsAndListItemsAreNotHardWrappedMidSentence()
+    {
+        Assert.Contains("endorsed by Anego Studios, the developers of Vintage Story.", ConsentNotice.Text);
+        Assert.Contains("from Anego's content server, or uses a copy you already have.", ConsentNotice.Text);
+        Assert.Contains("compiles a patched runtime here.", ConsentNotice.Text);
+    }
 }

@@ -82,10 +82,57 @@ public sealed partial class EulaViewModel : ViewModelBase
         Accepted = false;
     }
 
-    private static string PlainText(string markdown) => string.Join('\n',
-        markdown.Split('\n').Select(line =>
+    internal static string PlainText(string markdown)
+    {
+        string[] rawLines = markdown.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
+        var output = new List<string>(rawLines.Length);
+        bool previousWasHeading = false;
+
+        foreach (string rawLine in rawLines)
         {
-            string text = line.StartsWith('#') ? line.TrimStart('#', ' ') : line;
-            return text.Replace("`", string.Empty, StringComparison.Ordinal);
-        }));
+            string trimmed = rawLine.Trim();
+            if (trimmed.Length == 0)
+            {
+                output.Add(string.Empty);
+                previousWasHeading = false;
+                continue;
+            }
+
+            bool isHeading = trimmed.StartsWith('#');
+            string cleaned = (isHeading ? trimmed.TrimStart('#', ' ') : trimmed)
+                .Replace("`", string.Empty, StringComparison.Ordinal);
+
+            bool startsListItem = IsListItemStart(cleaned);
+            if (!isHeading && !startsListItem && !previousWasHeading && output.Count > 0 && output[^1].Length > 0)
+            {
+                output[^1] = output[^1] + " " + cleaned;
+            }
+            else
+            {
+                output.Add(cleaned);
+            }
+
+            previousWasHeading = isHeading;
+        }
+
+        return string.Join('\n', output);
+    }
+
+    private static bool IsListItemStart(string line)
+    {
+        if (line.StartsWith("- ", StringComparison.Ordinal) || line.StartsWith("* ", StringComparison.Ordinal))
+            return true;
+
+        int dot = line.IndexOf(". ", StringComparison.Ordinal);
+        if (dot <= 0)
+            return false;
+
+        for (int i = 0; i < dot; i++)
+        {
+            if (!char.IsAsciiDigit(line[i]))
+                return false;
+        }
+
+        return true;
+    }
 }
