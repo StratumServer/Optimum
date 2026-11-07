@@ -644,6 +644,9 @@ var targets = new List<MethodTarget>
     // funnel into this Main, so the arg injection lives here (lambda-free)
     new("Vintagestory.Client.ClientProgram", "Main", 1),
     new("Vintagestory.Client.ClientProgram", "Start", 2),
+    // Guard against re-entrant AssemblyResolve calls while AssemblyResolver..cctor
+    // initializes GamePaths and triggers the VintagestoryAPI module initializer.
+    new("Vintagestory.Common.AssemblyResolver", "AssemblyResolve", 2),
     // Mod-crash containment: a mod exception in GetHeldItemInfo during the
     // background search-cache build otherwise kills the client (SmithingPlus
     // shutdown race, unhandled on the TyronThreadPool thread).

@@ -41,6 +41,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
