@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..00ffe39 100644
+index 8014c9e..04803ad 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,40 +31,393 @@
+@@ -31,42 +31,452 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -21,6 +21,55 @@ index 8014c9e..00ffe39 100644
  	{
 +		readonly ManagedImageSurfaceStorage managedStorage;
 +		int storageReleased;
++		SKSurface directSurface;
++		bool directSkiaBacking;
++
++		public static Func<GRContext> ActiveGrContextProvider { get; set; }
++		public static bool DirectSkiaBackingEnabled { get; set; } = string.Equals (Environment.GetEnvironmentVariable ("OPTIMUM_GUI_DIRECT_SKIA"), "1", StringComparison.Ordinal);
++
++		public void EnableDirectSkiaBacking ()
++		{
++			directSkiaBacking = true;
++			EnsureDirectSurface ();
++		}
++
++		internal bool HasDirectBacking => directSurface != null || directSkiaBacking || DirectSkiaBackingEnabled;
++
++		internal SKSurface DirectSurface {
++			get {
++				EnsureDirectSurface ();
++				return directSurface;
++			}
++		}
++
++		internal SKCanvas DirectCanvas => DirectSurface?.Canvas;
++
++		internal void EnsureDirectSurface ()
++		{
++			if (directSurface != null) return;
++			if (managedStorage == null || Width <= 0 || Height <= 0) return;
++
++			GRContext grContext = ActiveGrContextProvider?.Invoke ();
++			if (grContext != null) {
++				var info = ManagedImageSurfaceStorage.SkiaInfo (Format, Width, Height);
++				directSurface = SKSurface.Create (grContext, false, info);
++			}
++
++			if (directSurface == null) {
++				var info = ManagedImageSurfaceStorage.SkiaInfo (Format, Width, Height);
++				directSurface = SKSurface.Create (info, managedStorage.InternalPixelPointer, ManagedPixelStride);
++			}
++		}
++
++		internal void FlushDirectSurface ()
++		{
++			if (directSurface == null) return;
++			directSurface.Canvas?.Flush ();
++			if (ActiveGrContextProvider != null && managedStorage != null && directSurface.Context != null) {
++				var info = ManagedImageSurfaceStorage.SkiaInfo (Format, Width, Height);
++				directSurface.ReadPixels (info, managedStorage.InternalPixelPointer, ManagedPixelStride, 0, 0);
++			}
++		}
 +
  		internal ImageSurface (IntPtr handle, bool owns) : base (handle, owns)
  		{
@@ -45,20 +94,24 @@ index 8014c9e..00ffe39 100644
 +		protected override void Dispose (bool disposing)
 +		{
 +			base.Dispose (disposing);
++			if (directSurface != null) {
++				directSurface.Dispose ();
++				directSurface = null;
++			}
 +			if (Interlocked.Exchange (ref storageReleased, 1) == 0) managedStorage?.ReleaseUnattachedPin ();
 +		}
 +
  		public ImageSurface (Format format, int width, int height)
 -			: base (NativeMethods.cairo_image_surface_create (format, width, height), true)
 +			: this (LoadSurface (format, width, height))
-+		{
-+		}
-+
+ 		{
+ 		}
+ 
 +		ImageSurface (Format format, int width, int height, bool managedOnly)
 +			: this (managedOnly
 +				? ManagedImageSurfaceStorage.CreateManaged (format, width, height)
 +				: ManagedImageSurfaceStorage.Create (format, width, height), managedOnly)
- 		{
++		{
 +			if (managedOnly) BeginRecording ();
 +		}
 +
@@ -103,7 +156,11 @@ index 8014c9e..00ffe39 100644
 +            if (shared) NativeMethods.cairo_surface_reference (result);
 +            return result;
 +        }
-+		internal byte[] CopyExposedPixels () => managedStorage?.CopyExposedPixels ();
++		internal byte[] CopyExposedPixels ()
++		{
++			if (directSurface != null) FlushDirectSurface ();
++			return managedStorage?.CopyExposedPixels ();
++		}
 +
 +		internal bool TryWriteToPngManaged (string filename)
 +		{
@@ -235,8 +292,8 @@ index 8014c9e..00ffe39 100644
 +			if (!TryRenderManagedSnapshotInPlace (snapshot)) ReplaceManagedPixels (RenderManagedSnapshot (snapshot));
 +			MarkManagedPixelsForSnapshots ();
 +			CheckpointRecordedCommandsForPixelAccess ();
- 		}
- 
++		}
++
          public ImageSurface (byte[] data, Format format, int width, int height, int stride)
 -			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
 +			: this (LoadArray (data, format, width, height, stride))
@@ -246,9 +303,9 @@ index 8014c9e..00ffe39 100644
  		public ImageSurface (IntPtr data, Format format, int width, int height, int stride)
 -			: base (NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride), true)
 +			: this (LoadPointer (data, format, width, height, stride))
- 		{
- 		}
- 
++		{
++		}
++
 +		static ImageSurfaceLoadResult LoadPointer (IntPtr data, Format format, int width, int height, int stride)
 +		{
 +			if (Surface.ManagedApiMode) {
@@ -266,18 +323,18 @@ index 8014c9e..00ffe39 100644
 +		}
 +
 +		static IntPtr CreateNativeDataSurface (IntPtr data, Format format, int width, int height, int stride)
-+		{
+ 		{
 +			if (!CairoNativeGuard.NativeAllowed)
 +				throw new NotSupportedException ("An unmanaged IntPtr image buffer requires the explicit libcairo compatibility backend.");
 +			return NativeMethods.cairo_image_surface_create_for_data (data, format, width, height, stride);
-+		}
-+
+ 		}
+ 
  		public ImageSurface (string filename)
 -			: base (NativeMethods.cairo_image_surface_create_from_png (filename), true)
 +			: this (LoadPng (filename))
-+		{
-+		}
-+
+ 		{
+ 		}
+ 
 +		ImageSurface (ImageSurfaceLoadResult load)
 +			: base (load.ManagedOnly ? IntPtr.Zero : load.Handle, true, load.RecordingCandidate || load.ManagedOnly, load.ManagedOnly, load.Status)
 +		{
@@ -304,7 +361,7 @@ index 8014c9e..00ffe39 100644
 +		}
 +
 +		static Status ValidateDataSurface (Format format, int width, int height, int stride)
- 		{
++		{
 +			if ((int)format < 0 || (int)format > 7) return Status.InvalidFormat;
 +			if (!ManagedImageSurfaceStorage.CanRecordFormat (format))
 +				throw new NotSupportedException ("The managed image API supports only little-endian ARGB32, RGB24, A8, A1, RGB565, RGB30, RGB96F, and RGBA128F surfaces.");
@@ -396,12 +453,14 @@ index 8014c9e..00ffe39 100644
 +			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, Status status) : this (storage, status, true, true) { }
 +			internal ImageSurfaceLoadResult (ManagedImageSurfaceStorage storage, Status status, bool managedOnly, bool recordingCandidate) { Storage = storage; Handle = storage.Handle; Status = status; ManagedOnly = managedOnly; RecordingCandidate = managedOnly || recordingCandidate; }
 +			internal ImageSurfaceLoadResult (IntPtr handle, bool recordingCandidate = false, bool managedOnly = false) { Handle = handle; Status = Status.Success; RecordingCandidate = recordingCandidate; ManagedOnly = managedOnly; }
- 		}
- 
++		}
++
          public static Surface CreateForImage(byte[] data, Format format, int width, int height)
          {
              int stride = StrideForWidth(format, width);
-@@ -75,23 +428,36 @@ namespace Cairo {
+             return new ImageSurface(data, format, width, height, stride);
+         }
+@@ -75,23 +485,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -441,13 +500,14 @@ index 8014c9e..00ffe39 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +465,289 @@ namespace Cairo {
+@@ -99,24 +522,290 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {
  			get {
  				CheckDisposed ();
 -				return NativeMethods.cairo_image_surface_get_data (Handle);
++				if (directSurface != null) FlushDirectSurface ();
 +				if (IsManagedOnly && ManagedStatus != Status.Success) return IntPtr.Zero;
 +				if (IsManagedOnly && managedStorage != null)
 +				{
@@ -711,7 +771,7 @@ index 8014c9e..00ffe39 100644
 +			current = observed;
 +		}
 +		throw new ObjectDisposedException (nameof (ManagedImageSurfaceStorage));
- 	}
++	}
 +	internal void ReleaseUnattachedPin () { if (Interlocked.Decrement (ref references) == 0 && Handle == IntPtr.Zero) ReleasePixelPin (); }
 +
 +	void ReleasePixelPin ()
@@ -719,7 +779,7 @@ index 8014c9e..00ffe39 100644
 +		if (Interlocked.Exchange (ref released, 1) != 0) return;
 +		dataPointer = IntPtr.Zero;
 +		if (pixelPin.IsAllocated) pixelPin.Free ();
-+	}
+ 	}
 +
 +	static void ReleaseFromNative (IntPtr userData)
 +	{

@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..133bcd2 100644
+index 6f7730e..0542382 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,623 @@
+@@ -32,37 +32,644 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -100,6 +100,7 @@ index 6f7730e..133bcd2 100644
 +				}
 +				lock (recordingSync) {
 +					if (disposed) return SurfaceRecordingState.Disposed;
++					if (this is ImageSurface img && img.HasDirectBacking && img.DirectSurface != null) return SurfaceRecordingState.Recording;
 +					return recorder == null ? SurfaceRecordingState.Native : recorder.State;
 +				}
 +			}
@@ -141,6 +142,9 @@ index 6f7730e..133bcd2 100644
 +				    NativeMethods.cairo_surface_get_reference_count (handle) != 1)))
 +					throw new InvalidOperationException ("Surface is not eligible for geometry recording.");
 +				recordingOwnerThread = Thread.CurrentThread;
++				if (this is ImageSurface img && (img.HasDirectBacking || ImageSurface.DirectSkiaBackingEnabled)) {
++					img.EnsureDirectSurface ();
++				}
 +				recorder = new SurfaceRecorder (this);
 +				return recorder;
 +			}
@@ -520,6 +524,11 @@ index 6f7730e..133bcd2 100644
 +		internal bool TryDrawRecordedCommands (SKCanvas canvas)
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.TryDrawRecordedCommands (canvas);
++			if (this is ImageSurface img && img.HasDirectBacking && img.DirectSurface != null) {
++				img.FlushDirectSurface ();
++				canvas.DrawSurface (img.DirectSurface, (float)managedDeviceOffset.X, (float)managedDeviceOffset.Y);
++				return true;
++			}
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
 +				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
@@ -532,6 +541,11 @@ index 6f7730e..133bcd2 100644
 +		internal bool TryDrawRecordedCommands (SKSurface target)
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.TryDrawRecordedCommands (target);
++			if (this is ImageSurface img && img.HasDirectBacking && img.DirectSurface != null) {
++				img.FlushDirectSurface ();
++				target.Canvas.DrawSurface (img.DirectSurface, (float)managedDeviceOffset.X, (float)managedDeviceOffset.Y);
++				return true;
++			}
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
 +				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
@@ -544,6 +558,11 @@ index 6f7730e..133bcd2 100644
 +		internal bool TryDrawRecordedCommands (SKSurface target, RecordedGpuBlur blur)
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.TryDrawRecordedCommands (target, blur);
++			if (this is ImageSurface img && img.HasDirectBacking && img.DirectSurface != null) {
++				img.FlushDirectSurface ();
++				target.Canvas.DrawSurface (img.DirectSurface, (float)managedDeviceOffset.X, (float)managedDeviceOffset.Y);
++				return true;
++			}
 +			SurfaceRecorderSnapshot snapshot;
 +			lock (recordingSync) {
 +				if (recordingContext != null && !ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) return false;
@@ -556,6 +575,7 @@ index 6f7730e..133bcd2 100644
 +		internal bool CommitGpuRenderedCommands ()
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.CommitGpuRenderedCommands ();
++			if (this is ImageSurface img && img.HasDirectBacking) return true;
 +			lock (recordingSync) {
 +				if (recorder == null || !recorder.CommitGpuRender ()) return false;
 +				return true;
@@ -565,6 +585,7 @@ index 6f7730e..133bcd2 100644
 +		internal bool AbortGpuRender ()
 +		{
 +			if (aliasOwner != null && managedOnly) return aliasOwner.AbortGpuRender ();
++			if (this is ImageSurface img && img.HasDirectBacking) return true;
 +			lock (recordingSync) {
 +				return recorder != null && recorder.AbortGpuRender ();
 +			}
@@ -631,7 +652,7 @@ index 6f7730e..133bcd2 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +673,299 @@ namespace Cairo
+@@ -87,141 +694,299 @@ namespace Cairo
  		}
  
  
