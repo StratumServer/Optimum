@@ -1,0 +1,36 @@
+diff --git a/VSSurvivalMod/Systems/Barrel/BEBarrel.cs b/VSSurvivalMod/Systems/Barrel/BEBarrel.cs
+--- a/VSSurvivalMod/Systems/Barrel/BEBarrel.cs
++++ b/VSSurvivalMod/Systems/Barrel/BEBarrel.cs
+@@ -28,6 +28,7 @@
+ 
+         public BarrelRecipe CurrentRecipe;
+         public int CurrentOutSize;
++        protected bool recipeDirty = true;
+ 
+         protected static SoundAttributes barrelOpen = new(AssetLocation.Create("sounds/block/barrelopen"), true);
+         protected static SoundAttributes barrelClose = new(AssetLocation.Create("sounds/block/barrelclose"), true);
+@@ -124,6 +125,7 @@
+ 
+             if (slotId == 0 || slotId == 1)
+             {
++                recipeDirty = true;
+                 invDialog?.UpdateContents();
+                 if (Api?.Side == EnumAppSide.Client)
+                 {
+@@ -143,6 +145,7 @@
+ 
+         protected void FindMatchingRecipe(IPlayer byPlayer)
+         {
++            recipeDirty = false;
+             ItemSlot[] inputSlots = [inventory[0], inventory[1]];
+             CurrentRecipe = null;
+ 
+@@ -197,7 +200,7 @@
+ 
+         protected void OnEvery3Second(float dt)
+         {
+-            if (!inventory[0].Empty && CurrentRecipe == null)
++            if (recipeDirty && !inventory[0].Empty && CurrentRecipe == null)
+             {
+                 FindMatchingRecipe();
+             }
