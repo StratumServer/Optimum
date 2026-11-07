@@ -487,6 +487,8 @@ var targets = new List<MethodTarget>
             "Vintagestory.API.MathTools.BlockFilter",
             "Vintagestory.API.MathTools.EntityFilter",
         }),
+    // Issue #275: O(1) candidate deduplication in crafting recipe resolution
+    new("Vintagestory.Common.InventoryCraftingGrid", "FindMatchingRecipe", 0),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "UpdateFreeMouse", 0),
     // ClientSystemStartup: atlas pipeline per-stage timing instrumentation.
