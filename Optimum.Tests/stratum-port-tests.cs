@@ -995,4 +995,48 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region TreeGen Tests
+
+    [Fact]
+    public void TreeGen_PlaceBlockEtc_OrdersMossConditionsBeforeBlockLookup()
+    {
+        string essentialsDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSEssentials.dll");
+        if (!System.IO.File.Exists(essentialsDll))
+        {
+            essentialsDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSEssentials.dll");
+        }
+        Assert.True(System.IO.File.Exists(essentialsDll), $"VSEssentials.dll not found at {essentialsDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(essentialsDll).MainModule;
+        var treeGenType = module.GetType("Vintagestory.ServerMods.TreeGen");
+        Assert.NotNull(treeGenType);
+
+        var placeMethod = treeGenType.Methods.Single(m => m.Name == "PlaceBlockEtc" && m.Parameters.Count == 5);
+        Assert.NotNull(placeMethod);
+
+        var instructions = placeMethod.Body.Instructions;
+        int getBlockIdx = -1;
+        int mossGrowthChanceIdx = -1;
+
+        for (int i = 0; i < instructions.Count; i++)
+        {
+            var ins = instructions[i];
+            if (ins.Operand is MethodReference mr && mr.Name == "GetBlock" && getBlockIdx == -1)
+            {
+                getBlockIdx = i;
+            }
+            if (ins.Operand is FieldReference fr && fr.Name == "mossGrowthChance" && mossGrowthChanceIdx == -1)
+            {
+                mossGrowthChanceIdx = i;
+            }
+        }
+
+        Assert.True(mossGrowthChanceIdx >= 0, "mossGrowthChance field read not found in PlaceBlockEtc");
+        Assert.True(getBlockIdx >= 0, "GetBlock call not found in PlaceBlockEtc");
+        Assert.True(mossGrowthChanceIdx < getBlockIdx,
+            $"Expected mossGrowthChance check (idx {mossGrowthChanceIdx}) before GetBlock call (idx {getBlockIdx})");
+    }
+
+    #endregion
 }

@@ -1,0 +1,16 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGen.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGen.cs
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGen.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGen.cs
+@@ -235,11 +235,11 @@ namespace Vintagestory.ServerMods
+         /// </summary>
+         private void PlaceBlockEtc(int blockId, BlockPos currentPos, IRandom rand, float dx, float dz)
+         {
+             blockAccessor.SetBlock(blockId, currentPos);
+ 
+-            if (blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood && treeGenParams.mossGrowthChance > 0 && config.treeBlocks.mossDecorBlock != null)
++            if (treeGenParams.mossGrowthChance > 0 && config.treeBlocks.mossDecorBlock != null && blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood)
+             {
+                 var rnd = rand.NextDouble();
+                 int faceIndex = treeGenParams.hemisphere == EnumHemisphere.North ? 0 : 2; // Prefer north face on the northern hemisphere, and south otherwise (= the shady spot)
+                 for (int i = 2; i >= 0; i--)
+                 {

@@ -27,6 +27,15 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
  		while (curWidth > 0f && num6++ < 5000)
  		{
  			curWidth -= num;
+@@ -157,7 +167,7 @@ public class TreeGen : ITreeGenerator
+ 	private void PlaceBlockEtc(int blockId, BlockPos currentPos, IRandom rand, float dx, float dz)
+ 	{
+ 		blockAccessor.SetBlock(blockId, currentPos);
+-		if (blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood && treeGenParams.mossGrowthChance > 0f && config.treeBlocks.mossDecorBlock != null)
++		if (treeGenParams.mossGrowthChance > 0f && config.treeBlocks.mossDecorBlock != null && blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood)
+ 		{
+ 			double num = rand.NextDouble();
+ 			int num2 = ((treeGenParams.hemisphere != EnumHemisphere.North) ? 2 : 0);
 @@ -201,7 +211,10 @@ public class TreeGen : ITreeGenerator
  			return;
  		}
