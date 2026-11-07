@@ -1,0 +1,319 @@
+diff --git a/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs b/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
+index 80ab89e..dd88f61 100644
+--- a/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
++++ b/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
+@@ -1,4 +1,5 @@
+-﻿using System.Collections;
++using System;
++using System.Collections;
+ using System.Collections.Generic;
+ 
+ #nullable disable
+@@ -6,30 +7,99 @@ using System.Collections.Generic;
+ namespace Vintagestory.Essentials
+ {
+     /// <summary>
+-    /// A fast custom set of type PathNode, for use in the AStar algorithm
++    /// An indexed priority queue (min-heap) and coordinate lookup set of type PathNode, for use in the AStar algorithm.
++    /// Replaces O(N) linear bucket scans with O(1) coordinate lookups and O(log N) priority operations.
+     /// </summary>
+     public class PathNodeSet : IEnumerable<PathNode>
+     {
+-        int arraySize = 16;
+-        PathNode[][] buckets = new PathNode[4][];
+-        int[] bucketCount = new int[4];
+-        int size = 0;
++        private PathNode[] heap = new PathNode[64];
++        private long[] sequences = new long[64];
++        private readonly Dictionary<long, PathNode> nodeMap = new Dictionary<long, PathNode>(64);
++        private int size = 0;
++        private long sequenceCounter = 0;
+ 
+-        public int Count {
+-            get {
+-                return size;
+-            }
++        public int Count => size;
++
++        public PathNodeSet()
++        {
+         }
+ 
+         public void Clear()
+         {
+-            for (int i = 0; i < 4; i++) bucketCount[i] = 0;
++            Array.Clear(heap, 0, size);
++            nodeMap.Clear();
+             size = 0;
++            sequenceCounter = 0;
+         }
+ 
+-        public PathNodeSet()
++        private static long ToKey(int x, int y, int z)
+         {
+-            for (int i = 0; i < 4; i++) buckets[i] = new PathNode[arraySize];
++            return ((long)(x & 0xFFFFFF)) | (((long)(z & 0xFFFFFF)) << 24) | (((long)(y & 0xFFFF)) << 48);
++        }
++
++        private static bool HasHigherPriority(PathNode a, long seqA, PathNode b, long seqB)
++        {
++            if (a.fCost < b.fCost) return true;
++            if (a.fCost > b.fCost) return false;
++            if (a.hCost < b.hCost) return true;
++            if (a.hCost > b.hCost) return false;
++            return seqA > seqB; // Newer nodes break ties first, matching vanilla Add order
++        }
++
++        private void Swap(int i, int j)
++        {
++            PathNode tempNode = heap[i];
++            heap[i] = heap[j];
++            heap[j] = tempNode;
++            heap[i].HeapIndex = i;
++            heap[j].HeapIndex = j;
++
++            long tempSeq = sequences[i];
++            sequences[i] = sequences[j];
++            sequences[j] = tempSeq;
++        }
++
++        private void SiftUp(int i)
++        {
++            while (i > 0)
++            {
++                int parent = (i - 1) >> 1;
++                if (HasHigherPriority(heap[i], sequences[i], heap[parent], sequences[parent]))
++                {
++                    Swap(i, parent);
++                    i = parent;
++                }
++                else
++                {
++                    break;
++                }
++            }
++        }
++
++        private void SiftDown(int i)
++        {
++            while (true)
++            {
++                int left = (i << 1) + 1;
++                int right = left + 1;
++                int best = i;
++
++                if (left < size && HasHigherPriority(heap[left], sequences[left], heap[best], sequences[best]))
++                    best = left;
++
++                if (right < size && HasHigherPriority(heap[right], sequences[right], heap[best], sequences[best]))
++                    best = right;
++
++                if (best != i)
++                {
++                    Swap(i, best);
++                    i = best;
++                }
++                else
++                {
++                    break;
++                }
++            }
+         }
+ 
+         /// <summary>
+@@ -37,40 +107,24 @@ namespace Vintagestory.Essentials
+         /// </summary>
+         public bool Add(PathNode value)
+         {
+-            int bucket = (value.Z % 2) * 2 + (value.X % 2);
+-            bucket = (bucket + 4) % 4;    // we cannot assume X and Z are both positive, could be near map edge
+-            PathNode[] set = buckets[bucket];
++            long key = ToKey(value.X, value.Y, value.Z);
++            if (nodeMap.ContainsKey(key)) return false;
+ 
+-            // fast search, start from the most recently added
+-            int size = bucketCount[bucket];
+-            int i = size;
+-            while (--i >= 0)
++            if (size >= heap.Length)
+             {
+-                if (value.Equals(set[i])) return false;
++                int newCapacity = heap.Length * 2;
++                Array.Resize(ref heap, newCapacity);
++                Array.Resize(ref sequences, newCapacity);
+             }
+ 
+-            // now actually add the value
+-            if (size >= arraySize)
+-            {
+-                ExpandArrays();
+-                set = buckets[bucket];  // re-establish the set because buckets[bucket] will have been changed to a new object by ExpandArrays()
+-            }
+-            // find the set element i with the next higher cost...
+-            float fCost = value.fCost;
+-            for (i = size - 1; i >= 0; i--)
+-            {
+-                if (set[i].fCost < fCost) continue;
+-                if (set[i].fCost == fCost && set[i].hCost < value.hCost) continue;   // compare the h values as a tie-breaker; if still a tie, newest will be last
+-                break;
+-            }
+-            // ...and insert this value just afterwards so that lowest cost is always last in the set.
+-            i++;
+-            int j = size;
+-            while (j > i) set[j] = set[--j];
+-            set[i] = value;
+-            size++;
+-            bucketCount[bucket] = size;
+-            this.size++;
++            int i = size++;
++            long seq = ++sequenceCounter;
++            heap[i] = value;
++            sequences[i] = seq;
++            value.HeapIndex = i;
++
++            nodeMap[key] = value;
++            SiftUp(i);
+             return true;
+         }
+ 
+@@ -79,96 +133,70 @@ namespace Vintagestory.Essentials
+         /// </summary>
+         public PathNode RemoveNearest()
+         {
+-            if (this.size == 0) return null;
+-            PathNode nearestNode = null;
+-            int bucketToRemoveFrom = 0;
++            if (size == 0) return null;
+ 
+-            // The last PathNode in each bucket should always have the lowest fCost (this is achieved by the Add() method)
+-            // So we only have to compare (maximum) four values to find the PathNode with the absolute lowest fCost
+-            for (int bucket = 0; bucket < 4; bucket++)
++            PathNode nearest = heap[0];
++            nodeMap.Remove(ToKey(nearest.X, nearest.Y, nearest.Z));
++
++            size--;
++            if (size > 0)
+             {
+-                int endIndex = bucketCount[bucket] - 1;
+-                if (endIndex < 0) continue;
+-                PathNode node = buckets[bucket][endIndex];
+-
+-                if (nearestNode is null || node.fCost < nearestNode.fCost || (node.fCost == nearestNode.fCost && node.hCost < nearestNode.hCost))  // we have to do the null check this way around due to foibles of PathNode.Equals()
+-                {
+-                    nearestNode = node;
+-                    bucketToRemoveFrom = bucket;
+-                }
++                heap[0] = heap[size];
++                sequences[0] = sequences[size];
++                heap[0].HeapIndex = 0;
++                heap[size] = null;
++                SiftDown(0);
++            }
++            else
++            {
++                heap[0] = null;
+             }
+ 
+-            // now actually remove the value - easy because it is always the last one in its bucket
+-            --bucketCount[bucketToRemoveFrom];
+-            this.size--;
+-            return nearestNode;
++            return nearest;
+         }
+ 
+-
+         public void Remove(PathNode value)
+         {
+-            int bucket = (value.Z % 2) * 2 + (value.X % 2);
+-            bucket = (bucket + 4) % 4;    // we cannot assume X and Z are both positive, could be near map edge
+-            PathNode[] set = buckets[bucket];
++            long key = ToKey(value.X, value.Y, value.Z);
++            if (!nodeMap.TryGetValue(key, out PathNode existing)) return;
+ 
+-            // fast search, start from the most recently added
+-            int size = bucketCount[bucket];
+-            int i = size;
+-            while (--i >= 0)
++            nodeMap.Remove(key);
++            int index = existing.HeapIndex;
++            if (index < 0 || index >= size || heap[index] != existing)
+             {
+-                if (value.Equals(set[i]))
+-                {
+-                    // now actually remove the value
+-                    size = --bucketCount[bucket];
+-                    while (i < size) set[i] = set[++i];
+-                    this.size--;
++                index = Array.IndexOf(heap, existing, 0, size);
++                if (index < 0) return;
++            }
+ 
+-                    break;
+-                }
++            size--;
++            if (index == size)
++            {
++                heap[size] = null;
++            }
++            else
++            {
++                heap[index] = heap[size];
++                sequences[index] = sequences[size];
++                heap[index].HeapIndex = index;
++                heap[size] = null;
++                SiftDown(index);
++                SiftUp(index);
+             }
+         }
+ 
+         public PathNode TryFindValue(PathNode value)
+         {
+-            int bucket = (value.Z % 2) * 2 + (value.X % 2);
+-            bucket = (bucket + 4) % 4;    // we cannot assume X and Z are both positive, could be near map edge
+-            PathNode[] set = buckets[bucket];
+-
+-            // fast search, start from the most recently added
+-            int size = bucketCount[bucket];
+-            int i = size;
+-            while (--i >= 0)
+-            {
+-                if (value.Equals(set[i])) return set[i];
+-            }
+-
+-            return null;
++            long key = ToKey(value.X, value.Y, value.Z);
++            nodeMap.TryGetValue(key, out PathNode existing);
++            return existing;
+         }
+ 
+-
+-        /// <summary>
+-        /// Expand the array in all buckets - not much point in having buckets of different sizes, this class doesn't take a huge amount of memory anyhow
+-        /// </summary>
+-        private void ExpandArrays()
+-        {
+-            int newSize = arraySize * 3 / 2;
+-            for (int bucket = 0; bucket < 4; bucket++)
+-            {
+-                PathNode[] newArray = new PathNode[newSize];
+-                int size = bucketCount[bucket];
+-                PathNode[] set = buckets[bucket];
+-                for (int i = 0; i < size; i++) newArray[i] = set[i];
+-                buckets[bucket] = newArray;
+-            }
+-            arraySize = newSize;
+-        }
+-
+-
+         public IEnumerator<PathNode> GetEnumerator()
+         {
+-            for (int bucket = 0; bucket < 4; bucket++)
+-                for (int i = 0; i < bucketCount[bucket]; i++)
+-                    yield return buckets[bucket][i];
++            for (int i = 0; i < size; i++)
++            {
++                yield return heap[i];
++            }
+         }
+ 
+         IEnumerator IEnumerable.GetEnumerator()
