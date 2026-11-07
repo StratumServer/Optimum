@@ -31,6 +31,27 @@ public class EulaViewModelTests
         var vm = new EulaViewModel();
         Assert.Contains("decompil", vm.ConsentText, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("# Before", vm.ConsentText, StringComparison.Ordinal);
+        Assert.Contains("endorsed by Anego Studios, the developers of Vintage Story.", vm.ConsentText, StringComparison.Ordinal);
+        Assert.Contains("from Anego's content server, or uses a copy you already have.", vm.ConsentText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlainTextUnwrapsHardWrappedParagraphsAndListContinuations()
+    {
+        const string wrapped = """
+            # Heading
+
+            First line of a paragraph
+            that was hard-wrapped.
+
+            1. First list item that
+               wraps onto the next line.
+            2. Second list item.
+            """;
+
+        string plain = EulaViewModel.PlainText(wrapped);
+        Assert.Contains("First line of a paragraph that was hard-wrapped.", plain, StringComparison.Ordinal);
+        Assert.Contains("1. First list item that wraps onto the next line.\n2. Second list item.", plain, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -40,7 +40,7 @@
           <ScrollViewer x:Name="Scroller" ScrollChanged="OnScrollChanged"
                         HorizontalScrollBarVisibility="Disabled"
                         AutomationProperties.Name="Optimum build notice">
-            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" Margin="16,12" />
+            <TextBlock Text="{Binding ConsentText}" TextWrapping="Wrap" HorizontalAlignment="Stretch" Margin="16,12" />
           </ScrollViewer>
         </Border>
       </Grid>
