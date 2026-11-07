@@ -270,4 +270,40 @@ public sealed class ShortcutWriterTests : IDisposable
         Assert.Equal("preserve install", File.ReadAllText(Path.Combine(installDir, "payload.txt")));
         Assert.False(Directory.Exists(Path.Combine(installDir, "Contents")));
     }
+
+    [Fact]
+    public void StripQuarantine_InvokesXattrOnMacOs()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs };
+        probe.Commands["xattr|-dr com.apple.quarantine /path/to/app"] = new ProcessOutcome(true, 0, "", "");
+
+        ShortcutWriter.StripQuarantine(probe, "/path/to/app");
+
+        // On Linux probe, it should skip xattr
+        var linuxProbe = new FakeSystemProbe { Os = OsKind.Linux };
+        ShortcutWriter.StripQuarantine(linuxProbe, "/path/to/app");
+    }
+
+    [Fact]
+    public void ResolvesAlternativeMacOsIconNames()
+    {
+        string home = _home.Replace('\\', '/');
+        var probe = new FakeSystemProbe { Os = OsKind.MacOs, HomeDirectory = home };
+        string installDir = $"{home}/Applications/OptimumAlternative";
+        string launcher = $"{installDir}/optimum-launch.sh";
+        Directory.CreateDirectory(installDir);
+        File.WriteAllText(launcher, "#!/bin/sh\nexit 0\n");
+        File.WriteAllText($"{installDir}/optimum.icns", "alt-icon");
+
+        var writer = new ShortcutWriter(probe);
+        IReadOnlyList<string> created = writer.Create(
+            installDir, launcher, ShortcutKinds.Menu);
+
+        string menuApp = $"{home}/Applications/Optimum.app";
+        Assert.Equal([menuApp], created);
+        Assert.True(File.Exists($"{menuApp}/Contents/Resources/Optimum.icns"));
+        Assert.Equal("alt-icon", File.ReadAllText($"{menuApp}/Contents/Resources/Optimum.icns"));
+
+        writer.Remove(created);
+    }
 }

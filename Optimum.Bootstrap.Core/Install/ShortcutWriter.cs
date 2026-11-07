@@ -544,21 +544,21 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         if (kinds.HasFlag(ShortcutKinds.Menu))
         {
             string app = Posix(home, "Applications", "Optimum.app");
-            if (WriteMacAppBundle(app, installDirectory, launcherPath))
+            if (WriteMacAppBundle(probe, app, installDirectory, launcherPath))
                 written.Add(app);
         }
 
         if (kinds.HasFlag(ShortcutKinds.Desktop))
         {
             string app = Posix(home, "Desktop", "Optimum.app");
-            if (WriteMacAppBundle(app, installDirectory, launcherPath))
+            if (WriteMacAppBundle(probe, app, installDirectory, launcherPath))
                 written.Add(app);
         }
 
         return written;
     }
 
-    private static bool WriteMacAppBundle(string app, string installDirectory, string launcherPath)
+    private static bool WriteMacAppBundle(ISystemProbe probe, string app, string installDirectory, string launcherPath)
     {
         string staging = app + ".tmp-" + Guid.NewGuid().ToString("N");
         string? backup = null;
@@ -583,9 +583,15 @@ public sealed class ShortcutWriter(ISystemProbe probe)
                 File.SetUnixFileMode(executable, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
                     | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
 
-            string sourceIcon = Path.Combine(installDirectory, "Icon.icns");
+            string? sourceIcon = new[]
+            {
+                Path.Combine(installDirectory, "Icon.icns"),
+                Path.Combine(installDirectory, "optimum.icns"),
+                Path.Combine(installDirectory, "Optimum.icns"),
+            }.FirstOrDefault(File.Exists);
+
             string? iconName = null;
-            if (File.Exists(sourceIcon))
+            if (sourceIcon is not null)
             {
                 iconName = "Optimum.icns";
                 File.Copy(sourceIcon, Path.Combine(resources, iconName), overwrite: true);
@@ -634,6 +640,8 @@ public sealed class ShortcutWriter(ISystemProbe probe)
             installed = true;
             if (backup is not null)
                 TryDeleteMacPath(backup);
+
+            StripQuarantine(probe, app);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
@@ -873,6 +881,21 @@ public sealed class ShortcutWriter(ISystemProbe probe)
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Runtime.InteropServices.COMException)
         {
             return [];
+        }
+    }
+
+    internal static void StripQuarantine(ISystemProbe probe, string path)
+    {
+        if (probe.Os != OsKind.MacOs)
+            return;
+
+        try
+        {
+            probe.Run("xattr", ["-dr", "com.apple.quarantine", path], TimeSpan.FromSeconds(30));
+        }
+        catch
+        {
+            /* best effort */
         }
     }
 }

@@ -120,6 +120,12 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
             {
                 if (backedUp && Directory.Exists(backupDir))
                     TryDelete(backupDir);
+
+                if (probe.Os == OsKind.MacOs)
+                {
+                    ShortcutWriter.StripQuarantine(probe, installDir);
+                }
+
                 RegisterInstall(installDir, request, finalLauncher, previousManifest, observer);
             }
             catch (Exception cleanup) when (cleanup is IOException or UnauthorizedAccessException)
