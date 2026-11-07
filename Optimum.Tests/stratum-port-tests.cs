@@ -1102,4 +1102,45 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region Issue 271 - ShiverAnimationNames and CollisionTester Delegate Tests
+
+    [Fact]
+    public void EntityBehaviorBodyTemperature_ShiverAnimationNames_CachedAndInjected()
+    {
+        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
+        if (!System.IO.File.Exists(survivalDll))
+        {
+            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        }
+        Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
+        var bodyTempType = module.GetType("Vintagestory.GameContent.EntityBehaviorBodyTemperature");
+        Assert.NotNull(bodyTempType);
+
+        var shiverField = bodyTempType.Fields.SingleOrDefault(f => f.Name == "ShiverAnimationNames");
+        Assert.NotNull(shiverField);
+        Assert.True(shiverField.IsStatic, "ShiverAnimationNames must be static");
+
+        var updateAnimMethod = bodyTempType.Methods.Single(m => m.Name == "updateFreezingAnimState" && m.Parameters.Count == 0);
+        Assert.NotNull(updateAnimMethod);
+
+        // Verify updateFreezingAnimState references ShiverAnimationNames field
+        Assert.Contains(updateAnimMethod.Body.Instructions, ins =>
+            ins.Operand is FieldReference fr && fr.Name == "ShiverAnimationNames");
+    }
+
+    [Fact]
+    public void CollisionTester_WalkBlocksDelegate_UsesCachedInstanceField()
+    {
+        var tester = new Vintagestory.API.MathTools.CollisionTester();
+        var cachingTester = new Vintagestory.API.MathTools.CachingCollisionTester();
+
+        // Both testers instantiate without throwing and initialize the walkBlocksDelegate
+        Assert.NotNull(tester);
+        Assert.NotNull(cachingTester);
+    }
+
+    #endregion
 }

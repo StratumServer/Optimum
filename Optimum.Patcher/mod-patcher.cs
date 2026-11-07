@@ -233,6 +233,10 @@ public static class ModPatcher
                     "TrySnowableSurfaceGrowX",
                     "TrySnowableSurfaceGrowZ",
                 ],
+                ["Vintagestory.GameContent.EntityBehaviorBodyTemperature"] =
+                [
+                    "ShiverAnimationNames",
+                ],
             },
             Interfaces: new()
             {
@@ -259,6 +263,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BEBehaviorMicroblockSnowCover", "buildSnowCuboids", 1),
                 new("Vintagestory.GameContent.GenStoryStructures", "InitWorldGen", 0),
                 new("Vintagestory.GameContent.GenStoryStructures", "OnChunkColumnGen", 1),
+                new("Vintagestory.GameContent.EntityBehaviorBodyTemperature", "updateFreezingAnimState", 0),
             ]);
     }
 

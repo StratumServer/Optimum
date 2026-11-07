@@ -1,0 +1,21 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperature.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperature.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperature.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperature.cs
+@@ -49,6 +49,8 @@ public class EntityBehaviorBodyTemperature : EntityBehavior
+ 	[DocumentAsJson("Optional", "37", false)]
+ 	public float NormalBodyTemperature;
+ 
++	public static readonly string[] ShiverAnimationNames = new string[3] { "shiver", "coldidle", "coldidleheld" };
++
+ 	private bool firstTick;
+ 
+ 	private long lastMoveMs;
+@@ -359,7 +361,7 @@ public class EntityBehaviorBodyTemperature : EntityBehavior
+ 				entity.StopAnimation("coldidleheld");
+ 			}
+ 		}
+-		else if (entity.AnimManager.IsAnimationActive("coldidle") || entity.AnimManager.IsAnimationActive("coldidleheld"))
++		else if (entity.AnimManager.IsAnimationActive(ShiverAnimationNames))
+ 		{
+ 			entity.StopAnimation("coldidle");
+ 			entity.StopAnimation("coldidleheld");
