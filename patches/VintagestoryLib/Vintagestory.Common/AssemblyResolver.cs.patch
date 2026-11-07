@@ -1,0 +1,35 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs b/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs
+index e1ffd03..9cf169e 100644
+--- a/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs
++++ b/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs
+@@ -20,10 +20,30 @@ public static class AssemblyResolver
+ 		string path = new AssemblyName(args.Name).Name + ".dll";
+ 		string text = null;
+ 		try
+ 		{
+ 			string[] assemblySearchPaths = AssemblySearchPaths;
++			if (assemblySearchPaths == null)
++			{
++				string baseDirectory = AppDomain.CurrentDomain.BaseDirectory;
++				text = Path.Combine(baseDirectory, path);
++				if (File.Exists(text))
++				{
++					return Assembly.LoadFrom(text);
++				}
++				text = Path.Combine(baseDirectory, "Lib", path);
++				if (File.Exists(text))
++				{
++					return Assembly.LoadFrom(text);
++				}
++				text = Path.Combine(baseDirectory, "Mods", path);
++				if (File.Exists(text))
++				{
++					return Assembly.LoadFrom(text);
++				}
++				return null;
++			}
+ 			for (int i = 0; i < assemblySearchPaths.Length; i++)
+ 			{
+ 				text = Path.Combine(assemblySearchPaths[i], path);
+ 				if (File.Exists(text))
+ 				{

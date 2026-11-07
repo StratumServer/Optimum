@@ -126,6 +126,23 @@ public class CecilPatchOwnershipTests
         Assert.Contains("new(\"Vintagestory.Client.NoObf.SvgLoader\", \"LoadSvg\", 6)", source);
     }
 
+    [Fact]
+    public void AssemblyResolverGuardsReentrantNullSearchPathsAndShipsThroughCecil()
+    {
+        string repoRoot = FindRepositoryRoot();
+        string programSource = File.ReadAllText(
+            Path.Combine(repoRoot, "Optimum.Patcher", "Program.cs"));
+        string patchSource = PatchReader.ReadPatch(
+            "patches/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs.patch");
+
+        Assert.Contains("new(\"Vintagestory.Common.AssemblyResolver\", \"AssemblyResolve\", 2)", programSource);
+        Assert.Contains("if (assemblySearchPaths == null)", patchSource);
+        Assert.Contains("AppDomain.CurrentDomain.BaseDirectory", patchSource);
+        Assert.Contains("Path.Combine(baseDirectory, \"Lib\", path)", patchSource);
+        Assert.Contains("Path.Combine(baseDirectory, \"Mods\", path)", patchSource);
+        Assert.DoesNotContain("=>", patchSource);
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
