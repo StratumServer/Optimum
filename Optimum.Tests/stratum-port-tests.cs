@@ -966,4 +966,33 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region BEBehaviorMicroblockSnowCover Tests
+
+    [Fact]
+    public void BEBehaviorMicroblockSnowCover_BuildSnowCuboids_AllocatesZeroOnHeap()
+    {
+        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
+        if (!System.IO.File.Exists(survivalDll))
+        {
+            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        }
+        Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
+        var snowCoverType = module.GetType("Vintagestory.GameContent.BEBehaviorMicroblockSnowCover");
+        Assert.NotNull(snowCoverType);
+
+        var buildMethod = snowCoverType.Methods.Single(m => m.Name == "buildSnowCuboids" && m.Parameters.Count == 1);
+        Assert.NotNull(buildMethod);
+
+        // Verify no 2D boolean array allocation
+        Assert.DoesNotContain(buildMethod.Body.Instructions, ins =>
+            ins.OpCode == OpCodes.Newobj && ins.Operand is MethodReference mr && mr.DeclaringType.Name.Contains("Boolean[,]"));
+
+        // Verify stackalloc is used
+        Assert.Contains(buildMethod.Body.Instructions, ins => ins.OpCode == OpCodes.Localloc);
+    }
+
+    #endregion
 }

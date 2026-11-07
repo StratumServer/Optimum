@@ -1,0 +1,109 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorMicroblockSnowCover.cs b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorMicroblockSnowCover.cs
+index fc632c18..09ff7a32 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorMicroblockSnowCover.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorMicroblockSnowCover.cs
+@@ -71,18 +71,19 @@ public class BEBehaviorMicroblockSnowCover : BlockEntityBehavior, IRotatable, IM
+ 	{
+ 		List<uint> list = new List<uint>();
+ 		List<uint> list2 = new List<uint>();
+ 		BlockEntityMicroBlock blockEntityMicroBlock = Api?.World.BlockAccessor.GetBlockEntity(base.Pos.UpCopy()) as BlockEntityMicroBlock;
+ 		CuboidWithMaterial[] array = null;
+-		bool[,] array2 = new bool[16, 16];
++		Span<bool> array2 = stackalloc bool[256];
+ 		for (int num = 15; num >= 0; num--)
+ 		{
+ 			for (int i = 0; i < 16; i++)
+ 			{
++				int visitedRowBase = i * 16;
+ 				for (int j = 0; j < 16; j++)
+ 				{
+-					if (array2[i, j])
++					if (array2[visitedRowBase + j])
+ 					{
+ 						continue;
+ 					}
+ 					bool flag = num == 0 && !Voxels[i, num, j];
+ 					if (!flag && !Voxels[i, num, j])
+@@ -127,11 +128,11 @@ public class BEBehaviorMicroblockSnowCover : BlockEntityBehavior, IRotatable, IM
+ 					}
+ 					for (int m = cuboidWithMaterial.Z1; m < cuboidWithMaterial.Z2; m++)
+ 					{
+ 						for (int n = cuboidWithMaterial.X1; n < cuboidWithMaterial.X2; n++)
+ 						{
+-							array2[n, m] = true;
++							array2[n * 16 + m] = true;
+ 						}
+ 					}
+ 					if (flag)
+ 					{
+ 						list2.Add(BlockEntityMicroBlock.ToUint(cuboidWithMaterial));
+@@ -170,10 +171,69 @@ public class BEBehaviorMicroblockSnowCover : BlockEntityBehavior, IRotatable, IM
+ 		{
+ 			SnowMesh = null;
+ 		}
+ 	}
+ 
++	protected bool TrySnowableSurfaceGrowX(CuboidWithMaterial cub, BoolArray16x16x16 voxels, Span<bool> voxelVisited, bool ground)
++	{
++		if (cub.X2 > 15)
++		{
++			return false;
++		}
++		int x2 = cub.X2;
++		int x2Row = x2 * 16;
++		for (int num = cub.Z1; num < cub.Z2; num++)
++		{
++			int zz = Math.Min(15, num);
++			if (aboveCuboids != null)
++			{
++				for (int i = 0; i < aboveCuboids.Length; i++)
++				{
++					if (aboveCuboids[i].Contains(x2, 0, zz))
++					{
++						return false;
++					}
++				}
++			}
++			if (voxels[x2, cub.Y1, zz] == ground || voxelVisited[x2Row + zz] || (cub.Y1 < 15 && voxels[x2, cub.Y1 + 1, zz]))
++			{
++				return false;
++			}
++		}
++		cub.X2++;
++		return true;
++	}
++
++	protected bool TrySnowableSurfaceGrowZ(CuboidWithMaterial cub, BoolArray16x16x16 voxels, Span<bool> voxelVisited, bool ground)
++	{
++		if (cub.Z2 > 15)
++		{
++			return false;
++		}
++		int z2 = cub.Z2;
++		for (int num = cub.X1; num < cub.X2; num++)
++		{
++			int xx = Math.Min(15, num);
++			if (aboveCuboids != null)
++			{
++				for (int i = 0; i < aboveCuboids.Length; i++)
++				{
++					if (aboveCuboids[i].Contains(xx, 0, z2))
++					{
++						return false;
++					}
++				}
++			}
++			if (voxels[xx, cub.Y1, z2] == ground || voxelVisited[xx * 16 + z2] || (cub.Y1 < 15 && voxels[xx, cub.Y1 + 1, z2]))
++			{
++				return false;
++			}
++		}
++		cub.Z2++;
++		return true;
++	}
++
+ 	protected bool TrySnowableSurfaceGrowX(CuboidWithMaterial cub, BoolArray16x16x16 voxels, bool[,] voxelVisited, bool ground)
+ 	{
+ 		if (cub.X2 > 15)
+ 		{
+ 			return false;
