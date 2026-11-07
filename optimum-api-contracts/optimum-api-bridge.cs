@@ -201,4 +201,213 @@ public static class OptimumApiBridge
     {
         controller.ForceCapForTesting(cap);
     }
+
+    private const char Ascii85FirstCharacter = '!';
+    private const char Ascii85LastCharacter = 'u';
+
+    private static readonly uint[] Ascii85Powers =
+    [
+        85u * 85u * 85u * 85u,
+        85u * 85u * 85u,
+        85u * 85u,
+        85u,
+        1u,
+    ];
+
+    public static string Ascii85Encode(byte[] bytes)
+    {
+        if (bytes == null)
+        {
+            throw new ArgumentNullException(nameof(bytes));
+        }
+
+        int exactLength = GetAscii85EncodedLength(bytes);
+        return string.Create(exactLength, bytes, static (chars, state) =>
+        {
+            int writePos = 0;
+            int i = 0;
+            Span<char> scratch = stackalloc char[5];
+
+            while (i <= state.Length - 4)
+            {
+                uint val = ((uint)state[i] << 24) | ((uint)state[i + 1] << 16) |
+                           ((uint)state[i + 2] << 8) | state[i + 3];
+                if (val == 0)
+                {
+                    chars[writePos++] = 'z';
+                }
+                else
+                {
+                    uint v = val;
+                    for (int k = 4; k >= 0; k--)
+                    {
+                        scratch[k] = (char)((v % 85) + Ascii85FirstCharacter);
+                        v /= 85;
+                    }
+                    scratch.CopyTo(chars.Slice(writePos, 5));
+                    writePos += 5;
+                }
+                i += 4;
+            }
+
+            int rem = state.Length - i;
+            if (rem > 0)
+            {
+                uint val = 0;
+                for (int j = 0; j < rem; j++)
+                {
+                    val |= (uint)state[i + j] << (24 - 8 * j);
+                }
+
+                int charsToWrite = rem + 1;
+                uint v = val;
+                for (int k = 4; k >= 0; k--)
+                {
+                    scratch[k] = (char)((v % 85) + Ascii85FirstCharacter);
+                    v /= 85;
+                }
+                scratch.Slice(0, charsToWrite).CopyTo(chars.Slice(writePos, charsToWrite));
+            }
+        });
+    }
+
+    public static byte[] Ascii85Decode(string encoded)
+    {
+        if (encoded == null)
+        {
+            throw new ArgumentNullException(nameof(encoded));
+        }
+
+        int decodedLength = GetAscii85DecodedLength(encoded);
+        byte[] result = new byte[decodedLength];
+        int writePos = 0;
+        int count = 0;
+        uint value = 0;
+
+        for (int i = 0; i < encoded.Length; i++)
+        {
+            char ch = encoded[i];
+            if (ch == 'z' && count == 0)
+            {
+                result[writePos++] = 0;
+                result[writePos++] = 0;
+                result[writePos++] = 0;
+                result[writePos++] = 0;
+            }
+            else if (ch < Ascii85FirstCharacter || ch > Ascii85LastCharacter)
+            {
+                throw new FormatException($"Invalid character '{ch}' in Ascii85 block.");
+            }
+            else
+            {
+                try
+                {
+                    uint digit = (uint)(ch - Ascii85FirstCharacter);
+                    uint add = checked(Ascii85Powers[count] * digit);
+                    value = checked(value + add);
+                }
+                catch (OverflowException ex)
+                {
+                    throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
+                }
+
+                count++;
+
+                if (count == 5)
+                {
+                    result[writePos++] = (byte)(value >> 24);
+                    result[writePos++] = (byte)(value >> 16);
+                    result[writePos++] = (byte)(value >> 8);
+                    result[writePos++] = (byte)value;
+                    count = 0;
+                    value = 0;
+                }
+            }
+        }
+
+        if (count == 1)
+        {
+            throw new FormatException("The final Ascii85 block must contain more than one character.");
+        }
+        else if (count > 1)
+        {
+            for (int padding = count; padding < 5; padding++)
+            {
+                try
+                {
+                    value = checked(value + 84u * Ascii85Powers[padding]);
+                }
+                catch (OverflowException ex)
+                {
+                    throw new FormatException("The current group of characters decodes to a value greater than UInt32.MaxValue.", ex);
+                }
+            }
+            result[writePos++] = (byte)(value >> 24);
+            if (count > 2) result[writePos++] = (byte)(value >> 16);
+            if (count > 3) result[writePos++] = (byte)(value >> 8);
+        }
+
+        return result;
+    }
+
+    private static int GetAscii85EncodedLength(byte[] bytes)
+    {
+        int length = 0;
+        int i = 0;
+        while (i <= bytes.Length - 4)
+        {
+            if ((bytes[i] | bytes[i + 1] | bytes[i + 2] | bytes[i + 3]) == 0)
+            {
+                length += 1;
+            }
+            else
+            {
+                length += 5;
+            }
+            i += 4;
+        }
+
+        int rem = bytes.Length - i;
+        if (rem > 0)
+        {
+            length += rem + 1;
+        }
+        return length;
+    }
+
+    private static int GetAscii85DecodedLength(string encoded)
+    {
+        int length = 0;
+        int count = 0;
+        for (int i = 0; i < encoded.Length; i++)
+        {
+            char ch = encoded[i];
+            if (ch == 'z' && count == 0)
+            {
+                length += 4;
+            }
+            else if (ch >= Ascii85FirstCharacter && ch <= Ascii85LastCharacter)
+            {
+                count++;
+                if (count == 5)
+                {
+                    length += 4;
+                    count = 0;
+                }
+            }
+            else
+            {
+                throw new FormatException($"Invalid character '{ch}' in Ascii85 block.");
+            }
+        }
+        if (count == 1)
+        {
+            throw new FormatException("The final Ascii85 block must contain more than one character.");
+        }
+        if (count > 1)
+        {
+            length += count - 1;
+        }
+        return length;
+    }
 }

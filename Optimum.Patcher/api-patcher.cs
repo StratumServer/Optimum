@@ -83,6 +83,10 @@ public static class ApiPatcher
             method.Name == "InFrustumAndRange" && method.Parameters.Count == 5);
         var optimumShadowCheck = bridge.Methods.Single(method =>
             method.Name == "InFrustumShadowPass" && method.Parameters.Count == 3);
+        var ascii85Encode = bridge.Methods.Single(method =>
+            method.Name == "Ascii85Encode" && method.Parameters.Count == 1);
+        var ascii85Decode = bridge.Methods.Single(method =>
+            method.Name == "Ascii85Decode" && method.Parameters.Count == 1);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -105,6 +109,10 @@ public static class ApiPatcher
         int headControllerFallback = PatchHeadControllerPoseFallback(vanilla.MainModule);
         int threadPoolDiagnostics = PatchTyronThreadPoolDiagnostics(vanilla.MainModule);
         int clientApiThreadContract = PatchClientApiThreadContract(vanilla.MainModule);
+        int ascii85Methods = PatchAscii85(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(ascii85Encode),
+            vanilla.MainModule.ImportReference(ascii85Decode));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -160,6 +168,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 ICoreClientAPI.IsTesselationThread contract patch, applied {clientApiThreadContract}.");
         }
+        if (ascii85Methods != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 Ascii85 methods patched, applied {ascii85Methods}.");
+        }
         if (guiCompositionMetrics != 1)
         {
             throw new InvalidOperationException(
@@ -214,10 +227,59 @@ public static class ApiPatcher
                 $"{headControllerFallback} head controller pose fallback, " +
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
+                $"{ascii85Methods} Ascii85 methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchAscii85(ModuleDefinition module, MethodReference encodeBridge, MethodReference decodeBridge)
+    {
+        const string typeName = "Vintagestory.API.MathTools.Ascii85";
+        var ascii85 = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var encode = ascii85.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "Encode" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType is ArrayType { ElementType.MetadataType: MetadataType.Byte } &&
+            method.ReturnType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{typeName}.Encode(byte[]) is missing from the vanilla API.");
+
+        var decode = ascii85.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "Decode" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType is ArrayType { ElementType.MetadataType: MetadataType.Byte })
+            ?? throw new InvalidOperationException($"{typeName}.Decode(string) is missing from the vanilla API.");
+
+        RewriteSingleArgForwarder(encode, encodeBridge);
+        RewriteSingleArgForwarder(decode, decodeBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName}.Encode(byte[]) + Decode(string) -> OptimumApiBridge");
+        return 2;
+    }
+
+    private static void RewriteSingleArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
     }
 
     internal static int PatchMaterializationObserver(ModuleDefinition module, ModuleDefinition contracts, ModuleDefinition cairo)
