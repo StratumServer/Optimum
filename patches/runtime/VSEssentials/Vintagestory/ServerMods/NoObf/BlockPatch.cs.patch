@@ -1,0 +1,16 @@
+diff --git a/VSEssentials/Vintagestory/ServerMods/NoObf/BlockPatch.cs b/VSEssentials/Vintagestory/ServerMods/NoObf/BlockPatch.cs
+--- a/VSEssentials/Vintagestory/ServerMods/NoObf/BlockPatch.cs
++++ b/VSEssentials/Vintagestory/ServerMods/NoObf/BlockPatch.cs
+@@ -196,10 +196,7 @@ public class BlockPatch
+ 		if (blocks.Length == 0)
+ 		{
+ 			return;
+ 		}
+-		if (blockAccessor is IWorldGenBlockAccessor worldGenBlockAccessor)
+-		{
+-			worldGenBlockAccessor.WorldgenWorldAccessor.Api.ModLoader.GetModSystem<GenVegetationAndPatches>();
+-		}
++		// Optimum: The modSys initialization in this part of the code is no longer used, but was eating up performance.
+ 		while (num-- > 0f && (!(num < 1f) || !(rnd.NextFloat() > num)))
+ 		{
+ 			pos.X = posX + (int)OffsetX.nextFloat(1f, rnd);

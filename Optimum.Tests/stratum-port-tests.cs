@@ -850,4 +850,25 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region BlockPatch Tests
+
+    [Fact]
+    public void BlockPatch_Generate_ContainsNoDeadModSystemLookup()
+    {
+        string vsEssentialsPath = typeof(Vintagestory.ServerMods.NoObf.BlockPatch).Assembly.Location;
+        using var module = AssemblyDefinition.ReadAssembly(vsEssentialsPath).MainModule;
+        var blockPatchType = module.GetType("Vintagestory.ServerMods.NoObf.BlockPatch");
+        Assert.NotNull(blockPatchType);
+
+        var generateMethod = blockPatchType.Methods.Single(m => m.Name == "Generate" && m.Parameters.Count == 7);
+        Assert.NotNull(generateMethod);
+
+        Assert.DoesNotContain(generateMethod.Body.Instructions, ins =>
+            ins.Operand is MethodReference mr && mr.Name == "GetModSystem");
+        Assert.DoesNotContain(generateMethod.Body.Instructions, ins =>
+            ins.Operand is TypeReference tr && tr.Name.Contains("GenVegetationAndPatches"));
+    }
+
+    #endregion
 }
