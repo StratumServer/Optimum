@@ -1,0 +1,216 @@
+diff --git a/VSSurvivalMod/Block/BlockAnvil.cs b/VSSurvivalMod/Block/BlockAnvil.cs
+index 2995d5c..4a4ed36 100644
+--- a/VSSurvivalMod/Block/BlockAnvil.cs
++++ b/VSSurvivalMod/Block/BlockAnvil.cs
+@@ -14,6 +14,9 @@ namespace Vintagestory.GameContent
+     {
+         public int MetalTier { get; private set; } = 0;
+ 
++        private static bool s_prewarmed;
++        private static readonly object s_prewarmLock = new object();
++
+         public override void OnLoaded(ICoreAPI api)
+         {
+             base.OnLoaded(api);
+@@ -21,6 +24,128 @@ namespace Vintagestory.GameContent
+             var metalsByCode = api.ModLoader.GetModSystem<SurvivalCoreSystem>().metalsByCode;
+ 
+             if (metalsByCode.TryGetValue(Variant["metal"] ?? LastCodePart(), out var metalVariant)) MetalTier = metalVariant.Tier;
++
++            if (api is ICoreClientAPI capi)
++            {
++                PrewarmAnvilInteractions(capi);
++            }
++        }
++
++        public static void PrewarmAnvilInteractions(ICoreClientAPI capi)
++        {
++            if (s_prewarmed || capi?.World?.Items == null) return;
++
++            lock (s_prewarmLock)
++            {
++                if (s_prewarmed) return;
++
++                int maxTier = 0;
++                var metalsByCode = capi.ModLoader.GetModSystem<SurvivalCoreSystem>()?.metalsByCode;
++                if (metalsByCode != null)
++                {
++                    foreach (var v in metalsByCode.Values)
++                    {
++                        if (v.Tier > maxTier) maxTier = v.Tier;
++                    }
++                }
++                if (maxTier < 10) maxTier = 10;
++
++                var workableByTier = new List<ItemStack>[maxTier + 1];
++                for (int t = 0; t <= maxTier; t++) workableByTier[t] = new List<ItemStack>();
++                var hammerStacklist = new List<ItemStack>();
++
++                foreach (Item item in capi.World.Items)
++                {
++                    if (item?.Code == null) continue;
++
++                    var workable = item.GetCollectibleInterface<IAnvilWorkable>();
++                    if (workable != null)
++                    {
++                        var stacks = item.GetHandBookStacks(capi);
++                        if (stacks != null)
++                        {
++                            for (int s = 0; s < stacks.Count; s++)
++                            {
++                                var stack = stacks[s];
++                                if (stack == null) continue;
++                                int reqTier = workable.GetRequiredAnvilTier(stack);
++                                for (int t = Math.Max(0, reqTier); t <= maxTier; t++)
++                                {
++                                    workableByTier[t].Add(stack);
++                                }
++                            }
++                        }
++                    }
++
++                    if (item is ItemHammer)
++                    {
++                        hammerStacklist.Add(new ItemStack(item));
++                    }
++                }
++
++                var hammers = hammerStacklist.ToArray();
++
++                for (int t = 0; t <= maxTier; t++)
++                {
++                    var workables = workableByTier[t].ToArray();
++                    capi.ObjectCache["anvilBlockInteractions" + t] = BuildInteractions(capi, workables, hammers);
++                }
++
++                s_prewarmed = true;
++            }
++        }
++
++        private static WorldInteraction[] BuildInteractions(ICoreAPI api, ItemStack[] workableStacks, ItemStack[] hammerStacks)
++        {
++            return new WorldInteraction[] {
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-anvil-takeworkable",
++                    MouseButton = EnumMouseButton.Right,
++                    ShouldApply = (wi, bs, es) => (api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil)?.WorkItemStack != null
++                },
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-anvil-placeworkable",
++                    HotKeyCode = "shift",
++                    MouseButton = EnumMouseButton.Right,
++                    Itemstacks = workableStacks,
++                    GetMatchingStacks = (wi, bs, es) => (api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil)?.WorkItemStack == null ? wi.Itemstacks : null
++                },
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-anvil-smith",
++                    MouseButton = EnumMouseButton.Left,
++                    Itemstacks = hammerStacks,
++                    GetMatchingStacks = (wi, bs, es) => (api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil)?.WorkItemStack == null ? null : wi.Itemstacks
++                },
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-anvil-rotateworkitem",
++                    MouseButton = EnumMouseButton.Right,
++                    Itemstacks = hammerStacks,
++                    GetMatchingStacks = (wi, bs, es) => (api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil)?.WorkItemStack == null ? null : wi.Itemstacks
++                },
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-selecttoolmode",
++                    HotKeyCode = "toolmodeselect",
++                    MouseButton = EnumMouseButton.None,
++                    Itemstacks = hammerStacks,
++                    GetMatchingStacks = (wi, bs, es) => (api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil)?.WorkItemStack == null ? null : wi.Itemstacks
++                },
++                new WorldInteraction()
++                {
++                    ActionLangCode = "blockhelp-anvil-addvoxels",
++                    HotKeyCode = "shift",
++                    MouseButton = EnumMouseButton.Right,
++                    Itemstacks = workableStacks,
++                    GetMatchingStacks = (wi, bs, es) => {
++                        BlockEntityAnvil bea = api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil;
++                        return bea?.WorkItemStack == null ? null : [bea.WorkItemStack.Collectible.GetCollectibleInterface<IAnvilWorkable>().GetBaseMaterial(bea.WorkItemStack)];
++                    }
++                }
++            };
+         }
+ 
+ 
+@@ -82,7 +207,7 @@ namespace Vintagestory.GameContent
+ 
+         public override WorldInteraction[] GetPlacedBlockInteractionHelp(IWorldAccessor world, BlockSelection selection, IPlayer forPlayer)
+         {
+-            return ObjectCacheUtil.GetOrCreate(api, "anvilBlockInteractions" + MetalTier, () =>
++            var anvilInteractions = ObjectCacheUtil.GetOrCreate(api, "anvilBlockInteractions" + MetalTier, () =>
+             {
+                 List<ItemStack> workableStacklist = new List<ItemStack>();
+                 List<ItemStack> hammerStacklist = new List<ItemStack>();
+@@ -104,56 +229,13 @@ namespace Vintagestory.GameContent
+                     }
+                 }
+ 
+-                return new WorldInteraction[] {
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-anvil-takeworkable",
+-                        MouseButton = EnumMouseButton.Right,
+-                        ShouldApply = (wi, bs, es) => GetBlockEntity<BlockEntityAnvil>(bs.Position)?.WorkItemStack != null
+-                    },
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-anvil-placeworkable",
+-                        HotKeyCode = "shift",
+-                        MouseButton = EnumMouseButton.Right,
+-                        Itemstacks = workableStacklist.ToArray(),
+-                        GetMatchingStacks = (wi, bs, es) => GetBlockEntity<BlockEntityAnvil>(bs.Position)?.WorkItemStack == null ? wi.Itemstacks : null
+-                    },
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-anvil-smith",
+-                        MouseButton = EnumMouseButton.Left,
+-                        Itemstacks = hammerStacklist.ToArray(),
+-                        GetMatchingStacks = (wi, bs, es) => GetBlockEntity<BlockEntityAnvil>(bs.Position)?.WorkItemStack == null ? null : wi.Itemstacks
+-                    },
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-anvil-rotateworkitem",
+-                        MouseButton = EnumMouseButton.Right,
+-                        Itemstacks = hammerStacklist.ToArray(),
+-                        GetMatchingStacks = (wi, bs, es) => GetBlockEntity<BlockEntityAnvil>(bs.Position)?.WorkItemStack == null ? null : wi.Itemstacks
+-                    },
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-selecttoolmode",
+-                        HotKeyCode = "toolmodeselect",
+-                        MouseButton = EnumMouseButton.None,
+-                        Itemstacks = hammerStacklist.ToArray(),
+-                        GetMatchingStacks = (wi, bs, es) => GetBlockEntity<BlockEntityAnvil>(bs.Position)?.WorkItemStack == null ? null : wi.Itemstacks
+-                    },
+-                    new WorldInteraction()
+-                    {
+-                        ActionLangCode = "blockhelp-anvil-addvoxels",
+-                        HotKeyCode = "shift",
+-                        MouseButton = EnumMouseButton.Right,
+-                        Itemstacks = workableStacklist.ToArray(),
+-                        GetMatchingStacks = (wi, bs, es) => {
+-                            BlockEntityAnvil bea = api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityAnvil;
+-                            return bea?.WorkItemStack == null ? null : [bea.WorkItemStack.Collectible.GetCollectibleInterface<IAnvilWorkable>().GetBaseMaterial(bea.WorkItemStack)];
+-                        }
+-                    }
+-                };
+-            }).Append(base.GetPlacedBlockInteractionHelp(world, selection, forPlayer));
++                return BuildInteractions(api, workableStacklist.ToArray(), hammerStacklist.ToArray());
++            });
++
++            var baseInteractions = base.GetPlacedBlockInteractionHelp(world, selection, forPlayer);
++            if (baseInteractions == null || baseInteractions.Length == 0) return anvilInteractions;
++
++            return anvilInteractions.Append(baseInteractions);
+         }
+ 
+         public override bool DoPlaceBlock(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ItemStack byItemStack)
