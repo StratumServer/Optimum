@@ -1,0 +1,23 @@
+diff --git a/VSEssentials/Entity/AI/Tasks/AiTaskSeekFoodAndEat.cs b/VSEssentials/Entity/AI/Tasks/AiTaskSeekFoodAndEat.cs
+--- a/VSEssentials/Entity/AI/Tasks/AiTaskSeekFoodAndEat.cs
++++ b/VSEssentials/Entity/AI/Tasks/AiTaskSeekFoodAndEat.cs
+@@ -95,6 +95,10 @@
+         public override void AfterInitialize()
+         {
+             bhMultiply = entity.GetBehavior<EntityBehaviorMultiplyBase>();
++            if (lastPOISearchTotalMs == 0 && entity.World != null)
++            {
++                lastPOISearchTotalMs = entity.World.ElapsedMilliseconds - entity.World.Rand.Next(15000);
++            }
+         }
+ 
+         public override bool ShouldExecute()
+@@ -110,7 +114,7 @@
+ 
+             targetPoi = null;
+             extraTargetDist = 0;
+-            lastPOISearchTotalMs = entity.World.ElapsedMilliseconds;
++            lastPOISearchTotalMs = entity.World.ElapsedMilliseconds + entity.World.Rand.Next(-1500, 1501);
+ 
+             if (eatLooseItems)
+             {

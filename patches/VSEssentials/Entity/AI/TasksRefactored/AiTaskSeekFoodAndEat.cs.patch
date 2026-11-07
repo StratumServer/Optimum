@@ -1,0 +1,25 @@
+diff --git a/VSEssentials/Entity/AI/TasksRefactored/AiTaskSeekFoodAndEat.cs b/VSEssentials/Entity/AI/TasksRefactored/AiTaskSeekFoodAndEat.cs
+--- a/VSEssentials/Entity/AI/TasksRefactored/AiTaskSeekFoodAndEat.cs
++++ b/VSEssentials/Entity/AI/TasksRefactored/AiTaskSeekFoodAndEat.cs
+@@ -227,6 +227,11 @@
+     {
+         base.AfterInitialize();
+         multiplyBaseBehavior = entity.GetBehavior<EntityBehaviorMultiplyBase>();
++        if (lastPOISearchTotalMs == 0 && entity.World != null)
++        {
++            int cooldown = Math.Max(1000, Config.PoiSearchCooldown);
++            lastPOISearchTotalMs = entity.World.ElapsedMilliseconds - entity.World.Rand.Next(cooldown);
++        }
+     }
+ 
+     public override bool ShouldExecute()
+@@ -238,7 +243,8 @@
+         if (multiplyBaseBehavior != null && !multiplyBaseBehavior.ShouldEat && entity.World.Rand.NextDouble() >= Config.ChanceToSeekFoodWithoutEating) return false;
+ 
+         targetPoi = null;
+-        lastPOISearchTotalMs = entity.World.ElapsedMilliseconds;
++        int jitter = Math.Max(100, Config.PoiSearchCooldown / 10);
++        lastPOISearchTotalMs = entity.World.ElapsedMilliseconds + entity.World.Rand.Next(-jitter, jitter + 1);
+ 
+         if (Config.EatLooseItems)
+         {
