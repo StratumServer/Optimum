@@ -872,6 +872,75 @@ public class StratumPortTests
 
     #endregion
 
+    #region ClientAnimator Tests
+
+    [Fact]
+    public void ClientAnimator_ApiPatcher_RewritesInitMatricesAndClampsActiveAnimations()
+    {
+        string vanillaApi = PatchReader.FindRepositoryFile(".vanilla/win-x64/vintagestory/VintagestoryAPI.dll");
+        using var module = AssemblyDefinition.ReadAssembly(vanillaApi).MainModule;
+        var clientAnimator = module.GetType("Vintagestory.API.Common.ClientAnimator");
+        Assert.NotNull(clientAnimator);
+
+        var initBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.ClientAnimatorInitMatrices),
+                new[] { typeof(ClientAnimator), typeof(int) })!);
+
+        int patched = ApiPatcher.PatchClientAnimator(module, initBridge);
+        Assert.Equal(4, patched);
+
+        // Verify initMatrices calls bridge
+        var init = clientAnimator.Methods.Single(m => m.Name == "initMatrices" && m.Parameters.Count == 1);
+        Assert.Collection(
+            init.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(initBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        // Verify calculateMatrices(float) clamps activeAnimCount
+        var calc1 = clientAnimator.Methods.Single(m => m.Name == "calculateMatrices" && m.Parameters.Count == 1);
+        int calc1Clamps = 0;
+        for (int i = 0; i < calc1.Body.Instructions.Count - 2; i++)
+        {
+            if (calc1.Body.Instructions[i].OpCode == OpCodes.Ldfld &&
+                calc1.Body.Instructions[i].Operand is FieldReference fr &&
+                fr.Name == "activeAnimCount" &&
+                calc1.Body.Instructions[i + 1].OpCode == OpCodes.Ldsfld &&
+                calc1.Body.Instructions[i + 2].OpCode == OpCodes.Call &&
+                calc1.Body.Instructions[i + 2].Operand is MethodReference mr &&
+                mr.Name == "Min")
+            {
+                calc1Clamps++;
+            }
+        }
+        Assert.Equal(1, calc1Clamps);
+
+        // Verify calculateMatrices(8 params) clamps both activeAnimCount reads
+        var calc8 = clientAnimator.Methods.Single(m => m.Name == "calculateMatrices" && m.Parameters.Count == 8);
+        int calc8Clamps = 0;
+        for (int i = 0; i < calc8.Body.Instructions.Count - 2; i++)
+        {
+            if (calc8.Body.Instructions[i].OpCode == OpCodes.Ldfld &&
+                calc8.Body.Instructions[i].Operand is FieldReference fr &&
+                fr.Name == "activeAnimCount" &&
+                calc8.Body.Instructions[i + 1].OpCode == OpCodes.Ldsfld &&
+                calc8.Body.Instructions[i + 2].OpCode == OpCodes.Call &&
+                calc8.Body.Instructions[i + 2].Operand is MethodReference mr &&
+                mr.Name == "Min")
+            {
+                calc8Clamps++;
+            }
+        }
+        Assert.Equal(2, calc8Clamps);
+    }
+
+    #endregion
+
     #region MechBlockRenderer Tests
 
     [Fact]
@@ -894,9 +963,6 @@ public class StratumPortTests
         int positionCalls = updateMethod.Body.Instructions.Count(ins =>
             ins.Operand is MethodReference mr && mr.Name == "get_Position");
         Assert.Equal(1, positionCalls);
-    }
-
-    #endregion
     }
 
     #endregion

@@ -497,4 +497,16 @@ public static class OptimumApiBridge
     {
         return left.Transform == right.Transform && left.Factor == right.Factor;
     }
+
+    public static void ClientAnimatorInitMatrices(ClientAnimator animator, int maxJointId)
+    {
+        var identMat = ClientAnimator.identMat;
+        var defaultPoseMatrices = new float[16 * maxJointId];
+        for (int i = 0; i < defaultPoseMatrices.Length; i += 16)
+        {
+            Buffer.BlockCopy(identMat, 0, defaultPoseMatrices, i * sizeof(float), 16 * sizeof(float));
+        }
+        animator.TransformationMatricesDefaultPose = defaultPoseMatrices;
+        animator.TransformationMatrices = new float[defaultPoseMatrices.Length];
+    }
 }
