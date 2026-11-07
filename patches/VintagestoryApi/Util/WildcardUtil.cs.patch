@@ -1,22 +1,16 @@
 diff --git a/VintagestoryApi/Util/WildcardUtil.cs b/VintagestoryApi/Util/WildcardUtil.cs
-index 64fb462..cada25b 100644
+index 64fb462..99c6594 100644
 --- a/VintagestoryApi/Util/WildcardUtil.cs
 +++ b/VintagestoryApi/Util/WildcardUtil.cs
-@@ -60,10 +60,11 @@ namespace Vintagestory.API.Util
-             return false;
-         }
+@@ -62,6 +62,7 @@ namespace Vintagestory.API.Util
  
          public static bool Match(AssetLocation needle, AssetLocation haystack)
          {
-+            if (needle == null || haystack == null) return false;
++            if (needle == null || haystack == null || needle.Path == null || haystack.Path == null) return false;
              if (needle.Domain != "*" && needle.Domain != haystack.Domain) return false;
              return fastMatch(needle.Path, haystack.Path);
          }
- 
-         /// <summary>
-@@ -73,35 +74,31 @@ namespace Vintagestory.API.Util
-         /// <param name="inCode"></param>
-         /// <param name="allowedVariants"></param>
+@@ -75,31 +76,28 @@ namespace Vintagestory.API.Util
          /// <returns></returns>
          public static bool Match(AssetLocation wildCard, AssetLocation inCode, string[] allowedVariants)
          {
@@ -37,6 +31,7 @@ index 64fb462..cada25b 100644
  
 +            string needle = wildCard.Path;
 +            string haystack = inCode.Path;
++            if (needle == null || haystack == null) return false;
  
 -            // Some faster/pre checks before doing a regex, because regexes are so, sooooo sloooooow
 -            if (wildCardIndex == wildCard.Path.Length - 1)
@@ -62,18 +57,12 @@ index 64fb462..cada25b 100644
              {
                  if (!MatchesVariants(wildCard, inCode, allowedVariants)) return false;
              }
- 
-             return true;
-@@ -127,11 +124,11 @@ namespace Vintagestory.API.Util
-         /// <param name="wildCard"></param>
-         /// <param name="inCode"></param>
+@@ -129,7 +127,7 @@ namespace Vintagestory.API.Util
          /// <returns></returns>
          public static string GetWildcardValue(AssetLocation wildCard, AssetLocation inCode)
          {
 -            if (inCode == null || (wildCard.Domain != "*" && !wildCard.Domain.Equals(inCode.Domain))) return null;
-+            if (wildCard == null || inCode == null || (wildCard.Domain != "*" && !wildCard.Domain.Equals(inCode.Domain))) return null;
++            if (wildCard == null || inCode == null || wildCard.Path == null || inCode.Path == null || (wildCard.Domain != "*" && !wildCard.Domain.Equals(inCode.Domain))) return null;
              if (!wildCard.Path.Contains('*')) return null;
  
              string pattern = Regex.Escape(wildCard.Path).Replace(@"\*", @"(.*)");
- 
-             Match match = Regex.Match(inCode.Path, @"^" + pattern + @"$", RegexOptions.None);

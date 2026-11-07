@@ -7,6 +7,7 @@ using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
 using Vintagestory.API.MathTools;
+using Vintagestory.API.Util;
 
 namespace Vintagestory.API.Config;
 
@@ -456,5 +457,39 @@ public static class OptimumApiBridge
         }
 
         return part == posFromLeft ? path.Substring(start) : null;
+    }
+
+    public static bool WildcardUtilMatch(AssetLocation? needle, AssetLocation? haystack)
+    {
+        if (needle == null || haystack == null) return false;
+        if (needle.Domain != "*" && needle.Domain != haystack.Domain) return false;
+        string? needlePath = needle.Path;
+        string? haystackPath = haystack.Path;
+        if (needlePath == null || haystackPath == null) return false;
+        return WildcardUtil.Match(needlePath, haystackPath);
+    }
+
+    public static bool WildcardUtilMatch(AssetLocation? wildCard, AssetLocation? inCode, string[]? allowedVariants)
+    {
+        if (wildCard == null || inCode == null) return false;
+        if (wildCard.Domain == "*" && wildCard.Path == "*") return true;
+        if (wildCard.Equals(inCode)) return true;
+        if (wildCard.Domain != "*" && !wildCard.Domain.Equals(inCode.Domain)) return false;
+
+        string? needle = wildCard.Path;
+        string? haystack = inCode.Path;
+        if (needle == null || haystack == null) return false;
+
+        if (!needle.Contains('*') && !needle.StartsWith("@"))
+            return needle.Length == haystack.Length && needle.Equals(haystack, StringComparison.OrdinalIgnoreCase);
+
+        if (!WildcardUtil.Match(needle, haystack)) return false;
+
+        if (allowedVariants != null && allowedVariants.Length > 0 && needle.IndexOf('*') != -1)
+        {
+            if (!WildcardUtil.MatchesVariants(wildCard, inCode, allowedVariants)) return false;
+        }
+
+        return true;
     }
 }

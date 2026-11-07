@@ -20,7 +20,7 @@ public class StratumPortTests
 {
     #region WildcardUtil Tests
 
-    [Theory(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Theory]
     [InlineData("rock-*", "rock-granite", true)]
     [InlineData("rock-*", "rock-basalt", true)]
     [InlineData("rock-*", "soil-low", false)]
@@ -40,7 +40,7 @@ public class StratumPortTests
         Assert.Equal(expected, result);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_AssetLocation_NullSafe()
     {
         var wildCard = new AssetLocation("game", "rock-*");
@@ -49,7 +49,7 @@ public class StratumPortTests
         Assert.False(result);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_AssetLocation_GlobalWildcard()
     {
         var wildCard = new AssetLocation("*", "*");
@@ -58,7 +58,7 @@ public class StratumPortTests
         Assert.True(result);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_AssetLocation_ExactMatch()
     {
         var wildCard = new AssetLocation("game", "rock-granite");
@@ -67,7 +67,7 @@ public class StratumPortTests
         Assert.True(result);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_AssetLocation_WildcardSuffix()
     {
         var wildCard = new AssetLocation("game", "rock-*");
@@ -78,7 +78,7 @@ public class StratumPortTests
         Assert.False(WildcardUtil.Match(wildCard, codeNoMatch, null));
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_AssetLocation_DomainMismatch()
     {
         var wildCard = new AssetLocation("game", "rock-*");
@@ -87,7 +87,7 @@ public class StratumPortTests
         Assert.False(result);
     }
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
     public void WildcardUtil_Match_WithAllowedVariants()
     {
         var wildCard = new AssetLocation("game", "rock-*");
@@ -98,6 +98,52 @@ public class StratumPortTests
 
         Assert.True(WildcardUtil.Match(wildCard, codeGranite, allowed));
         Assert.False(WildcardUtil.Match(wildCard, codeBasalt, allowed));
+    }
+
+    [Fact]
+    public void WildcardUtil_Match_TwoArg_AssetLocation_NullSafe()
+    {
+        var wildCard = new AssetLocation("game", "rock-*");
+        Assert.False(WildcardUtil.Match(wildCard, null));
+        Assert.False(WildcardUtil.Match(null, wildCard));
+        Assert.False(WildcardUtil.Match((AssetLocation)null, (AssetLocation)null));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(wildCard, null));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(null, wildCard));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(null, null));
+    }
+
+    [Fact]
+    public void WildcardUtil_Match_TwoArg_AssetLocation_ProducesSameResult()
+    {
+        var needle = new AssetLocation("game", "rock-*");
+        var match = new AssetLocation("game", "rock-granite");
+        var noMatch = new AssetLocation("game", "soil-low");
+        var diffDomain = new AssetLocation("other", "rock-granite");
+        var globalDomain = new AssetLocation("*", "rock-*");
+
+        Assert.True(WildcardUtil.Match(needle, match));
+        Assert.False(WildcardUtil.Match(needle, noMatch));
+        Assert.False(WildcardUtil.Match(needle, diffDomain));
+        Assert.True(WildcardUtil.Match(globalDomain, diffDomain));
+
+        Assert.True(OptimumApiBridge.WildcardUtilMatch(needle, match));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(needle, noMatch));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(needle, diffDomain));
+        Assert.True(OptimumApiBridge.WildcardUtilMatch(globalDomain, diffDomain));
+    }
+
+    [Fact]
+    public void WildcardUtil_Match_RegexFallback()
+    {
+        var regexWildcard = new AssetLocation("game", "@^rock-(granite|andesite)$");
+        var codeGranite = new AssetLocation("game", "rock-granite");
+        var codeBasalt = new AssetLocation("game", "rock-basalt");
+
+        Assert.True(WildcardUtil.Match(regexWildcard, codeGranite, null));
+        Assert.False(WildcardUtil.Match(regexWildcard, codeBasalt, null));
+
+        Assert.True(OptimumApiBridge.WildcardUtilMatch(regexWildcard, codeGranite, null));
+        Assert.False(OptimumApiBridge.WildcardUtilMatch(regexWildcard, codeBasalt, null));
     }
 
     #endregion
@@ -570,6 +616,81 @@ public class StratumPortTests
             {
                 Assert.Equal(OpCodes.Call, ins.OpCode);
                 Assert.Equal(lastCodePartBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+    }
+
+    [Fact]
+    public void WildcardUtil_ApiPatcher_RewritesMethodsToCallOptimumApiBridge()
+    {
+        using var module = ModuleDefinition.CreateModule("WildcardUtilPatchTest", ModuleKind.Dll);
+        var wildcardUtil = new TypeDefinition(
+            "Vintagestory.API.Util",
+            "WildcardUtil",
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit,
+            module.TypeSystem.Object);
+        module.Types.Add(wildcardUtil);
+
+        var assetLocationType = new TypeDefinition(
+            "Vintagestory.API.Common",
+            "AssetLocation",
+            TypeAttributes.Public | TypeAttributes.BeforeFieldInit,
+            module.TypeSystem.Object);
+        module.Types.Add(assetLocationType);
+
+        var stringArrayType = new ArrayType(module.TypeSystem.String);
+
+        var matchTwoArg = new MethodDefinition(
+            "Match",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            module.TypeSystem.Boolean);
+        matchTwoArg.Parameters.Add(new ParameterDefinition("needle", ParameterAttributes.None, assetLocationType));
+        matchTwoArg.Parameters.Add(new ParameterDefinition("haystack", ParameterAttributes.None, assetLocationType));
+        matchTwoArg.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        matchTwoArg.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        wildcardUtil.Methods.Add(matchTwoArg);
+
+        var matchThreeArg = new MethodDefinition(
+            "Match",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            module.TypeSystem.Boolean);
+        matchThreeArg.Parameters.Add(new ParameterDefinition("wildCard", ParameterAttributes.None, assetLocationType));
+        matchThreeArg.Parameters.Add(new ParameterDefinition("inCode", ParameterAttributes.None, assetLocationType));
+        matchThreeArg.Parameters.Add(new ParameterDefinition("allowedVariants", ParameterAttributes.None, stringArrayType));
+        matchThreeArg.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        matchThreeArg.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        wildcardUtil.Methods.Add(matchThreeArg);
+
+        var matchTwoArgBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.WildcardUtilMatch), new[] { typeof(AssetLocation), typeof(AssetLocation) })!);
+        var matchThreeArgBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.WildcardUtilMatch), new[] { typeof(AssetLocation), typeof(AssetLocation), typeof(string[]) })!);
+
+        int patched = ApiPatcher.PatchWildcardUtil(module, matchTwoArgBridge, matchThreeArgBridge);
+
+        Assert.Equal(2, patched);
+        Assert.Empty(matchTwoArg.Body.Variables);
+        Assert.Collection(
+            matchTwoArg.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(matchTwoArgBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        Assert.Empty(matchThreeArg.Body.Variables);
+        Assert.Collection(
+            matchThreeArg.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_2, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(matchThreeArgBridge.FullName, ((MethodReference)ins.Operand).FullName);
             },
             ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
     }
