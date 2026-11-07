@@ -12,7 +12,8 @@ public sealed record PatchRequest(
     string GameDirectory,
     string? OverlayDirectory = null,
     bool Backup = true,
-    bool Rollback = false);
+    bool Rollback = false,
+    IReadOnlyList<string>? SupportedGameVersions = null);
 
 public sealed record PatchResult(
     bool Ok,
@@ -41,9 +42,13 @@ public interface IGamePatcher
 /// existing Vintage Story game directory using an overlay or donor layout.
 /// Preserves pristine vanilla assemblies into <c>.optimum/vanilla/</c> for idempotency and rollback.
 /// </summary>
-public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator = null) : IGamePatcher
+public sealed class GamePatcher(
+    ISystemProbe probe,
+    IRuntimeValidator? validator = null,
+    Func<string, string?>? versionDetector = null) : IGamePatcher
 {
     private readonly IRuntimeValidator _validator = validator ?? new RuntimeValidator(probe);
+    private readonly Func<string, string?> _versionDetector = versionDetector ?? DetectGameVersion;
 
     public Task<PatchResult> PatchAsync(
         PatchRequest request,
@@ -94,6 +99,44 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
             overlayDir = NormalizeAbsolute(request.OverlayDirectory);
             if (!probe.DirectoryExists(overlayDir))
                 return Task.FromResult(PatchResult.Failure(FailureReason.BadInput, $"the overlay directory does not exist: {overlayDir}"));
+        }
+
+        // Verify game version compatibility before backup or modification
+        IReadOnlyList<string>? supportedVersions = request.SupportedGameVersions;
+        if (supportedVersions is null || supportedVersions.Count == 0)
+        {
+            if (overlayDir is not null)
+            {
+                string manifestPath = Path.Combine(overlayDir, PatchOverlayManifest.FileName);
+                if (probe.FileExists(manifestPath))
+                {
+                    string? json = probe.ReadText(manifestPath);
+                    if (json is not null)
+                    {
+                        var overlayManifest = PatchOverlayManifest.Deserialize(json);
+                        if (overlayManifest?.SupportedGameVersions is { Count: > 0 } sv)
+                        {
+                            supportedVersions = sv;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (supportedVersions is { Count: > 0 })
+        {
+            string candidateLib = probe.FileExists(backupLib) ? backupLib : gameLib;
+            string? detectedVersion = _versionDetector(candidateLib);
+            if (!string.IsNullOrEmpty(detectedVersion))
+            {
+                bool isSupported = supportedVersions.Any(sv =>
+                    string.Equals(sv, detectedVersion, StringComparison.OrdinalIgnoreCase));
+                if (!isSupported)
+                {
+                    return Task.FromResult(PatchResult.Failure(FailureReason.UnsupportedVersion,
+                        $"incompatible game version: detected Vintage Story {detectedVersion}, but this release of Optimum only supports: {string.Join(", ", supportedVersions)}"));
+                }
+            }
         }
 
         // Resolve patcher tool
@@ -824,6 +867,38 @@ public sealed class GamePatcher(ISystemProbe probe, IRuntimeValidator? validator
         catch
         {
             return "";
+        }
+    }
+
+    internal static string? DetectGameVersion(string libPath)
+    {
+        try
+        {
+            if (!File.Exists(libPath)) return null;
+            var info = System.Diagnostics.FileVersionInfo.GetVersionInfo(libPath);
+            string? version = info.FileVersion?.Trim();
+            if (string.IsNullOrEmpty(version))
+                version = info.ProductVersion?.Trim();
+            if (string.IsNullOrEmpty(version))
+                return null;
+
+            int plusIndex = version.IndexOf('+');
+            if (plusIndex >= 0) version = version[..plusIndex];
+
+            if (Version.TryParse(version, out var parsed))
+            {
+                if (parsed.Build >= 0 && parsed.Revision == 0)
+                    return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}";
+                if (parsed.Build >= 0 && parsed.Revision > 0)
+                    return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}.{parsed.Revision}";
+                return $"{parsed.Major}.{parsed.Minor}";
+            }
+
+            return version;
+        }
+        catch
+        {
+            return null;
         }
     }
 
