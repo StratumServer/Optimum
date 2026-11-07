@@ -205,6 +205,54 @@ public class BfsChunkVisibilityTests
     }
 
     [Fact]
+    public void UndulatingTerrain_UpOverHillThenDownIntoValley_RendersAllReachableChunks()
+    {
+        // Issue #176: In undulating terrain, sight must be able to step UP over a hill or
+        // contour, and then DOWN into a valley behind it. The flawed ancestor-mask "never-go-back"
+        // previously forbade opposite axis movement along the entire traversal history,
+        // prematurely truncating render distance on non-flat terrain.
+        var grid = Grid(3);
+        // Place opaque chunk at (0, 0, 2) blocking straight horizontal line, but air at (0, 1, 2)
+        // allows light to travel up and over into the valley at (0, 0, 3).
+        var opaque = new List<(int, int, int)> { (0, 0, 2) };
+        var graph = new FakeGraph(grid, opaque: opaque);
+        var bfs = new OptimumChunkVisibilityBfs();
+        bfs.Run(graph, 0, 0, 0);
+
+        Assert.Contains((0, 1, 2), graph.Visible);
+        Assert.Contains((0, 0, 3), graph.Visible);
+    }
+
+    [Fact]
+    public void DepressionTerrain_DownIntoBasinThenUpToOppositeRidge_RendersAllReachableChunks()
+    {
+        // Issue #176: Stepping DOWN into a depression/valley and then UP to an opposite ridge.
+        var grid = Grid(3);
+        // Opaque chunk at (0, 0, 2) blocking straight line, but air at (0, -1, 2) allows passing below.
+        var opaque = new List<(int, int, int)> { (0, 0, 2) };
+        var graph = new FakeGraph(grid, opaque: opaque);
+        var bfs = new OptimumChunkVisibilityBfs();
+        bfs.Run(graph, 0, 0, 0);
+
+        Assert.Contains((0, -1, 2), graph.Visible);
+        Assert.Contains((0, 0, 3), graph.Visible);
+    }
+
+    [Fact]
+    public void OptimumBoundedHandoff_ReleaseWhenEmpty_DoesNotThrow()
+    {
+        // Issue #176: Defensive handoff release. On session teardown / world transition,
+        // an over-release on an empty handoff must gracefully no-op instead of throwing
+        // an unhandled InvalidOperationException that disconnects multiplayer clients.
+        var handoff = new OptimumBoundedHandoff(4);
+        Assert.Equal(0, handoff.Reserved);
+
+        // Must not throw when releasing an empty handoff
+        handoff.Release();
+        Assert.Equal(0, handoff.Reserved);
+    }
+
+    [Fact]
     public void LibInlineBfs_MirrorsTheReferenceInvariants()
     {
         // Reconciles the two algorithm copies: the unit-tested reference

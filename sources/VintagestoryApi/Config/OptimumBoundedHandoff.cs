@@ -49,7 +49,7 @@ public sealed class OptimumBoundedHandoff
             int current = Volatile.Read(ref _reserved);
             if (current <= 0)
             {
-                throw new InvalidOperationException("Cannot release an empty handoff.");
+                return;
             }
 
             if (Interlocked.CompareExchange(ref _reserved, current - 1, current) == current)

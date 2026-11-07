@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
-index 7befa7d..b46f0f4 100644
+index 7befa7d..9bb3141 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 @@ -1,8 +1,9 @@
@@ -124,7 +124,7 @@ index 7befa7d..b46f0f4 100644
  	}
  
  	private void traverseRayAndMarkVisible(Vec3i fromPos, Vec3i toPosRel, double yoffset = 0.5, double xoffset = 0.5)
-@@ -192,6 +247,235 @@ public class ChunkCuller
+@@ -192,6 +247,234 @@ public class ChunkCuller
  				}
  			}
  		}
@@ -171,7 +171,7 @@ index 7befa7d..b46f0f4 100644
 +		int bfsRadiusY = game.WorldMap.ChunkMapSizeY + 2;
 +
 +		long rootPack = bfsPack(cx, cy, cz);
-+		bfsVisited[rootPack] = 0;
++		bfsVisited[rootPack] = 0x3F;
 +		bfsQueue.Enqueue(bfsEncodeNode(cx, cy, cz, -1));
 +
 +		while (bfsQueue.Count > 0)
@@ -181,13 +181,11 @@ index 7befa7d..b46f0f4 100644
 +			int ncx = bfsUnpackX(node);
 +			int ncy = bfsUnpackY(node);
 +			int ncz = bfsUnpackZ(node);
-+			long curPack = bfsPack(ncx, ncy, ncz);
-+			int curMask = bfsVisited.TryGetValue(curPack, out var mm) ? mm : 0;
 +
 +			for (int dir = 0; dir < 6; dir++)
 +			{
-+				// (1) never-go-back: skip a direction whose opposite the flood already used
-+				if ((curMask & (1 << bfsOppositeOf(dir))) != 0)
++				// (1) never-go-back: skip stepping back to the immediate parent chunk we entered from
++				if (nodeFromFace >= 0 && dir == nodeFromFace)
 +				{
 +					continue;
 +				}
@@ -227,27 +225,28 @@ index 7befa7d..b46f0f4 100644
 +					continue;
 +				}
 +
++				int inFace = bfsOppositeOf(dir);
++				int inMask = 1 << inFace;
 +				long nPack = bfsPack(nx, ny, nz);
-+				int newMask = curMask | (1 << dir);
 +
-+				if (bfsVisited.TryGetValue(nPack, out var existing))
++				if (bfsVisited.TryGetValue(nPack, out var seenMask))
 +				{
-+					int merged = existing | newMask;
-+					if (merged != existing)
++					if ((seenMask & inMask) != 0)
 +					{
-+						bfsVisited[nPack] = merged;
++						continue;
 +					}
-+					continue;
++					bfsVisited[nPack] = seenMask | inMask;
 +				}
-+
-+				bfsVisited[nPack] = newMask;
-+
-+				if (chunks.TryGetValue(bfsChunkKey(nx, ny, nz), out var value) && value != null)
++				else
 +				{
-+					value.SetVisible(visible: true);
++					bfsVisited[nPack] = inMask;
++					if (chunks.TryGetValue(bfsChunkKey(nx, ny, nz), out var value) && value != null)
++					{
++						value.SetVisible(visible: true);
++					}
 +				}
 +
-+				bfsQueue.Enqueue(bfsEncodeNode(nx, ny, nz, bfsOppositeOf(dir)));
++				bfsQueue.Enqueue(bfsEncodeNode(nx, ny, nz, inFace));
 +			}
 +		}
 +
