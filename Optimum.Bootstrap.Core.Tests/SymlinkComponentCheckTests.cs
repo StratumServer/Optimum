@@ -30,4 +30,46 @@ public class SymlinkComponentCheckTests
         Assert.Throws<DirectoryNotFoundException>(() =>
             SymlinkComponentCheck.FirstSymlinkComponent(probe, "/nowhere/at/all", requireExists: true));
     }
+
+    [Fact]
+    public void FirstSymlinkUnderRoot_IgnoresSymlinkAboveRoot()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddSymlink("/home/tester/mount");
+        probe.AddDirectory("/home/tester/mount/vintagestory");
+        probe.AddDirectory("/home/tester/mount/vintagestory/assets");
+
+        // Symlink is above root, so FirstSymlinkUnderRoot should be null
+        string root = "/home/tester/mount/vintagestory";
+        string path = "/home/tester/mount/vintagestory/assets/game/shaders/test.vsh";
+        Assert.Null(SymlinkComponentCheck.FirstSymlinkUnderRoot(probe, path, root));
+        Assert.True(SymlinkComponentCheck.IsContainedWithinRoot(probe, path, root, out _));
+    }
+
+    [Fact]
+    public void FirstSymlinkUnderRoot_DetectsSymlinkedSubdirectoryUnderRoot()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/home/tester/vintagestory");
+        probe.AddSymlink("/home/tester/vintagestory/assets");
+
+        string root = "/home/tester/vintagestory";
+        string path = "/home/tester/vintagestory/assets/game/shaders/test.vsh";
+        Assert.Equal("/home/tester/vintagestory/assets",
+            SymlinkComponentCheck.FirstSymlinkUnderRoot(probe, path, root));
+        Assert.False(SymlinkComponentCheck.IsContainedWithinRoot(probe, path, root, out string? escaping));
+        Assert.Equal("/home/tester/vintagestory/assets", escaping);
+    }
+
+    [Fact]
+    public void IsContainedWithinRoot_RefusesPathTraversalOutsideRoot()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/home/tester/vintagestory");
+
+        string root = "/home/tester/vintagestory";
+        string path = "/home/tester/vintagestory/assets/../../etc/passwd";
+        Assert.False(SymlinkComponentCheck.IsContainedWithinRoot(probe, path, root, out string? escaping));
+        Assert.NotNull(escaping);
+    }
 }

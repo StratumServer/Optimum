@@ -163,7 +163,7 @@ public static partial class InstallPathGuard
         return hasGame && !hasOptimum;
     }
 
-    private static string Canonical(ISystemProbe probe, string path)
+    internal static string Canonical(ISystemProbe probe, string path)
     {
         string trimmed = path.Trim();
 
@@ -195,10 +195,10 @@ public static partial class InstallPathGuard
     private static StringComparison Comparison(ISystemProbe probe) =>
         probe.Os == OsKind.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
-    private static bool PathEquals(ISystemProbe probe, string a, string b) =>
+    internal static bool PathEquals(ISystemProbe probe, string a, string b) =>
         string.Equals(a, b, Comparison(probe));
 
-    private static bool IsWithinOrEqual(ISystemProbe probe, string child, string parent)
+    internal static bool IsWithinOrEqual(ISystemProbe probe, string child, string parent)
     {
         if (PathEquals(probe, child, parent))
             return true;
