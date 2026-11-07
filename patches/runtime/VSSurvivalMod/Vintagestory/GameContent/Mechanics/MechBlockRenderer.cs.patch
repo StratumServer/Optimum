@@ -1,0 +1,13 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechBlockRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechBlockRenderer.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechBlockRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/Mechanics/MechBlockRenderer.cs
+@@ -48,7 +48,8 @@ public abstract class MechBlockRenderer : IRenderer, IDisposable
+ 		int num = 0;
+ 		foreach (IMechanicalPowerRenderable value in renderedDevices.Values)
+ 		{
+-			tmp.Set((float)((double)value.Position.X - cameraPos.X), (float)((double)value.Position.InternalY - cameraPos.Y), (float)((double)value.Position.Z - cameraPos.Z));
++			BlockPos position = value.Position;
++			tmp.Set((float)((double)position.X - cameraPos.X), (float)((double)position.InternalY - cameraPos.Y), (float)((double)position.Z - cameraPos.Z));
+ 			UpdateLightAndTransformMatrix(num, tmp, value.AngleRad % ((float)Math.PI * 2f), value);
+ 			num++;
+ 		}

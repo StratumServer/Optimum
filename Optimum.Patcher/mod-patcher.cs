@@ -249,6 +249,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.GearRenderer", "LoadShader", 0),
                 new("Vintagestory.GameContent.GearRenderer", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.GearRenderer", "updateSuperMechState", 2),
+                new("Vintagestory.GameContent.Mechanics.MechBlockRenderer", "UpdateCustomFloatBuffer", 0),
             ]);
     }
 
