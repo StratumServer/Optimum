@@ -1,0 +1,85 @@
+diff --git a/VSSurvivalMod/Block/BlockShelf.cs b/VSSurvivalMod/Block/BlockShelf.cs
+index 29beee7..c60a159 100644
+--- a/VSSurvivalMod/Block/BlockShelf.cs
++++ b/VSSurvivalMod/Block/BlockShelf.cs
+@@ -18,15 +18,20 @@ namespace Vintagestory.GameContent
+             PlacedPriorityInteract = true;
+             interactions = ObjectCacheUtil.GetOrCreate(api, "shelfInteractions", () =>
+             {
+-                List<ItemStack> usableItemStacklist = new List<ItemStack>();
++                List<ItemStack> mealContainerList = new List<ItemStack>();
++                List<ItemStack> crockSealerList = new List<ItemStack>();
+                 List<ItemStack> shelvableStacklist = new List<ItemStack>();
+ 
+                 foreach (var obj in api.World.Collectibles)
+                 {
+-                    if (obj?.Attributes?["mealContainer"]?.AsBool() == true || obj is IContainedInteractable or IBlockMealContainer ||
+-                        obj?.Attributes?["canSealCrock"]?.AsBool() == true)
++                    if (obj == null) continue;
++                    if (obj.Attributes?["mealContainer"]?.AsBool() == true || obj is IContainedInteractable or IBlockMealContainer)
+                     {
+-                        usableItemStacklist.Add(new ItemStack(obj));
++                        mealContainerList.Add(new ItemStack(obj));
++                    }
++                    if (obj.Attributes?["canSealCrock"]?.AsBool() == true)
++                    {
++                        crockSealerList.Add(new ItemStack(obj));
+                     }
+ 
+                     if (BlockEntityShelf.GetShelvableLayout(new ItemStack(obj)) != null)
+@@ -50,6 +55,10 @@ namespace Vintagestory.GameContent
+                 }
+ 
+                 var sstacks = shelvableStacklist.ToArray();
++                var mealContainers = mealContainerList.ToArray();
++                var crockSealers = crockSealerList.ToArray();
++                var sampleMealContainer = mealContainers.Length > 0 ? mealContainers[0] : null;
++                var sampleCrockSealer = crockSealers.Length > 0 ? crockSealers[0] : null;
+ 
+                 return new WorldInteraction[]
+                 {
+@@ -61,8 +70,11 @@ namespace Vintagestory.GameContent
+                         GetMatchingStacks = (wi, bs, es) =>
+                         {
+                             var beshelf = api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityShelf;
++                            if (beshelf == null) return null;
+ 
+-                            return usableItemStacklist.Where(stack => beshelf?.CanUse(stack, bs) == true)?.ToArray();
++                            if (sampleMealContainer != null && beshelf.CanUse(sampleMealContainer, bs)) return mealContainers;
++                            if (sampleCrockSealer != null && beshelf.CanUse(sampleCrockSealer, bs)) return crockSealers;
++                            return null;
+                         }
+                     },
+                     new WorldInteraction()
+@@ -73,9 +85,13 @@ namespace Vintagestory.GameContent
+                         GetMatchingStacks = (wi, bs, es) =>
+                         {
+                             var beshelf = api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityShelf;
++                            if (beshelf == null) return null;
+ 
+-                            if (usableItemStacklist.All(stack => beshelf?.CanUse(stack, bs) == false)) return [.. usableItemStacklist.Where(stack => beshelf?.CanPlace(stack, bs, out bool canTake) == true)];
+-                            else return null;
++                            bool canUse = (sampleMealContainer != null && beshelf.CanUse(sampleMealContainer, bs)) ||
++                                          (sampleCrockSealer != null && beshelf.CanUse(sampleCrockSealer, bs));
++
++                            if (!canUse && beshelf.CanPlace(null, bs, out _)) return sstacks;
++                            return null;
+                         }
+                     },
+                     new WorldInteraction()
+@@ -87,9 +103,13 @@ namespace Vintagestory.GameContent
+                         GetMatchingStacks = (wi, bs, es) =>
+                         {
+                             var beshelf = api.World.BlockAccessor.GetBlockEntity(bs.Position) as BlockEntityShelf;
++                            if (beshelf == null) return null;
+ 
+-                            if (usableItemStacklist.Any(stack => beshelf?.CanUse(stack, bs) == true)) return [.. usableItemStacklist.Where(stack => beshelf?.CanPlace(stack, bs, out bool canTake) == true)];
+-                            else return null;
++                            bool canUse = (sampleMealContainer != null && beshelf.CanUse(sampleMealContainer, bs)) ||
++                                          (sampleCrockSealer != null && beshelf.CanUse(sampleCrockSealer, bs));
++
++                            if (canUse && beshelf.CanPlace(null, bs, out _)) return sstacks;
++                            return null;
+                         }
+                     },
+                     new WorldInteraction()
