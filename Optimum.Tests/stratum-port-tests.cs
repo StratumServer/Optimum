@@ -696,4 +696,158 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region EvolvingNatFloat Tests
+
+    [Fact]
+    public void EvolvingNatFloat_Equals_ValueSemanticsAndIEquatable()
+    {
+        var a = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 2.5f);
+        var b = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 2.5f);
+        var c = new EvolvingNatFloat(EnumTransformFunction.QUADRATIC, 2.5f);
+        var d = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 3.0f);
+
+        Assert.IsAssignableFrom<IEquatable<EvolvingNatFloat>>(a);
+
+        // Value equality
+        Assert.True(a.Equals(b));
+        Assert.True(b.Equals(a));
+        Assert.True(a == b);
+        Assert.False(a != b);
+        Assert.True(a.Equals((object)b));
+        Assert.Equal(a.GetHashCode(), b.GetHashCode());
+
+        // Inequality by transform
+        Assert.False(a.Equals(c));
+        Assert.False(c.Equals(a));
+        Assert.False(a == c);
+        Assert.True(a != c);
+        Assert.False(a.Equals((object)c));
+
+        // Inequality by factor
+        Assert.False(a.Equals(d));
+        Assert.False(d.Equals(a));
+        Assert.False(a == d);
+        Assert.True(a != d);
+        Assert.False(a.Equals((object)d));
+
+        // Non-EvolvingNatFloat and null
+        Assert.False(a.Equals((object?)null));
+        Assert.False(a.Equals("other-type"));
+    }
+
+    [Fact]
+    public void OptimumApiBridge_EvolvingNatFloatEquals_MatchesSemantics()
+    {
+        var a = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 1.5f);
+        var b = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 1.5f);
+        var c = new EvolvingNatFloat(EnumTransformFunction.IDENTICAL, 1.5f);
+        var d = new EvolvingNatFloat(EnumTransformFunction.LINEAR, 2.0f);
+
+        Assert.True(OptimumApiBridge.EvolvingNatFloatEquals(a, b));
+        Assert.False(OptimumApiBridge.EvolvingNatFloatEquals(a, c));
+        Assert.False(OptimumApiBridge.EvolvingNatFloatEquals(a, d));
+    }
+
+    [Fact]
+    public void ApiPatcher_PatchEvolvingNatFloat_RewritesOperatorsAndInjectsIEquatableWithoutBoxing()
+    {
+        using ModuleDefinition module = ModuleDefinition.CreateModule("VintagestoryAPI", ModuleKind.Dll);
+        var evolvingNatFloat = new TypeDefinition(
+            "Vintagestory.API.MathTools",
+            "EvolvingNatFloat",
+            TypeAttributes.Public | TypeAttributes.SequentialLayout | TypeAttributes.AnsiClass | TypeAttributes.Sealed | TypeAttributes.BeforeFieldInit,
+            module.ImportReference(typeof(ValueType)));
+        module.Types.Add(evolvingNatFloat);
+
+        var opEquality = new MethodDefinition(
+            "op_Equality",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+            module.TypeSystem.Boolean);
+        opEquality.Parameters.Add(new ParameterDefinition("left", ParameterAttributes.None, evolvingNatFloat));
+        opEquality.Parameters.Add(new ParameterDefinition("right", ParameterAttributes.None, evolvingNatFloat));
+        opEquality.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        opEquality.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        evolvingNatFloat.Methods.Add(opEquality);
+
+        var opInequality = new MethodDefinition(
+            "op_Inequality",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+            module.TypeSystem.Boolean);
+        opInequality.Parameters.Add(new ParameterDefinition("left", ParameterAttributes.None, evolvingNatFloat));
+        opInequality.Parameters.Add(new ParameterDefinition("right", ParameterAttributes.None, evolvingNatFloat));
+        opInequality.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        opInequality.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        evolvingNatFloat.Methods.Add(opInequality);
+
+        var equalsBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(
+                nameof(OptimumApiBridge.EvolvingNatFloatEquals),
+                new[] { typeof(EvolvingNatFloat), typeof(EvolvingNatFloat) })!);
+
+        int patched = ApiPatcher.PatchEvolvingNatFloat(module, equalsBridge);
+
+        Assert.Equal(2, patched);
+
+        // Verify IEquatable<EvolvingNatFloat> interface is implemented
+        Assert.Contains(
+            evolvingNatFloat.Interfaces,
+            iface => iface.InterfaceType.FullName.StartsWith("System.IEquatable`1<Vintagestory.API.MathTools.EvolvingNatFloat"));
+
+        // Verify op_Equality calls bridge without boxing
+        Assert.Empty(opEquality.Body.Variables);
+        Assert.DoesNotContain(opEquality.Body.Instructions, ins => ins.OpCode == OpCodes.Box);
+        Assert.Collection(
+            opEquality.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(equalsBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        // Verify op_Inequality calls bridge and inverts without boxing
+        Assert.Empty(opInequality.Body.Variables);
+        Assert.DoesNotContain(opInequality.Body.Instructions, ins => ins.OpCode == OpCodes.Box);
+        Assert.Collection(
+            opInequality.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(equalsBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ldc_I4_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ceq, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        // Verify Equals(EvolvingNatFloat) method exists and loads this value type without boxing
+        var equalsMethod = evolvingNatFloat.Methods.Single(m =>
+            !m.IsStatic &&
+            m.Name == "Equals" &&
+            m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.FullName == evolvingNatFloat.FullName);
+
+        Assert.DoesNotContain(equalsMethod.Body.Instructions, ins => ins.OpCode == OpCodes.Box);
+        Assert.Collection(
+            equalsMethod.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Ldobj, ins.OpCode);
+                Assert.Equal(evolvingNatFloat.FullName, ((TypeReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(equalsBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+    }
+
+    #endregion
 }
