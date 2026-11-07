@@ -1,0 +1,30 @@
+diff --git a/VintagestoryApi/Math/EvolvingNatFloat.cs b/VintagestoryApi/Math/EvolvingNatFloat.cs
+index d7f08db..55d3d29 100644
+--- a/VintagestoryApi/Math/EvolvingNatFloat.cs
++++ b/VintagestoryApi/Math/EvolvingNatFloat.cs
+@@ -14,7 +14,7 @@ namespace Vintagestory.API.MathTools
+     /// </summary>
+     [DocumentAsJson]
+     [JsonObject(MemberSerialization.OptIn)]
+-    public struct EvolvingNatFloat
++    public struct EvolvingNatFloat : IEquatable<EvolvingNatFloat>
+     {
+         public static readonly EvolvingNatFloat NoValueSet = new EvolvingNatFloat(EnumTransformFunction.UNSPECIFIED, 0f);
+ 
+@@ -156,10 +156,14 @@ namespace Vintagestory.API.MathTools
+             return evo;
+         }
+ 
++        public bool Equals(EvolvingNatFloat other)
++        {
++            return other.Transform == Transform && other.factor == factor;
++        }
++
+         public override bool Equals([NotNullWhen(true)] object obj)
+         {
+-            if (obj is not EvolvingNatFloat enf) return false;
+-            return enf.Transform == Transform && enf.factor == factor;
++            return obj is EvolvingNatFloat enf && Equals(enf);
+         }
+ 
+         public static bool operator ==(EvolvingNatFloat left, EvolvingNatFloat right)

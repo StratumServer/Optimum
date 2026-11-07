@@ -95,6 +95,8 @@ public static class ApiPatcher
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 2);
         var wildcardUtilMatchThreeArg = bridge.Methods.Single(method =>
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 3);
+        var evolvingNatFloatEquals = bridge.Methods.Single(method =>
+            method.Name == "EvolvingNatFloatEquals" && method.Parameters.Count == 2);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -129,6 +131,9 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(wildcardUtilMatchTwoArg),
             vanilla.MainModule.ImportReference(wildcardUtilMatchThreeArg));
+        int evolvingNatFloatOperators = PatchEvolvingNatFloat(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(evolvingNatFloatEquals));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -199,6 +204,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 WildcardUtil methods patched, applied {wildcardUtilMethods}.");
         }
+        if (evolvingNatFloatOperators != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 EvolvingNatFloat equality operators patched, applied {evolvingNatFloatOperators}.");
+        }
         if (guiCompositionMetrics != 1)
         {
             throw new InvalidOperationException(
@@ -255,6 +265,7 @@ public static class ApiPatcher
                 $"{clientApiThreadContract} client API thread contract, " +
                 $"{ascii85Methods} Ascii85 methods, {registryObjectMethods} RegistryObject code part methods, " +
                 $"{wildcardUtilMethods} WildcardUtil methods, " +
+                $"{evolvingNatFloatOperators} EvolvingNatFloat equality operators, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
@@ -394,6 +405,95 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.Match(AssetLocation, AssetLocation) + Match(..., string[]) -> OptimumApiBridge");
         return 2;
+    }
+
+    internal static int PatchEvolvingNatFloat(ModuleDefinition module, MethodReference equalsBridge)
+    {
+        const string typeName = "Vintagestory.API.MathTools.EvolvingNatFloat";
+        var evolvingNatFloat = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var opEquality = evolvingNatFloat.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "op_Equality" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.FullName == typeName &&
+            method.Parameters[1].ParameterType.FullName == typeName &&
+            method.ReturnType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException($"{typeName}.op_Equality is missing from the vanilla API.");
+
+        var opInequality = evolvingNatFloat.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "op_Inequality" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.FullName == typeName &&
+            method.Parameters[1].ParameterType.FullName == typeName &&
+            method.ReturnType.MetadataType == MetadataType.Boolean)
+            ?? throw new InvalidOperationException($"{typeName}.op_Inequality is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(opEquality, equalsBridge);
+        RewriteTwoArgNegatedForwarder(opInequality, equalsBridge);
+
+        var iequatableOpen = module.ImportReference(typeof(IEquatable<>));
+        var iequatableOfSelf = new GenericInstanceType(iequatableOpen);
+        iequatableOfSelf.GenericArguments.Add(evolvingNatFloat);
+
+        if (!evolvingNatFloat.Interfaces.Any(i => i.InterfaceType.FullName == iequatableOfSelf.FullName))
+        {
+            evolvingNatFloat.Interfaces.Add(new InterfaceImplementation(iequatableOfSelf));
+        }
+
+        var equalsMethod = evolvingNatFloat.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "Equals" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.FullName == typeName &&
+            method.ReturnType.MetadataType == MetadataType.Boolean);
+
+        if (equalsMethod == null)
+        {
+            equalsMethod = new MethodDefinition(
+                "Equals",
+                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.NewSlot | MethodAttributes.Virtual | MethodAttributes.Final,
+                module.TypeSystem.Boolean);
+            equalsMethod.Parameters.Add(new ParameterDefinition("other", ParameterAttributes.None, evolvingNatFloat));
+            evolvingNatFloat.Methods.Add(equalsMethod);
+        }
+
+        ClearDebugInformation(equalsMethod);
+        var body = new MethodBody(equalsMethod) { InitLocals = false };
+        var il = body.GetILProcessor();
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldobj, evolvingNatFloat));
+        il.Append(Instruction.Create(OpCodes.Ldarg_1));
+        il.Append(Instruction.Create(OpCodes.Call, equalsBridge));
+        il.Append(Instruction.Create(OpCodes.Ret));
+        equalsMethod.Body = body;
+
+        Console.WriteLine($"  API PATCHED: {typeName}.op_Equality + op_Inequality + Equals(EvolvingNatFloat) -> OptimumApiBridge");
+        return 2;
+    }
+
+    private static void RewriteTwoArgNegatedForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ldc_I4_0));
+        processor.Append(Instruction.Create(OpCodes.Ceq));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
     }
 
     private static void RewriteThreeArgForwarder(MethodDefinition target, MethodReference bridgeMethod)

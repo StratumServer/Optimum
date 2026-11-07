@@ -492,4 +492,9 @@ public static class OptimumApiBridge
 
         return true;
     }
+
+    public static bool EvolvingNatFloatEquals(EvolvingNatFloat left, EvolvingNatFloat right)
+    {
+        return left.Transform == right.Transform && left.Factor == right.Factor;
+    }
 }
