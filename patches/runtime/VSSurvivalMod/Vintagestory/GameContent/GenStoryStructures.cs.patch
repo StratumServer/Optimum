@@ -1,0 +1,49 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/GenStoryStructures.cs b/VSSurvivalMod/Vintagestory/GameContent/GenStoryStructures.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/GenStoryStructures.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/GenStoryStructures.cs
+@@ -267,6 +267,24 @@ public class GenStoryStructures : ModSystem, IStoryStructureSystem
+ 			obj.MaxSpawnDistX = (int)((double)obj.MaxSpawnDistX * num);
+ 			obj.MaxSpawnDistZ = (int)((double)obj.MaxSpawnDistZ * num);
+ 		}
++		int maxUsableHeight = api.World.BlockAccessor.MapSizeY - 2;
++		List<WorldGenStoryStructure> list2 = new List<WorldGenStoryStructure>();
++		WorldGenStoryStructure[] structures2 = scfg.Structures;
++		foreach (WorldGenStoryStructure worldGenStoryStructure in structures2)
++		{
++			if (worldGenStoryStructure.schematicData != null && worldGenStoryStructure.schematicData.SizeY > maxUsableHeight)
++			{
++				api.Logger.Warning($"Story structure {worldGenStoryStructure.Code} height ({worldGenStoryStructure.schematicData.SizeY}) exceeds usable world height ({maxUsableHeight}). It will not be generated.");
++			}
++			else
++			{
++				list2.Add(worldGenStoryStructure);
++			}
++		}
++		if (list2.Count != scfg.Structures.Length)
++		{
++			scfg.Structures = list2.ToArray();
++		}
+ 		DetermineStoryStructures();
+ 		strucRand.SetWorldSeed(api.WorldManager.Seed + 1095);
+ 	}
+@@ -602,6 +620,20 @@ public class GenStoryStructures : ModSystem, IStoryStructureSystem
+ 				StoryStructureInstancesDirty = true;
+ 				blockPos.Y = location.Y1;
+ 			}
++			int maxY = api.World.BlockAccessor.MapSizeY;
++			if (location.Y1 < 1)
++			{
++				location.Y1 = 1;
++				location.Y2 = location.Y1 + worldGenStoryStructure.schematicData.SizeY;
++				StoryStructureInstancesDirty = true;
++			}
++			if (location.Y2 > maxY - 1)
++			{
++				location.Y2 = maxY - 1;
++				location.Y1 = Math.Max(1, location.Y2 - worldGenStoryStructure.schematicData.SizeY);
++				StoryStructureInstancesDirty = true;
++			}
++			blockPos.Y = location.Y1;
+ 			Block block = null;
+ 			if (worldGenStoryStructure.resolvedRockTypeRemaps != null)
+ 			{

@@ -1069,4 +1069,37 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region GenStoryStructures Tests
+
+    [Fact]
+    public void GenStoryStructures_WorldGenClampingAndValidation_Injected()
+    {
+        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
+        if (!System.IO.File.Exists(survivalDll))
+        {
+            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        }
+        Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
+        var storyGenType = module.GetType("Vintagestory.GameContent.GenStoryStructures");
+        Assert.NotNull(storyGenType);
+
+        var initMethod = storyGenType.Methods.Single(m => m.Name == "InitWorldGen" && m.Parameters.Count == 0);
+        Assert.NotNull(initMethod);
+        // Verify InitWorldGen checks MapSizeY
+        Assert.Contains(initMethod.Body.Instructions, ins =>
+            ins.Operand is MethodReference mr && mr.Name == "get_MapSizeY");
+
+        var columnGenMethod = storyGenType.Methods.Single(m => m.Name == "OnChunkColumnGen" && m.Parameters.Count == 1);
+        Assert.NotNull(columnGenMethod);
+        // Verify OnChunkColumnGen reads MapSizeY and clamps coordinates with Math.Max
+        Assert.Contains(columnGenMethod.Body.Instructions, ins =>
+            ins.Operand is MethodReference mr && mr.Name == "get_MapSizeY");
+        Assert.Contains(columnGenMethod.Body.Instructions, ins =>
+            ins.Operand is MethodReference mr && mr.Name == "Max" && mr.DeclaringType.Name == "Math");
+    }
+
+    #endregion
 }
