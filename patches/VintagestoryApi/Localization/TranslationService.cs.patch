@@ -1,0 +1,45 @@
+diff --git a/VintagestoryApi/Localization/TranslationService.cs b/VintagestoryApi/Localization/TranslationService.cs
+--- a/VintagestoryApi/Localization/TranslationService.cs
++++ b/VintagestoryApi/Localization/TranslationService.cs
+@@ -75,20 +75,31 @@
+             var regexCache = new Dictionary<string, KeyValuePair<Regex, string>>();
+             var wildcardCache = new Dictionary<string, string>();
+ 
+-            var origins = assetManager.Origins;
++            string langFileName = LanguageCode + ".json";
++            string worldconfigLangFileName = "worldconfig-" + LanguageCode + ".json";
+ 
+-            foreach (var asset in origins.SelectMany(p => p.GetAssets(AssetCategory.lang).Where(a => a.Name.Equals($"{LanguageCode}.json") || a.Name.Equals($"worldconfig-{LanguageCode}.json"))))
++            var origins = assetManager.Origins;
++            for (int i = 0; i < origins.Count; i++)
+             {
++                var assets = origins[i].GetAssets(AssetCategory.lang);
++                if (assets == null) continue;
+ 
+-                try
+-                {
+-                    var json = asset.ToText();
+-                    LoadEntries(entryCache, regexCache, wildcardCache, JsonConvert.DeserializeObject<Dictionary<string, string>>(json), asset.Location.Domain);
+-                }
+-                catch (Exception ex)
++                for (int j = 0; j < assets.Count; j++)
+                 {
+-                    logger.Error($"Failed to load language file: {asset.Name}");
+-                    logger.Error(ex);
++                    var asset = assets[j];
++                    if (asset.Name.Equals(langFileName) || asset.Name.Equals(worldconfigLangFileName))
++                    {
++                        try
++                        {
++                            var json = asset.ToText();
++                            LoadEntries(entryCache, regexCache, wildcardCache, JsonConvert.DeserializeObject<Dictionary<string, string>>(json), asset.Location.Domain);
++                        }
++                        catch (Exception ex)
++                        {
++                            logger.Error($"Failed to load language file: {asset.Name}");
++                            logger.Error(ex);
++                        }
++                    }
+                 }
+             }
+ 
