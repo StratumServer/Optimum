@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..0542382 100644
+index 6f7730e..e8e11c9 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,644 @@
+@@ -32,37 +32,660 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -482,8 +482,24 @@ index 6f7730e..0542382 100644
 +		internal bool RecordClip(bool preserve) => TryRecord(rec => rec.RecordClip(preserve));
 +		internal bool RecordResetClip() => TryRecord(rec => rec.RecordResetClip());
 +		internal bool RecordedInClip(double x, double y) { if (aliasOwner != null && managedOnly) return aliasOwner.RecordedInClip (x, y); lock (recordingSync) return recorder.InClip(x, y); }
-+		internal bool RecordBlur(double range, int edge, int x1, int y1, int x2, int y2, bool full) => TryRecord(rec => rec.RecordBlur(range, edge, x1, y1, x2, y2, full));
-+		internal bool RecordDemultiplyAlpha() => TryRecord(rec => rec.RecordDemultiplyAlpha());
++		internal bool RecordBlur(double range, int edge, int x1, int y1, int x2, int y2, bool full)
++		{
++			if (aliasOwner != null && managedOnly) return aliasOwner.RecordBlur(range, edge, x1, y1, x2, y2, full);
++			if (this is ImageSurface img && img.HasDirectBacking) {
++				img.FlushDirectSurface();
++				return false;
++			}
++			return TryRecord(rec => rec.RecordBlur(range, edge, x1, y1, x2, y2, full));
++		}
++		internal bool RecordDemultiplyAlpha()
++		{
++			if (aliasOwner != null && managedOnly) return aliasOwner.RecordDemultiplyAlpha();
++			if (this is ImageSurface img && img.HasDirectBacking) {
++				img.FlushDirectSurface();
++				return false;
++			}
++			return TryRecord(rec => rec.RecordDemultiplyAlpha());
++		}
 +		internal bool RecordImage(SKBitmap bitmap, int x, int y, int width, int height) => TryRecord(rec => rec.RecordImage(bitmap, x, y, width, height));
 +		internal bool RecordPicture(SKPicture picture, int x, int y, int width, int height, int? tint, Action<Context> replay, bool textureColorOrder = false, RecordedPreparationCache.Picture pictureOwner = null) => TryRecord(rec => rec.RecordPicture(picture, x, y, width, height, tint, replay, textureColorOrder, pictureOwner));
 +		internal bool RecordPicture(SKPicture picture, int x, int y, Action<Context> replay) => RecordPicture(picture, x, y, 0, 0, null, replay);
@@ -652,7 +668,7 @@ index 6f7730e..0542382 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +694,299 @@ namespace Cairo
+@@ -87,141 +710,299 @@ namespace Cairo
  		}
  
  
