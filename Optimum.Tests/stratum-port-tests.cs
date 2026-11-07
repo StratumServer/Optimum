@@ -1039,4 +1039,34 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region LerpedWeightedIndex2DMap Tests
+
+    [Fact]
+    public void LerpedWeightedIndex2DMap_WeightsAt_UsesArrayClearAndPrecomputedRows()
+    {
+        string essentialsDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSEssentials.dll");
+        if (!System.IO.File.Exists(essentialsDll))
+        {
+            essentialsDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSEssentials.dll");
+        }
+        Assert.True(System.IO.File.Exists(essentialsDll), $"VSEssentials.dll not found at {essentialsDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(essentialsDll).MainModule;
+        var mapType = module.GetType("Vintagestory.ServerMods.LerpedWeightedIndex2DMap");
+        Assert.NotNull(mapType);
+
+        var weightsMethod = mapType.Methods.Single(m => m.Name == "WeightsAt" && m.Parameters.Count == 3);
+        Assert.NotNull(weightsMethod);
+
+        // Verify Array.Clear is called to zero output
+        Assert.Contains(weightsMethod.Body.Instructions, ins =>
+            ins.OpCode == OpCodes.Call && ins.Operand is MethodReference mr && mr.Name == "Clear" && mr.DeclaringType.Name == "Array");
+
+        // Verify multiplication by sizeX is hoisted (done exactly 2 times for rowLeft and rowRight, instead of 4 times)
+        int mulInstructions = weightsMethod.Body.Instructions.Count(ins => ins.OpCode == OpCodes.Mul);
+        Assert.Equal(2, mulInstructions);
+    }
+
+    #endregion
 }

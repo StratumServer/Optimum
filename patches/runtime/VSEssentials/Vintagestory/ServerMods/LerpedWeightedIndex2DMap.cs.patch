@@ -1,0 +1,25 @@
+diff --git a/VSEssentials/Vintagestory/ServerMods/LerpedWeightedIndex2DMap.cs b/VSEssentials/Vintagestory/ServerMods/LerpedWeightedIndex2DMap.cs
+--- a/VSEssentials/Vintagestory/ServerMods/LerpedWeightedIndex2DMap.cs
++++ b/VSEssentials/Vintagestory/ServerMods/LerpedWeightedIndex2DMap.cs
+@@ -96,16 +96,15 @@ public class LerpedWeightedIndex2DMap
+ 	public float[] WeightsAt(float x, float z, float[] output)
+ 	{
+-		for (int i = 0; i < output.Length; i++)
+-		{
+-			output[i] = 0f;
+-		}
++		Array.Clear(output, 0, output.Length);
+ 		int num = (int)Math.Floor(x - 0.5f) + topleftPadding;
+ 		int num2 = num + 1;
+ 		int num3 = (int)Math.Floor(z - 0.5f) + topleftPadding;
+ 		int num4 = num3 + 1;
+ 		float lerp = x - ((float)(num - topleftPadding) + 0.5f);
+ 		float num5 = z - ((float)(num3 - topleftPadding) + 0.5f);
+-		HalfBiLerp(groups[num3 * sizeX + num], groups[num3 * sizeX + num2], lerp, output, 1f - num5);
+-		HalfBiLerp(groups[num4 * sizeX + num], groups[num4 * sizeX + num2], lerp, output, num5);
++		int rowLeft = num3 * sizeX;
++		int rowRight = num4 * sizeX;
++		HalfBiLerp(groups[rowLeft + num], groups[rowLeft + num2], lerp, output, 1f - num5);
++		HalfBiLerp(groups[rowRight + num], groups[rowRight + num2], lerp, output, num5);
+ 		return output;
+ 	}

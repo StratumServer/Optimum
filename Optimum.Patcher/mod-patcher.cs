@@ -177,6 +177,7 @@ public static class ModPatcher
                 new("Vintagestory.ServerMods.TreeGen", "growBranch", 13),
                 new("Vintagestory.ServerMods.TreeGen", "PlaceBlockEtc", 5),
                 new("Vintagestory.ServerMods.NoObf.BlockPatch", "Generate", 7),
+                new("Vintagestory.ServerMods.LerpedWeightedIndex2DMap", "WeightsAt", 3),
             ]);
     }
 
