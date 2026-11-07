@@ -410,4 +410,51 @@ public static class OptimumApiBridge
         }
         return length;
     }
+
+    public static string? RegistryObjectLastCodePart(RegistryObject? obj, int posFromRight = 0)
+    {
+        if (obj?.Code == null) return null;
+        string path = obj.Code.Path;
+        if (posFromRight == 0 && !path.Contains('-')) return path;
+        if (posFromRight < 0)
+        {
+            _ = path.Length;
+            throw new IndexOutOfRangeException();
+        }
+
+        int end = path.Length;
+        for (int skip = 0; skip < posFromRight; skip++)
+        {
+            int dash = path.LastIndexOf('-', end - 1);
+            if (dash < 0) return null;
+            end = dash;
+        }
+        int start = path.LastIndexOf('-', end - 1) + 1;
+        return path.Substring(start, end - start);
+    }
+
+    public static string? RegistryObjectFirstCodePart(RegistryObject? obj, int posFromLeft = 0)
+    {
+        if (obj?.Code == null) return null;
+        string path = obj.Code.Path;
+        if (posFromLeft == 0 && !path.Contains('-')) return path;
+        if (posFromLeft < 0)
+        {
+            _ = path.Length;
+            throw new IndexOutOfRangeException();
+        }
+
+        int start = 0;
+        int part = 0;
+        int pathLength = path.Length;
+        for (int i = 0; i < pathLength; i++)
+        {
+            if (path[i] != '-') continue;
+            if (part == posFromLeft) return path.Substring(start, i - start);
+            part++;
+            start = i + 1;
+        }
+
+        return part == posFromLeft ? path.Substring(start) : null;
+    }
 }

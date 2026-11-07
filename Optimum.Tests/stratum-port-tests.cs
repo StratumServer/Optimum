@@ -440,21 +440,23 @@ public class StratumPortTests
 
     #region RegistryObject FirstCodePart/LastCodePart Tests
 
-    [Fact(Skip = "Requires fork patches: OptimumDiagnostics")]
-    public void FirstCodePart_NoDash_ReturnsFullPath()
+    private sealed class DummyRegistryObject : RegistryObject
     {
-        // Simulate the logic: path "granite" with no dash
-        string path = "granite";
-        int posFromLeft = 0;
-        if (posFromLeft == 0 && !path.Contains('-'))
+        public DummyRegistryObject(string? path)
         {
-            Assert.Equal("granite", path);
-            return;
+            Code = path != null ? new AssetLocation("game", path) : null;
         }
-        Assert.Fail("Should have returned early");
     }
 
-    [Theory(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Fact]
+    public void FirstCodePart_NoDash_ReturnsFullPath()
+    {
+        var obj = new DummyRegistryObject("granite");
+        Assert.Equal("granite", obj.FirstCodePart(0));
+        Assert.Null(obj.FirstCodePart(1));
+    }
+
+    [Theory]
     [InlineData("rock-granite-polished", 0, "rock")]
     [InlineData("rock-granite-polished", 1, "granite")]
     [InlineData("rock-granite-polished", 2, "polished")]
@@ -462,20 +464,12 @@ public class StratumPortTests
     [InlineData("a-b", 1, "b")]
     public void FirstCodePart_Logic_MatchesSplitBehavior(string path, int posFromLeft, string expected)
     {
-        // Replicate the optimized FirstCodePart logic
-        int start = 0;
-        for (int skip = 0; skip < posFromLeft; skip++)
-        {
-            int dash = path.IndexOf('-', start);
-            if (dash < 0) { Assert.Fail("posFromLeft too high"); return; }
-            start = dash + 1;
-        }
-        int end = path.IndexOf('-', start);
-        string result = end < 0 ? path.Substring(start) : path.Substring(start, end - start);
-        Assert.Equal(expected, result);
+        var obj = new DummyRegistryObject(path);
+        Assert.Equal(expected, obj.FirstCodePart(posFromLeft));
+        Assert.Equal(expected, OptimumApiBridge.RegistryObjectFirstCodePart(obj, posFromLeft));
     }
 
-    [Theory(Skip = "Requires fork patches: OptimumDiagnostics")]
+    [Theory]
     [InlineData("rock-granite-polished", 0, "polished")]
     [InlineData("rock-granite-polished", 1, "granite")]
     [InlineData("rock-granite-polished", 2, "rock")]
@@ -483,17 +477,101 @@ public class StratumPortTests
     [InlineData("a-b", 1, "a")]
     public void LastCodePart_Logic_MatchesSplitBehavior(string path, int posFromRight, string expected)
     {
-        // Replicate the optimized LastCodePart logic
-        int end = path.Length;
-        for (int skip = 0; skip < posFromRight; skip++)
-        {
-            int dash = path.LastIndexOf('-', end - 1);
-            if (dash < 0) { Assert.Fail("posFromRight too high"); return; }
-            end = dash;
-        }
-        int start = path.LastIndexOf('-', end - 1);
-        string result = start < 0 ? path.Substring(0, end) : path.Substring(start + 1, end - start - 1);
-        Assert.Equal(expected, result);
+        var obj = new DummyRegistryObject(path);
+        Assert.Equal(expected, obj.LastCodePart(posFromRight));
+        Assert.Equal(expected, OptimumApiBridge.RegistryObjectLastCodePart(obj, posFromRight));
+    }
+
+    [Fact]
+    public void CodePart_NullCodeOrOutOfBounds_ReturnsNull()
+    {
+        var nullObj = new DummyRegistryObject(null);
+        Assert.Null(nullObj.FirstCodePart(0));
+        Assert.Null(nullObj.LastCodePart(0));
+        Assert.Null(OptimumApiBridge.RegistryObjectFirstCodePart(nullObj, 0));
+        Assert.Null(OptimumApiBridge.RegistryObjectLastCodePart(nullObj, 0));
+
+        var obj = new DummyRegistryObject("rock-granite");
+        Assert.Null(obj.FirstCodePart(2));
+        Assert.Null(obj.LastCodePart(2));
+        Assert.Null(obj.FirstCodePart(100));
+        Assert.Null(obj.LastCodePart(100));
+        Assert.Null(OptimumApiBridge.RegistryObjectFirstCodePart(obj, 2));
+        Assert.Null(OptimumApiBridge.RegistryObjectLastCodePart(obj, 2));
+    }
+
+    [Fact]
+    public void CodePart_NegativeIndex_ThrowsIndexOutOfRangeException()
+    {
+        var obj = new DummyRegistryObject("rock-granite");
+        Assert.Throws<IndexOutOfRangeException>(() => obj.FirstCodePart(-1));
+        Assert.Throws<IndexOutOfRangeException>(() => obj.LastCodePart(-1));
+        Assert.Throws<IndexOutOfRangeException>(() => OptimumApiBridge.RegistryObjectFirstCodePart(obj, -1));
+        Assert.Throws<IndexOutOfRangeException>(() => OptimumApiBridge.RegistryObjectLastCodePart(obj, -1));
+    }
+
+    [Fact]
+    public void RegistryObject_ApiPatcher_RewritesMethodsToCallOptimumApiBridge()
+    {
+        using var module = ModuleDefinition.CreateModule("RegistryObjectPatchTest", ModuleKind.Dll);
+        var registryObject = new TypeDefinition(
+            "Vintagestory.API.Common",
+            "RegistryObject",
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.BeforeFieldInit,
+            module.TypeSystem.Object);
+        module.Types.Add(registryObject);
+
+        var firstCodePart = new MethodDefinition(
+            "FirstCodePart",
+            MethodAttributes.Public | MethodAttributes.HideBySig,
+            module.TypeSystem.String);
+        firstCodePart.Parameters.Add(new ParameterDefinition("posFromLeft", ParameterAttributes.Optional, module.TypeSystem.Int32));
+        firstCodePart.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        firstCodePart.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        firstCodePart.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        registryObject.Methods.Add(firstCodePart);
+
+        var lastCodePart = new MethodDefinition(
+            "LastCodePart",
+            MethodAttributes.Public | MethodAttributes.HideBySig,
+            module.TypeSystem.String);
+        lastCodePart.Parameters.Add(new ParameterDefinition("posFromRight", ParameterAttributes.Optional, module.TypeSystem.Int32));
+        lastCodePart.Body.Variables.Add(new VariableDefinition(module.TypeSystem.Int32));
+        lastCodePart.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        lastCodePart.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        registryObject.Methods.Add(lastCodePart);
+
+        var firstCodePartBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.RegistryObjectFirstCodePart), new[] { typeof(RegistryObject), typeof(int) })!);
+        var lastCodePartBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(nameof(OptimumApiBridge.RegistryObjectLastCodePart), new[] { typeof(RegistryObject), typeof(int) })!);
+
+        int patched = ApiPatcher.PatchRegistryObjectCodeParts(module, firstCodePartBridge, lastCodePartBridge);
+
+        Assert.Equal(2, patched);
+        Assert.Empty(firstCodePart.Body.Variables);
+        Assert.Collection(
+            firstCodePart.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(firstCodePartBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
+
+        Assert.Empty(lastCodePart.Body.Variables);
+        Assert.Collection(
+            lastCodePart.Body.Instructions,
+            ins => Assert.Equal(OpCodes.Ldarg_0, ins.OpCode),
+            ins => Assert.Equal(OpCodes.Ldarg_1, ins.OpCode),
+            ins =>
+            {
+                Assert.Equal(OpCodes.Call, ins.OpCode);
+                Assert.Equal(lastCodePartBridge.FullName, ((MethodReference)ins.Operand).FullName);
+            },
+            ins => Assert.Equal(OpCodes.Ret, ins.OpCode));
     }
 
     #endregion

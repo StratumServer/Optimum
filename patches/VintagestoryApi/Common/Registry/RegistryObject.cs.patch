@@ -2,7 +2,7 @@ diff --git a/VintagestoryApi/Common/Registry/RegistryObject.cs b/VintagestoryApi
 index f095fbc..cfcc08b 100644
 --- a/VintagestoryApi/Common/Registry/RegistryObject.cs
 +++ b/VintagestoryApi/Common/Registry/RegistryObject.cs
-@@ -211,28 +211,55 @@ namespace Vintagestory.API.Common
+@@ -211,28 +211,61 @@ namespace Vintagestory.API.Common
          /// <param name="posFromRight"></param>
          /// <returns></returns>
          public string LastCodePart(int posFromRight = 0)
@@ -11,6 +11,12 @@ index f095fbc..cfcc08b 100644
 -            if (posFromRight == 0 && !Code.Path.Contains('-')) return Code.Path;
 +            string path = Code.Path;
 +            if (posFromRight == 0 && !path.Contains('-')) return path;
++            if (posFromRight < 0)
++            {
++                // Split dereferences Path before the vanilla array access throws.
++                _ = path.Length;
++                throw new IndexOutOfRangeException();
++            }
  
 -            string[] parts = Code.Path.Split('-');
 -            return parts.Length - 1 - posFromRight >= 0 ? parts[parts.Length - 1 - posFromRight] : null;
