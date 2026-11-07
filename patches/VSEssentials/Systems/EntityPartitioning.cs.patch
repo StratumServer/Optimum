@@ -1,0 +1,127 @@
+diff --git a/VSEssentials/Systems/EntityPartitioning.cs b/VSEssentials/Systems/EntityPartitioning.cs
+index a0aa3b8..9eb2035 100644
+--- a/VSEssentials/Systems/EntityPartitioning.cs
++++ b/VSEssentials/Systems/EntityPartitioning.cs
+@@ -21,10 +21,28 @@ namespace Vintagestory.GameContent
+         public EntityPartitionChunk()
+         {
+             Entities = new List<Entity>[EntityPartitioning.partitionsLength * EntityPartitioning.partitionsLength];
+         }
+ 
++        public void Clear()
++        {
++            if (Entities != null)
++            {
++                for (int i = 0; i < Entities.Length; i++)
++                {
++                    Entities[i]?.Clear();
++                }
++            }
++            if (InanimateEntities != null)
++            {
++                for (int i = 0; i < InanimateEntities.Length; i++)
++                {
++                    InanimateEntities[i]?.Clear();
++                }
++            }
++        }
++
+         public List<Entity> Add(Entity e, int gridIndex)
+         {
+             List<Entity> list = e.IsCreature ?
+                 FetchOrCreateList(ref Entities[gridIndex]) :
+                 FetchOrCreateList(ref (InanimateEntities ??= new List<Entity>[EntityPartitioning.partitionsLength * EntityPartitioning.partitionsLength])[gridIndex]);
+@@ -70,10 +88,12 @@ namespace Vintagestory.GameContent
+         /// <summary>
+         /// The key is the chunkIndex3d (including dimension Y value) so that different dimensions are partitioned into separate EntityPartitionChunk
+         /// </summary>
+         public Dictionary<long, EntityPartitionChunk> Partitions = new Dictionary<long, EntityPartitionChunk>();
+ 
++        private readonly Stack<EntityPartitionChunk> chunkPool = new Stack<EntityPartitionChunk>();
++
+         const int chunkSize = GlobalConstants.ChunkSize;
+ 
+ 
+         /// <summary>
+         /// Updated every frame. The largest hitbox length of all loaded entities.
+@@ -132,10 +152,18 @@ namespace Vintagestory.GameContent
+             long chunkMapSizeX = api.World.BlockAccessor.MapSizeX / chunkSize;
+             long chunkMapSizeZ = api.World.BlockAccessor.MapSizeZ / chunkSize;
+             double largestTouchDistance = 0;
+ 
+             var Partitions = this.Partitions;
++            foreach (var partition in Partitions.Values)
++            {
++                partition.Clear();
++                if (chunkPool.Count < 512)
++                {
++                    chunkPool.Push(partition);
++                }
++            }
+             Partitions.Clear();
+ 
+             foreach (var entity in entities)
+             {
+                 if (entity.IsCreature)
+@@ -150,27 +178,55 @@ namespace Vintagestory.GameContent
+                 int gridIndex = (z / gridSizeInBlocks) % partitionsLength * partitionsLength + (x / gridSizeInBlocks) % partitionsLength;
+                 if (gridIndex < 0) continue;    // entities could be outside the map edge
+ 
+                 long nowInChunkIndex3d = MapUtil.Index3dL(x / chunkSize, (int)pos.InternalY / chunkSize, z / chunkSize, chunkMapSizeX, chunkMapSizeZ);
+ 
++                if (!Partitions.TryGetValue(nowInChunkIndex3d, out EntityPartitionChunk partition))
++                {
++                    partition = chunkPool.Count > 0 ? chunkPool.Pop() : new EntityPartitionChunk();
++                    Partitions[nowInChunkIndex3d] = partition;
++                }
++
++                var list = partition.Add(entity, gridIndex);
++                if (entity is EntityPlayer ep) ep.entityListForPartitioning = list;
++            }
++
++            this.LargestTouchDistance = largestTouchDistance;   // Only write to the field when we finished the operation, there could be 10k entities
++        }
++
++        private void PartitionSingleEntity(Entity entity)
++        {
++            if (entity.IsCreature)
++            {
++                if (entity.touchDistance > LargestTouchDistance) LargestTouchDistance = entity.touchDistance;
++            }
++
++            EntityPos pos = entity.Pos;
++
++            int x = (int)pos.X;
++            int z = (int)pos.Z;
++            int gridIndex = (z / gridSizeInBlocks) % partitionsLength * partitionsLength + (x / gridSizeInBlocks) % partitionsLength;
++            if (gridIndex < 0) return;
++
++            long chunkMapSizeX = api.World.BlockAccessor.MapSizeX / chunkSize;
++            long chunkMapSizeZ = api.World.BlockAccessor.MapSizeZ / chunkSize;
++            long nowInChunkIndex3d = MapUtil.Index3dL(x / chunkSize, (int)pos.InternalY / chunkSize, z / chunkSize, chunkMapSizeX, chunkMapSizeZ);
++
+             if (!Partitions.TryGetValue(nowInChunkIndex3d, out EntityPartitionChunk partition))
+             {
+-                Partitions[nowInChunkIndex3d] = partition = new EntityPartitionChunk();
++                partition = chunkPool.Count > 0 ? chunkPool.Pop() : new EntityPartitionChunk();
++                Partitions[nowInChunkIndex3d] = partition;
+             }
+ 
+             var list = partition.Add(entity, gridIndex);
+             if (entity is EntityPlayer ep) ep.entityListForPartitioning = list;
+         }
+ 
+-            this.LargestTouchDistance = largestTouchDistance;   // Only write to the field when we finished the operation, there could be 10k entities
+-        }
+-
+-
+         public void RePartitionPlayer(EntityPlayer entity)
+         {
+             entity.entityListForPartitioning?.Remove(entity);
+-            PartitionEntities(new Entity[] { entity });
++            PartitionSingleEntity(entity);
+         }
+ 
+         private void OnSwitchedGameMode(IServerPlayer player)
+         {
+             RePartitionPlayer(player.Entity);
