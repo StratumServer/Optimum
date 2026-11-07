@@ -1,0 +1,95 @@
+diff --git a/VSEssentials/Entity/AI/AiTaskManager.cs b/VSEssentials/Entity/AI/AiTaskManager.cs
+index 86955cb..d8544cb 100644
+--- a/VSEssentials/Entity/AI/AiTaskManager.cs
++++ b/VSEssentials/Entity/AI/AiTaskManager.cs
+@@ -102,11 +102,43 @@ public sealed class AiTaskManager(Entity entity)
+ 
+     public event Action<IAiTask>? OnTaskStarted;
+     public event Action<IAiTask>? OnTaskStopped;
++
++    private ActionBoolReturn<IAiTask>? _onShouldExecuteTask;
++    private ActionBoolReturn<IAiTask>[]? _onShouldExecuteTaskCached;
++
+     /// <summary>
+     /// All delegates must return true to execute the task
+     /// </summary>
+-    public event ActionBoolReturn<IAiTask>? OnShouldExecuteTask;
+-    public event OnExecuteTaskDelegate? OnExecuteTask;
++    public event ActionBoolReturn<IAiTask>? OnShouldExecuteTask
++    {
++        add
++        {
++            _onShouldExecuteTask += value;
++            _onShouldExecuteTaskCached = _onShouldExecuteTask == null ? null : Array.ConvertAll(_onShouldExecuteTask.GetInvocationList(), d => (ActionBoolReturn<IAiTask>)d);
++        }
++        remove
++        {
++            _onShouldExecuteTask -= value;
++            _onShouldExecuteTaskCached = _onShouldExecuteTask == null ? null : Array.ConvertAll(_onShouldExecuteTask.GetInvocationList(), d => (ActionBoolReturn<IAiTask>)d);
++        }
++    }
++
++    private OnExecuteTaskDelegate? _onExecuteTask;
++    private OnExecuteTaskDelegate[]? _onExecuteTaskCached;
++
++    public event OnExecuteTaskDelegate? OnExecuteTask
++    {
++        add
++        {
++            _onExecuteTask += value;
++            _onExecuteTaskCached = _onExecuteTask == null ? null : Array.ConvertAll(_onExecuteTask.GetInvocationList(), d => (OnExecuteTaskDelegate)d);
++        }
++        remove
++        {
++            _onExecuteTask -= value;
++            _onExecuteTaskCached = _onExecuteTask == null ? null : Array.ConvertAll(_onExecuteTask.GetInvocationList(), d => (OnExecuteTaskDelegate)d);
++        }
++    }
+ 
+     public const int ActiveTasksSlotsNumber = 8;
+ 
+@@ -172,16 +204,15 @@ public sealed class AiTaskManager(Entity entity)
+     {
+         IAiTask? activeTask = activeTasksBySlot[slot];
+ 
+-        if (OnExecuteTask != null)
++        var onExecuteHandlers = _onExecuteTaskCached;
++        if (onExecuteHandlers != null)
+         {
+-            bool execute = true;
+-            foreach (OnExecuteTaskDelegate dele in OnExecuteTask.GetInvocationList().Cast<OnExecuteTaskDelegate>())
++            for (int i = 0; i < onExecuteHandlers.Length; i++)
+             {
+-                execute &= dele(task, activeTask);
+-            }
+-            if (!execute)
+-            {
+-                return;
++                if (!onExecuteHandlers[i](task, activeTask))
++                {
++                    return;
++                }
+             }
+         }
+ 
+@@ -474,15 +505,15 @@ public sealed class AiTaskManager(Entity entity)
+ 
+     private bool ShouldExecuteTask(IAiTask task)
+     {
+-        if (OnShouldExecuteTask == null) return true;
++        var handlers = _onShouldExecuteTaskCached;
++        if (handlers == null) return true;
+ 
+-        bool exec = true;
+-        foreach (ActionBoolReturn<IAiTask> dele in OnShouldExecuteTask.GetInvocationList())
++        for (int i = 0; i < handlers.Length; i++)
+         {
+-            exec &= dele(task);
++            if (!handlers[i](task)) return false;
+         }
+ 
+-        return exec;
++        return true;
+     }
+ 
+     private void ProcessRunningTasks(float dt)
