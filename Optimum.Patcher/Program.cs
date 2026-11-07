@@ -51,6 +51,18 @@ var typesToInject = new List<string>
 {
     "Optimum.OptimumInfo",
     "Optimum.OptimumUpdateChecker",
+    "Optimum.OptimumUpdateUi",
+    "Optimum.Update.OverlayManifest",
+    "Optimum.Update.OverlayFile",
+    "Optimum.Update.OverlayStager",
+    "Optimum.Update.StageProgress",
+    "Optimum.Update.StageResult",
+    "Optimum.Update.UpdateFailure",
+    "Optimum.Update.OptimumUpdater",
+    "Optimum.Update.UpdatePhase",
+    "Optimum.Update.InstallLayout",
+    "Optimum.Update.UpdateResult",
+    "Optimum.Update.UpdateLock",
     "Optimum.EntityLightBatchBuffer",
     "Optimum.OptimumOptiTimeGuard",
     "Optimum.PhysicsListReuseGuard",
@@ -533,6 +545,8 @@ var targets = new List<MethodTarget>
         new[] { "Vintagestory.API.Common.ItemSlot", "System.Double", "System.Double", "System.Double", "System.Single", "System.Int32", "System.Single", "System.Boolean", "System.Boolean", "System.Boolean" }),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
+    // The Optimum update links are handled before the vanilla link handling (no lambdas, no closures).
+    new("Vintagestory.Client.GuiCompositeMainMenuLeft", "didClickLink", 1),
     // E3: particle spawn distance gate, before the per-particle revive loop
     new("Vintagestory.Client.NoObf.ParticlePoolQuads", "SpawnParticles", 1),
     // GuiManager: reusable scratch buffers instead of .ToList() snapshots.

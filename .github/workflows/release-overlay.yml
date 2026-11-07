@@ -176,6 +176,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          shopt -s nullglob
           tag="$RELEASE_TAG"
           test -f dist/optimum-manifest-linux-x64.json
           test -f dist/optimum-manifest-win-x64.json
