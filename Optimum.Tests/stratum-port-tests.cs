@@ -871,4 +871,33 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region MechBlockRenderer Tests
+
+    [Fact]
+    public void MechBlockRenderer_UpdateCustomFloatBuffer_CachesPosition()
+    {
+        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
+        if (!System.IO.File.Exists(survivalDll))
+        {
+            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        }
+        Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
+        var rendererType = module.GetType("Vintagestory.GameContent.Mechanics.MechBlockRenderer");
+        Assert.NotNull(rendererType);
+
+        var updateMethod = rendererType.Methods.Single(m => m.Name == "UpdateCustomFloatBuffer" && m.Parameters.Count == 0);
+        Assert.NotNull(updateMethod);
+
+        int positionCalls = updateMethod.Body.Instructions.Count(ins =>
+            ins.Operand is MethodReference mr && mr.Name == "get_Position");
+        Assert.Equal(1, positionCalls);
+    }
+
+    #endregion
+    }
+
+    #endregion
 }
