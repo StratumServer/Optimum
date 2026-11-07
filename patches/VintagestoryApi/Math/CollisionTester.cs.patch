@@ -1,10 +1,31 @@
 diff --git a/VintagestoryApi/Math/CollisionTester.cs b/VintagestoryApi/Math/CollisionTester.cs
-index b06b0dc..8bc8017 100644
 --- a/VintagestoryApi/Math/CollisionTester.cs
 +++ b/VintagestoryApi/Math/CollisionTester.cs
-@@ -46,10 +46,40 @@ namespace Vintagestory.API.MathTools
-         /// <param name="newPosition"></param>
-         /// <param name="stepHeight"></param>
+@@ -37,6 +37,23 @@ namespace Vintagestory.API.MathTools
+         readonly Vec3d blockPosVec = new();
+         readonly BlockPos collBlockPos = new(Dimensions.WillSetLater);
+ 
++        protected Action<Block, int, int, int> walkBlocksDelegate;
++        protected IBlockAccessor currentBlockAccessor;
++
++        public CollisionTester()
++        {
++            walkBlocksDelegate = WalkBlocksAccumulator;
++        }
++
++        protected void WalkBlocksAccumulator(Block block, int x, int y, int z)
++        {
++            Cuboidf[] collisionBoxes = block.GetCollisionBoxes(currentBlockAccessor, tmpPos.Set(x, y, z));
++            if (collisionBoxes != null)
++            {
++                CollisionBoxList.Add(collisionBoxes, x, y, z, block);
++            }
++        }
++
+         /// <summary>
+         /// Takes the entity positiona and motion and adds them, respecting any colliding blocks. The resulting new position is put into outposition
+         /// </summary>
+@@ -48,6 +65,36 @@ namespace Vintagestory.API.MathTools
          /// <param name="yExtra">Default 1 for the extra high collision boxes of fences</param>
          public void ApplyTerrainCollision(Entity entity, EntityPos entityPos, float dtFactor, ref Vec3d newPosition, float stepHeight = 1, float yExtra = 1)
          {
@@ -41,5 +62,37 @@ index b06b0dc..8bc8017 100644
              minPos.SetDimension(entityPos.Dimension);
  
              var worldAccessor = entity.World;
-             Vec3d pos = this.pos;           // Local copy for efficiency
-             Cuboidd entityBox = this.entityBox; // Local copy for efficiency
+@@ -224,13 +271,9 @@ namespace Vintagestory.API.MathTools
+ 
+             // Clear the list and add every cuboid the block has to it.
+             CollisionBoxList.Clear();
+-            blockAccessor.WalkBlocks(minPos, maxPos, (block, x, y, z) => {
+-                Cuboidf[] collisionBoxes = block.GetCollisionBoxes(blockAccessor, tmpPos.Set(x, y, z));
+-                if (collisionBoxes != null)
+-                {
+-                    CollisionBoxList.Add(collisionBoxes, x, y, z, block);
+-                }
+-            }, true);
++            currentBlockAccessor = blockAccessor;
++            blockAccessor.WalkBlocks(minPos, maxPos, walkBlocksDelegate, true);
++            currentBlockAccessor = null;
+         }
+ 
+ 
+@@ -514,13 +557,9 @@ namespace Vintagestory.API.MathTools
+             }
+ 
+             CollisionBoxList.Clear();
+-            blockAccessor.WalkBlocks(minPos, maxPos, (block, x, y, z) => {
+-                Cuboidf[] collisionBoxes = block.GetCollisionBoxes(blockAccessor, tmpPos.Set(x, y, z));
+-                if (collisionBoxes != null)
+-                {
+-                    CollisionBoxList.Add(collisionBoxes, x, y, z, block);
+-                }
+-            }, true);
++            currentBlockAccessor = blockAccessor;
++            blockAccessor.WalkBlocks(minPos, maxPos, walkBlocksDelegate, true);
++            currentBlockAccessor = null;
+         }
+ 
+         public void PushOutFromBlocks(IBlockAccessor blockAccessor, Entity entity, Vec3d tmpVec, float clippingLimit)
