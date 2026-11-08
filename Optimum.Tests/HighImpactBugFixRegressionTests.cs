@@ -1041,6 +1041,25 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("RestoreAll(logger)", guardSource);
     }
 
+    [Fact]
+    public void CacheManager_StructuredValidationStatusAndDiagnostics()
+    {
+        string cacheManagerSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Launcher/CacheManager.cs"));
+        string resultSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Launcher/CacheValidationResult.cs"));
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Launcher/Program.cs"));
+
+        Assert.Contains("CacheValidationStatus", resultSource);
+        Assert.Contains("ManifestMissing", resultSource);
+        Assert.Contains("VersionMismatch", resultSource);
+        Assert.Contains("CachedAssemblyCorrupted", resultSource);
+        Assert.Contains("ApiContractInvalid", resultSource);
+        Assert.Contains("CacheValidationResult ValidateCache", cacheManagerSource);
+        Assert.Contains("[Optimum.Launcher] Cache invalidated: {validationResult.Status}", programSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

@@ -38,18 +38,18 @@ public sealed class CacheManager
     public string ManifestPath => Path.Combine(_cacheDir, "manifest.json");
 
     /// <summary>
-    /// Validates the cache. Returns the manifest if valid, null if a re-patch is needed.
-    /// Checks the manifest inputs and the cached assembly hash before launch.
+    /// Validates the cache and returns a detailed diagnostic result.
+    /// Checks the manifest inputs, versions, and cached assembly hashes before launch.
     /// </summary>
-    public CacheManifest? ValidateCache(IReadOnlyCollection<string>? requiredAssemblies = null)
+    public CacheValidationResult ValidateCache(IReadOnlyCollection<string>? requiredAssemblies = null)
     {
         return ValidateCacheCore(requiredAssemblies);
     }
 
-    private CacheManifest? ValidateCacheCore(IReadOnlyCollection<string>? requiredAssemblies)
+    private CacheValidationResult ValidateCacheCore(IReadOnlyCollection<string>? requiredAssemblies)
     {
         if (!File.Exists(ManifestPath))
-            return null;
+            return CacheValidationResult.Failure(CacheValidationStatus.ManifestMissing, detail: ManifestPath);
 
         string json = File.ReadAllText(ManifestPath);
         CacheManifest? manifest;
@@ -57,17 +57,17 @@ public sealed class CacheManager
         {
             manifest = JsonSerializer.Deserialize<CacheManifest>(json, JsonOpts);
         }
-        catch (JsonException)
+        catch (JsonException ex)
         {
-            return null;
+            return CacheValidationResult.Failure(CacheValidationStatus.ManifestCorrupt, detail: ex.Message);
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException ex)
         {
-            return null;
+            return CacheValidationResult.Failure(CacheValidationStatus.ManifestCorrupt, detail: ex.Message);
         }
 
         if (manifest is null)
-            return null;
+            return CacheValidationResult.Failure(CacheValidationStatus.ManifestCorrupt);
 
         if (requiredAssemblies is not null)
         {
@@ -76,35 +76,41 @@ public sealed class CacheManager
                 bool listed = manifest.Targets.Exists(target =>
                     string.Equals(target.Assembly, requiredAssembly, StringComparison.OrdinalIgnoreCase));
                 if (!listed || !File.Exists(Path.Combine(_cacheDir, requiredAssembly)))
-                    return null;
+                    return CacheValidationResult.Failure(CacheValidationStatus.RequiredAssemblyMissing, targetAssembly: requiredAssembly);
             }
         }
 
         // Version check
         if (manifest.OptimumVersion != _optimumVersion)
-            return null;
+            return CacheValidationResult.Failure(CacheValidationStatus.VersionMismatch, detail: $"Manifest OptimumVersion '{manifest.OptimumVersion}' != '{_optimumVersion}'");
 
         // Validate each target
         foreach (var target in manifest.Targets)
         {
             var vanillaPath = Path.Combine(_gameDir, target.VanillaAssembly ?? target.Assembly);
             if (!File.Exists(vanillaPath))
-                return null;
+                return CacheValidationResult.Failure(CacheValidationStatus.VanillaAssemblyMissing, targetAssembly: target.Assembly, detail: vanillaPath);
 
             var cachedPath = Path.Combine(_cacheDir, target.Assembly);
-            if (!File.Exists(cachedPath) || string.IsNullOrEmpty(target.CachedHash) || ComputeFileHash(cachedPath) != target.CachedHash)
-                return null;
+            if (!File.Exists(cachedPath))
+                return CacheValidationResult.Failure(CacheValidationStatus.CachedAssemblyMissing, targetAssembly: target.Assembly, detail: cachedPath);
+
+            if (string.IsNullOrEmpty(target.CachedHash) || ComputeFileHash(cachedPath) != target.CachedHash)
+                return CacheValidationResult.Failure(CacheValidationStatus.CachedAssemblyCorrupted, targetAssembly: target.Assembly);
 
             if (string.Equals(target.Assembly, "VintagestoryAPI.dll", StringComparison.OrdinalIgnoreCase) &&
                 (!ApiContractValidator.HasTesselationThreadContract(cachedPath) ||
                  !ApiContractValidator.HasGuiCertificationContract(cachedPath, Path.Combine(_gameDir, "Optimum.Api.Contracts.dll"))))
             {
-                return null;
+                return CacheValidationResult.Failure(CacheValidationStatus.ApiContractInvalid, targetAssembly: target.Assembly);
             }
 
             var donorPath = Path.Combine(_donorDir, target.Donor);
-            if (!File.Exists(donorPath) || ComputeFileHash(donorPath) != target.DonorHash)
-                return null;
+            if (!File.Exists(donorPath))
+                return CacheValidationResult.Failure(CacheValidationStatus.DonorMissing, targetAssembly: target.Assembly, detail: donorPath);
+
+            if (ComputeFileHash(donorPath) != target.DonorHash)
+                return CacheValidationResult.Failure(CacheValidationStatus.DonorHashMismatch, targetAssembly: target.Assembly);
 
             // Fast-path: check mtime + size
             var info = new FileInfo(vanillaPath);
@@ -114,7 +120,7 @@ public sealed class CacheManager
                 // Mtime/size changed - verify with full hash
                 var actualHash = ComputeFileHash(vanillaPath);
                 if (actualHash != target.VanillaHash)
-                    return null;
+                    return CacheValidationResult.Failure(CacheValidationStatus.VanillaHashMismatch, targetAssembly: target.Assembly);
 
                 // Hash still matches (mtime was touched but content unchanged) - update mtime record
                 target.VanillaMtimeTicks = info.LastWriteTimeUtc.Ticks;
@@ -123,7 +129,7 @@ public sealed class CacheManager
             }
         }
 
-        return manifest;
+        return CacheValidationResult.Success(manifest);
     }
 
     /// <summary>
