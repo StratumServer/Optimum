@@ -210,6 +210,16 @@ public static class OptimumGreedyMesher
         return lightRgba & unchecked(keep * 0x01010101);
     }
 
+    /// <summary>
+    /// Returns true if the packed RGBA light contains any dynamic point light
+    /// (torch, lantern, glowing lava) in its RGB block-light channels.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static bool HasBlockLight(int lightRgba)
+    {
+        return (lightRgba & 0x00FFFFFF) != 0;
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ToIndex(int x, int y, int z) => y * Size2 + z * Size + x;
 

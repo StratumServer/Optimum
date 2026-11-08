@@ -299,4 +299,36 @@ public class GreedyMesherTests
         int b = OptimumGreedyMesher.QuantizeLight(0x67676767, 2); // 103 per channel
         Assert.Equal(a, b);
     }
+
+    [Theory]
+    [InlineData(0x00000000, false)] // Zero light
+    [InlineData(unchecked((int)0xFF000000), false)] // Pure sunlight (high byte only)
+    [InlineData(0x1F000000, false)] // Partial sunlight
+    [InlineData(0x00000001, true)]  // Red block light
+    [InlineData(0x00000200, true)]  // Green block light
+    [InlineData(0x00030000, true)]  // Blue block light
+    [InlineData(unchecked((int)0xFF00150A), true)] // Sunlight + torchlight
+    public void HasBlockLight_IdentifiesDynamicPointLights(int lightRgba, bool expected)
+    {
+        Assert.Equal(expected, OptimumGreedyMesher.HasBlockLight(lightRgba));
+    }
+
+    [Fact]
+    public void PointLightZeroToleranceEnforcement_PreventsQuantizationStepping()
+    {
+        // Near point light: raw values differ slightly due to quadratic falloff.
+        int cornerA = unchecked((int)0xFF00150A);
+        int cornerB = unchecked((int)0xFF00150B);
+
+        // With tolerance 2, normal sunlight would quantize them equal:
+        int sunlightA = OptimumGreedyMesher.QuantizeLight(cornerA & unchecked((int)0xFF000000), 2);
+        int sunlightB = OptimumGreedyMesher.QuantizeLight(cornerB & unchecked((int)0xFF000000), 2);
+        Assert.Equal(sunlightA, sunlightB);
+
+        // But because point light is detected, tolerance is forced to 0:
+        Assert.True(OptimumGreedyMesher.HasBlockLight(cornerA));
+        int quantA = OptimumGreedyMesher.QuantizeLight(cornerA, 0);
+        int quantB = OptimumGreedyMesher.QuantizeLight(cornerB, 0);
+        Assert.NotEqual(quantA, quantB); // Prevents stepped banding!
+    }
 }

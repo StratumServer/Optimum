@@ -399,10 +399,27 @@ public static class OptimumGreedyMeshEmitter
 
                 vars.CalcBlockFaceLight(face, extIdx + moveIndex[face]);
 
-                int q0 = OptimumGreedyMesher.QuantizeLight(vars.CurrentLightRGBByCorner[0], tolerance);
-                int q1 = OptimumGreedyMesher.QuantizeLight(vars.CurrentLightRGBByCorner[1], tolerance);
-                int q2 = OptimumGreedyMesher.QuantizeLight(vars.CurrentLightRGBByCorner[2], tolerance);
-                int q3 = OptimumGreedyMesher.QuantizeLight(vars.CurrentLightRGBByCorner[3], tolerance);
+                int raw0 = vars.CurrentLightRGBByCorner[0];
+                int raw1 = vars.CurrentLightRGBByCorner[1];
+                int raw2 = vars.CurrentLightRGBByCorner[2];
+                int raw3 = vars.CurrentLightRGBByCorner[3];
+
+                int faceTolerance = tolerance;
+                if (OptimumGreedyMesher.HasBlockLight(raw0) ||
+                    OptimumGreedyMesher.HasBlockLight(raw1) ||
+                    OptimumGreedyMesher.HasBlockLight(raw2) ||
+                    OptimumGreedyMesher.HasBlockLight(raw3))
+                {
+                    // Near dynamic point light sources (torches, lanterns, glowing blocks),
+                    // enforce strict zero-tolerance to preserve smooth quadratic falloff
+                    // without stepped ambient occlusion / light banding.
+                    faceTolerance = 0;
+                }
+
+                int q0 = OptimumGreedyMesher.QuantizeLight(raw0, faceTolerance);
+                int q1 = OptimumGreedyMesher.QuantizeLight(raw1, faceTolerance);
+                int q2 = OptimumGreedyMesher.QuantizeLight(raw2, faceTolerance);
+                int q3 = OptimumGreedyMesher.QuantizeLight(raw3, faceTolerance);
 
                 if (q0 != q1 || q0 != q2 || q0 != q3) continue;
 
