@@ -1,12 +1,12 @@
 using Vintagestory.API.Config;
 
-namespace Optimum;
+namespace Optimum.Internal;
 
 /// <summary>
 /// Exposes Optimum version metadata from VintagestoryAPI.
 /// OptimumConfig.Version supplies the managed value. Packaging scripts read VERSION.
 /// </summary>
-public static class OptimumInfo
+public static class OptimumBuildInfo
 {
     public const string Version = OptimumConfig.Version;
     public const string Name = "Optimum";

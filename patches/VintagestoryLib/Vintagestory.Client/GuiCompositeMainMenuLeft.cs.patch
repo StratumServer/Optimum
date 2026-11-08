@@ -9,7 +9,7 @@ index 5f68dc1..1535238 100644
 -		string text = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
 +		// Optimum: insert Optimum link before the vanilla login block.
 +		string loginText = Lang.Get("mainmenu-loggedin", ClientSettings.PlayerName);
-+		string optimumTag = Optimum.OptimumInfo.DisplayTag;
++		string optimumTag = Optimum.Internal.OptimumBuildInfo.DisplayTag;
 +		if (Optimum.OptimumUpdateChecker.UpdateAvailable)
 +		{
 +			optimumTag += " <font color=\"#8cdb6a\">(" + Lang.Get("optimum-update-available", Optimum.OptimumUpdateChecker.LatestVersion) + ")</font>";
