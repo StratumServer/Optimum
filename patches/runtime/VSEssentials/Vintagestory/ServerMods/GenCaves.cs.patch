@@ -1,0 +1,124 @@
+--- a/VSEssentials/Vintagestory/ServerMods/GenCaves.cs
++++ b/VSEssentials/Vintagestory/ServerMods/GenCaves.cs
+@@ -373,6 +373,8 @@
+ 	private bool SetBlocks(IServerChunk[] chunks, float horRadius, float vertRadius, double centerX, double centerY, double centerZ, ushort[] terrainheightmap, ushort[] rainheightmap, int chunkX, int chunkZ, bool genHotSpring)
+ 	{
+ 		IMapChunk mapChunk = chunks[0].MapChunk;
++		byte[] caveHeightDistort = mapChunk.CaveHeightDistort;
++		IList<Block> blocks = api.World.Blocks;
+ 		horRadius++;
+ 		vertRadius += 2f;
+ 		int num = (int)GameMath.Clamp(centerX - (double)horRadius, 0.0, 31.0);
+@@ -384,22 +386,31 @@
+ 		double num7 = horRadius * horRadius;
+ 		double num8 = vertRadius * vertRadius;
+ 		double num9 = GameMath.Clamp((double)vertRadius / 4.0, 0.0, 0.1);
++		int maxWaterY = Math.Min(num4 + 10, worldheight - 1);
+ 		for (int i = num; i <= num2; i++)
+ 		{
+-			double num10 = ((double)i - centerX) * ((double)i - centerX) / num7;
++			double dx = (double)i - centerX;
++			double num10 = dx * dx / num7;
+ 			for (int j = num5; j <= num6; j++)
+ 			{
+-				double num11 = ((double)j - centerZ) * ((double)j - centerZ) / num7;
+-				double num12 = (double)(mapChunk.CaveHeightDistort[j * 32 + i] - 127) * num9;
+-				for (int k = num3; k <= num4 + 10; k++)
++				double dz = (double)j - centerZ;
++				double num11 = dz * dz / num7;
++				if (num10 + num11 > 1.0)
++				{
++					continue;
++				}
++				int idx2d = j * 32 + i;
++				double num12 = (double)(caveHeightDistort[idx2d] - 127) * num9;
++				double heightrndSq = num12 * num12;
++				for (int k = num3; k <= maxWaterY; k++)
+ 				{
+ 					double num13 = (double)k - centerY;
+-					double num14 = ((num13 > 0.0) ? (num12 * num12) : 0.0);
++					double num14 = ((num13 > 0.0) ? heightrndSq : 0.0);
+ 					double num15 = num13 * num13 / (num8 + num14);
+-					if (!(num10 + num15 + num11 > 1.0) && k <= worldheight - 1)
++					if (!(num10 + num15 + num11 > 1.0))
+ 					{
+ 						int num16 = k % 32;
+-						if (api.World.Blocks[chunks[k / 32].Data.GetFluid((num16 * 32 + j) * 32 + i)].LiquidCode != null)
++						if (blocks[chunks[k / 32].Data.GetFluid((num16 * 32 + j) * 32 + i)].LiquidCode != null)
+ 						{
+ 							return false;
+ 						}
+@@ -433,35 +444,49 @@
+ 			mapChunk.SetModdata("hotspringlocations", dictionary);
+ 		}
+ 		int num18 = geologicActivity * 16 / 128;
++		int maxCarveY = Math.Min(num4 + 10, worldheight - 1);
++		int baseX = chunkX * 32;
++		int baseZ = chunkZ * 32;
++		BlockPos lightUpdatePos = null;
+ 		for (int l = num17; l <= num2; l++)
+ 		{
+-			double num10 = ((double)l - centerX) * ((double)l - centerX) / num7;
++			double dx = (double)l - centerX;
++			double num10 = dx * dx / num7;
++			int worldX = baseX + l;
+ 			for (int m = num5; m <= num6; m++)
+ 			{
+-				double num11 = ((double)m - centerZ) * ((double)m - centerZ) / num7;
+-				double num19 = (double)(mapChunk.CaveHeightDistort[m * 32 + l] - 127) * num9;
+-				int num20 = terrainheightmap[m * 32 + l];
+-				for (int num21 = num4 + 10; num21 >= num3; num21--)
++				double dz = (double)m - centerZ;
++				double num11 = dz * dz / num7;
++				if (num10 + num11 > 1.0)
++				{
++					continue;
++				}
++				int idx2d = m * 32 + l;
++				double num19 = (double)(caveHeightDistort[idx2d] - 127) * num9;
++				double heightrndSq = num19 * num19;
++				int num20 = terrainheightmap[idx2d];
++				int worldZ = baseZ + m;
++				for (int num21 = maxCarveY; num21 >= num3; num21--)
+ 				{
+ 					double num22 = (double)num21 - centerY;
+-					double num23 = ((num22 > 0.0) ? (num19 * num19 * Math.Min(1.0, (double)Math.Abs(num21 - num20) / 10.0)) : 0.0);
++					double num23 = ((num22 > 0.0) ? (heightrndSq * Math.Min(1.0, (double)Math.Abs(num21 - num20) / 10.0)) : 0.0);
+ 					double num15 = num22 * num22 / (num8 + num23);
+-					if (num21 <= worldheight - 1 && !(num10 + num15 + num11 > 1.0))
++					if (!(num10 + num15 + num11 > 1.0))
+ 					{
+-						if (terrainheightmap[m * 32 + l] == num21)
++						if (terrainheightmap[idx2d] == num21)
+ 						{
+-							terrainheightmap[m * 32 + l] = (ushort)(num21 - 1);
+-							rainheightmap[m * 32 + l]--;
++							terrainheightmap[idx2d] = (ushort)(num21 - 1);
++							rainheightmap[idx2d]--;
+ 						}
+ 						IChunkBlocks data = chunks[num21 / 32].Data;
+ 						int num24 = (num21 % 32 * 32 + m) * 32 + l;
+ 						if (num21 == 11)
+ 						{
+-							if (basaltNoise.Noise(chunkX * 32 + l, chunkZ * 32 + m) > 0.65)
++							if (basaltNoise.Noise(worldX, worldZ) > 0.65)
+ 							{
+ 								data[num24] = gcfg.basaltBlockId;
+-								terrainheightmap[m * 32 + l] = Math.Max(terrainheightmap[m * 32 + l], (ushort)11);
+-								rainheightmap[m * 32 + l] = Math.Max(rainheightmap[m * 32 + l], (ushort)11);
++								terrainheightmap[idx2d] = Math.Max(terrainheightmap[idx2d], (ushort)11);
++								rainheightmap[idx2d] = Math.Max(rainheightmap[idx2d], (ushort)11);
+ 							}
+ 							else
+ 							{
+@@ -476,7 +501,9 @@
+ 								}
+ 								if (num21 <= num18)
+ 								{
+-									worldgenBlockAccessor.ScheduleBlockLightUpdate(new BlockPos(chunkX * 32 + l, num21, chunkZ * 32 + m), airBlockId, gcfg.lavaBlockId);
++									lightUpdatePos ??= new BlockPos(0);
++									lightUpdatePos.Set(worldX, num21, worldZ);
++									worldgenBlockAccessor.ScheduleBlockLightUpdate(lightUpdatePos, airBlockId, gcfg.lavaBlockId);
+ 								}
+ 							}
+ 						}
