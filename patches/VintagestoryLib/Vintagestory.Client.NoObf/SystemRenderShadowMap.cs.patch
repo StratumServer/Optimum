@@ -1,8 +1,60 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
-index f8183c3..1600f3e 100644
+index f8183c3..89f02b6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
-@@ -114,6 +114,15 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -25,10 +25,14 @@ public class SystemRenderShadowMap : ClientSystem
+ 
+ 	private double[] up = new double[3] { 0.0, 1.0, 0.0 };
+ 
+ 	private Vec3d forward = new Vec3d();
+ 
++	internal bool optimumUndergroundShadowSuppressed;
++
++	private BlockPos optimumShadowBlockPosScratch;
++
+ 	public override string Name => "res";
+ 
+ 	public SystemRenderShadowMap(ClientMain game)
+ 		: base(game)
+ 	{
+@@ -40,10 +44,34 @@ public class SystemRenderShadowMap : ClientSystem
+ 		shadowBox = new ShadowBox(lightViewMatrix, game);
+ 	}
+ 
+ 	private void OnRenderBefore(float dt)
+ 	{
++		int sunLight = 32;
++		if (game.BlockAccessor != null && game.EntityPlayer != null)
++		{
++			sunLight = game.BlockAccessor.GetLightLevel((optimumShadowBlockPosScratch ??= new BlockPos()).Set(game.EntityPlayer.Pos), EnumLightLevelType.OnlySunLight);
++		}
++
++		if (optimumUndergroundShadowSuppressed)
++		{
++			if (sunLight >= 3)
++			{
++				optimumUndergroundShadowSuppressed = false;
++			}
++		}
++		else if (sunLight <= 1)
++		{
++			optimumUndergroundShadowSuppressed = true;
++		}
++
++		if (optimumUndergroundShadowSuppressed)
++		{
++			game.shUniforms.DropShadowIntensity = (game.AmbientManager.DropShadowIntensity = 0f);
++			return;
++		}
++
+ 		Vec3f sunPosition = game.Calendar.SunPosition;
+ 		Vec3f moonPosition = game.Calendar.MoonPosition;
+ 		AmbientModifier ambientModifier = game.AmbientManager.CurrentModifiers["weather"];
+ 		double num = -0.1;
+ 		if (ambientModifier != null)
+@@ -112,10 +140,19 @@ public class SystemRenderShadowMap : ClientSystem
+ 		game.frustumCuller.shadowRangeZ = shadowDistance + (double)cullExtraRange;
+ 		Vec3f vec3f = ((game.Calendar.MoonLightStrength > game.Calendar.SunLightStrength) ? game.Calendar.MoonPosition : game.Calendar.SunPosition);
  		loadOrthoModeMatrix(projectionMatrix, shadowBox.Width, shadowBox.Height, shadowBox.Length);
  		Mat4d.LookAt(lightViewMatrix, vec3f.ToDoubleArray(), new double[4], new double[3] { 0.0, 1.0, 0.0 });
  		Mat4d.Mul(projectionViewMatrix, projectionMatrix, lightViewMatrix);
@@ -18,3 +70,5 @@ index f8183c3..1600f3e 100644
  		game.Platform.LoadFrameBuffer(fb);
  		game.Platform.ClearFrameBuffer(fb);
  		ShaderProgramChunkshadowmap chunkshadowmap = ShaderPrograms.Chunkshadowmap;
+ 		chunkshadowmap.Use();
+ 		game.PMatrix.Push(projectionMatrix);

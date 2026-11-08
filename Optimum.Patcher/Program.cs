@@ -469,6 +469,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
     // Issue #286: snap shadow projection translation to texel grid to prevent edge shimmering
     new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "PrepareForShadowRendering", 3),
+    // Issue #285: skip solar shadow cascades when deep underground with hysteresis
+    new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "OnRenderBefore", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
