@@ -1,0 +1,21 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
+index 76886d6..3f27913 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs
+@@ -60,10 +60,16 @@ namespace Vintagestory.GameContent
+         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+         {
+             IRenderAPI rpi = capi.Render;
+             Vec3d camPos = capi.World.Player.Entity.CameraPos;
+ 
++            double distSq = camPos.SquareDistanceTo(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5);
++            if (distSq > RenderRange * RenderRange) return;
++
++            var culler = capi.Render?.DefaultFrustumCuller;
++            if (culler != null && !culler.SphereInFrustum(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5, 0.75)) return;
++
+             rpi.GlDisableCullFace();
+             rpi.GlToggleBlend(true);
+ 
+             IStandardShaderProgram prog = rpi.PreparedStandardShader(pos.X, pos.Y, pos.Z);
+ 

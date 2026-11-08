@@ -1,0 +1,130 @@
+diff --git a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
+index 613b86f..0c1ffaf 100644
+--- a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
++++ b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
+@@ -616,10 +616,11 @@ namespace Vintagestory.GameContent
+             {
+                 Inventory.AfterBlocksLoaded(Api.World);
+             }
+ 
+ 
++            float prevTemp = furnaceTemperature;
+             furnaceTemperature = tree.GetFloat("furnaceTemperature");
+             maxTemperature = tree.GetInt("maxTemperature");
+             inputStackCookingTime = tree.GetFloat("oreCookingTime");
+             fuelBurnTime = tree.GetFloat("fuelBurnTime");
+             maxFuelBurnTime = tree.GetFloat("maxFuelBurnTime");
+@@ -627,10 +628,14 @@ namespace Vintagestory.GameContent
+             canIgniteFuel = tree.GetBool("canIgniteFuel", true);
+             cachedFuel = tree.GetFloat("cachedFuel", 0);
+ 
+             if (Api?.Side == EnumAppSide.Client)
+             {
++                if ((prevTemp < 50 && furnaceTemperature >= 50) || (prevTemp >= 50 && furnaceTemperature < 50))
++                {
++                    shouldRedraw = true;
++                }
+                 UpdateRenderer();
+ 
+                 if (clientDialog != null) SetDialogValues(clientDialog.Attributes);
+             }
+ 
+@@ -648,24 +653,34 @@ namespace Vintagestory.GameContent
+         void UpdateRenderer()
+         {
+             if (renderer == null) return;
+ 
+             ItemStack contentStack = inputStack == null ? outputStack : inputStack;
++            bool isPot = contentStack?.Collectible is IInFirepitRendererSupplier;
++            bool isColdPot = isPot && furnaceTemperature < 50 && InputStackTemp < 50;
++
++            if (isColdPot)
++            {
++                renderer.contentStackRenderer?.Dispose();
++                renderer.contentStackRenderer = null;
++                renderer.SetContents(null, null);
++                return;
++            }
+ 
+             bool useOldRenderer =
+                 renderer.ContentStack != null &&
+                 renderer.contentStackRenderer != null &&
+-                contentStack?.Collectible is IInFirepitRendererSupplier &&
++                isPot &&
+                 renderer.ContentStack.Equals(Api.World, contentStack, GlobalConstants.IgnoredStackAttributes)
+             ;
+ 
+             if (useOldRenderer) return; // Otherwise the cooking sounds restarts all the time
+ 
+             renderer.contentStackRenderer?.Dispose();
+             renderer.contentStackRenderer = null;
+ 
+-            if (contentStack?.Collectible is IInFirepitRendererSupplier)
++            if (isPot)
+             {
+                 IInFirepitRenderer childrenderer = (contentStack?.Collectible as IInFirepitRendererSupplier).GetRendererWhenInFirepit(contentStack, this, contentStack == outputStack);
+                 if (childrenderer != null)
+                 {
+                     renderer.SetChildRenderer(contentStack, childrenderer);
+@@ -910,10 +925,14 @@ namespace Vintagestory.GameContent
+             
+             if (contentStack.Collectible is IInFirepitRendererSupplier)
+             {
+                 EnumFirepitModel model = (contentStack.Collectible as IInFirepitRendererSupplier).GetDesiredFirepitModel(contentStack, this, contentStack == outputStack);
+                 this.CurrentModel = model;
++                if (furnaceTemperature < 50 && InputStackTemp < 50)
++                {
++                    return GetPotStaticMesh(tesselator, contentStack);
++                }
+                 return null;
+             }
+ 
+             InFirePitProps renderProps = GetRenderProps(contentStack);
+             
+@@ -944,10 +963,46 @@ namespace Vintagestory.GameContent
+                 return null; // Mesh drawing is handled by the FirepitContentsRenderer
+             }
+             
+         }
+ 
++        private MeshData GetPotStaticMesh(ITesselatorAPI tesselator, ItemStack contentStack)
++        {
++            if (Api is not ICoreClientAPI capi) return null;
++
++            string key = "potInFirepitStaticMesh-" + contentStack.Collectible.Code;
++            return ObjectCacheUtil.GetOrCreate(Api, key, () =>
++            {
++                BlockCookedContainer potBlock = capi.World.GetBlock(contentStack.Collectible.CodeWithVariant("type", "cooked")) as BlockCookedContainer;
++                if (potBlock == null) return null;
++
++                string basePath = "shapes/block/clay/pot-";
++                Shape potShape = Shape.TryGet(capi, basePath + "opened-empty.json");
++                if (potShape == null) return null;
++
++                tesselator.TesselateShape(potBlock, potShape, out MeshData potMesh);
++                if (potMesh == null) return null;
++
++                potMesh = potMesh.Clone();
++                potMesh.Translate(0f, 1f / 16f, 0f);
++
++                Shape lidShape = Shape.TryGet(capi, basePath + "part-lid.json");
++                if (lidShape != null)
++                {
++                    tesselator.TesselateShape(potBlock, lidShape, out MeshData lidMesh);
++                    if (lidMesh != null)
++                    {
++                        lidMesh = lidMesh.Clone();
++                        lidMesh.Translate(0f, 6.5f / 16f, 0f);
++                        potMesh.AddMeshData(lidMesh);
++                    }
++                }
++
++                return potMesh;
++            })?.Clone();
++        }
++
+         public override void OnBlockUnloaded()
+         {
+             base.OnBlockUnloaded();
+ 
+             renderer?.Dispose();

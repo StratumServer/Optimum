@@ -1058,6 +1058,23 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("ApiContractInvalid", resultSource);
         Assert.Contains("CacheValidationResult ValidateCache", cacheManagerSource);
         Assert.Contains("[Optimum.Launcher] Cache invalidated: {validationResult.Status}", programSource);
+
+    [Fact]
+    public void PotInFirepitRenderer_StaticMeshAndFrustumCullOptimization()
+    {
+        string rendererPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/BlockEntityRenderer/PotInFirepitRenderer.cs.patch");
+        Assert.Contains("SquareDistanceTo", rendererPatch);
+        Assert.Contains("RenderRange * RenderRange", rendererPatch);
+        Assert.Contains("SphereInFrustum", rendererPatch);
+
+        string firepitPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs.patch");
+        Assert.Contains("GetPotStaticMesh", firepitPatch);
+        Assert.Contains("isColdPot", firepitPatch);
+        Assert.Contains("furnaceTemperature < 50", firepitPatch);
+        Assert.Contains("shouldRedraw = true;", firepitPatch);
+
+        string patcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains(""GetPotStaticMesh"", patcherSource);
     }
 
     [Fact]
