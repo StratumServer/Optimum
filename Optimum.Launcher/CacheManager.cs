@@ -215,7 +215,7 @@ public sealed class CacheManager
         EnsureSameDirectory(stagedDllPath, outputPath);
         try
         {
-            File.Move(stagedDllPath, outputPath, true);
+            FileRetryHelper.Retry(() => File.Move(stagedDllPath, outputPath, true));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -229,7 +229,7 @@ public sealed class CacheManager
         {
             try
             {
-                File.Move(stagedPdbPath, pdbPath, true);
+                FileRetryHelper.Retry(() => File.Move(stagedPdbPath, pdbPath, true));
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

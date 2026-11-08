@@ -653,12 +653,12 @@ public static class Program
 
             foreach (var plan in plans)
             {
-                File.Move(plan.TempDll!, plan.GameDll, true);
+                FileRetryHelper.Retry(() => File.Move(plan.TempDll!, plan.GameDll, true));
                 committed.Add(plan);
                 if (plan.TempPdb is not null)
-                    File.Move(plan.TempPdb, plan.GamePdb, true);
+                    FileRetryHelper.Retry(() => File.Move(plan.TempPdb, plan.GamePdb, true));
                 else if (File.Exists(plan.GamePdb))
-                    File.Delete(plan.GamePdb);
+                    FileRetryHelper.Retry(() => File.Delete(plan.GamePdb));
             }
         }
         catch (Exception ex)
@@ -667,11 +667,11 @@ public static class Program
             {
                 try
                 {
-                    File.Copy(plan.BackupDll, plan.GameDll, true);
+                    FileRetryHelper.Retry(() => File.Copy(plan.BackupDll, plan.GameDll, true));
                     if (plan.BackupPdb is not null)
-                        File.Copy(plan.BackupPdb, plan.GamePdb, true);
+                        FileRetryHelper.Retry(() => File.Copy(plan.BackupPdb, plan.GamePdb, true));
                     else if (File.Exists(plan.GamePdb))
-                        File.Delete(plan.GamePdb);
+                        FileRetryHelper.Retry(() => File.Delete(plan.GamePdb));
                 }
                 catch (Exception rollbackError)
                 {
