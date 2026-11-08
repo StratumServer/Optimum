@@ -493,6 +493,149 @@ public static class OptimumApiBridge
         return true;
     }
 
+    public static AssetLocation? WildcardUtilWildCardReplace(AssetLocation? code, AssetLocation? search, AssetLocation? replace)
+    {
+        if (search == code) return search;
+        if (code == null || search == null || replace == null || code.Path == null || search.Path == null || replace.Path == null) return null;
+        if (search.Domain != "*" && search.Domain != code.Domain) return null;
+
+        string searchPathStr = search.Path;
+        string codePathStr = code.Path;
+        string replacePathStr = replace.Path;
+
+        ReadOnlySpan<char> searchPath = searchPathStr.AsSpan();
+        ReadOnlySpan<char> codePath = codePathStr.AsSpan();
+        ReadOnlySpan<char> replacePath = replacePathStr.AsSpan();
+
+        int starCount = 0;
+        for (int i = 0; i < searchPath.Length; i++)
+        {
+            if (searchPath[i] == '*') starCount++;
+        }
+
+        if (starCount == 0)
+        {
+            if (codePath.SequenceEqual(searchPath))
+            {
+                return new AssetLocation(code.Domain, replacePathStr);
+            }
+            return null;
+        }
+
+        Span<Range> captures = stackalloc Range[Math.Min(starCount, 16)];
+        if (!MatchWildcardGreedy(codePath, searchPath, captures, 0, 0))
+        {
+            return null;
+        }
+
+        int replaceStars = 0;
+        for (int i = 0; i < replacePath.Length; i++)
+        {
+            if (replacePath[i] == '*') replaceStars++;
+        }
+
+        int toFill = Math.Min(replaceStars, starCount);
+        int finalLength = replacePath.Length - toFill;
+        for (int i = 0; i < toFill; i++)
+        {
+            finalLength += captures[i].GetOffsetAndLength(codePath.Length).Length;
+        }
+
+        Range[] capturedRanges = captures[0..toFill].ToArray();
+        string outCode = string.Create(finalLength, (codePathStr, replacePathStr, capturedRanges, toFill), static (dest, state) =>
+        {
+            ReadOnlySpan<char> cSpan = state.codePathStr.AsSpan();
+            ReadOnlySpan<char> rSpan = state.replacePathStr.AsSpan();
+            Range[] caps = state.capturedRanges;
+            int fillCount = state.toFill;
+
+            int destIdx = 0;
+            int repIdx = 0;
+            int capIdx = 0;
+
+            while (repIdx < rSpan.Length)
+            {
+                int nextStar = rSpan.Slice(repIdx).IndexOf('*');
+                if (nextStar < 0 || capIdx >= fillCount)
+                {
+                    rSpan.Slice(repIdx).CopyTo(dest.Slice(destIdx));
+                    break;
+                }
+
+                rSpan.Slice(repIdx, nextStar).CopyTo(dest.Slice(destIdx));
+                destIdx += nextStar;
+                repIdx += nextStar + 1;
+
+                var (offset, length) = caps[capIdx].GetOffsetAndLength(cSpan.Length);
+                cSpan.Slice(offset, length).CopyTo(dest.Slice(destIdx));
+                destIdx += length;
+                capIdx++;
+            }
+        });
+
+        return new AssetLocation(code.Domain, outCode);
+    }
+
+    private static bool MatchWildcardGreedy(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern, Span<Range> captures, int captureIndex, int textOffset)
+    {
+        int starIdx = pattern.IndexOf('*');
+        if (starIdx < 0)
+        {
+            return text.SequenceEqual(pattern);
+        }
+
+        ReadOnlySpan<char> prefix = pattern.Slice(0, starIdx);
+        if (!text.StartsWith(prefix))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> restPattern = pattern.Slice(starIdx + 1);
+        int restStar = restPattern.IndexOf('*');
+        if (restStar < 0)
+        {
+            if (!text.Slice(starIdx).EndsWith(restPattern))
+            {
+                return false;
+            }
+
+            int capLen = text.Length - starIdx - restPattern.Length;
+            if (captureIndex < captures.Length)
+            {
+                captures[captureIndex] = new Range(textOffset + starIdx, textOffset + starIdx + capLen);
+            }
+            return true;
+        }
+
+        ReadOnlySpan<char> literal = restPattern.Slice(0, restStar);
+        ReadOnlySpan<char> searchSlice = text.Slice(starIdx);
+        int searchSliceOffset = textOffset + starIdx;
+
+        int remainingSearchLength = searchSlice.Length - restPattern.Slice(restStar).Length + 1;
+        while (remainingSearchLength >= literal.Length)
+        {
+            int foundIdx = searchSlice.Slice(0, remainingSearchLength).LastIndexOf(literal);
+            if (foundIdx < 0) break;
+
+            int nextTextOffset = searchSliceOffset + foundIdx + literal.Length;
+            ReadOnlySpan<char> nextText = searchSlice.Slice(foundIdx + literal.Length);
+            ReadOnlySpan<char> nextPattern = restPattern.Slice(restStar);
+
+            if (MatchWildcardGreedy(nextText, nextPattern, captures, captureIndex + 1, nextTextOffset))
+            {
+                if (captureIndex < captures.Length)
+                {
+                    captures[captureIndex] = new Range(searchSliceOffset, searchSliceOffset + foundIdx);
+                }
+                return true;
+            }
+
+            remainingSearchLength = foundIdx;
+        }
+
+        return false;
+    }
+
     public static bool EvolvingNatFloatEquals(EvolvingNatFloat left, EvolvingNatFloat right)
     {
         return left.Transform == right.Transform && left.Factor == right.Factor;

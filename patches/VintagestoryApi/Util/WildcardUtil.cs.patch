@@ -1,8 +1,171 @@
 diff --git a/VintagestoryApi/Util/WildcardUtil.cs b/VintagestoryApi/Util/WildcardUtil.cs
-index 64fb462..99c6594 100644
 --- a/VintagestoryApi/Util/WildcardUtil.cs
 +++ b/VintagestoryApi/Util/WildcardUtil.cs
-@@ -62,6 +62,7 @@ namespace Vintagestory.API.Util
+@@ -20,32 +20,146 @@ namespace Vintagestory.API.Util
+         public static AssetLocation WildCardReplace(this AssetLocation code, AssetLocation search, AssetLocation replace)
+         {
+             if (search == code) return search;
++            if (code == null || search == null || replace == null || code.Path == null || search.Path == null || replace.Path == null) return null;
++            if (search.Domain != "*" && search.Domain != code.Domain) return null;
+ 
+-            if (code == null || (search.Domain != "*" && search.Domain != code.Domain)) return null;
++            string searchPathStr = search.Path;
++            string codePathStr = code.Path;
++            string replacePathStr = replace.Path;
+ 
+-            string pattern = Regex.Escape(search.Path).Replace(@"\*", @"(.*)");
++            ReadOnlySpan<char> searchPath = searchPathStr.AsSpan();
++            ReadOnlySpan<char> codePath = codePathStr.AsSpan();
++            ReadOnlySpan<char> replacePath = replacePathStr.AsSpan();
+ 
+-            Match match = Regex.Match(code.Path, @"^" + pattern + @"$");
+-            if (!match.Success) return null;
+-
+-            string outCode = replace.Path;
+-
+-            for (int i = 1; i < match.Groups.Count; i++)
++            int starCount = 0;
++            for (int i = 0; i < searchPath.Length; i++)
+             {
+-                Group g = match.Groups[i];
+-                CaptureCollection cc = g.Captures;
+-                for (int j = 0; j < cc.Count; j++)
+-                {
+-                    Capture c = cc[j];
+-
+-                    int pos = outCode.IndexOf('*');
+-                    outCode = outCode.Remove(pos, 1).Insert(pos, c.Value);
+-                }
++                if (searchPath[i] == '*') starCount++;
+             }
+ 
++            if (starCount == 0)
++            {
++                if (codePath.SequenceEqual(searchPath))
++                {
++                    return new AssetLocation(code.Domain, replacePathStr);
++                }
++                return null;
++            }
++
++            Span<Range> captures = stackalloc Range[Math.Min(starCount, 16)];
++            if (!MatchWildcardGreedy(codePath, searchPath, captures, 0, 0))
++            {
++                return null;
++            }
++
++            int replaceStars = 0;
++            for (int i = 0; i < replacePath.Length; i++)
++            {
++                if (replacePath[i] == '*') replaceStars++;
++            }
++
++            int toFill = Math.Min(replaceStars, starCount);
++            int finalLength = replacePath.Length - toFill;
++            for (int i = 0; i < toFill; i++)
++            {
++                finalLength += captures[i].GetOffsetAndLength(codePath.Length).Length;
++            }
++
++            Range[] capturedRanges = captures[0..toFill].ToArray();
++            string outCode = string.Create(finalLength, (codePathStr, replacePathStr, capturedRanges, toFill), static (dest, state) =>
++            {
++                ReadOnlySpan<char> cSpan = state.codePathStr.AsSpan();
++                ReadOnlySpan<char> rSpan = state.replacePathStr.AsSpan();
++                Range[] caps = state.capturedRanges;
++                int fillCount = state.toFill;
++
++                int destIdx = 0;
++                int repIdx = 0;
++                int capIdx = 0;
++
++                while (repIdx < rSpan.Length)
++                {
++                    int nextStar = rSpan.Slice(repIdx).IndexOf('*');
++                    if (nextStar < 0 || capIdx >= fillCount)
++                    {
++                        rSpan.Slice(repIdx).CopyTo(dest.Slice(destIdx));
++                        break;
++                    }
++
++                    rSpan.Slice(repIdx, nextStar).CopyTo(dest.Slice(destIdx));
++                    destIdx += nextStar;
++                    repIdx += nextStar + 1;
++
++                    var (offset, length) = caps[capIdx].GetOffsetAndLength(cSpan.Length);
++                    cSpan.Slice(offset, length).CopyTo(dest.Slice(destIdx));
++                    destIdx += length;
++                    capIdx++;
++                }
++            });
++
+             return new AssetLocation(code.Domain, outCode);
+         }
+ 
++        private static bool MatchWildcardGreedy(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern, Span<Range> captures, int captureIndex, int textOffset)
++        {
++            int starIdx = pattern.IndexOf('*');
++            if (starIdx < 0)
++            {
++                return text.SequenceEqual(pattern);
++            }
++
++            ReadOnlySpan<char> prefix = pattern.Slice(0, starIdx);
++            if (!text.StartsWith(prefix))
++            {
++                return false;
++            }
++
++            ReadOnlySpan<char> restPattern = pattern.Slice(starIdx + 1);
++            int restStar = restPattern.IndexOf('*');
++            if (restStar < 0)
++            {
++                if (!text.Slice(starIdx).EndsWith(restPattern))
++                {
++                    return false;
++                }
++
++                int capLen = text.Length - starIdx - restPattern.Length;
++                if (captureIndex < captures.Length)
++                {
++                    captures[captureIndex] = new Range(textOffset + starIdx, textOffset + starIdx + capLen);
++                }
++                return true;
++            }
++
++            ReadOnlySpan<char> literal = restPattern.Slice(0, restStar);
++            ReadOnlySpan<char> searchSlice = text.Slice(starIdx);
++            int searchSliceOffset = textOffset + starIdx;
++
++            int remainingSearchLength = searchSlice.Length - restPattern.Slice(restStar).Length + 1;
++            while (remainingSearchLength >= literal.Length)
++            {
++                int foundIdx = searchSlice.Slice(0, remainingSearchLength).LastIndexOf(literal);
++                if (foundIdx < 0) break;
++
++                int nextTextOffset = searchSliceOffset + foundIdx + literal.Length;
++                ReadOnlySpan<char> nextText = searchSlice.Slice(foundIdx + literal.Length);
++                ReadOnlySpan<char> nextPattern = restPattern.Slice(restStar);
++
++                if (MatchWildcardGreedy(nextText, nextPattern, captures, captureIndex + 1, nextTextOffset))
++                {
++                    if (captureIndex < captures.Length)
++                    {
++                        captures[captureIndex] = new Range(searchSliceOffset, searchSliceOffset + foundIdx);
++                    }
++                    return true;
++                }
++
++                remainingSearchLength = foundIdx;
++            }
++
++            return false;
++        }
++
+         public static bool Match(string needle, string haystack)
+         {
+             return fastMatch(needle, haystack);
+@@ -62,6 +176,7 @@ namespace Vintagestory.API.Util
  
          public static bool Match(AssetLocation needle, AssetLocation haystack)
          {
@@ -10,7 +173,7 @@ index 64fb462..99c6594 100644
              if (needle.Domain != "*" && needle.Domain != haystack.Domain) return false;
              return fastMatch(needle.Path, haystack.Path);
          }
-@@ -75,31 +76,28 @@ namespace Vintagestory.API.Util
+@@ -75,31 +190,28 @@ namespace Vintagestory.API.Util
          /// <returns></returns>
          public static bool Match(AssetLocation wildCard, AssetLocation inCode, string[] allowedVariants)
          {
@@ -57,7 +220,7 @@ index 64fb462..99c6594 100644
              {
                  if (!MatchesVariants(wildCard, inCode, allowedVariants)) return false;
              }
-@@ -129,7 +127,7 @@ namespace Vintagestory.API.Util
+@@ -129,7 +241,7 @@ namespace Vintagestory.API.Util
          /// <returns></returns>
          public static string GetWildcardValue(AssetLocation wildCard, AssetLocation inCode)
          {
