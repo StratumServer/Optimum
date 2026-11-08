@@ -33,8 +33,14 @@ public static class ShaderCompatibilityScanner
         ("harmony", "Harmony"),
         ("registerrenderer", "RenderHook"),
         ("onrenderframe", "RenderHook"),
-        ("enumrenderstage", "RenderHook")
+        ("enumrenderstage", "RenderHook"),
+        ("irenderer", "RenderHook")
     ];
+
+    private static readonly HashSet<string> KnownBenignRendererMods = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "yangtransport"
+    };
 
     private static readonly string[] OptimumBuiltInMods =
     [
@@ -297,7 +303,7 @@ public static class ShaderCompatibilityScanner
             "external final shader owns the post-process contract", GetShaderSources(report, "final.fsh"), GetShaderMods(report, "final.fsh"));
         AddFeatureDecision(report, "GodRaysSampleCap", HasExternalShader(report, "godrays.fsh"),
             "external godrays shader owns the sample-count contract", GetShaderSources(report, "godrays.fsh"), GetShaderMods(report, "godrays.fsh"));
-        bool externalShaderHooks = report.Sources.Any(x => x.Indicators.Any(IsShaderHookIndicator));
+        bool externalShaderHooks = report.Sources.Any(HasShaderHooks);
         bool externalShaderAssets = report.Sources.Any(x => x.ShaderFiles.Count > 0);
         AddFeatureDecision(report, "ShaderPreprocessParallel", externalShaderAssets || externalShaderHooks,
             "external shader assets or shader hooks can depend on load order", GetSources(report, HasShaderAssetsOrHooks), GetMods(report, HasShaderAssetsOrHooks));
@@ -374,9 +380,30 @@ public static class ShaderCompatibilityScanner
     private static IEnumerable<string> GetMods(ShaderCompatibilityReport report, Func<ShaderModSource, bool> matches) =>
         report.Sources.Where(matches).Select(source => source.Name);
 
+    private static bool IsBenignContentMod(ShaderModSource source)
+    {
+        if (source.ModId != null && KnownBenignRendererMods.Contains(source.ModId)) return true;
+        if (source.Name != null && KnownBenignRendererMods.Any(b => source.Name.Contains(b, StringComparison.OrdinalIgnoreCase))) return true;
+        return false;
+    }
+
     private static bool HasShaderAssetsOrHooks(ShaderModSource source) => source.ShaderFiles.Count > 0 || HasShaderHooks(source);
 
-    private static bool HasShaderHooks(ShaderModSource source) => source.Indicators.Any(IsShaderHookIndicator);
+    private static bool HasShaderHooks(ShaderModSource source)
+    {
+        if (IsBenignContentMod(source)) return false;
+
+        // Intrusive hooks: direct shader registry, custom shader loaders, custom shader programs, or Harmony IL patching
+        if (source.Indicators.Any(i => i is "ShaderRegistry" or "LoadShader" or "ShaderProgram" or "Harmony"))
+            return true;
+
+        // Standard public API IRenderer hooks (RegisterRenderer, OnRenderFrame, EnumRenderStage) are only
+        // considered intrusive if the mod also supplies custom shader assets to run during those passes
+        if (source.Indicators.Contains("RenderHook") && source.ShaderFiles.Count > 0)
+            return true;
+
+        return false;
+    }
 
     private static bool HasExternalShader(ShaderCompatibilityReport report, string fileName)
     {
