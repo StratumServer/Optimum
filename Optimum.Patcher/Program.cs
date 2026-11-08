@@ -591,6 +591,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseDown", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseUp", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseMove", 1),
+    // Issue #361: relocate Render Scale and Chisel LOD to Graphics settings tab
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "OnGraphicsOptions", 1),
+    new("Vintagestory.Client.NoObf.GuiCompositeSettings", "SetGfxValues", 0),
     // R3: scale the occlusion-culling engagement threshold by view distance
     new("Vintagestory.Client.NoObf.ChunkCuller", "CullInvisibleChunks", 0),
     // Issue #72: BFS visibility flood fill + its helpers, transplanted alongside

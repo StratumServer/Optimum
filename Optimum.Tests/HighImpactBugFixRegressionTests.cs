@@ -807,6 +807,33 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         });
     }
 
+    [Fact]
+    public void GuiCompositeSettings_RelocatesRenderScaleAndChiselLodToGraphicsTab()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
+
+        // Verify Chisel LOD and Render Scale controls are added to Graphics tab
+        Assert.Contains("\"optChiselLod\"", patch);
+        Assert.Contains("\"optChiselLodDist\"", patch);
+        Assert.Contains("\"optRenderScale\"", patch);
+        Assert.Contains("composer.GetDropDown(\"optRenderScale\")", patch);
+
+        // Verify SetGfxValues initializes all three controls
+        Assert.Contains("composer.GetSwitch(\"optChiselLod\")?.SetValue(ClientSettings.OptimumChiselLod);", patch);
+        Assert.Contains("composer.GetSlider(\"optChiselLodDist\")?.SetValues(ClientSettings.OptimumChiselLodDistance", patch);
+
+        // Verify removed from Optimum tab rows
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-chisellod\"", patch);
+        Assert.DoesNotContain("+		AddOptimumDropdownRow(\"optimum-renderscale\"", patch);
+
+        // Verify wired as Cecil transplant targets in Program.cs
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"OnGraphicsOptions\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"SetGfxValues\", 0)", programSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
