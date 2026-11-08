@@ -275,6 +275,14 @@ var membersToInject = new Dictionary<string, List<string>>
         "populateTesselatedChunkPart",
         "OptimumCloneChunkMesh",
     },
+    ["Vintagestory.Client.NoObf.SurfaceLayerTesselator"] = new()
+    {
+        "tmpPos",
+    },
+    ["Vintagestory.Client.NoObf.BleedingJsonTesselator"] = new()
+    {
+        "tmpPos",
+    },
     // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
     {
@@ -637,7 +645,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons", 3),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons_EdgeOnly", 3),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildDecorPolygons", 5),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "TesselateBlock", 6),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "GetMeshPoolForPass", 3),
+    new("Vintagestory.Client.NoObf.SurfaceLayerTesselator", "Tesselate", 1),
+    new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "Tesselate", 1),
+    new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "DoMeshWithBleeding", 3),
     new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddModelAndStoreLocation", 8),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
@@ -670,6 +682,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.EventManager", "TriggerGameTickDebug", 2),
     new("Vintagestory.Common.Compression", "CompressAndCombine", 3),
     new("Vintagestory.Common.Compression", "DecompressCombined", 4),
+    new("Vintagestory.Common.Compression", "DecompressToInts", 2),
     new("Vintagestory.Common.LoadBalancer", "CreateDedicatedWorkerThread", 3),
     // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
     // data when a mod holds a stale IAsset ref after texture unload.
