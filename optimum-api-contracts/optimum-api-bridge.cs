@@ -652,4 +652,85 @@ public static class OptimumApiBridge
         animator.TransformationMatricesDefaultPose = defaultPoseMatrices;
         animator.TransformationMatrices = new float[defaultPoseMatrices.Length];
     }
+
+    public static void AssetLocationResolveToDomainAndPath(string? domainAndPath, out string? domain, out string? path)
+    {
+        if (domainAndPath == null)
+        {
+            domain = null;
+            path = null;
+            return;
+        }
+
+        ReadOnlySpan<char> span = domainAndPath.AsSpan();
+        int colonIndex = span.IndexOf(':');
+
+        if (colonIndex == -1)
+        {
+            domain = null;
+            path = LowercaseAndIntern(span, domainAndPath);
+            return;
+        }
+
+        ReadOnlySpan<char> domainSpan = span.Slice(0, colonIndex);
+        ReadOnlySpan<char> pathSpan = span.Slice(colonIndex + 1);
+
+        if (domainSpan.Equals("game", StringComparison.OrdinalIgnoreCase))
+        {
+            domain = "game";
+        }
+        else if (domainSpan.Equals("survival", StringComparison.OrdinalIgnoreCase))
+        {
+            domain = "survival";
+        }
+        else if (domainSpan.Equals("creative", StringComparison.OrdinalIgnoreCase))
+        {
+            domain = "creative";
+        }
+        else
+        {
+            domain = LowercaseAndIntern(domainSpan, null);
+        }
+
+        path = LowercaseAndIntern(pathSpan, null);
+    }
+
+    private static string LowercaseAndIntern(ReadOnlySpan<char> span, string? original)
+    {
+        if (span.IsEmpty) return string.Empty;
+
+        bool hasUpper = false;
+        for (int i = 0; i < span.Length; i++)
+        {
+            if (char.IsUpper(span[i]))
+            {
+                hasUpper = true;
+                break;
+            }
+        }
+
+        if (!hasUpper)
+        {
+            if (original != null && original.Length == span.Length)
+            {
+                return string.Intern(original);
+            }
+            if (span.Length <= 256)
+            {
+                Span<char> buf = stackalloc char[span.Length];
+                span.CopyTo(buf);
+                return string.Intern(new string(buf));
+            }
+            return string.Intern(span.ToString());
+        }
+
+        if (span.Length <= 256)
+        {
+            Span<char> buf = stackalloc char[span.Length];
+            span.ToLowerInvariant(buf);
+            return string.Intern(new string(buf));
+        }
+
+        return string.Intern(span.ToString().ToLowerInvariant());
+    }
 }

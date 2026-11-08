@@ -1,0 +1,97 @@
+diff --git a/VintagestoryApi/Common/Assets/AssetLocation.cs b/VintagestoryApi/Common/Assets/AssetLocation.cs
+index 6eee9e2..a102cd6 100644
+--- a/VintagestoryApi/Common/Assets/AssetLocation.cs
++++ b/VintagestoryApi/Common/Assets/AssetLocation.cs
+@@ -178,23 +178,87 @@ namespace Vintagestory.API.Common
+         /// <param name="domainAndPath">Full path</param>
+         /// <param name="domain">The mod domain to get</param>
+         /// <param name="path">The resulting path to get</param>
+         static void ResolveToDomainAndPath(string domainAndPath, out string domain, out string path)
+         {
+-            domainAndPath = domainAndPath.ToLowerInvariant();
+-            var colonIndex = domainAndPath.IndexOf(':');
++            if (domainAndPath == null)
++            {
++                domain = null;
++                path = null;
++                return;
++            }
++
++            ReadOnlySpan<char> span = domainAndPath.AsSpan();
++            int colonIndex = span.IndexOf(':');
+ 
+             if (colonIndex == -1)
+             {
+                 domain = null;
+-                path = string.Intern(domainAndPath);
++                path = LowercaseAndIntern(span, domainAndPath);
++                return;
++            }
++
++            ReadOnlySpan<char> domainSpan = span.Slice(0, colonIndex);
++            ReadOnlySpan<char> pathSpan = span.Slice(colonIndex + 1);
++
++            if (domainSpan.Equals("game", StringComparison.OrdinalIgnoreCase))
++            {
++                domain = "game";
++            }
++            else if (domainSpan.Equals("survival", StringComparison.OrdinalIgnoreCase))
++            {
++                domain = "survival";
++            }
++            else if (domainSpan.Equals("creative", StringComparison.OrdinalIgnoreCase))
++            {
++                domain = "creative";
+             }
+             else
+             {
+-                domain = string.Intern(domainAndPath.Substring(0, colonIndex));
+-                path = string.Intern(domainAndPath.Substring(colonIndex + 1));
++                domain = LowercaseAndIntern(domainSpan, null);
++            }
++
++            path = LowercaseAndIntern(pathSpan, null);
++        }
++
++        private static string LowercaseAndIntern(ReadOnlySpan<char> span, string original)
++        {
++            if (span.IsEmpty) return string.Empty;
++
++            bool hasUpper = false;
++            for (int i = 0; i < span.Length; i++)
++            {
++                if (char.IsUpper(span[i]))
++                {
++                    hasUpper = true;
++                    break;
++                }
+             }
++
++            if (!hasUpper)
++            {
++                if (original != null && original.Length == span.Length)
++                {
++                    return string.Intern(original);
++                }
++                if (span.Length <= 256)
++                {
++                    Span<char> buf = stackalloc char[span.Length];
++                    span.CopyTo(buf);
++                    return string.Intern(new string(buf));
++                }
++                return string.Intern(span.ToString());
++            }
++
++            if (span.Length <= 256)
++            {
++                Span<char> buf = stackalloc char[span.Length];
++                span.ToLowerInvariant(buf);
++                return string.Intern(new string(buf));
++            }
++
++            return string.Intern(span.ToString().ToLowerInvariant());
+         }
+ 
+         /// <summary>
+         /// Create a new AssetLocation with given domain and path: for efficiency it is the responsibility of calling code to ensure these are lowercase
+         /// </summary>
