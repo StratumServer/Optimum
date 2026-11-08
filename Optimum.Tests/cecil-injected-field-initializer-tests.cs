@@ -108,31 +108,6 @@ public class CecilInjectedFieldInitializerTests
     }
 
     [Fact]
-    public void WeatherSimulationSoundVolumeDeadzoneFieldsHaveNoInitializer()
-    {
-        // The source-tree fork (patches/VSEssentials/Systems/Weather/WeatherSimulationSound.cs.patch)
-        // sentinels these at -1f so the very first SetVolume call always
-        // fires. That initializer is float literal IL in the constructor,
-        // not metadata - safe there because that class is a normally
-        // compiled C# type. The runtime patch injects these same fields via
-        // Cecil member injection instead, which never runs the constructor,
-        // so any non-default initializer would silently vanish. Defaulting
-        // to 0f (the CLR's guaranteed zero-init, no initializer needed) is
-        // functionally equivalent here: it only skips the very first
-        // SetVolume call if the true starting volume happens to land within
-        // the 0.01 deadzone of zero, which is inaudible anyway.
-        string patch = Read("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs.patch");
-
-        Assert.DoesNotMatch(
-            new Regex(@"lastSet(Wind|Rain)Volume(Leafy|Leafless)\s*=\s*-1f;"),
-            patch);
-        Assert.Contains("private float lastSetWindVolumeLeafy;", patch);
-        Assert.Contains("private float lastSetWindVolumeLeafless;", patch);
-        Assert.Contains("private float lastSetRainVolumeLeafy;", patch);
-        Assert.Contains("private float lastSetRainVolumeLeafless;", patch);
-    }
-
-    [Fact]
     public void TreeGenScratchFieldsHaveNoInitializer()
     {
         string patch = Read("patches/runtime/VSEssentials/Vintagestory/ServerMods/TreeGen.cs.patch");

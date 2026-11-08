@@ -113,13 +113,6 @@ public static class ModPatcher
                 [
                     "isWithinRepulseRange",
                 ],
-                ["Vintagestory.GameContent.WeatherSimulationSound"] =
-                [
-                    "lastSetWindVolumeLeafy",
-                    "lastSetWindVolumeLeafless",
-                    "lastSetRainVolumeLeafy",
-                    "lastSetRainVolumeLeafless",
-                ],
                 ["Vintagestory.GameContent.ChunkMapLayer"] =
                 [
                     "pageCache",
@@ -163,7 +156,6 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityShapeRenderer", "DoRender3DOpaqueBatched", 2),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
-                new("Vintagestory.GameContent.WeatherSimulationSound", "updateSounds", 1),
                 new("Vintagestory.GameContent.ChunkMapLayer", ".ctor", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "Event_OnChunkDirty", 3),
                 new("Vintagestory.GameContent.ChunkMapLayer", "OnMapOpenedClient", 0),
