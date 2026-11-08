@@ -377,13 +377,13 @@ index b1b2eea..1bad182 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1436,10 +1701,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +1701,35 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
-+		if (ClientSettings.OptimumRenderScale < 1.0f)
++		if (!optimumFsrDisabled && ClientSettings.OptimumRenderScale < 1.0f)
 +		{
 +			int nativeWidth = ((NativeWindow)window).ClientSize.X;
 +			int nativeHeight = ((NativeWindow)window).ClientSize.Y;
@@ -400,10 +400,12 @@ index b1b2eea..1bad182 100644
 +			FramebufferErrorCode optimumFsrStatus = GL.CheckFramebufferStatus((FramebufferTarget)36160);
 +			if ((int)optimumFsrStatus != 36053)
 +			{
-+				logger.Error("Optimum disabled FSR: native intermediate framebuffer returned {0}.", optimumFsrStatus);
++				logger.Warning("Optimum disabled FSR: native intermediate framebuffer returned {0}. Restoring native resolution.", optimumFsrStatus);
 +				GL.DeleteTexture(frameBufferRef3.ColorTextureIds[0]);
 +				GL.DeleteFramebuffer(frameBufferRef3.FboId);
 +				list[OptimumFsrFramebufferIndex] = null;
++				optimumFsrDisabled = true;
++				ClientSettings.SSAA = 1f;
 +			}
 +		}
  		frameBufferRef = (list[5] = new FrameBufferRef
@@ -411,7 +413,7 @@ index b1b2eea..1bad182 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1867,10 +2155,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1867,10 +2157,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			LoadFrameBuffer(EnumFrameBuffer.GodRays);
  			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
@@ -423,7 +425,7 @@ index b1b2eea..1bad182 100644
  			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
  			godrays.Dusk = ShaderUniforms.Dusk;
  			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
-@@ -2023,17 +2312,67 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,17 +2314,69 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -433,9 +435,11 @@ index b1b2eea..1bad182 100644
 +	{
 +		if (!optimumFsrDisabled)
 +		{
-+			logger.Error("Optimum FSR disabled after runtime failure: {0}", error);
++			optimumFsrDisabled = true;
++			logger.Warning("Optimum FSR disabled after runtime failure, restoring native resolution: {0}", error);
++			ClientSettings.SSAA = 1f;
++			RebuildFrameBuffers();
 +		}
-+		optimumFsrDisabled = true;
 +	}
 +
  	public override void BlitPrimaryToDefault()
