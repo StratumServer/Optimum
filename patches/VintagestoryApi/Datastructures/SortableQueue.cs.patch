@@ -2,7 +2,7 @@ diff --git a/VintagestoryApi/Datastructures/SortableQueue.cs b/VintagestoryApi/D
 index b674310..2e54600 100644
 --- a/VintagestoryApi/Datastructures/SortableQueue.cs
 +++ b/VintagestoryApi/Datastructures/SortableQueue.cs
-@@ -1,169 +1,206 @@
+@@ -1,169 +1,207 @@
 -﻿using System;
 +using System;
  
@@ -24,10 +24,11 @@ index b674310..2e54600 100644
 +    protected T[] array;
 +
 +    // Optimum: reusable sort buffer eliminates per-Sort allocation.
-+    // The pathfinder calls Sort() on every A* open-set expansion (~50-200x
-+    // per pathfind). Each call allocated a fresh T[maxSize] just to linearize
-+    // a wrapped ring buffer before sorting. This field persists across calls,
-+    // only growing when maxSize increases (expandArray).
++    // ChunkTesselatorManager.tessChunksQueue calls Sort() whenever queued
++    // tesselated chunks are re-ordered by camera priority. Each wrapped-ring
++    // sort previously allocated a fresh T[maxSize] just to linearize the
++    // buffer before sorting. This field persists across calls, only growing
++    // when maxSize increases (expandArray).
 +    protected T[] sortBuffer;
 +
 +    public SortableQueue()
