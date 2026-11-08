@@ -142,30 +142,31 @@ public static class OptimumGreedyMeshEmitter
 
     private static bool _geometryVerified;
 
+    // 2D slice scratch buffers (Size2 = 32x32 = 1,024 elements per array):
+    // - _sliceMergeKeys: 8 KB (long[1024], packing (blockId << 32) | (uint)quantizedLight)
+    // - _sliceBlockIds:  4 KB (int[1024])
+    // - _sliceCandidate: 1 KB (bool[1024])
+    // - _sliceEligible:  1 KB (bool[1024])
+    // - _sliceConsumed:  1 KB (bool[1024])
+    // Total 2D working set = 15 KB (< 16 KB), keeping the entire slice state resident
+    // in L1d CPU cache and eliminating 1.25 MB of per-thread 3D volume scratch arrays.
     [ThreadStatic]
     private static OptimumGreedyMesher.MergedQuad[] _quadBuffer;
 
     [ThreadStatic]
-    private static bool[] _eligible;
+    private static long[] _sliceMergeKeys;
 
     [ThreadStatic]
-    private static byte[] _faceFlags;
+    private static int[] _sliceBlockIds;
 
     [ThreadStatic]
-    private static long[] _mergeKeys;
+    private static bool[] _sliceCandidate;
 
-    // Flat face light cache: 1 int per face per block position (the flat
-    // eligibility check guarantees all 4 corners equal, so one value
-    // carries the face's full light state). Layout: [idx * 6 + face].
-    // Only populated for faces that pass eligibility.
     [ThreadStatic]
-    private static int[] _faceLightCache;
+    private static bool[] _sliceEligible;
 
-    // BlockId per position, cached during pass A so pass B's run-neighbor
-    // checks and the merge-key loop don't chase Block references again.
-    // Only valid where the candidate face flags are nonzero.
     [ThreadStatic]
-    private static int[] _blockIdCache;
+    private static bool[] _sliceConsumed;
 
     // Tolerance applied beyond GreedyMeshFarDistance: 16-level light
     // (steps of 16 out of 255). Coarse enough to merge across most far
@@ -174,8 +175,8 @@ public static class OptimumGreedyMeshEmitter
     private const int FarLightTolerance = 4;
 
     /// <summary>
-    /// Runs the greedy merge on the current chunk's interior and emits
-    /// merged quads directly into <paramref name="centerPool"/>. Zeroes
+    /// Runs the greedy merge on the current chunk's interior 2D slice by 2D slice
+    /// and emits merged quads directly into <paramref name="centerPool"/>. Zeroes
     /// currentChunkDraw32 entries for blocks whose faces got consumed.
     /// Returns the number of quads emitted (for diagnostics).
     /// </summary>
@@ -250,197 +251,16 @@ public static class OptimumGreedyMeshEmitter
             }
         }
 
-        bool[] eligible = _eligible ??= new bool[Size3];
-        byte[] faceFlags = _faceFlags ??= new byte[Size3];
-        long[] mergeKeys = _mergeKeys ??= new long[Size3];
-        int[] faceLightCache = _faceLightCache ??= new int[Size3 * 6];
-        int[] blockIdCache = _blockIdCache ??= new int[Size3];
+        long[] sliceMergeKeys = _sliceMergeKeys ??= new long[Size2];
+        int[] sliceBlockIds = _sliceBlockIds ??= new int[Size2];
+        bool[] sliceCandidate = _sliceCandidate ??= new bool[Size2];
+        bool[] sliceEligible = _sliceEligible ??= new bool[Size2];
+        bool[] sliceConsumed = _sliceConsumed ??= new bool[Size2];
         OptimumGreedyMesher.MergedQuad[] quadBuffer = _quadBuffer ??= new OptimumGreedyMesher.MergedQuad[InteriorMax * InteriorMax];
-
-        // --- Pass A (B2, B5, B11 + Stage A guards): per-face merge
-        // candidates from the cheap checks only - visibility, block-type
-        // eligibility, texture lookups. No light computation here: light
-        // is the expensive part of tesselation (CalcBlockFaceLight's AO
-        // path walks 8 neighbors per face) and the vanilla path recomputes
-        // it for every face greedy doesn't consume, so computing it for
-        // faces that can never merge would pay that cost twice for
-        // nothing. Pass B computes it only for faces with a same-material
-        // run neighbor. ---
-        int candidateCount = 0;
-        for (int y = 0; y < Size; y++)
-        for (int z = 0; z < Size; z++)
-        for (int x = 0; x < Size; x++)
-        {
-            int idx = y * Size2 + z * Size + x;
-            byte rawFlags = currentChunkDraw32[idx];
-
-            bool interior = x >= InteriorMin && x <= InteriorMax && z >= InteriorMin && z <= InteriorMax;
-            if (rawFlags == 0 || !interior)
-            {
-                eligible[idx] = false;
-                faceFlags[idx] = 0;
-                continue;
-            }
-
-            int extIdx = (y + 1) * 34 * 34 + (z + 1) * 34 + (x + 1);
-            Block block = currentChunkBlocksExt[extIdx];
-
-            bool baseEligible = block.DrawType == EnumDrawType.Cube
-                && block.FaceCullMode == EnumFaceCullMode.Default
-                && (int)block.SideOpaque == 0x3F
-                && block.RandomDrawOffset == 0
-                && !block.ShapeUsesColormap
-                && !block.LoadColorMapAnyway
-                && !block.Frostable
-                && !block.CanReceiveBleed
-                && !block.HasTiles
-                && !block.HasAlternates
-                && !block.alternatingVOffset
-                && block is not IDrawYAdjustable
-                // Only the Opaque pass has a shader patched to decode the
-                // tile-count sentinel (chunkopaque.vsh/.fsh). A cube block
-                // declaring any other pass - e.g. grass-topped soil, which
-                // is EnumChunkRenderPass.TopSoil - would route a merged
-                // quad through an unpatched shader: single-tile UV smeared
-                // across the whole span, and the hijacked flag bits (see
-                // below) left live for that shader's own flag reads.
-                && block.RenderPass == EnumChunkRenderPass.Opaque
-                // EmitMergedQuad ORs the tile-count sentinel into bits 8-11
-                // and 29-31 of the block's own VertexFlags (ZOffset,
-                // Reflective, WindMode/WindData). A block that already uses
-                // any of those bits would have them corrupted by the OR, or
-                // - worse - a block with the Reflective bit naturally set
-                // would false-trigger the sentinel in the shader on
-                // ordinary vanilla-path (unmerged) quads, since eligibility
-                // isn't consulted there. VertexFlags.cs documents WindData
-                // doubling as reflective-mode storage when WindMode == 0,
-                // so this combination exists in real content.
-                && (block.VertexFlags.All & (VertexFlags.ZOffsetBitMask
-                    | VertexFlags.ReflectiveBitMask | VertexFlags.WindBitsMask)) == 0;
-
-            int[] subIds = baseEligible ? subidsByBlockAndFace[block.BlockId] : null;
-            if (subIds == null)
-            {
-                eligible[idx] = false;
-                faceFlags[idx] = 0;
-                continue;
-            }
-
-            byte candFlags = 0;
-            for (int face = 0; face < 6; face++)
-            {
-                int faceBit = 1 << face;
-                if ((rawFlags & faceBit) == 0) continue;
-
-                int subId = subIds[face];
-                if (subId < 0 || subId >= texPositions.Length || texPositions[subId] == null) continue;
-
-                candFlags |= (byte)faceBit;
-            }
-
-            blockIdCache[idx] = block.BlockId;
-            faceFlags[idx] = candFlags;
-            eligible[idx] = candFlags != 0;
-            if (candFlags != 0) candidateCount++;
-        }
-
-        if (candidateCount == 0)
-        {
-            OptimumDiagnostics.RecordGreedyMeshChunk(0, 0);
-            return 0;
-        }
-
-        // --- Pass B (B6): light, computed lazily. A face only gets a
-        // CalcBlockFaceLight call if it has at least one same-BlockId
-        // candidate neighbor along its merge axes (a "run neighbor") -
-        // without one it can never merge, so it falls through to the
-        // vanilla path untouched, with its light computed exactly once,
-        // there. For run members: quantize the 4 corners by the effective
-        // tolerance and require them equal. Matching the corner *pattern*
-        // across blocks is not enough - a merged quad interpolates the
-        // seed's corners once across the whole span while vanilla repeats
-        // the per-block gradient, so flat (quantized) light is the only
-        // case a single quad reproduces. The quantized value is what gets
-        // emitted, so every block in a span agrees exactly. ---
 
         // Save vars state we mutate during CalcBlockFaceLight calls.
         Block savedBlock = vars.block;
         int savedExtIndex3d = vars.extIndex3d;
-
-        int eligibleCount = 0;
-        for (int y = 0; y < Size; y++)
-        for (int z = InteriorMin; z <= InteriorMax; z++)
-        for (int x = InteriorMin; x <= InteriorMax; x++)
-        {
-            int idx = y * Size2 + z * Size + x;
-            byte candFlags = faceFlags[idx];
-            if (candFlags == 0) continue;
-
-            int extIdx = (y + 1) * 34 * 34 + (z + 1) * 34 + (x + 1);
-            int myId = blockIdCache[idx];
-            bool varsSet = false;
-
-            byte safeFlags = 0;
-            for (int face = 0; face < 6; face++)
-            {
-                int faceBit = 1 << face;
-                if ((candFlags & faceBit) == 0) continue;
-
-                if (!HasRunNeighbor(faceFlags, blockIdCache, face, faceBit, x, y, z, idx, myId)) continue;
-
-                if (!varsSet)
-                {
-                    // Set vars state for CalcBlockFaceLight (it reads
-                    // vars.block and vars.extIndex3d internally).
-                    vars.block = currentChunkBlocksExt[extIdx];
-                    vars.extIndex3d = extIdx;
-                    varsSet = true;
-                }
-
-                vars.CalcBlockFaceLight(face, extIdx + moveIndex[face]);
-
-                int raw0 = vars.CurrentLightRGBByCorner[0];
-                int raw1 = vars.CurrentLightRGBByCorner[1];
-                int raw2 = vars.CurrentLightRGBByCorner[2];
-                int raw3 = vars.CurrentLightRGBByCorner[3];
-
-                int faceTolerance = tolerance;
-                if (OptimumGreedyMesher.HasBlockLight(raw0) ||
-                    OptimumGreedyMesher.HasBlockLight(raw1) ||
-                    OptimumGreedyMesher.HasBlockLight(raw2) ||
-                    OptimumGreedyMesher.HasBlockLight(raw3))
-                {
-                    // Near dynamic point light sources (torches, lanterns, glowing blocks),
-                    // enforce strict zero-tolerance to preserve smooth quadratic falloff
-                    // without stepped ambient occlusion / light banding.
-                    faceTolerance = 0;
-                }
-
-                int q0 = OptimumGreedyMesher.QuantizeLight(raw0, faceTolerance);
-                int q1 = OptimumGreedyMesher.QuantizeLight(raw1, faceTolerance);
-                int q2 = OptimumGreedyMesher.QuantizeLight(raw2, faceTolerance);
-                int q3 = OptimumGreedyMesher.QuantizeLight(raw3, faceTolerance);
-
-                if (q0 != q1 || q0 != q2 || q0 != q3) continue;
-
-                faceLightCache[idx * 6 + face] = q0;
-                safeFlags |= (byte)faceBit;
-            }
-
-            faceFlags[idx] = safeFlags;
-            eligible[idx] = safeFlags != 0;
-            if (safeFlags != 0) eligibleCount++;
-        }
-
-        // Restore vars state.
-        vars.block = savedBlock;
-        vars.extIndex3d = savedExtIndex3d;
-
-        if (eligibleCount == 0)
-        {
-            OptimumDiagnostics.RecordGreedyMeshChunk(0, 0);
-            return 0;
-        }
 
         int totalQuads = 0;
         int totalBlocksConsumed = 0;
@@ -448,106 +268,196 @@ public static class OptimumGreedyMeshEmitter
         for (int face = 0; face < 6; face++)
         {
             int faceBit = 1 << face;
+            int moveDelta = moveIndex[face];
 
-            // Merge key folds in BlockId (B4) and the flat (quantized)
-            // face light value (B6), so the merge never crosses a
-            // material or light boundary. Packed exactly into a long
-            // (blockId in the high 32 bits, light in the low 32 bits)
-            // instead of hashed: a 32-bit HashCode.Combine could collide
-            // and silently merge two different materials or light levels
-            // into one quad.
-            for (int y = 0; y < Size; y++)
-            for (int z = InteriorMin; z <= InteriorMax; z++)
-            for (int x = InteriorMin; x <= InteriorMax; x++)
+            // Axis bounds for interior columns (x in [1..30], z in [1..30], y in [0..31]):
+            // faces 0,2 (N/S): slice=Z [1..30], row=Y [0..31], col=X [1..30]
+            // faces 1,3 (E/W): slice=X [1..30], row=Y [0..31], col=Z [1..30]
+            // faces 4,5 (U/D): slice=Y [0..31], row=Z [1..30], col=X [1..30]
+            int sliceMin = face < 4 ? InteriorMin : 0;
+            int sliceMax = face < 4 ? InteriorMax : Size - 1;
+            int rowMin = face < 4 ? 0 : InteriorMin;
+            int rowMax = face < 4 ? Size - 1 : InteriorMax;
+
+            for (int slice = sliceMin; slice <= sliceMax; slice++)
             {
-                int idx = y * Size2 + z * Size + x;
-                if ((faceFlags[idx] & faceBit) == 0) continue;
+                Array.Clear(sliceCandidate, 0, Size2);
 
-                mergeKeys[idx] = ((long)(uint)blockIdCache[idx] << 32) | (uint)faceLightCache[idx * 6 + face];
-            }
-
-            int quadCount = OptimumGreedyMesher.MergePass(
-                mergeKeys, faceFlags, eligible, quadBuffer, maxWidth, maxHeight, onlyFace: face);
-
-            int emitCount = Math.Min(quadCount, quadBuffer.Length);
-            for (int i = 0; i < emitCount; i++)
-            {
-                OptimumGreedyMesher.MergedQuad quad = quadBuffer[i];
-                int seedIdx = OptimumGreedyMesher.FaceSliceToIndex(quad.Face, quad.Slice, quad.RowStart, quad.ColStart);
-                int seedX = seedIdx % Size;
-                int seedZ = (seedIdx / Size) % Size;
-                int seedY = seedIdx / Size2;
-                int extSeed = (seedY + 1) * 34 * 34 + (seedZ + 1) * 34 + (seedX + 1);
-                Block block = currentChunkBlocksExt[extSeed];
-
-                int subId = subidsByBlockAndFace[block.BlockId][face];
-                TextureAtlasPosition texPos = texPositions[subId];
-
-                // Flat face light from the cache (all blocks in the
-                // merged span share the identical quantized value by
-                // merge-key construction).
-                int lightRgb = faceLightCache[seedIdx * 6 + face];
-
-                EmitMergedQuad(centerPool, vars, block, quad, texPos, lightRgb);
-
-                // Zero the covered faces out of currentChunkDraw32 so the
-                // vanilla per-block loop does not emit them a second time.
-                // A coplanar duplicate z-fights with the merged quad (the
-                // two triangulations interpolate depth differently) and
-                // flickers. Done here, per emitted quad, rather than from
-                // MergePass's faceFlags bookkeeping, so a quad dropped by
-                // the buffer cap still falls back to the vanilla path.
-                for (int row = 0; row < quad.Height; row++)
-                for (int col = 0; col < quad.Width; col++)
+                // --- Slice Pass A: cheap visibility, block eligibility, and texture subId check ---
+                int sliceCandidates = 0;
+                for (int row = rowMin; row <= rowMax; row++)
                 {
-                    int cellIdx = OptimumGreedyMesher.FaceSliceToIndex(
-                        quad.Face, quad.Slice, quad.RowStart + row, quad.ColStart + col);
-                    currentChunkDraw32[cellIdx] = (byte)(currentChunkDraw32[cellIdx] & ~faceBit);
+                    int rowBase = row * Size;
+                    for (int col = InteriorMin; col <= InteriorMax; col++)
+                    {
+                        int idx = OptimumGreedyMesher.FaceSliceToIndex(face, slice, row, col);
+                        if ((currentChunkDraw32[idx] & faceBit) == 0) continue;
+
+                        int x, y, z;
+                        switch (face)
+                        {
+                            case 0: case 2: x = col; y = row; z = slice; break;
+                            case 1: case 3: x = slice; y = row; z = col; break;
+                            default:        x = col; y = slice; z = row; break;
+                        }
+
+                        int extIdx = (y + 1) * 34 * 34 + (z + 1) * 34 + (x + 1);
+                        Block block = currentChunkBlocksExt[extIdx];
+                        if (!IsBlockBaseEligible(block)) continue;
+
+                        int[] subIds = subidsByBlockAndFace[block.BlockId];
+                        if (subIds == null) continue;
+
+                        int subId = subIds[face];
+                        if (subId < 0 || subId >= texPositions.Length || texPositions[subId] == null) continue;
+
+                        int cell2d = rowBase + col;
+                        sliceCandidate[cell2d] = true;
+                        sliceBlockIds[cell2d] = block.BlockId;
+                        sliceCandidates++;
+                    }
                 }
 
-                totalQuads++;
-                totalBlocksConsumed += quad.Width * quad.Height;
+                // If fewer than 2 candidates exist in this slice, no merge can happen.
+                if (sliceCandidates < 2) continue;
+
+                // --- Slice Pass B: lazy CalcBlockFaceLight for candidates with a 2D run neighbor ---
+                Array.Clear(sliceEligible, 0, Size2);
+                int sliceEligibleCount = 0;
+
+                for (int row = rowMin; row <= rowMax; row++)
+                {
+                    int rowBase = row * Size;
+                    for (int col = InteriorMin; col <= InteriorMax; col++)
+                    {
+                        int cell2d = rowBase + col;
+                        if (!sliceCandidate[cell2d]) continue;
+
+                        int myId = sliceBlockIds[cell2d];
+                        if (!HasSliceRunNeighbor(sliceCandidate, sliceBlockIds, row, col, cell2d, myId))
+                        {
+                            sliceCandidate[cell2d] = false;
+                            continue;
+                        }
+
+                        int x, y, z;
+                        switch (face)
+                        {
+                            case 0: case 2: x = col; y = row; z = slice; break;
+                            case 1: case 3: x = slice; y = row; z = col; break;
+                            default:        x = col; y = slice; z = row; break;
+                        }
+
+                        int extIdx = (y + 1) * 34 * 34 + (z + 1) * 34 + (x + 1);
+                        vars.block = currentChunkBlocksExt[extIdx];
+                        vars.extIndex3d = extIdx;
+                        vars.CalcBlockFaceLight(face, extIdx + moveDelta);
+
+                        int raw0 = vars.CurrentLightRGBByCorner[0];
+                        int raw1 = vars.CurrentLightRGBByCorner[1];
+                        int raw2 = vars.CurrentLightRGBByCorner[2];
+                        int raw3 = vars.CurrentLightRGBByCorner[3];
+
+                        int faceTolerance = tolerance;
+                        if (OptimumGreedyMesher.HasBlockLight(raw0) ||
+                            OptimumGreedyMesher.HasBlockLight(raw1) ||
+                            OptimumGreedyMesher.HasBlockLight(raw2) ||
+                            OptimumGreedyMesher.HasBlockLight(raw3))
+                        {
+                            faceTolerance = 0;
+                        }
+
+                        int q0 = OptimumGreedyMesher.QuantizeLight(raw0, faceTolerance);
+                        int q1 = OptimumGreedyMesher.QuantizeLight(raw1, faceTolerance);
+                        int q2 = OptimumGreedyMesher.QuantizeLight(raw2, faceTolerance);
+                        int q3 = OptimumGreedyMesher.QuantizeLight(raw3, faceTolerance);
+
+                        if (q0 != q1 || q0 != q2 || q0 != q3)
+                        {
+                            sliceCandidate[cell2d] = false;
+                            continue;
+                        }
+
+                        sliceEligible[cell2d] = true;
+                        sliceMergeKeys[cell2d] = ((long)(uint)myId << 32) | (uint)q0;
+                        sliceEligibleCount++;
+                    }
+                }
+
+                if (sliceEligibleCount == 0) continue;
+
+                int quadCount = OptimumGreedyMesher.MergeSlice(
+                    sliceMergeKeys, sliceEligible, sliceConsumed, quadBuffer,
+                    face, slice, maxWidth, maxHeight);
+
+                int emitCount = Math.Min(quadCount, quadBuffer.Length);
+                for (int i = 0; i < emitCount; i++)
+                {
+                    OptimumGreedyMesher.MergedQuad quad = quadBuffer[i];
+                    int seedIdx = OptimumGreedyMesher.FaceSliceToIndex(quad.Face, quad.Slice, quad.RowStart, quad.ColStart);
+                    int seedX = seedIdx % Size;
+                    int seedZ = (seedIdx / Size) % Size;
+                    int seedY = seedIdx / Size2;
+                    int extSeed = (seedY + 1) * 34 * 34 + (seedZ + 1) * 34 + (seedX + 1);
+                    Block block = currentChunkBlocksExt[extSeed];
+
+                    int subId = subidsByBlockAndFace[block.BlockId][face];
+                    TextureAtlasPosition texPos = texPositions[subId];
+
+                    // Extract the flat quantized face light directly from the low 32 bits of MergeKey.
+                    int lightRgb = unchecked((int)(uint)quad.MergeKey);
+
+                    EmitMergedQuad(centerPool, vars, block, quad, texPos, lightRgb);
+
+                    for (int row = 0; row < quad.Height; row++)
+                    for (int col = 0; col < quad.Width; col++)
+                    {
+                        int cellIdx = OptimumGreedyMesher.FaceSliceToIndex(
+                            quad.Face, quad.Slice, quad.RowStart + row, quad.ColStart + col);
+                        currentChunkDraw32[cellIdx] = (byte)(currentChunkDraw32[cellIdx] & ~faceBit);
+                    }
+
+                    totalQuads++;
+                    totalBlocksConsumed += quad.Width * quad.Height;
+                }
             }
         }
+
+        // Restore vars state.
+        vars.block = savedBlock;
+        vars.extIndex3d = savedExtIndex3d;
 
         OptimumDiagnostics.RecordGreedyMeshChunk(totalQuads, totalBlocksConsumed);
         return totalQuads;
     }
 
-    /// <summary>
-    /// True when the face at (x,y,z) has an adjacent same-BlockId merge
-    /// candidate along either of its merge axes - the precondition for it
-    /// ever merging into a span wider than one block. Axis mapping
-    /// matches OptimumGreedyMesher.FaceSliceToIndex: faces 0/2 merge
-    /// along X (col) and Y (row); 1/3 along Z and Y; 4/5 along X and Z.
-    /// Coordinate bounds are checked explicitly because idx +/- step can
-    /// silently wrap into the adjacent row of the flat array. Reads
-    /// faceFlags as pass B mutates it, so a neighbor that already failed
-    /// its own light check no longer counts - that only ever shrinks the
-    /// set of faces we compute light for, never the set that could merge.
-    /// </summary>
-    private static bool HasRunNeighbor(
-        byte[] faceFlags, int[] blockIdCache, int face, int faceBit,
-        int x, int y, int z, int idx, int myId)
+    private static bool IsBlockBaseEligible(Block block)
     {
-        int colStep, colCoord, rowStep, rowCoord;
-        switch (face)
-        {
-            case 0: case 2: // col=X, row=Y
-                colStep = 1; colCoord = x; rowStep = Size2; rowCoord = y;
-                break;
-            case 1: case 3: // col=Z, row=Y
-                colStep = Size; colCoord = z; rowStep = Size2; rowCoord = y;
-                break;
-            default: // 4, 5: col=X, row=Z
-                colStep = 1; colCoord = x; rowStep = Size; rowCoord = z;
-                break;
-        }
+        return block.DrawType == EnumDrawType.Cube
+            && block.FaceCullMode == EnumFaceCullMode.Default
+            && (int)block.SideOpaque == 0x3F
+            && block.RandomDrawOffset == 0
+            && !block.ShapeUsesColormap
+            && !block.LoadColorMapAnyway
+            && !block.Frostable
+            && !block.CanReceiveBleed
+            && !block.HasTiles
+            && !block.HasAlternates
+            && !block.alternatingVOffset
+            && block is not IDrawYAdjustable
+            && block.RenderPass == EnumChunkRenderPass.Opaque
+            && (block.VertexFlags.All & (VertexFlags.ZOffsetBitMask
+                | VertexFlags.ReflectiveBitMask | VertexFlags.WindBitsMask)) == 0;
+    }
 
-        if (colCoord > 0 && (faceFlags[idx - colStep] & faceBit) != 0 && blockIdCache[idx - colStep] == myId) return true;
-        if (colCoord < Size - 1 && (faceFlags[idx + colStep] & faceBit) != 0 && blockIdCache[idx + colStep] == myId) return true;
-        if (rowCoord > 0 && (faceFlags[idx - rowStep] & faceBit) != 0 && blockIdCache[idx - rowStep] == myId) return true;
-        if (rowCoord < Size - 1 && (faceFlags[idx + rowStep] & faceBit) != 0 && blockIdCache[idx + rowStep] == myId) return true;
+    private static bool HasSliceRunNeighbor(
+        bool[] sliceCandidate, int[] sliceBlockIds,
+        int row, int col, int cell2d, int myId)
+    {
+        if (col > 0 && sliceCandidate[cell2d - 1] && sliceBlockIds[cell2d - 1] == myId) return true;
+        if (col < Size - 1 && sliceCandidate[cell2d + 1] && sliceBlockIds[cell2d + 1] == myId) return true;
+        if (row > 0 && sliceCandidate[cell2d - Size] && sliceBlockIds[cell2d - Size] == myId) return true;
+        if (row < Size - 1 && sliceCandidate[cell2d + Size] && sliceBlockIds[cell2d + Size] == myId) return true;
         return false;
     }
 

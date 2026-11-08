@@ -193,6 +193,91 @@ public static class OptimumGreedyMesher
     }
 
     /// <summary>
+    /// Merges a single 2D slice (<see cref="Size"/>x<see cref="Size"/> = 1,024 cells,
+    /// indexed by <c>row * Size + col</c>) for the specified <paramref name="face"/>
+    /// and <paramref name="slice"/>. Operates entirely within 2D slice scratch buffers
+    /// (&lt; 16 KB total) so the working set remains resident in L1d CPU cache.
+    /// </summary>
+    public static int MergeSlice(
+        ReadOnlySpan<long> sliceMergeKeys,
+        ReadOnlySpan<bool> sliceEligible,
+        Span<bool> consumed,
+        Span<MergedQuad> output,
+        int face,
+        int slice,
+        int maxWidth = Size,
+        int maxHeight = Size)
+    {
+        consumed[..Size2].Clear();
+        int quadCount = 0;
+
+        for (int row = 0; row < Size; row++)
+        {
+            int rowBase = row * Size;
+            for (int col = 0; col < Size; col++)
+            {
+                int seedCell = rowBase + col;
+                if (consumed[seedCell] || !sliceEligible[seedCell]) continue;
+
+                long key = sliceMergeKeys[seedCell];
+
+                int width = 1;
+                while (width < maxWidth && col + width < Size)
+                {
+                    int nextCell = rowBase + col + width;
+                    if (consumed[nextCell] || !sliceEligible[nextCell] || sliceMergeKeys[nextCell] != key)
+                        break;
+                    width++;
+                }
+
+                int height = 1;
+                while (height < maxHeight && row + height < Size)
+                {
+                    int nextRowBase = (row + height) * Size;
+                    bool rowMatches = true;
+                    for (int c = col; c < col + width; c++)
+                    {
+                        int nextCell = nextRowBase + c;
+                        if (consumed[nextCell] || !sliceEligible[nextCell] || sliceMergeKeys[nextCell] != key)
+                        {
+                            rowMatches = false;
+                            break;
+                        }
+                    }
+                    if (!rowMatches) break;
+                    height++;
+                }
+
+                for (int r = row; r < row + height; r++)
+                {
+                    int markRowBase = r * Size;
+                    for (int c = col; c < col + width; c++)
+                    {
+                        consumed[markRowBase + c] = true;
+                    }
+                }
+
+                if (quadCount < output.Length)
+                {
+                    output[quadCount] = new MergedQuad
+                    {
+                        Face = face,
+                        Slice = slice,
+                        ColStart = col,
+                        Width = width,
+                        RowStart = row,
+                        Height = height,
+                        MergeKey = key,
+                    };
+                }
+                quadCount++;
+            }
+        }
+
+        return quadCount;
+    }
+
+    /// <summary>
     /// Quantizes a packed light value (4 independent byte channels: sun +
     /// RGB) to steps of 2^tolerance per channel by masking off the low
     /// bits - floor quantization, AND per byte, so there are no
