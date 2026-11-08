@@ -92,6 +92,7 @@ public class WindowsRuntimeConfigFrameworksTests
         JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
         Assert.True(props["System.GC.Server"]!.GetValue<bool>());
         Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
+        Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
     }
 
     [PwshFact]
