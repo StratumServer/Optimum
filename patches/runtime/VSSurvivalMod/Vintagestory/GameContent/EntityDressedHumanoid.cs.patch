@@ -1,9 +1,7 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
 --- a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs
-@@ -122,58 +122,155 @@ public class EntityDressedHumanoid : EntityHumanoid
- 		foreach (KeyValuePair<string, CompositeTexture> texture in Api.World.GetEntityType(Code).Client.Textures)
- 		{
+@@ -124,56 +124,156 @@ public class EntityDressedHumanoid : EntityHumanoid
  			fastSmallDictionary[texture.Key] = texture.Value;
  			texture.Value.Bake(coreClientAPI.Assets);
  		}
@@ -23,15 +21,31 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
  			{
 -				TexturedWeightedCompositeShape texturedWeightedCompositeShape = array[i];
 -				if (texturedWeightedCompositeShape != null && !(texturedWeightedCompositeShape.Base == null))
+-				{
+-					addGearToShape(outfitSlots[i], texturedWeightedCompositeShape, entityShape2, shapePathForLogging, null, texturedWeightedCompositeShape.Textures);
+-				}
+-			}
+-			foreach (KeyValuePair<string, AssetLocation> texture2 in entityShape.Textures)
+-			{
+-				if (!fastSmallDictionary.ContainsKey(texture2.Key))
+-				{
+-					CompositeTexture compositeTexture = new CompositeTexture(texture2.Value);
+-					compositeTexture.Bake(coreClientAPI.Assets);
+-					fastSmallDictionary[texture2.Key] = compositeTexture;
+-				}
 +				fastSmallDictionary[texture3.Key] = texture3.Value;
-+			}
-+		}
+ 			}
+ 		}
+-		for (int j = 0; j < outfitCodes.Length; j++)
 +		else
-+		{
+ 		{
+-			TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
+-			if (texturedWeightedCompositeShape2 == null)
 +			Shape entityShape2 = (entityShape = entityShape.Clone());
 +			TexturedWeightedCompositeShape[] array = humanoidOutfits.Outfit2Shapes(OutfitConfigFileName, OutfitCodes);
 +			if (outfitSlots != null)
-+			{
+ 			{
+-				continue;
 +				for (int i = 0; i < outfitSlots.Length && i < array.Length; i++)
 +				{
 +					TexturedWeightedCompositeShape texturedWeightedCompositeShape = array[i];
@@ -41,54 +55,60 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
 +					}
 +				}
 +				foreach (KeyValuePair<string, AssetLocation> texture2 in entityShape.Textures)
- 				{
--					addGearToShape(outfitSlots[i], texturedWeightedCompositeShape, entityShape2, shapePathForLogging, null, texturedWeightedCompositeShape.Textures);
++				{
 +					if (!fastSmallDictionary.ContainsKey(texture2.Key))
 +					{
 +						CompositeTexture compositeTexture = new CompositeTexture(texture2.Value);
 +						compositeTexture.Bake(coreClientAPI.Assets);
 +						fastSmallDictionary[texture2.Key] = compositeTexture;
 +					}
- 				}
++				}
  			}
--			foreach (KeyValuePair<string, AssetLocation> texture2 in entityShape.Textures)
-+			for (int j = 0; j < outfitCodes.Length; j++)
+-			if (texturedWeightedCompositeShape2.DisableElements != null)
++			if (outfitCodes != null && outfitSlots != null && array != null)
  			{
--				if (!fastSmallDictionary.ContainsKey(texture2.Key))
-+				TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
-+				if (texturedWeightedCompositeShape2 == null)
- 				{
--					CompositeTexture compositeTexture = new CompositeTexture(texture2.Value);
--					compositeTexture.Bake(coreClientAPI.Assets);
--					fastSmallDictionary[texture2.Key] = compositeTexture;
-+					continue;
-+				}
-+				if (texturedWeightedCompositeShape2.DisableElements != null)
+-				entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++				for (int j = 0; j < outfitCodes.Length && j < array.Length && j < outfitSlots.Length; j++)
 +				{
-+					entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++					TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
++					if (texturedWeightedCompositeShape2 == null)
++					{
++						continue;
++					}
++					if (texturedWeightedCompositeShape2.DisableElements != null)
++					{
++						entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++					}
++					if (texturedWeightedCompositeShape2.OverrideTextures == null)
++					{
++						continue;
++					}
++					foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
++					{
++						AssetLocation value = overrideTexture.Value;
++						entityShape.Textures[overrideTexture.Key] = value;
++						fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, outfitSlots[j], outfitCodes[j], overrideTexture.Key));
++					}
 +				}
-+				if (texturedWeightedCompositeShape2.OverrideTextures == null)
-+				{
-+					continue;
-+				}
-+				foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
-+				{
-+					AssetLocation value = overrideTexture.Value;
-+					entityShape.Textures[overrideTexture.Key] = value;
-+					fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, OutfitSlots[j], OutfitCodes[j], overrideTexture.Key));
- 				}
  			}
+-			if (texturedWeightedCompositeShape2.OverrideTextures == null)
 +			if (optimumOutfitCacheKey != null)
-+			{
+ 			{
+-				continue;
+-			}
+-			foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
+-			{
+-				AssetLocation value = overrideTexture.Value;
+-				entityShape.Textures[overrideTexture.Key] = value;
+-				fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, OutfitSlots[j], OutfitCodes[j], overrideTexture.Key));
 +				OptimumOutfitShapeCache.Store(optimumOutfitCacheKey, entityShape, fastSmallDictionary);
-+			}
+ 			}
  		}
--		for (int j = 0; j < outfitCodes.Length; j++)
 +		optimumAnimatorCacheKey = optimumOutfitCacheKey;
-+		bool shapeIsCloned = true;
-+		base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
-+	}
-+
+ 		bool shapeIsCloned = true;
+ 		base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
+ 	}
+ 
 +	private string optimumAnimatorCacheKey;
 +
 +	protected override void OnTesselation(ref Shape entityShape, string shapePathForLogging, ref bool shapeIsCloned)
@@ -101,15 +121,12 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
 +		shapeFresh = true;
 +		CompositeShape cshape = base.Properties.Client.Shape;
 +		if (cshape?.Overlays != null && cshape.Overlays.Length > 0)
- 		{
--			TexturedWeightedCompositeShape texturedWeightedCompositeShape2 = array[j];
--			if (texturedWeightedCompositeShape2 == null)
++		{
 +			shapeIsCloned = true;
 +			entityShape = entityShape.Clone();
 +			IDictionary<string, CompositeTexture> textures = base.Properties.Client.Textures;
 +			foreach (CompositeShape overlay in cshape.Overlays)
- 			{
--				continue;
++			{
 +				Shape overlayShape = Api.Assets.TryGet(overlay.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"))?.ToObject<Shape>();
 +				if (overlayShape == null)
 +				{
@@ -135,8 +152,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
 +						cmpt.Baked.TextureSubId = textureSubid;
 +					}
 +				});
- 			}
--			if (texturedWeightedCompositeShape2.DisableElements != null)
++			}
 +		}
 +		string[] willDisableElements = null;
 +		if (base.Properties.Attributes?["disableElements"].Exists == true)
@@ -147,21 +163,17 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
 +		if (bhs != null)
 +		{
 +			foreach (EntityBehavior bh in bhs)
- 			{
--				entityShape.RemoveElements(texturedWeightedCompositeShape2.DisableElements);
++			{
 +				bh.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned, ref willDisableElements);
- 			}
--			if (texturedWeightedCompositeShape2.OverrideTextures == null)
++			}
 +		}
 +		if (willDisableElements != null && willDisableElements.Length > 0)
 +		{
 +			if (!shapeIsCloned)
- 			{
--				continue;
++			{
 +				entityShape = entityShape.Clone();
 +				shapeIsCloned = true;
- 			}
--			foreach (KeyValuePair<string, AssetLocation> overrideTexture in texturedWeightedCompositeShape2.OverrideTextures)
++			}
 +			entityShape.RemoveElements(willDisableElements);
 +		}
 +		optimumAnimatorCacheKey = OptimumOutfitAnimatorCache.BuildKey(optimumAnimatorCacheKey, cshape?.Overlays, willDisableElements);
@@ -169,17 +181,12 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs b/V
 +		{
 +			AnimManager.LoadAnimator(World.Api, this, entityShape, AnimManager.Animator?.Animations, requirePosesOnServer, willDisableElements, "head");
 +			if (optimumAnimatorCacheKey != null)
- 			{
--				AssetLocation value = overrideTexture.Value;
--				entityShape.Textures[overrideTexture.Key] = value;
--				fastSmallDictionary[overrideTexture.Key] = CreateCompositeTexture(value, coreClientAPI, new SourceStringComponents("Outfit config file {0}, Outfit slot {1}, Outfit type {2}, Override Texture {3}", OutfitConfigFileName, OutfitSlots[j], OutfitCodes[j], overrideTexture.Key));
++			{
 +				OptimumOutfitAnimatorCache.Store(optimumAnimatorCacheKey, entityShape, AnimManager.Animator);
- 			}
- 		}
--		bool shapeIsCloned = true;
--		base.OnTesselation(ref entityShape, shapePathForLogging, ref shapeIsCloned);
- 	}
- 
++			}
++		}
++	}
++
  	private CompositeTexture CreateCompositeTexture(AssetLocation loc, ICoreClientAPI capi, SourceStringComponents sourceForLogging)
  	{
  		CompositeTexture compositeTexture = new CompositeTexture(loc);
