@@ -510,6 +510,17 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("if (reuse)", containerPatch);
         Assert.Contains("optimumNonEmptyStacks?.Clear();", containerPatch);
     }
+
+    [Fact]
+    public void ChunkTesselatorManager_AppliesWallClockUploadTimeGuard()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch"));
+        Assert.Contains("long uploadStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();", patch);
+        Assert.Contains("long maxUploadTicks = (System.Diagnostics.Stopwatch.Frequency * 3L) / 1000L;", patch);
+        Assert.Contains("if (uploadedAny && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)", patch);
+        Assert.Contains("processPrioQueue = tessChunksQueuePriority.Count > 0;", patch);
+        Assert.Contains("while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)", patch);
     }
 
     [Fact]
