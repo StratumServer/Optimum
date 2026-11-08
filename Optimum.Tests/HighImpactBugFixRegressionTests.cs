@@ -1058,6 +1058,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("ApiContractInvalid", resultSource);
         Assert.Contains("CacheValidationResult ValidateCache", cacheManagerSource);
         Assert.Contains("[Optimum.Launcher] Cache invalidated: {validationResult.Status}", programSource);
+    }
 
     [Fact]
     public void PotInFirepitRenderer_StaticMeshAndFrustumCullOptimization()
@@ -1074,7 +1075,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("shouldRedraw = true;", firepitPatch);
 
         string patcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
-        Assert.Contains(""GetPotStaticMesh"", patcherSource);
+        Assert.Contains("\"GetPotStaticMesh\"", patcherSource);
     }
 
     [Fact]
