@@ -28,10 +28,23 @@ public class ChiselLodCoverageTests
         Assert.DoesNotContain("tesselator.TesselateBlock(primaryBlock", source);
         Assert.Contains("GetMajorityMaterialId()", source);
         Assert.Contains("(BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId()", source);
+        Assert.Contains("VolumeRel >= 0.35f", source);
         Assert.Contains("primaryBlock.RenderPass == EnumChunkRenderPass.Opaque", source);
         Assert.Contains("primaryBlock.VertexFlags.GlowLevel == 0", source);
         Assert.Contains("TesselatorManager.GetDefaultBlockMesh(primaryBlock)", source);
         Assert.DoesNotContain("?.Clone()", source);
+    }
+
+    [Theory]
+    [InlineData("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs.patch")]
+    public void ChiselLodVolumeGatesLowVolumeMicroblocks(string relativePath)
+    {
+        string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
+
+        // Prevents open-space, window cutouts, and thin railings (< 35% solid volume)
+        // from snapping into solid 1x1x1 unit cubes at distance
+        Assert.Contains("VolumeRel >= 0.35f", source);
+        Assert.Contains("bool canUseDefaultMesh = VolumeRel >= 0.35f", source);
     }
 
     [Theory]

@@ -18,7 +18,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs b/V
 +			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 +			int primaryBlockId = (BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId();
 +			Block primaryBlock = Api.World.GetBlock(primaryBlockId);
-+			bool canUseDefaultMesh = primaryBlock != null && primaryBlock.RenderPass == EnumChunkRenderPass.Opaque && primaryBlock.VertexFlags.GlowLevel == 0;
++			bool canUseDefaultMesh = VolumeRel >= 0.35f && primaryBlock != null && primaryBlock.RenderPass == EnumChunkRenderPass.Opaque && primaryBlock.VertexFlags.GlowLevel == 0;
 +			MeshData lodMesh = canUseDefaultMesh ? capi.TesselatorManager.GetDefaultBlockMesh(primaryBlock) : null;
 +			bool fallback = lodMesh == null;
 +			lodMesh ??= Mesh;
