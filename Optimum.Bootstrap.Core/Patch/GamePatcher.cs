@@ -218,7 +218,7 @@ public sealed class GamePatcher(
             }
 
             string vanillaLibHash = ComputeSha256(sourceLib);
-            string patchedLibHash = ComputeSha256(tempLib);
+            string patchedLibHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempLib);
             MoveFile(tempLib, gameLib);
             string tempLibPdb = Path.ChangeExtension(tempLib, ".pdb");
             if (probe.FileExists(tempLibPdb))
@@ -252,7 +252,7 @@ public sealed class GamePatcher(
             }
 
             string vanillaApiHash = ComputeSha256(sourceApi);
-            string patchedApiHash = ComputeSha256(tempApi);
+            string patchedApiHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempApi);
             MoveFile(tempApi, gameApi);
             string tempApiPdb = Path.ChangeExtension(tempApi, ".pdb");
             if (probe.FileExists(tempApiPdb))
@@ -287,7 +287,7 @@ public sealed class GamePatcher(
                 if (outcome.Started && outcome.ExitCode == 0 && probe.FileExists(tempEssentials))
                 {
                     string vanillaHash = ComputeSha256(sourceEssentials);
-                    string patchedHash = ComputeSha256(tempEssentials);
+                    string patchedHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempEssentials);
                     MoveFile(tempEssentials, gameEssentials);
                     string tempPdb = Path.ChangeExtension(tempEssentials, ".pdb");
                     if (probe.FileExists(tempPdb))
@@ -328,7 +328,7 @@ public sealed class GamePatcher(
                 if (outcome.Started && outcome.ExitCode == 0 && probe.FileExists(tempSurvival))
                 {
                     string vanillaHash = ComputeSha256(sourceSurvival);
-                    string patchedHash = ComputeSha256(tempSurvival);
+                    string patchedHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempSurvival);
                     MoveFile(tempSurvival, gameSurvival);
                     string tempPdb = Path.ChangeExtension(tempSurvival, ".pdb");
                     if (probe.FileExists(tempPdb))
@@ -885,6 +885,20 @@ public sealed class GamePatcher(
                 | UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute);
         }
         catch { /* best effort */ }
+    }
+
+    internal static string? ExtractPatchedHash(string? output)
+    {
+        if (string.IsNullOrEmpty(output)) return null;
+
+        const string prefix = "PATCHED SHA256: ";
+        int index = output.LastIndexOf(prefix, StringComparison.Ordinal);
+        if (index < 0) return null;
+
+        int start = index + prefix.Length;
+        int end = output.IndexOfAny(['\r', '\n'], start);
+        string candidate = (end < 0 ? output[start..] : output[start..end]).Trim();
+        return candidate.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? candidate : null;
     }
 
     private static string ComputeSha256(string path)

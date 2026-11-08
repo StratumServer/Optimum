@@ -389,4 +389,15 @@ public sealed class GamePatcherTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Theory]
+    [InlineData("Done.\nPATCHED SHA256: sha256:abcdef0123456789\n", "sha256:abcdef0123456789")]
+    [InlineData("output\r\nPATCHED SHA256: sha256:12345\r\nDone", "sha256:12345")]
+    [InlineData("no hash here", null)]
+    [InlineData(null, null)]
+    public void ExtractPatchedHash_ParsesCorrectly(string? output, string? expected)
+    {
+        string? result = GamePatcher.ExtractPatchedHash(output);
+        Assert.Equal(expected, result);
+    }
 }
