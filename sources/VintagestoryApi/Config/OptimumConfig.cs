@@ -135,8 +135,8 @@ public static class OptimumConfig
     /// </summary>
     public static volatile bool GreedyMeshShadersCompiledOn;
 
-    public static int ChiselLodDistance = 48;
-    public static double ChiselLodDistanceSq = 48.0 * 48.0;
+    public static int ChiselLodDistance = 64;
+    public static double ChiselLodDistanceSq = 64.0 * 64.0;
 
     /// <summary>
     /// Hysteresis factor for entity/chisel render distance. Entities that were
@@ -874,8 +874,9 @@ public static class OptimumConfig
 
     public static void SetChiselLodDistance(int blocks)
     {
-        ChiselLodDistance = blocks;
-        ChiselLodDistanceSq = (double)blocks * blocks;
+        int clamped = Math.Max(48, blocks);
+        ChiselLodDistance = clamped;
+        ChiselLodDistanceSq = (double)clamped * clamped;
     }
 
     /// <summary>
@@ -1082,8 +1083,8 @@ public static class OptimumConfig
             WeatherWindThrottleEnabled = data.WeatherWindThrottle;
             ParticleDistanceGateEnabled = data.ParticleDistanceGate;
             ChiselLodEnabled = data.ChiselLod;
-            ChiselLodDistance = data.ChiselLodDistance;
-            ChiselLodDistanceSq = (double)data.ChiselLodDistance * data.ChiselLodDistance;
+            ChiselLodDistance = Math.Max(48, data.ChiselLodDistance);
+            ChiselLodDistanceSq = (double)ChiselLodDistance * ChiselLodDistance;
             OcclusionCullingScaleEnabled = data.OcclusionCullingScale;
             BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
             MeshPartPoolEnabled = data.MeshPartPool;
@@ -1280,7 +1281,7 @@ internal sealed class OptimumConfigData
     public bool WeatherWindThrottle { get; set; } = true;
     public bool ParticleDistanceGate { get; set; } = true;
     public bool ChiselLod { get; set; } = true;
-    public int ChiselLodDistance { get; set; } = 48;
+    public int ChiselLodDistance { get; set; } = 64;
     public bool OcclusionCullingScale { get; set; } = true;
     public bool BfsChunkVisibility { get; set; } = true;
     public bool MeshPartPool { get; set; } = true;

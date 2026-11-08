@@ -244,6 +244,27 @@ public class ChiselLodCoverageTests
         Assert.Contains("ResetChiselLod", source);
     }
 
+    [Fact]
+    public void ChiselLodSettings_DefaultDistanceAndSliderClamp_EnforcesMinimum64And48()
+    {
+        string clientSettingsPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch");
+        string guiSettingsPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
+        string configSource = File.ReadAllText(FindRepositoryFile("sources/VintagestoryApi/Config/OptimumConfig.cs"));
+
+        Assert.Contains("public static int OptimumChiselLodDistance { get; set; } = 64;", clientSettingsPatch);
+        Assert.Contains("SetValues(ClientSettings.OptimumChiselLodDistance, 48, 256, 16, \" blocks\")", guiSettingsPatch);
+        Assert.Contains("public static int ChiselLodDistance = 64;", configSource);
+        Assert.Contains("public int ChiselLodDistance { get; set; } = 64;", configSource);
+
+        Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(32);
+        Assert.Equal(48, Vintagestory.API.Config.OptimumConfig.ChiselLodDistance);
+        Assert.Equal(48.0 * 48.0, Vintagestory.API.Config.OptimumConfig.ChiselLodDistanceSq);
+
+        Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(64);
+        Assert.Equal(64, Vintagestory.API.Config.OptimumConfig.ChiselLodDistance);
+        Assert.Equal(64.0 * 64.0, Vintagestory.API.Config.OptimumConfig.ChiselLodDistanceSq);
+    }
+
     private static string FindRepositoryFile(string relativePath)
     {
         DirectoryInfo directory = new(AppContext.BaseDirectory);

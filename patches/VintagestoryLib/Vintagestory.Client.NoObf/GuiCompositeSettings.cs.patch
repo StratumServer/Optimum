@@ -180,7 +180,7 @@ index 4d08f84..ac67865 100644
 +		((GuiElementSwitch)optimumControls["optWeatherWind"]).SetValue(ClientSettings.OptimumWeatherWindThrottle);
 +		((GuiElementSwitch)optimumControls["optParticleDist"]).SetValue(ClientSettings.OptimumParticleDistanceGate);
 +		((GuiElementSwitch)optimumControls["optChiselLod"]).SetValue(ClientSettings.OptimumChiselLod);
-+		((GuiElementSlider)optimumControls["optChiselLodDist"]).SetValues(ClientSettings.OptimumChiselLodDistance, 32, 256, 16, " blocks");
++		((GuiElementSlider)optimumControls["optChiselLodDist"]).SetValues(ClientSettings.OptimumChiselLodDistance, 48, 256, 16, " blocks");
 +		((GuiElementSwitch)optimumControls["optOcclusionScale"]).SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
 +		((GuiElementSwitch)optimumControls["optDynLightCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
 +		((GuiElementSwitch)optimumControls["optEntityLightBatch"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
@@ -373,7 +373,7 @@ index 4d08f84..ac67865 100644
 +	private void onOptimumWeatherWindChanged(bool on) { ClientSettings.OptimumWeatherWindThrottle = on; Vintagestory.API.Config.OptimumConfig.WeatherWindThrottleEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumParticleDistChanged(bool on) { ClientSettings.OptimumParticleDistanceGate = on; Vintagestory.API.Config.OptimumConfig.ParticleDistanceGateEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumChiselLodChanged(bool on) { ClientSettings.OptimumChiselLod = on; Vintagestory.API.Config.OptimumConfig.ChiselLodEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
-+	private bool onOptimumChiselLodDistChanged(int val) { ClientSettings.OptimumChiselLodDistance = val; Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(val); Vintagestory.API.Config.OptimumConfig.Save(); return true; }
++	private bool onOptimumChiselLodDistChanged(int val) { val = Math.Max(48, val); ClientSettings.OptimumChiselLodDistance = val; Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(val); Vintagestory.API.Config.OptimumConfig.Save(); return true; }
 +
 +	// The rows below bind straight to OptimumConfig: nothing reads them
 +	// per-frame from ClientSettings, so no mirror property is needed.

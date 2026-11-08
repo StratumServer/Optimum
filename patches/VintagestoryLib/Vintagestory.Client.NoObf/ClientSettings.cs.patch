@@ -22,7 +22,7 @@ index bdaa84a..b82240e 100644
 +	public static bool OptimumWeatherWindThrottle { get; set; } = true;
 +	public static bool OptimumParticleDistanceGate { get; set; } = true;
 +	public static bool OptimumChiselLod { get; set; } = true;
-+	public static int OptimumChiselLodDistance { get; set; } = 48;
++	public static int OptimumChiselLodDistance { get; set; } = 64;
 +	public static bool OptimumDynamicLightCache { get; set; } = true;
 +	public static float OptimumRenderScale { get; set; } = 1.0f;
  }
