@@ -31,7 +31,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VANILLA_SERVER="$PROJECT_ROOT/.vanilla/linux-x64/vintagestory"
+VANILLA_SERVER="${VANILLA_SERVER:-}"
+if [ -z "$VANILLA_SERVER" ]; then
+    if [ -d "$PROJECT_ROOT/.vanilla/linux-x64/vintagestory" ]; then
+        VANILLA_SERVER="$PROJECT_ROOT/.vanilla/linux-x64/vintagestory"
+    elif [ -d "$PROJECT_ROOT/.vanilla/win-x64/vintagestory" ]; then
+        VANILLA_SERVER="$PROJECT_ROOT/.vanilla/win-x64/vintagestory"
+    else
+        VANILLA_SERVER="$PROJECT_ROOT/.vanilla/linux-x64/vintagestory"
+    fi
+fi
 PATCHED_DLLS="$PROJECT_ROOT/bin/Release/net10.0"
 PATCHED_LIB_DLL="$PROJECT_ROOT/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
 HARNESS_DIR="$PROJECT_ROOT/.worldgen-parity"

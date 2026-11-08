@@ -11,7 +11,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-VANILLA_SERVER="${VANILLA_SERVER:-$REPO_ROOT/.vanilla/linux-x64/vintagestory}"
+VANILLA_SERVER="${VANILLA_SERVER:-}"
+if [ -z "$VANILLA_SERVER" ]; then
+    if [ -d "$REPO_ROOT/.vanilla/linux-x64/vintagestory" ]; then
+        VANILLA_SERVER="$REPO_ROOT/.vanilla/linux-x64/vintagestory"
+    elif [ -d "$REPO_ROOT/.vanilla/win-x64/vintagestory" ]; then
+        VANILLA_SERVER="$REPO_ROOT/.vanilla/win-x64/vintagestory"
+    else
+        VANILLA_SERVER="$REPO_ROOT/.vanilla/linux-x64/vintagestory"
+    fi
+fi
 PATCHED_DLLS="${PATCHED_DLLS:-$REPO_ROOT/bin/Release/net10.0}"
 STAGE_DIR="${STAGE_DIR:-/tmp/vs-savegame-roundtrip-$UID}"
 DATA_DIR="$STAGE_DIR/data"
