@@ -753,6 +753,24 @@ function Install-StagedPackage {
     $oldMoved = $false
     $newMoved = $false
 
+    function Invoke-OptimumFileRetry {
+        param (
+            [scriptblock]$Action,
+            [int]$MaxRetries = 10,
+            [int]$InitialDelayMs = 250
+        )
+        $attempt = 0
+        while ($true) {
+            try {
+                return & $Action
+            } catch {
+                $attempt++
+                if ($attempt -ge $MaxRetries) { throw }
+                Start-Sleep -Milliseconds ($InitialDelayMs * $attempt)
+            }
+        }
+    }
+
     try {
         New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
         Get-ChildItem -Path $StageDir -Force | ForEach-Object {
@@ -760,10 +778,10 @@ function Install-StagedPackage {
         }
 
         if ($hadExisting) {
-            Move-Item -LiteralPath $installPath -Destination $backupDir
+            Invoke-OptimumFileRetry { Move-Item -LiteralPath $installPath -Destination $backupDir }
             $oldMoved = $true
         }
-        Move-Item -LiteralPath $tempDir -Destination $installPath
+        Invoke-OptimumFileRetry { Move-Item -LiteralPath $tempDir -Destination $installPath }
         $newMoved = $true
         if ($oldMoved) {
             Remove-Item -Recurse -Force -LiteralPath $backupDir
@@ -777,7 +795,7 @@ function Install-StagedPackage {
                 Remove-Item -Recurse -Force -LiteralPath $installPath
             }
             if ($oldMoved -and (Test-Path $backupDir) -and -not (Test-Path $installPath)) {
-                Move-Item -LiteralPath $backupDir -Destination $installPath
+                Invoke-OptimumFileRetry { Move-Item -LiteralPath $backupDir -Destination $installPath }
                 $oldMoved = $false
             }
         } catch {
