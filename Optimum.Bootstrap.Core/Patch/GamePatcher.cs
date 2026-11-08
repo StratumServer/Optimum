@@ -440,6 +440,11 @@ public sealed class GamePatcher(
 
         RestoreGameContentAsset(gameDir);
         RestoreCairoWrapperAsset(gameDir);
+        RestoreFileAsset(gameDir, "Optimum.Api.Contracts.dll");
+        string launcherName = probe.Os == OsKind.Windows ? "Optimum.exe" : "Optimum";
+        RestoreFileAsset(gameDir, launcherName);
+        RestoreDirectoryAssets(gameDir, Path.Combine("assets", "game", "lang"), restored);
+        RestoreDirectoryAssets(gameDir, Path.Combine("assets", "darkvision", "config", "shaderpatches"));
 
         observer?.Log(LogLevel.Info, $"rollback complete: restored {restored.Count} vanilla assemblies");
         return PatchResult.Success(gameDir, restored);
@@ -464,6 +469,7 @@ public sealed class GamePatcher(
         string? contractsSrc = ResolveDonor(overlayDir, gameDir, "Optimum.Api.Contracts.dll", "VintagestoryAPI.Contracts.dll");
         if (contractsSrc is not null && probe.FileExists(contractsSrc))
         {
+            BackupFileAsset(gameDir, "Optimum.Api.Contracts.dll");
             CopySafeFile(contractsSrc, Path.Combine(gameDir, "Optimum.Api.Contracts.dll"), gameDir, observer);
         }
 
@@ -525,6 +531,7 @@ public sealed class GamePatcher(
                     string dstFile = Path.Combine(langDst, Path.GetFileName(file));
                     if (SymlinkComponentCheck.IsContainedWithinRoot(probe, dstFile, gameDir, out _))
                     {
+                        BackupFileAsset(gameDir, Path.Combine("assets", "game", "lang", Path.GetFileName(file)));
                         MergeJsonFile(file, dstFile);
                     }
                 }
@@ -546,7 +553,9 @@ public sealed class GamePatcher(
                 EnsureDirectory(darkVisionPatchesDst);
                 foreach (string file in probe.EnumerateFiles(darkVisionPatchesSrc, "*.txt"))
                 {
-                    CopySafeFile(file, Path.Combine(darkVisionPatchesDst, Path.GetFileName(file)), gameDir, observer);
+                    string fileName = Path.GetFileName(file);
+                    BackupFileAsset(gameDir, Path.Combine("assets", "darkvision", "config", "shaderpatches", fileName));
+                    CopySafeFile(file, Path.Combine(darkVisionPatchesDst, fileName), gameDir, observer);
                 }
             }
         }
@@ -557,6 +566,7 @@ public sealed class GamePatcher(
         if (launcherSrc is not null && probe.FileExists(launcherSrc))
         {
             string launcherDst = Path.Combine(gameDir, launcherName);
+            BackupFileAsset(gameDir, launcherName);
             if (CopySafeFile(launcherSrc, launcherDst, gameDir, observer))
             {
                 MakeExecutable(launcherDst);
@@ -571,74 +581,87 @@ public sealed class GamePatcher(
         }
     }
 
-    private void BackupGameContentAsset(string gameDir, string gameContentPath)
+    private void BackupFileAsset(string gameDir, string relativePath)
     {
         string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla");
-        string backupPath = Path.Combine(vanillaDir, "Optimum.GameContent.dll");
-        string absentMarker = Path.Combine(vanillaDir, "Optimum.GameContent.dll.absent");
+        string targetPath = Path.Combine(gameDir, relativePath);
+        string backupPath = Path.Combine(vanillaDir, relativePath);
+        string absentMarker = Path.Combine(vanillaDir, relativePath + ".absent");
+
         if (probe.FileExists(backupPath) || probe.FileExists(absentMarker))
             return;
 
-        EnsureDirectory(vanillaDir);
-        if (probe.FileExists(gameContentPath))
-            CopyFile(gameContentPath, backupPath);
+        EnsureDirectory(Path.GetDirectoryName(backupPath)!);
+        if (probe.FileExists(targetPath))
+            CopyFile(targetPath, backupPath);
         else
             WriteText(absentMarker, string.Empty);
+    }
+
+    private void RestoreFileAsset(string gameDir, string relativePath)
+    {
+        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla");
+        string targetPath = Path.Combine(gameDir, relativePath);
+        string backupPath = Path.Combine(vanillaDir, relativePath);
+        string absentMarker = Path.Combine(vanillaDir, relativePath + ".absent");
+
+        if (probe.FileExists(backupPath))
+        {
+            CopyFile(backupPath, targetPath);
+            TryDeleteFile(backupPath);
+        }
+        else if (probe.FileExists(absentMarker))
+        {
+            TryDeleteFile(targetPath);
+        }
+
+        TryDeleteFile(absentMarker);
+    }
+
+    private void RestoreDirectoryAssets(string gameDir, string relativeDir, List<string>? restored = null)
+    {
+        string backupDir = Path.Combine(gameDir, ".optimum", "vanilla", relativeDir);
+        if (!probe.DirectoryExists(backupDir)) return;
+
+        string targetDir = Path.Combine(gameDir, relativeDir);
+        foreach (string file in probe.EnumerateFiles(backupDir, "*"))
+        {
+            if (file.EndsWith(".absent", StringComparison.OrdinalIgnoreCase))
+            {
+                string targetFileName = Path.GetFileName(file[..^7]);
+                string targetPath = Path.Combine(targetDir, targetFileName);
+                TryDeleteFile(targetPath);
+                TryDeleteFile(file);
+            }
+            else
+            {
+                string targetFileName = Path.GetFileName(file);
+                string targetPath = Path.Combine(targetDir, targetFileName);
+                CopyFile(file, targetPath);
+                TryDeleteFile(file);
+                restored?.Add(Path.Combine(relativeDir, targetFileName).Replace('\\', '/'));
+            }
+        }
+    }
+
+    private void BackupGameContentAsset(string gameDir, string gameContentPath)
+    {
+        BackupFileAsset(gameDir, "Optimum.GameContent.dll");
     }
 
     private void RestoreGameContentAsset(string gameDir)
     {
-        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla");
-        string gameContentPath = Path.Combine(gameDir, "Optimum.GameContent.dll");
-        string backupPath = Path.Combine(vanillaDir, "Optimum.GameContent.dll");
-        string absentMarker = Path.Combine(vanillaDir, "Optimum.GameContent.dll.absent");
-
-        if (probe.FileExists(backupPath))
-        {
-            CopyFile(backupPath, gameContentPath);
-            TryDeleteFile(backupPath);
-        }
-        else if (probe.FileExists(absentMarker))
-        {
-            TryDeleteFile(gameContentPath);
-        }
-
-        TryDeleteFile(absentMarker);
+        RestoreFileAsset(gameDir, "Optimum.GameContent.dll");
     }
 
     private void BackupCairoWrapperAsset(string gameDir, string cairoPath)
     {
-        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla", "Lib");
-        string backupPath = Path.Combine(vanillaDir, "cairo-sharp.dll");
-        string absentMarker = Path.Combine(vanillaDir, "cairo-sharp.dll.absent");
-        if (probe.FileExists(backupPath) || probe.FileExists(absentMarker))
-            return;
-
-        EnsureDirectory(vanillaDir);
-        if (probe.FileExists(cairoPath))
-            CopyFile(cairoPath, backupPath);
-        else
-            WriteText(absentMarker, string.Empty);
+        BackupFileAsset(gameDir, Path.Combine("Lib", "cairo-sharp.dll"));
     }
 
     private void RestoreCairoWrapperAsset(string gameDir)
     {
-        string vanillaDir = Path.Combine(gameDir, ".optimum", "vanilla", "Lib");
-        string cairoPath = Path.Combine(gameDir, "Lib", "cairo-sharp.dll");
-        string backupPath = Path.Combine(vanillaDir, "cairo-sharp.dll");
-        string absentMarker = Path.Combine(vanillaDir, "cairo-sharp.dll.absent");
-
-        if (probe.FileExists(backupPath))
-        {
-            CopyFile(backupPath, cairoPath);
-            TryDeleteFile(backupPath);
-        }
-        else if (probe.FileExists(absentMarker))
-        {
-            TryDeleteFile(cairoPath);
-        }
-
-        TryDeleteFile(absentMarker);
+        RestoreFileAsset(gameDir, Path.Combine("Lib", "cairo-sharp.dll"));
     }
 
     private void MergeJsonFile(string srcFile, string dstFile)
@@ -665,7 +688,6 @@ public sealed class GamePatcher(
             var dstNode = JsonNode.Parse(dstText) as JsonObject;
             if (srcNode is null || dstNode is null)
             {
-                CopyFile(srcFile, dstFile);
                 return;
             }
 
@@ -674,11 +696,20 @@ public sealed class GamePatcher(
                 dstNode[kvp.Key] = kvp.Value?.DeepClone();
             }
 
-            WriteText(dstFile, dstNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            string tempFile = $"{dstFile}.tmp-{Guid.NewGuid():N}";
+            try
+            {
+                WriteText(tempFile, dstNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                MoveFile(tempFile, dstFile);
+            }
+            finally
+            {
+                TryDeleteFile(tempFile);
+            }
         }
         catch
         {
-            CopyFile(srcFile, dstFile);
+            // On JSON syntax failure or write error, preserve pristine original file untouched.
         }
     }
 
