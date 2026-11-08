@@ -12,8 +12,8 @@ public class AnimatableRendererCullingTests
             PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs.patch"));
 
         // Checks frustum visibility before entering OpenGL state modification and draw calls
-        Assert.Contains("capi.Render?.CurrentFrustumCuller != null", patch);
-        Assert.Contains("capi.Render.CurrentFrustumCuller.SphereInFrustum", patch);
+        Assert.Contains("capi.Render?.DefaultFrustumCuller != null", patch);
+        Assert.Contains("capi.Render.DefaultFrustumCuller.SphereInFrustum", patch);
 
         // Uses bounding sphere based on scaled entity radius
         Assert.Contains("double radius = Math.Max(ScaleX, Math.Max(ScaleY, ScaleZ)) * 2.5;", patch);
