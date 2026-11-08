@@ -152,8 +152,42 @@ public static class OptimumApiBridge
         Sphere sphere,
         bool nowVisible,
         int lodLevel,
-        ModelDataPoolLocation location) =>
-        OptimumFrustumCullSimd.InFrustumAndRange(culler, sphere, nowVisible, lodLevel, location);
+        ModelDataPoolLocation location)
+    {
+        if (OptimumConfig.EffectiveSimdCulling)
+        {
+            return OptimumFrustumCullSimd.InFrustumAndRange(culler, sphere, nowVisible, lodLevel, location);
+        }
+
+        // Mirrors the source-tree FrustumCulling.InFrustumAndRange chisel branch:
+        // LOD 2 (real carved mesh) renders inside ChiselLodDistanceSq, LOD 3 (cube proxy)
+        // renders outside it. Both LOD levels of a chisel chunk part are flagged, so this
+        // MUST branch on lodLevel - returning one shared boolean makes them both visible
+        // up close (z-fighting) and both invisible far away (block disappears).
+        if (OptimumConfig.ChiselLodEnabled
+            && (lodLevel == 2 || lodLevel == 3)
+            && ChiselLodLocations.TryGetValue(location, out _))
+        {
+            // lodLevel 1 == frustum planes + "distance < ViewDistanceSq", i.e. exactly the
+            // base bound the source-tree chisel branch keeps. The vanilla lod2Bias split is
+            // replaced by the chisel distance split below.
+            if (!culler.InFrustumAndRange(sphere, nowVisible, 1))
+            {
+                return false;
+            }
+
+            double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
+            double chiselDistance = ChiselDistanceSqTo(culler, sphere);
+            // Hysteresis: entities that were visible stay visible until they cross the outer threshold.
+            double innerThreshold = chiselDistanceSq;
+            double outerThreshold = chiselDistanceSq * OptimumConfig.HysteresisFactorSq;
+            return lodLevel == 2
+                ? chiselDistance <= (nowVisible ? outerThreshold : innerThreshold)
+                : chiselDistance > (nowVisible ? innerThreshold : outerThreshold);
+        }
+
+        return culler.InFrustumAndRange(sphere, nowVisible, lodLevel);
+    }
 
     /// <summary>
     /// Shadow-pass counterpart of <see cref="InFrustumAndRange"/>. Vanilla's
