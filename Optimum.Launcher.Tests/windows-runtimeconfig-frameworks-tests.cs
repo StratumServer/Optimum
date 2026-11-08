@@ -96,6 +96,59 @@ public class WindowsRuntimeConfigFrameworksTests
     }
 
     [PwshFact]
+    public void CalibratesLowMemoryGCOptionsWhenMemoryIsLow()
+    {
+        string result = Run(LauncherConfig, VanillaWithDesktop, "-TotalAvailableMemoryBytes", "8589934592");
+
+        JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.True(props["System.GC.Server"]!.GetValue<bool>());
+        Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
+        Assert.False(props.ContainsKey("System.GC.DATAs"));
+        Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
+    }
+
+    [PwshFact]
+    public void CalibratesLowMemoryGCOptionsWhenAggressiveProfileRequested()
+    {
+        string result = Run(LauncherConfig, VanillaWithDesktop, "-MemoryProfile", "aggressive");
+
+        JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.False(props.ContainsKey("System.GC.DATAs"));
+        Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
+    }
+
+    [Fact]
+    public void LauncherCalibratesRuntimeConfigForLowMemory()
+    {
+        string tempDir = Directory.CreateTempSubdirectory("optimum-launcher-gc-").FullName;
+        try
+        {
+            string cfgPath = Path.Combine(tempDir, "Vintagestory.runtimeconfig.json");
+            File.WriteAllText(cfgPath, LauncherConfig);
+
+            Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=aggressive"]);
+            string updated = File.ReadAllText(cfgPath);
+            JsonObject props = JsonNode.Parse(updated)!["runtimeOptions"]!["configProperties"]!.AsObject();
+            Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DATAs"));
+
+            Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=throughput"]);
+            updated = File.ReadAllText(cfgPath);
+            props = JsonNode.Parse(updated)!["runtimeOptions"]!["configProperties"]!.AsObject();
+            Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DynamicAdaptationMode"));
+            Assert.False(props.ContainsKey("System.GC.HighMemoryPercent"));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [PwshFact]
     public void LeavesFrameworksAloneWhenVanillaNamesOnlyTheCoreRuntime()
     {
         string result = Run(LauncherConfig, VanillaCoreOnly);
@@ -131,7 +184,7 @@ public class WindowsRuntimeConfigFrameworksTests
         Assert.Contains("Vintagestory.runtimeconfig.json", script[sync..Math.Min(script.Length, sync + 400)]);
     }
 
-    private static string Run(string launcherJson, string vanillaJson)
+    private static string Run(string launcherJson, string vanillaJson, params string[] extraArgs)
     {
         string dir = Directory.CreateTempSubdirectory("optimum-rtcfg-").FullName;
         try
@@ -147,8 +200,14 @@ public class WindowsRuntimeConfigFrameworksTests
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
             };
-            foreach (string arg in new[] { "-NoProfile", "-NonInteractive", "-File", script,
-                "-LauncherConfig", launcher, "-VanillaConfig", vanilla })
+            var args = new System.Collections.Generic.List<string>
+            {
+                "-NoProfile", "-NonInteractive", "-File", script,
+                "-LauncherConfig", launcher, "-VanillaConfig", vanilla
+            };
+            if (extraArgs != null && extraArgs.Length > 0)
+                args.AddRange(extraArgs);
+            foreach (string arg in args)
                 psi.ArgumentList.Add(arg);
 
             using Process p = Process.Start(psi)!;
