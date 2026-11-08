@@ -1,10 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-index bdaa84a..b82240e 100644
+index bdaa84a..ff60170 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-@@ -2205,6 +2205,23 @@ public class ClientSettings : SettingsBase
- 
- 	public virtual bool DefaultSSBOsSetting()
+@@ -2207,4 +2207,22 @@ public class ClientSettings : SettingsBase
  	{
  		return RuntimeEnv.OS != OS.Mac;
  	}
@@ -25,4 +23,5 @@ index bdaa84a..b82240e 100644
 +	public static int OptimumChiselLodDistance { get; set; } = 64;
 +	public static bool OptimumDynamicLightCache { get; set; } = true;
 +	public static float OptimumRenderScale { get; set; } = 1.0f;
++	public static float OptimumFsrSharpness { get; set; } = 0.2f;
  }

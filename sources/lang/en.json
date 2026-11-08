@@ -60,6 +60,8 @@
 	"optimum-renderscale-quality": "Quality (0.85x)",
 	"optimum-renderscale-balanced": "Balanced (0.77x)",
 	"optimum-renderscale-performance": "Performance (0.67x)",
+	"optimum-fsrsharpness": "FSR Sharpness",
+	"optimum-fsrsharpness-tooltip": "Adjust AMD FSR Robust Contrast-Adaptive Sharpening (RCAS). Higher values produce sharper edges; lower values reduce contrast ringing and noise.",
 	"optimum-godrayscap": "Cap God-Rays Samples",
 	"optimum-godrayscap-tooltip": "Limits the god-rays post-process to 100 texture samples. Off keeps the vanilla 180-sample path.",
 	"optimum-compatibility-unavailable-suffix": "(unavailable)",

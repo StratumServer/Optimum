@@ -4,6 +4,7 @@
 
 uniform sampler2D inputScene;
 uniform vec2 inputTexelSize;
+uniform float sharpness;
 
 in vec2 texCoord;
 
@@ -24,7 +25,7 @@ void main(void)
 	vec3 hitMaximum = (vec3(1.0) - max(maximumRing, e)) / hitMaximumDenominator;
 	vec3 lobeChannels = max(-hitMinimum, hitMaximum);
 	float lobe = max(-0.1875, min(max(max(lobeChannels.r, lobeChannels.g), lobeChannels.b), 0.0));
-	lobe *= exp2(-0.2);
+	lobe *= exp2(-sharpness);
 
 	vec3 sharpened = (lobe * (b + d + f + h) + e) / (4.0 * lobe + 1.0);
 	outColor = vec4(clamp(sharpened, 0.0, 1.0), 1.0);

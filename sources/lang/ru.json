@@ -60,6 +60,8 @@
 	"optimum-renderscale-quality": "Кач-во (0.85x)",
 	"optimum-renderscale-balanced": "Баланс (0.77x)",
 	"optimum-renderscale-performance": "Скорость (0.67x)",
+	"optimum-fsrsharpness": "Резкость FSR",
+	"optimum-fsrsharpness-tooltip": "Настройка резкости AMD FSR RCAS. Выше значение — четче края; ниже значение — меньше ореолов и шума.",
 	"optimum-godrayscap": "Лимит сэмплов лучей",
 	"optimum-godrayscap-tooltip": "Ограничивает божественные лучи 100 сэмплами текстуры. Выкл. — ванильные 180 сэмплов."
 }
