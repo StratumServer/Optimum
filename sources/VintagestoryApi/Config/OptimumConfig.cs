@@ -762,6 +762,19 @@ public static class OptimumConfig
     // or approximate until the launcher rescans.
     public static bool IsShaderCompatibilityReportStale => _shaderCompatibilityReportStale;
 
+    public static IReadOnlyCollection<string> ShaderCompatibilityDisabledFeatures => _shaderCompatibilityDisabledFeatures;
+
+    public static string ShaderCompatibilityReportStatus
+    {
+        get
+        {
+            if (IsShaderCompatibilityReportMissing) return "missing";
+            if (IsShaderCompatibilityScanFailed) return "scan_failed";
+            if (IsShaderCompatibilityReportStale) return "stale";
+            return "clean";
+        }
+    }
+
     // Display names of the mods that blocked the feature, without file paths
     // (those stay in GetShaderFeatureBlockReason for diagnostics).
     public static string GetShaderFeatureBlockMods(string feature) =>

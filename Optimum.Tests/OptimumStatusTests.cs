@@ -148,4 +148,83 @@ public class OptimumStatusTests
             "Optimum.Patcher/Program.cs"));
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientMain\", \"ExecuteMainThreadTasks\", 1", patcherSource);
     }
+
+    [Fact]
+    public void StatusReportsShaderReportAdaptiveWorkerAndRadiusStatus()
+    {
+        string status = Vintagestory.GameContent.OptimumStatusModSystem.BuildStatus();
+
+        Assert.Contains("shader-report:", status);
+        Assert.Contains("adaptive-workers:", status);
+        Assert.Contains("adaptive-radius:", status);
+        Assert.Contains("circuit-breakers:", status);
+    }
+
+    [Fact]
+    public void AdaptiveWorkerController_TracksPhasesThroughHysteresis()
+    {
+        var ctrl = new AdaptiveWorkerController(maxWorkers: 4, evalInterval: 10);
+        Assert.Equal(AdaptiveWorkerPhase.Cold, ctrl.CurrentPhase);
+        Assert.Equal("cold", ctrl.PhaseName);
+
+        // Record chunks with high contention (>40%) and low queue depth -> scales down
+        for (int i = 0; i < 10; i++)
+        {
+            ctrl.RecordChunk(lockWaitTicks: 50, workTicks: 50);
+        }
+        ctrl.Evaluate(queueDepth: 5);
+        Assert.Equal(AdaptiveWorkerPhase.ScalingDown, ctrl.CurrentPhase);
+        Assert.Equal("scaling_down", ctrl.PhaseName);
+
+        // High contention but deep queue -> queue constrained
+        for (int i = 0; i < 10; i++)
+        {
+            ctrl.RecordChunk(lockWaitTicks: 50, workTicks: 50);
+        }
+        ctrl.Evaluate(queueDepth: 100);
+        Assert.Equal(AdaptiveWorkerPhase.QueueConstrained, ctrl.CurrentPhase);
+        Assert.Equal("queue_constrained", ctrl.PhaseName);
+
+        // Low contention across intervals until EWMA falls below ScaleUpThreshold (0.15)
+        while (ctrl.ContentionRatio > 0.15)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                ctrl.RecordChunk(lockWaitTicks: 1, workTicks: 99);
+            }
+            ctrl.Evaluate(queueDepth: 20);
+        }
+        Assert.Equal(AdaptiveWorkerPhase.ScalingUp, ctrl.CurrentPhase);
+        Assert.Equal("scaling_up", ctrl.PhaseName);
+    }
+
+    [Fact]
+    public void AdaptiveRadiusController_TracksPhasesThroughHysteresis()
+    {
+        var ctrl = new OptimumAdaptiveRadiusController(maxRadius: 12);
+        Assert.Equal(AdaptiveRadiusPhase.Cold, ctrl.CurrentPhase);
+        Assert.Equal("cold", ctrl.PhaseName);
+
+        // Tick with high queue depth -> throttles radius
+        ctrl.Tick(queueDepth: 100, maxRadius: 12);
+        ctrl.Tick(queueDepth: 100, maxRadius: 12);
+        Assert.Equal(AdaptiveRadiusPhase.Throttling, ctrl.CurrentPhase);
+        Assert.Equal("throttling", ctrl.PhaseName);
+
+        // Tick with low queue depth until smoothed queue depth drops below lowThreshold -> recovering
+        while (ctrl.SmoothedQueueDepth > OptimumConfig.AdaptiveRadiusLowThreshold)
+        {
+            ctrl.Tick(queueDepth: 5, maxRadius: 12);
+        }
+        Assert.Equal(AdaptiveRadiusPhase.Recovering, ctrl.CurrentPhase);
+        Assert.Equal("recovering", ctrl.PhaseName);
+
+        // Once fully recovered to maxRadius -> stable
+        for (int i = 0; i < 20; i++)
+        {
+            ctrl.Tick(queueDepth: 5, maxRadius: 12);
+        }
+        Assert.Equal(AdaptiveRadiusPhase.Stable, ctrl.CurrentPhase);
+        Assert.Equal("stable", ctrl.PhaseName);
+    }
 }

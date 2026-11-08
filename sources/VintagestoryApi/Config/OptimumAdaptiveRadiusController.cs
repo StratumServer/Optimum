@@ -5,6 +5,18 @@ using System.Threading;
 namespace Vintagestory.API.Config;
 
 /// <summary>
+/// Operational phase of the adaptive view radius controller.
+/// </summary>
+public enum AdaptiveRadiusPhase : byte
+{
+    Disabled = 0,
+    Cold = 1,
+    Stable = 2,
+    Throttling = 3,
+    Recovering = 4
+}
+
+/// <summary>
 /// Adaptive chunk generation radius controller. Reduces the effective view
 /// radius during exploration spikes (high gen-queue depth) so fewer chunk
 /// columns queue at once, cutting stutter from gen thread saturation.
@@ -28,14 +40,41 @@ public sealed class OptimumAdaptiveRadiusController
     private int _configuredMax;
     private double _smoothedQueueDepth;
     private bool _warmedUp;
+    private AdaptiveRadiusPhase _currentPhase = AdaptiveRadiusPhase.Cold;
     private long _lastKometProbeTicks;
     private bool _hasKometProbe;
+
+    /// <summary>
+    /// Currently active controller instance for cross-subsystem diagnostics.
+    /// </summary>
+    public static OptimumAdaptiveRadiusController? ActiveInstance { get; internal set; }
 
     /// <summary>Current effective radius in chunk columns. Thread-safe read.</summary>
     public int EffectiveRadius => Volatile.Read(ref _effectiveRadius);
 
     /// <summary>Smoothed queue depth from the last Tick (diagnostics).</summary>
     public double SmoothedQueueDepth => _smoothedQueueDepth;
+
+    /// <summary>
+    /// Current operational phase for diagnostics and status reporting.
+    /// </summary>
+    public AdaptiveRadiusPhase CurrentPhase =>
+        !OptimumConfig.EffectiveAdaptiveRadiusEnabled
+            ? AdaptiveRadiusPhase.Disabled
+            : (!_warmedUp ? AdaptiveRadiusPhase.Cold : _currentPhase);
+
+    /// <summary>
+    /// Token name of the current operational phase.
+    /// </summary>
+    public string PhaseName => CurrentPhase switch
+    {
+        AdaptiveRadiusPhase.Disabled => "disabled",
+        AdaptiveRadiusPhase.Cold => "cold",
+        AdaptiveRadiusPhase.Stable => "stable",
+        AdaptiveRadiusPhase.Throttling => "throttling",
+        AdaptiveRadiusPhase.Recovering => "recovering",
+        _ => "unknown"
+    };
 
     /// <summary>
     /// Create the controller. Call once at server startup.
@@ -47,6 +86,8 @@ public sealed class OptimumAdaptiveRadiusController
         _effectiveRadius = _configuredMax;
         _smoothedQueueDepth = 0;
         _warmedUp = false;
+        _currentPhase = AdaptiveRadiusPhase.Cold;
+        ActiveInstance = this;
     }
 
     /// <summary>
@@ -76,6 +117,7 @@ public sealed class OptimumAdaptiveRadiusController
             // Disabled: pin to max and skip all math.
             Volatile.Write(ref _effectiveRadius, _configuredMax);
             OptimumConfig.AdaptiveRadiusEffective = _configuredMax;
+            _currentPhase = AdaptiveRadiusPhase.Disabled;
             return;
         }
 
@@ -85,6 +127,7 @@ public sealed class OptimumAdaptiveRadiusController
         {
             _smoothedQueueDepth = sample;
             _warmedUp = true;
+            _currentPhase = AdaptiveRadiusPhase.Cold;
         }
         else
         {
@@ -101,10 +144,16 @@ public sealed class OptimumAdaptiveRadiusController
         if (_smoothedQueueDepth > highThreshold && current > floor)
         {
             next = current - 1;
+            _currentPhase = AdaptiveRadiusPhase.Throttling;
         }
         else if (_smoothedQueueDepth < lowThreshold && current < _configuredMax)
         {
             next = current + 1;
+            _currentPhase = AdaptiveRadiusPhase.Recovering;
+        }
+        else
+        {
+            _currentPhase = AdaptiveRadiusPhase.Stable;
         }
 
         Volatile.Write(ref _effectiveRadius, Math.Clamp(next, floor, _configuredMax));
@@ -157,6 +206,7 @@ public sealed class OptimumAdaptiveRadiusController
         _effectiveRadius = _configuredMax;
         _smoothedQueueDepth = 0;
         _warmedUp = false;
+        _currentPhase = AdaptiveRadiusPhase.Cold;
         _lastKometProbeTicks = 0;
         _hasKometProbe = false;
         VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);

@@ -5,6 +5,18 @@ using System.Threading;
 namespace Vintagestory.API.Config;
 
 /// <summary>
+/// Operational phase of the adaptive worldgen worker controller.
+/// </summary>
+public enum AdaptiveWorkerPhase : byte
+{
+    Cold = 0,
+    Stable = 1,
+    ScalingUp = 2,
+    ScalingDown = 3,
+    QueueConstrained = 4
+}
+
+/// <summary>
 /// Adaptive worldgen worker cap controller. Adjusts the active worker count
 /// based on measured lock contention (the E.2 illuminator lock that serializes
 /// passes 3/4). Pure logic: no threads, no side effects, fully testable.
@@ -38,11 +50,17 @@ public sealed class AdaptiveWorkerController
     private double _contentionEwma;
     private long _chunksSinceLastEval;
     private bool _warmedUp;
+    private AdaptiveWorkerPhase _currentPhase = AdaptiveWorkerPhase.Cold;
 
     // Atomics that workers write to (exposed for the scheduler to accumulate into)
     private long _lockWaitTicks;
     private long _workTicks;
     private long _chunksGenerated;
+
+    /// <summary>
+    /// Currently active controller instance for cross-subsystem diagnostics.
+    /// </summary>
+    public static AdaptiveWorkerController? ActiveInstance { get; internal set; }
 
     /// <summary>
     /// Fires when Evaluate() changes the active cap. Arguments: oldCap, newCap, contentionEwma.
@@ -65,6 +83,24 @@ public sealed class AdaptiveWorkerController
     /// </summary>
     public long TotalChunksGenerated => Volatile.Read(ref _chunksGenerated);
 
+    /// <summary>
+    /// Current operational phase for diagnostics and status reporting.
+    /// </summary>
+    public AdaptiveWorkerPhase CurrentPhase => !_warmedUp ? AdaptiveWorkerPhase.Cold : _currentPhase;
+
+    /// <summary>
+    /// Token name of the current operational phase.
+    /// </summary>
+    public string PhaseName => CurrentPhase switch
+    {
+        AdaptiveWorkerPhase.Cold => "cold",
+        AdaptiveWorkerPhase.Stable => "stable",
+        AdaptiveWorkerPhase.ScalingUp => "scaling_up",
+        AdaptiveWorkerPhase.ScalingDown => "scaling_down",
+        AdaptiveWorkerPhase.QueueConstrained => "queue_constrained",
+        _ => "unknown"
+    };
+
     /// <param name="maxWorkers">
     /// Hard ceiling: the static-policy worker count for this machine. The
     /// controller never exceeds this.
@@ -80,6 +116,8 @@ public sealed class AdaptiveWorkerController
         _activeWorkerCap = _maxWorkers;
         _contentionEwma = 0.0;
         _warmedUp = false;
+        _currentPhase = AdaptiveWorkerPhase.Cold;
+        ActiveInstance = this;
     }
 
     /// <summary>
@@ -146,6 +184,11 @@ public sealed class AdaptiveWorkerController
             if (queueDepth < QueuePressureFloor * current)
             {
                 next = current - 1;
+                _currentPhase = AdaptiveWorkerPhase.ScalingDown;
+            }
+            else
+            {
+                _currentPhase = AdaptiveWorkerPhase.QueueConstrained;
             }
         }
         else if (_contentionEwma < ScaleUpThreshold && current < _maxWorkers)
@@ -155,7 +198,16 @@ public sealed class AdaptiveWorkerController
             if (queueDepth > QueuePressureFloor)
             {
                 next = current + 1;
+                _currentPhase = AdaptiveWorkerPhase.ScalingUp;
             }
+            else
+            {
+                _currentPhase = AdaptiveWorkerPhase.Stable;
+            }
+        }
+        else
+        {
+            _currentPhase = AdaptiveWorkerPhase.Stable;
         }
 
         Volatile.Write(ref _activeWorkerCap, next);
@@ -188,6 +240,7 @@ public sealed class AdaptiveWorkerController
         Volatile.Write(ref _activeWorkerCap, _maxWorkers);
         _contentionEwma = 0.0;
         _warmedUp = false;
+        _currentPhase = AdaptiveWorkerPhase.Cold;
         Interlocked.Exchange(ref _lockWaitTicks, 0);
         Interlocked.Exchange(ref _workTicks, 0);
         Interlocked.Exchange(ref _chunksGenerated, 0);
