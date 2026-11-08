@@ -861,6 +861,39 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("\"onOptimumFsrSharpnessChanged\"", programSource);
     }
 
+    [Fact]
+    public void ParticlePoolQuadsAndParticleManager_VectorizeInterpolationAndReuseProps()
+    {
+        // 1. Verify ParticlePoolQuads patch pads velocities to 4 floats and vectorizes ProcessParticlesFromOffThread
+        string poolPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch"));
+        Assert.Contains("velocities[num] = new float[4 * poolSize];", poolPatch);
+        Assert.Contains("Vector<float>", poolPatch);
+        Assert.Contains("vVal + vCamDelta + vVel * vDtRatio", poolPatch);
+        Assert.Contains("array[velIdx + 3] = 0f;", poolPatch);
+
+        // 2. Verify ParticleManager patch reuses reusableSpawnProps
+        string managerPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch"));
+        Assert.Contains("protected SimpleParticleProperties reusableSpawnProps = new SimpleParticleProperties();", managerPatch);
+        Assert.Contains("+		SimpleParticleProperties props = reusableSpawnProps ??= new SimpleParticleProperties();", managerPatch);
+        Assert.Contains("-		SimpleParticleProperties simpleParticleProperties = new SimpleParticleProperties(quantity, quantity", managerPatch);
+
+        // 3. Verify Program.cs targets and fields
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"reusableSpawnProps\"", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ParticlePoolQuads\", \"ProcessParticlesFromOffThread\", 2,", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ParticlePoolQuads\", \"OnNewFrameOffThread\", 2,", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ParticleManager\", \"SpawnParticles\", 10,", programSource);
+
+        // 4. Verify cecil-owned.list includes ParticleManager
+        string cecilList = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch", cecilList);
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch", cecilList);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

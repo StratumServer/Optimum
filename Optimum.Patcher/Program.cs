@@ -247,6 +247,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "_scratchViewVector",
         "_scratchPlayerPos",
     },
+    // Issue #386: reusable particle spawn properties on the main thread
+    ["Vintagestory.Client.NoObf.ParticleManager"] = new()
+    {
+        "reusableSpawnProps",
+    },
     // ChunkRenderer: scratch chunk-origin vector and pool-location lists reused per chunk upload
     ["Vintagestory.Client.NoObf.ChunkRenderer"] = new()
     {
@@ -579,6 +584,14 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "didClickLink", 1),
     // E3: particle spawn distance gate, before the per-particle revive loop
     new("Vintagestory.Client.NoObf.ParticlePoolQuads", "SpawnParticles", 1),
+    // Issue #386: vectorize off-thread buffer interpolation and pad velocities
+    new("Vintagestory.Client.NoObf.ParticlePoolQuads", "ProcessParticlesFromOffThread", 2,
+        new[] { "System.Single", "Vintagestory.API.MathTools.Vec3d" }),
+    new("Vintagestory.Client.NoObf.ParticlePoolQuads", "OnNewFrameOffThread", 2,
+        new[] { "System.Single", "Vintagestory.API.MathTools.Vec3d" }),
+    // Issue #386: reuse pre-allocated spawn properties on the main thread
+    new("Vintagestory.Client.NoObf.ParticleManager", "SpawnParticles", 10,
+        new[] { "System.Single", "System.Int32", "Vintagestory.API.MathTools.Vec3d", "Vintagestory.API.MathTools.Vec3d", "Vintagestory.API.MathTools.Vec3f", "Vintagestory.API.MathTools.Vec3f", "System.Single", "System.Single", "System.Single", "Vintagestory.API.Common.EnumParticleModel" }),
     // GuiManager: reusable scratch buffers instead of .ToList() snapshots.
     // RequestFocus is NOT here: its other two FindIndex lambdas (unrelated
     // to this fix) stay in the compiled body regardless, so it can't be

@@ -12,7 +12,6 @@ public class CecilPatchOwnershipTests
     {
         "patches/VintagestoryLib/Vintagestory.API.Common/EventHelper.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch",
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs.patch",
 
         // Triaged 2026-08-11 (see docs/todo.md's "CecilPatchOwnershipTests backlog

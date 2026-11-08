@@ -1,0 +1,69 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
+index 5ba5406..7f775f8 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs
+@@ -12,10 +12,12 @@ public class ParticleManager
+ {
+ 	protected SystemRenderParticles particleSystem;
+ 
+ 	protected BlockBreakingParticleProps blockBreakingProps;
+ 
++	protected SimpleParticleProperties reusableSpawnProps = new SimpleParticleProperties();
++
+ 	protected object asyncParticleQueueLock = new object();
+ 
+ 	protected Queue<IParticlePropertiesProvider> asyncParticleQueue = new Queue<IParticlePropertiesProvider>();
+ 
+ 	private Dictionary<long, Entity> loadedEntities = new Dictionary<long, Entity>();
+@@ -60,15 +62,46 @@ public class ParticleManager
+ 		return true;
+ 	}
+ 
+ 	public void SpawnParticles(float quantity, int color, Vec3d minPos, Vec3d maxPos, Vec3f minVelocity, Vec3f maxVelocity, float lifeLength, float gravityEffect, float scale, EnumParticleModel model)
+ 	{
+-		SimpleParticleProperties simpleParticleProperties = new SimpleParticleProperties(quantity, quantity, color, minPos, maxPos, minVelocity, maxVelocity, lifeLength, gravityEffect);
+-		simpleParticleProperties.Init(particleSystem.game.api);
+-		simpleParticleProperties.ParticleModel = model;
+-		simpleParticleProperties.MinSize = (simpleParticleProperties.MaxSize = scale);
+-		particleSystem.mainthreadpools[(int)simpleParticleProperties.ParticleModel].SpawnParticles(simpleParticleProperties);
++		SimpleParticleProperties props = reusableSpawnProps ??= new SimpleParticleProperties();
++		props.MinQuantity = quantity;
++		props.AddQuantity = 0f;
++		props.Color = color;
++		props.MinPos = minPos;
++		if (maxPos != null && minPos != null)
++		{
++			props.AddPos.X = maxPos.X - minPos.X;
++			props.AddPos.Y = maxPos.Y - minPos.Y;
++			props.AddPos.Z = maxPos.Z - minPos.Z;
++		}
++		else
++		{
++			props.AddPos.X = 0.0;
++			props.AddPos.Y = 0.0;
++			props.AddPos.Z = 0.0;
++		}
++		props.MinVelocity = minVelocity;
++		if (maxVelocity != null && minVelocity != null)
++		{
++			props.AddVelocity.X = maxVelocity.X - minVelocity.X;
++			props.AddVelocity.Y = maxVelocity.Y - minVelocity.Y;
++			props.AddVelocity.Z = maxVelocity.Z - minVelocity.Z;
++		}
++		else
++		{
++			props.AddVelocity.X = 0f;
++			props.AddVelocity.Y = 0f;
++			props.AddVelocity.Z = 0f;
++		}
++		props.LifeLength = lifeLength;
++		props.GravityEffect = gravityEffect;
++		props.ParticleModel = model;
++		props.MinSize = (props.MaxSize = scale);
++		props.Init(particleSystem.game.api);
++		particleSystem.mainthreadpools[(int)props.ParticleModel].SpawnParticles(props);
+ 	}
+ 
+ 	public void EnqueueAsyncParticles(IParticlePropertiesProvider props)
+ 	{
+ 		lock (asyncParticleQueueLock)

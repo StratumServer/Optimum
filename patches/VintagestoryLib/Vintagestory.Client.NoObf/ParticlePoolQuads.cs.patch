@@ -1,9 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
-index 4db59d6..2911500 100644
+index 4db59d6..7d34819 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
-@@ -1,6 +1,8 @@
+@@ -1,6 +1,9 @@
  using System;
++using System.Numerics;
 +using System.Runtime.CompilerServices;
 +using System.Threading;
  using Vintagestory.API.Client;
@@ -11,7 +12,7 @@ index 4db59d6..2911500 100644
  using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
  using Vintagestory.Common;
-@@ -25,11 +27,11 @@ public class ParticlePoolQuads : IParticlePool
+@@ -25,11 +28,11 @@ public class ParticlePoolQuads : IParticlePool
  
  	private int writePosition = 1;
  
@@ -24,7 +25,20 @@ index 4db59d6..2911500 100644
  
  	protected int poolSize;
  
-@@ -141,10 +143,34 @@ public class ParticlePoolQuads : IParticlePool
+@@ -103,11 +106,11 @@ public class ParticlePoolQuads : IParticlePool
+ 			tickTimes = new float[5];
+ 			velocities = new float[5][];
+ 			for (int num = 0; num < 5; num++)
+ 			{
+ 				tickTimes[num] = partPhysics.PhysicsTickTime;
+-				velocities[num] = new float[3 * poolSize];
++				velocities[num] = new float[4 * poolSize];
+ 				cameraPos[num] = new Vec3d();
+ 				updateBuffers[num] = genUpdateBuffer();
+ 			}
+ 		}
+ 		else
+@@ -141,10 +144,34 @@ public class ParticlePoolQuads : IParticlePool
  		int num2 = 0;
  		if (!particleProperties.IgnoreUserConfig && QuantityAlive * 100 >= game.particleLevel * poolSize)
  		{
@@ -59,3 +73,102 @@ index 4db59d6..2911500 100644
  		{
  			int rgbaColor = particleProperties.GetRgbaColor(game.api);
  			if (rgbaColor == 0)
+@@ -270,18 +297,57 @@ public class ParticlePoolQuads : IParticlePool
+ 		float num7 = (float)(obj.Z - cameraPos.Z);
+ 		obj.X -= num5;
+ 		obj.Y -= num6;
+ 		obj.Z -= num7;
+ 		float[] values = meshData.CustomFloats.Values;
+-		for (int i = 0; i < num4; i++)
++		int totalFloats = num4 * 4;
++		if (array.Length < totalFloats)
+ 		{
+-			int num8 = i * 4;
+-			values[num8] += num5 + array[i * 3] * num2;
+-			num8++;
+-			values[num8] += num6 + array[i * 3 + 1] * num2;
+-			num8++;
+-			values[num8] += num7 + array[i * 3 + 2] * num2;
++			for (int i = 0; i < num4; i++)
++			{
++				int num8 = i * 4;
++				values[num8] += num5 + array[i * 3] * num2;
++				num8++;
++				values[num8] += num6 + array[i * 3 + 1] * num2;
++				num8++;
++				values[num8] += num7 + array[i * 3 + 2] * num2;
++			}
++		}
++		else
++		{
++			int vStep = Vector<float>.Count;
++			int vectorLimit = totalFloats - vStep;
++			int offset = 0;
++			if (Vector.IsHardwareAccelerated && vStep >= 4)
++			{
++				Span<float> camPattern = stackalloc float[vStep];
++				for (int j = 0; j < vStep; j += 4)
++				{
++					camPattern[j] = num5;
++					camPattern[j + 1] = num6;
++					camPattern[j + 2] = num7;
++					camPattern[j + 3] = 0f;
++				}
++				Vector<float> vCamDelta = new Vector<float>(camPattern);
++				Vector<float> vDtRatio = new Vector<float>(num2);
++
++				while (offset <= vectorLimit)
++				{
++					Vector<float> vVal = new Vector<float>(values, offset);
++					Vector<float> vVel = new Vector<float>(array, offset);
++					Vector<float> vRes = vVal + vCamDelta + vVel * vDtRatio;
++					vRes.CopyTo(values, offset);
++					offset += vStep;
++				}
++			}
++
++			for (; offset < totalFloats; offset += 4)
++			{
++				values[offset] += num5 + array[offset] * num2;
++				values[offset + 1] += num6 + array[offset + 1] * num2;
++				values[offset + 2] += num7 + array[offset + 2] * num2;
++			}
+ 		}
+ 		game.Platform.UpdateMesh(particleModelRef, meshData);
+ 		if (ModelType == EnumParticleModel.Quad)
+ 		{
+ 			if (game.extendedDebugInfo)
+@@ -321,10 +387,14 @@ public class ParticlePoolQuads : IParticlePool
+ 		ParticleBase particleBase = ParticlesPool.FirstAlive;
+ 		int posPosition = 0;
+ 		int rgbaPosition = 0;
+ 		int flagPosition = 0;
+ 		MeshData meshData = updateBuffers[writePosition];
++		if (velocities[writePosition] == null || velocities[writePosition].Length < poolSize * 4)
++		{
++			velocities[writePosition] = new float[poolSize * 4];
++		}
+ 		float[] array = velocities[writePosition];
+ 		Vec3d vec3d = this.cameraPos[writePosition].Set(cameraPos);
+ 		if (ParticlesPool.AliveCount < 20000)
+ 		{
+ 			partPhysics.PhysicsTickTime = 0.0625f;
+@@ -347,13 +417,15 @@ public class ParticlePoolQuads : IParticlePool
+ 				ParticleBase next = particleBase.Next;
+ 				ParticlesPool.Kill(particleBase);
+ 				particleBase = next;
+ 				continue;
+ 			}
+-			array[num3 * 3] = (particleBase.prevPosDeltaX = (float)(particleBase.Position.X - x));
+-			array[num3 * 3 + 1] = (particleBase.prevPosDeltaY = (float)(particleBase.Position.Y - y));
+-			array[num3 * 3 + 2] = (particleBase.prevPosDeltaZ = (float)(particleBase.Position.Z - z));
++			int velIdx = num3 * 4;
++			array[velIdx] = (particleBase.prevPosDeltaX = (float)(particleBase.Position.X - x));
++			array[velIdx + 1] = (particleBase.prevPosDeltaY = (float)(particleBase.Position.Y - y));
++			array[velIdx + 2] = (particleBase.prevPosDeltaZ = (float)(particleBase.Position.Z - z));
++			array[velIdx + 3] = 0f;
+ 			num3++;
+ 			particleBase.UpdateBuffers(meshData, vec3d, ref posPosition, ref rgbaPosition, ref flagPosition);
+ 			particleBase = particleBase.Next;
+ 		}
+ 		meshData.CustomFloats.Count = num3 * 4;
