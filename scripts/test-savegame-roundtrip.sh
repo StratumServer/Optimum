@@ -64,31 +64,28 @@ mkdir -p "$STAGE_DIR" "$DATA_DIR" "$PATCHED_SERVER_DIR" "$LOG_DIR"
 # ------------------------------------------------------------------------------
 setup_patched_server() {
     echo "[Setup] Preparing Optimum patched server tree..."
-    find "$VANILLA_SERVER" -mindepth 1 -maxdepth 1 -type f -exec cp -l --target-directory="$PATCHED_SERVER_DIR" {} + 2>/dev/null || \
+    rm -rf "$PATCHED_SERVER_DIR"
+    mkdir -p "$PATCHED_SERVER_DIR"
     cp -r "$VANILLA_SERVER"/* "$PATCHED_SERVER_DIR/"
-
-    while IFS= read -r -d '' directory; do
-        ln -snf "$directory" "$PATCHED_SERVER_DIR/$(basename "$directory")"
-    done < <(find "$VANILLA_SERVER" -mindepth 1 -maxdepth 1 -type d -print0)
 
     # Overlay Optimum binaries if available
     if [ -d "$PATCHED_DLLS" ]; then
         for dll in VintagestoryAPI.dll Optimum.Api.Contracts.dll Optimum.GameContent.dll; do
             if [ -f "$PATCHED_DLLS/$dll" ]; then
-                cp -f "$PATCHED_DLLS/$dll" "$PATCHED_SERVER_DIR/$dll"
+                cp --remove-destination -f "$PATCHED_DLLS/$dll" "$PATCHED_SERVER_DIR/$dll"
                 echo "  Overlaid: $dll"
             fi
         done
         mkdir -p "$PATCHED_SERVER_DIR/Mods"
         for mod in VSEssentials.dll VSSurvivalMod.dll; do
             if [ -f "$PATCHED_DLLS/$mod" ]; then
-                cp -f "$PATCHED_DLLS/$mod" "$PATCHED_SERVER_DIR/Mods/$mod"
+                cp --remove-destination -f "$PATCHED_DLLS/$mod" "$PATCHED_SERVER_DIR/Mods/$mod"
                 echo "  Overlaid: Mods/$mod"
             fi
         done
         local patched_lib="$REPO_ROOT/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
         if [ -f "$patched_lib" ]; then
-            cp -f "$patched_lib" "$PATCHED_SERVER_DIR/VintagestoryLib.dll"
+            cp --remove-destination -f "$patched_lib" "$PATCHED_SERVER_DIR/VintagestoryLib.dll"
             echo "  Overlaid: VintagestoryLib.dll (Cecil-patched)"
         fi
     fi
