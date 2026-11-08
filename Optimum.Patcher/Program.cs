@@ -465,6 +465,8 @@ var targets = new List<MethodTarget>
     // Found missing from this list while wiring diagnostics counters (2026-07-03);
     // ShadowCullDistanceSq was injected but nothing ever called it.
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
+    // Issue #286: snap shadow projection translation to texel grid to prevent edge shimmering
+    new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "PrepareForShadowRendering", 3),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)

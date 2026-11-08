@@ -35,6 +35,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch

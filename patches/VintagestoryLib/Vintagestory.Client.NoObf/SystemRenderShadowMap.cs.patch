@@ -1,0 +1,20 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
+index f8183c3..1600f3e 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
+@@ -114,6 +114,15 @@ public class SystemRenderShadowMap : ClientSystem
+ 		loadOrthoModeMatrix(projectionMatrix, shadowBox.Width, shadowBox.Height, shadowBox.Length);
+ 		Mat4d.LookAt(lightViewMatrix, vec3f.ToDoubleArray(), new double[4], new double[3] { 0.0, 1.0, 0.0 });
+ 		Mat4d.Mul(projectionViewMatrix, projectionMatrix, lightViewMatrix);
++		double shadowMapResolution = (double)(Math.Max(4, ClientSettings.ShadowMapQuality + 2) * 1024);
++		double texelSizeX = 2.0 / shadowMapResolution;
++		double texelSizeY = 2.0 / shadowMapResolution;
++		double snapOffsetX = Math.Round(projectionViewMatrix[12] / texelSizeX) * texelSizeX - projectionViewMatrix[12];
++		double snapOffsetY = Math.Round(projectionViewMatrix[13] / texelSizeY) * texelSizeY - projectionViewMatrix[13];
++		projectionViewMatrix[12] += snapOffsetX;
++		projectionViewMatrix[13] += snapOffsetY;
++		projectionMatrix[12] += snapOffsetX;
++		projectionMatrix[13] += snapOffsetY;
+ 		game.Platform.LoadFrameBuffer(fb);
+ 		game.Platform.ClearFrameBuffer(fb);
+ 		ShaderProgramChunkshadowmap chunkshadowmap = ShaderPrograms.Chunkshadowmap;
