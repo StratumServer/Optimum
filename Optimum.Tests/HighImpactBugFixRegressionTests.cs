@@ -359,12 +359,14 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs.patch"));
         Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", sourcePatch);
         Assert.Contains("if (!isWithinRepulseRange && entity != cworld.Player?.Entity)", sourcePatch);
+        Assert.Contains("entity.World?.Side == EnumAppSide.Client", sourcePatch);
 
         string runtimePatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs.patch"));
         Assert.Contains("private bool isWithinRepulseRange;", runtimePatch);
         Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", runtimePatch);
         Assert.Contains("if (!isWithinRepulseRange)", runtimePatch);
+        Assert.Contains("entity.World?.Side == EnumAppSide.Client", runtimePatch);
     }
 
     [Fact]
