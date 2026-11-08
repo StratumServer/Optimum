@@ -1,10 +1,7 @@
 diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
-index a571d72..9d9e28a 100644
 --- a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
 +++ b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
-@@ -1,10 +1,11 @@
- using System;
- using Vintagestory.API;
+@@ -3,6 +3,7 @@ using Vintagestory.API;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
@@ -12,11 +9,7 @@ index a571d72..9d9e28a 100644
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  
- #nullable disable
- 
-@@ -65,10 +66,11 @@ namespace Vintagestory.GameContent
-             entity.AfterPhysicsTick = AfterPhysicsTick;
-         }
+@@ -67,6 +68,7 @@ namespace Vintagestory.GameContent
  
          public override void UpdateColSelBoxes()
          {
@@ -24,11 +17,7 @@ index a571d72..9d9e28a 100644
              touchdist = Math.Max(radius.X, radius.Z);
          }
  
- 
-         public override float GetTouchDistance(ref EnumHandling handling)
-@@ -191,13 +193,31 @@ namespace Vintagestory.GameContent
- 
-         public double ownPosRepulseX, ownPosRepulseY, ownPosRepulseZ;
+@@ -193,9 +195,31 @@ namespace Vintagestory.GameContent
          public float mySize;
          protected int dimension;
  
@@ -37,7 +26,7 @@ index a571d72..9d9e28a 100644
          public override void UpdateColSelBoxes()
          {
              touchdist = entity.touchDistance;
-+            if (cworld != null)
++            if (entity.World?.Side == EnumAppSide.Client && cworld != null)
 +            {
 +                var plr = cworld.Player?.Entity;
 +                if (plr != null && entity != plr)
@@ -53,20 +42,20 @@ index a571d72..9d9e28a 100644
 +                    isWithinRepulseRange = true;
 +                }
 +            }
++            else
++            {
++                isWithinRepulseRange = true;
++            }
          }
  
          public void AfterPhysicsTick()
-         {
-             var entity = this.entity;
-@@ -213,10 +233,22 @@ namespace Vintagestory.GameContent
-         {
-             var entity = this.entity;
+@@ -215,6 +239,18 @@ namespace Vintagestory.GameContent
              if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable) return;
              EntityAgent eagent = entity as EntityAgent;
              if (eagent?.MountedOn != null) return;
 +
-+            // Optimum: skip repulsion physics for entities beyond the configured distance.
-+            if (OptimumConfig.RepulsionGateEnabled && cworld != null)
++            // Optimum: skip repulsion physics for entities beyond the configured distance (client side only).
++            if (OptimumConfig.RepulsionGateEnabled && entity.World?.Side == EnumAppSide.Client && cworld != null)
 +            {
 +                if (!isWithinRepulseRange && entity != cworld.Player?.Entity)
 +                {
@@ -79,5 +68,3 @@ index a571d72..9d9e28a 100644
              if (entity.World.ElapsedMilliseconds < 2000) return;
  
              var pushVector = this.pushVector;
-             pushVector.Set(0, 0, 0);
- 

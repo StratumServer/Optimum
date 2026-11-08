@@ -26,13 +26,13 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.c
  	public double ownPosRepulseY;
  
  	public double ownPosRepulseZ;
-@@ -59,10 +62,26 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+@@ -59,10 +62,30 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
  	}
  
  	public override void UpdateColSelBoxes()
  	{
  		touchdist = entity.touchDistance;
-+		if (cworld != null)
++		if (entity.World?.Side == EnumAppSide.Client && cworld != null)
 +		{
 +			Entity plr = cworld.Player?.Entity;
 +			if (plr != null && entity != plr)
@@ -48,18 +48,22 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.c
 +				isWithinRepulseRange = true;
 +			}
 +		}
++		else
++		{
++			isWithinRepulseRange = true;
++		}
  	}
  
  	public void AfterPhysicsTick()
  	{
  		Entity obj = entity;
-@@ -79,10 +98,19 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+@@ -79,10 +102,19 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
  		Entity entity = base.entity;
  		if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable)
  		{
  			return;
  		}
-+		if (OptimumConfig.RepulsionGateEnabled && cworld != null && entity != cworld.Player.Entity)
++		if (OptimumConfig.RepulsionGateEnabled && entity.World?.Side == EnumAppSide.Client && cworld != null && entity != cworld.Player?.Entity)
 +		{
 +			if (!isWithinRepulseRange)
 +			{
