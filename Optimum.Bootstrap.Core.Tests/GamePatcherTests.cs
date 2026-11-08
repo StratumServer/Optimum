@@ -167,6 +167,7 @@ public sealed class GamePatcherTests
             File.WriteAllText(Path.Combine(gameDir, "VintagestoryAPI.dll"), "vanilla-api");
             File.WriteAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll"), "vanilla-cairo");
             File.WriteAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll"), "vanilla-essentials");
+            File.WriteAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json"), "{\"vanilla-key\": \"Vanilla Value\"}");
             File.WriteAllText(Path.Combine(gameDir, "run.sh"), "#!/bin/sh\n./Optimum\n");
 
             string overlayDir = Path.Combine(root, "overlay");
@@ -236,6 +237,7 @@ public sealed class GamePatcherTests
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "shaders", "optimum.vsh")));
             Assert.True(File.Exists(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
             Assert.Contains("Optimum Value", File.ReadAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
+            Assert.Contains("Vanilla Value", File.ReadAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json")));
             string deployedDarkVisionPatch = Path.Combine(gameDir, "assets", "darkvision", "config", "shaderpatches", "optimum_vsp_terrain_desaturation.txt");
             Assert.True(File.Exists(deployedDarkVisionPatch));
             Assert.Equal("darkvision compatibility patch", File.ReadAllText(deployedDarkVisionPatch));
@@ -253,8 +255,11 @@ public sealed class GamePatcherTests
             Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
             Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
             Assert.Equal("vanilla-cairo", File.ReadAllText(Path.Combine(gameDir, "Lib", "cairo-sharp.dll")).Trim());
-            Assert.True(File.Exists(deployedDarkVisionPatch));
+            Assert.False(File.Exists(deployedDarkVisionPatch));
             Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.GameContent.dll")));
+            string rolledBackLang = File.ReadAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json"));
+            Assert.Contains("Vanilla Value", rolledBackLang);
+            Assert.DoesNotContain("Optimum Value", rolledBackLang);
 
             // An existing assembly is restored instead of being removed on rollback.
             File.WriteAllText(Path.Combine(gameDir, "Optimum.GameContent.dll"), "existing-game-content");
@@ -354,5 +359,34 @@ public sealed class GamePatcherTests
         Assert.Equal(FailureReason.BadInput, result.Reason);
         Assert.Contains("Optimum.Patcher", result.Message);
         Assert.False(((ISystemProbe)probe).DirectoryExists("/game/.optimum/vanilla"));
+    }
+
+    [Fact]
+    public async Task MergeJsonFilePreservesVanillaFileOnCorruptedJson()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-json-test").FullName;
+        try
+        {
+            string gameDir = Path.Combine(root, "game");
+            Directory.CreateDirectory(Path.Combine(gameDir, "assets", "game", "lang"));
+            string vanillaFile = Path.Combine(gameDir, "assets", "game", "lang", "en.json");
+            File.WriteAllText(vanillaFile, "{\"vanilla-key\": \"Vanilla Value\"}");
+
+            string overlayDir = Path.Combine(root, "overlay");
+            Directory.CreateDirectory(Path.Combine(overlayDir, "assets", "game", "lang"));
+            string invalidOverlayFile = Path.Combine(overlayDir, "assets", "game", "lang", "en.json");
+            File.WriteAllText(invalidOverlayFile, "{ invalid json content !!!");
+
+            var probe = SystemProbe.Default;
+            var patcher = new GamePatcher(probe, new StubRuntimeValidator());
+
+            await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(File.Exists(vanillaFile));
+            Assert.Equal("{\"vanilla-key\": \"Vanilla Value\"}", File.ReadAllText(vanillaFile));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 }
