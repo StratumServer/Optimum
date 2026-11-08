@@ -50,6 +50,12 @@ public sealed class GamePatcher(
     private readonly IRuntimeValidator _validator = validator ?? new RuntimeValidator(probe);
     private readonly Func<string, string?> _versionDetector = versionDetector ?? DetectGameVersion;
 
+    /// <summary>
+    /// Test seam invoked during the commit phase with the step name
+    /// (<c>"swap"</c>, <c>"overlay"</c>, <c>"manifest"</c>).
+    /// </summary>
+    internal Action<string>? FailAtCommitStep { get; init; }
+
     public Task<PatchResult> PatchAsync(
         PatchRequest request,
         IBuildObserver? observer = null,
@@ -203,27 +209,27 @@ public sealed class GamePatcher(
 
         var patchedTargets = new List<string>();
         var targetRecords = new List<PatchTargetRecord>();
+        var stagedSwaps = new List<(string StagedPath, string LivePath, string StagedPdbPath, string LivePdbPath)>();
 
-        // Patch Target 1: VintagestoryLib.dll (Transplant)
-        cancellationToken.ThrowIfCancellationRequested();
-        observer?.Phase(ProgressPhase.Patch, 20, "patching VintagestoryLib.dll");
-        string tempLib = Path.Combine(gameDir, $"VintagestoryLib.dll.tmp-{Guid.NewGuid():N}");
+        string stagingDir = Path.Combine(gameDir, ".optimum", $"staging-{Guid.NewGuid():N}");
+        EnsureDirectory(stagingDir);
+
         try
         {
-            ProcessOutcome outcome = RunPatcher(patcherPath, isDll, [sourceLib, donorLib, tempLib]);
-            if (!outcome.Started || outcome.ExitCode != 0 || !probe.FileExists(tempLib))
+            // Stage Target 1: VintagestoryLib.dll (Transplant)
+            cancellationToken.ThrowIfCancellationRequested();
+            observer?.Phase(ProgressPhase.Patch, 20, "patching VintagestoryLib.dll");
+            string stagedLib = Path.Combine(stagingDir, "VintagestoryLib.dll");
+            ProcessOutcome libOutcome = RunPatcher(patcherPath, isDll, [sourceLib, donorLib, stagedLib]);
+            if (!libOutcome.Started || libOutcome.ExitCode != 0 || !probe.FileExists(stagedLib))
             {
                 return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
-                    $"failed to patch VintagestoryLib.dll (exit {outcome.ExitCode}): {TrimOutput(outcome)}"));
+                    $"failed to patch VintagestoryLib.dll (exit {libOutcome.ExitCode}): {TrimOutput(libOutcome)}"));
             }
 
             string vanillaLibHash = ComputeSha256(sourceLib);
-            string patchedLibHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempLib);
-            MoveFile(tempLib, gameLib);
-            string tempLibPdb = Path.ChangeExtension(tempLib, ".pdb");
-            if (probe.FileExists(tempLibPdb))
-                MoveFile(tempLibPdb, Path.ChangeExtension(gameLib, ".pdb"));
-
+            string patchedLibHash = ExtractPatchedHash(libOutcome.StandardOutput) ?? ComputeSha256(stagedLib);
+            stagedSwaps.Add((stagedLib, gameLib, Path.ChangeExtension(stagedLib, ".pdb"), Path.ChangeExtension(gameLib, ".pdb")));
             patchedTargets.Add("VintagestoryLib.dll");
             targetRecords.Add(new PatchTargetRecord
             {
@@ -232,32 +238,21 @@ public sealed class GamePatcher(
                 PatchedHash = patchedLibHash,
             });
             observer?.Phase(ProgressPhase.Patch, 40, "patched VintagestoryLib.dll");
-        }
-        finally
-        {
-            TryDeleteFile(tempLib);
-        }
 
-        // Patch Target 2: VintagestoryAPI.dll (Api)
-        cancellationToken.ThrowIfCancellationRequested();
-        observer?.Phase(ProgressPhase.Patch, 45, "patching VintagestoryAPI.dll");
-        string tempApi = Path.Combine(gameDir, $"VintagestoryAPI.dll.tmp-{Guid.NewGuid():N}");
-        try
-        {
-            ProcessOutcome outcome = RunPatcher(patcherPath, isDll, ["--api", sourceApi, donorApi, tempApi]);
-            if (!outcome.Started || outcome.ExitCode != 0 || !probe.FileExists(tempApi))
+            // Stage Target 2: VintagestoryAPI.dll (Api)
+            cancellationToken.ThrowIfCancellationRequested();
+            observer?.Phase(ProgressPhase.Patch, 45, "patching VintagestoryAPI.dll");
+            string stagedApi = Path.Combine(stagingDir, "VintagestoryAPI.dll");
+            ProcessOutcome apiOutcome = RunPatcher(patcherPath, isDll, ["--api", sourceApi, donorApi, stagedApi]);
+            if (!apiOutcome.Started || apiOutcome.ExitCode != 0 || !probe.FileExists(stagedApi))
             {
                 return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
-                    $"failed to patch VintagestoryAPI.dll (exit {outcome.ExitCode}): {TrimOutput(outcome)}"));
+                    $"failed to patch VintagestoryAPI.dll (exit {apiOutcome.ExitCode}): {TrimOutput(apiOutcome)}"));
             }
 
             string vanillaApiHash = ComputeSha256(sourceApi);
-            string patchedApiHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempApi);
-            MoveFile(tempApi, gameApi);
-            string tempApiPdb = Path.ChangeExtension(tempApi, ".pdb");
-            if (probe.FileExists(tempApiPdb))
-                MoveFile(tempApiPdb, Path.ChangeExtension(gameApi, ".pdb"));
-
+            string patchedApiHash = ExtractPatchedHash(apiOutcome.StandardOutput) ?? ComputeSha256(stagedApi);
+            stagedSwaps.Add((stagedApi, gameApi, Path.ChangeExtension(stagedApi, ".pdb"), Path.ChangeExtension(gameApi, ".pdb")));
             patchedTargets.Add("VintagestoryAPI.dll");
             targetRecords.Add(new PatchTargetRecord
             {
@@ -266,125 +261,132 @@ public sealed class GamePatcher(
                 PatchedHash = patchedApiHash,
             });
             observer?.Phase(ProgressPhase.Patch, 65, "patched VintagestoryAPI.dll");
+
+            // Stage Target 3: Mods/VSEssentials.dll (Mod)
+            if (sourceEssentials is not null && donorEssentials is not null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                observer?.Phase(ProgressPhase.Patch, 70, "patching Mods/VSEssentials.dll");
+                string stagedModsDir = Path.Combine(stagingDir, "Mods");
+                EnsureDirectory(stagedModsDir);
+                string stagedEssentials = Path.Combine(stagedModsDir, "VSEssentials.dll");
+                ProcessOutcome essentialsOutcome = RunPatcher(patcherPath, isDll,
+                    ["--mod", "vsessentials", sourceEssentials, donorEssentials, stagedEssentials]);
+                if (!essentialsOutcome.Started || essentialsOutcome.ExitCode != 0 || !probe.FileExists(stagedEssentials))
+                {
+                    return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
+                        $"failed to patch Mods/VSEssentials.dll (exit {essentialsOutcome.ExitCode}): {TrimOutput(essentialsOutcome)}"));
+                }
+
+                string vanillaHash = ComputeSha256(sourceEssentials);
+                string patchedHash = ExtractPatchedHash(essentialsOutcome.StandardOutput) ?? ComputeSha256(stagedEssentials);
+                stagedSwaps.Add((stagedEssentials, gameEssentials, Path.ChangeExtension(stagedEssentials, ".pdb"), Path.ChangeExtension(gameEssentials, ".pdb")));
+                patchedTargets.Add("Mods/VSEssentials.dll");
+                targetRecords.Add(new PatchTargetRecord
+                {
+                    Assembly = "Mods/VSEssentials.dll",
+                    VanillaHash = vanillaHash,
+                    PatchedHash = patchedHash,
+                });
+                observer?.Phase(ProgressPhase.Patch, 80, "patched Mods/VSEssentials.dll");
+            }
+
+            // Stage Target 4: Mods/VSSurvivalMod.dll (Mod)
+            if (sourceSurvival is not null && donorSurvival is not null)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                observer?.Phase(ProgressPhase.Patch, 82, "patching Mods/VSSurvivalMod.dll");
+                string stagedModsDir = Path.Combine(stagingDir, "Mods");
+                EnsureDirectory(stagedModsDir);
+                string stagedSurvival = Path.Combine(stagedModsDir, "VSSurvivalMod.dll");
+                ProcessOutcome survivalOutcome = RunPatcher(patcherPath, isDll,
+                    ["--mod", "vssurvivalmod", sourceSurvival, donorSurvival, stagedSurvival]);
+                if (!survivalOutcome.Started || survivalOutcome.ExitCode != 0 || !probe.FileExists(stagedSurvival))
+                {
+                    return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
+                        $"failed to patch Mods/VSSurvivalMod.dll (exit {survivalOutcome.ExitCode}): {TrimOutput(survivalOutcome)}"));
+                }
+
+                string vanillaHash = ComputeSha256(sourceSurvival);
+                string patchedHash = ExtractPatchedHash(survivalOutcome.StandardOutput) ?? ComputeSha256(stagedSurvival);
+                stagedSwaps.Add((stagedSurvival, gameSurvival, Path.ChangeExtension(stagedSurvival, ".pdb"), Path.ChangeExtension(gameSurvival, ".pdb")));
+                patchedTargets.Add("Mods/VSSurvivalMod.dll");
+                targetRecords.Add(new PatchTargetRecord
+                {
+                    Assembly = "Mods/VSSurvivalMod.dll",
+                    VanillaHash = vanillaHash,
+                    PatchedHash = patchedHash,
+                });
+                observer?.Phase(ProgressPhase.Patch, 88, "patched Mods/VSSurvivalMod.dll");
+            }
+
+            // Validate staged outputs before touching live game files
+            foreach (var swap in stagedSwaps)
+            {
+                if (!probe.FileExists(swap.StagedPath))
+                {
+                    return Task.FromResult(PatchResult.Failure(FailureReason.VerificationFailed,
+                        $"staged assembly missing before commit: {Path.GetFileName(swap.StagedPath)}"));
+                }
+            }
+
+            // Commit and validate transactionally: any failure restores vanilla backups
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                foreach (var swap in stagedSwaps)
+                {
+                    MoveFile(swap.StagedPath, swap.LivePath);
+                    if (probe.FileExists(swap.StagedPdbPath))
+                        MoveFile(swap.StagedPdbPath, swap.LivePdbPath);
+                    FailAtCommitStep?.Invoke("swap");
+                }
+
+                // Deploy contracts, shaders, lang strings, launcher
+                observer?.Phase(ProgressPhase.Patch, 90, "deploying contracts and overlay assets");
+                DeployOverlayAssets(overlayDir, gameDir, observer);
+                FailAtCommitStep?.Invoke("overlay");
+
+                // Write marker and manifest
+                string optimumDir = Path.Combine(gameDir, ".optimum");
+                EnsureDirectory(optimumDir);
+                WriteText(Path.Combine(optimumDir, "version"), CoreInfo.Version);
+
+                var manifest = new PatchInstallManifest
+                {
+                    OptimumVersion = CoreInfo.Version,
+                    PatchedAtUtc = DateTimeOffset.UtcNow,
+                    GameDirectory = gameDir,
+                    Targets = targetRecords,
+                };
+                WriteText(Path.Combine(gameDir, PatchInstallManifest.RelativePath), manifest.Serialize());
+                FailAtCommitStep?.Invoke("manifest");
+
+                // Validate patched runtime
+                observer?.Phase(ProgressPhase.Verify, 95, "validating patched runtime");
+                RuntimeValidationResult validation = _validator.Validate(gameDir);
+                if (!validation.Ok)
+                {
+                    Rollback(gameDir, observer);
+                    return Task.FromResult(PatchResult.Failure(FailureReason.VerificationFailed,
+                        validation.Detail ?? "runtime validation failed"));
+                }
+            }
+            catch (Exception ex)
+            {
+                Rollback(gameDir, observer);
+                return Task.FromResult(PatchResult.Failure(FailureReason.EngineInternal,
+                    $"patch commit failed and was rolled back: {ex.Message}"));
+            }
+
+            observer?.Phase(ProgressPhase.Verify, 99, "patch complete");
+            observer?.Log(LogLevel.Info, $"successfully patched {patchedTargets.Count} assemblies at {gameDir}");
+            return Task.FromResult(PatchResult.Success(gameDir, patchedTargets));
         }
         finally
         {
-            TryDeleteFile(tempApi);
+            TryDeleteDirectory(stagingDir);
         }
-
-        // Patch Target 3: Mods/VSEssentials.dll (Mod)
-        if (sourceEssentials is not null && donorEssentials is not null)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            observer?.Phase(ProgressPhase.Patch, 70, "patching Mods/VSEssentials.dll");
-            string modsDir = Path.Combine(gameDir, "Mods");
-            EnsureDirectory(modsDir);
-            string tempEssentials = Path.Combine(modsDir, $"VSEssentials.dll.tmp-{Guid.NewGuid():N}");
-            try
-            {
-                ProcessOutcome outcome = RunPatcher(patcherPath, isDll,
-                    ["--mod", "vsessentials", sourceEssentials, donorEssentials, tempEssentials]);
-                if (outcome.Started && outcome.ExitCode == 0 && probe.FileExists(tempEssentials))
-                {
-                    string vanillaHash = ComputeSha256(sourceEssentials);
-                    string patchedHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempEssentials);
-                    MoveFile(tempEssentials, gameEssentials);
-                    string tempPdb = Path.ChangeExtension(tempEssentials, ".pdb");
-                    if (probe.FileExists(tempPdb))
-                        MoveFile(tempPdb, Path.ChangeExtension(gameEssentials, ".pdb"));
-
-                    patchedTargets.Add("Mods/VSEssentials.dll");
-                    targetRecords.Add(new PatchTargetRecord
-                    {
-                        Assembly = "Mods/VSEssentials.dll",
-                        VanillaHash = vanillaHash,
-                        PatchedHash = patchedHash,
-                    });
-                    observer?.Phase(ProgressPhase.Patch, 80, "patched Mods/VSEssentials.dll");
-                }
-                else
-                {
-                    observer?.Log(LogLevel.Warn, $"skipping Mods/VSEssentials.dll patch: {TrimOutput(outcome)}");
-                }
-            }
-            finally
-            {
-                TryDeleteFile(tempEssentials);
-            }
-        }
-
-        // Patch Target 4: Mods/VSSurvivalMod.dll (Mod)
-        if (sourceSurvival is not null && donorSurvival is not null)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            observer?.Phase(ProgressPhase.Patch, 82, "patching Mods/VSSurvivalMod.dll");
-            string modsDir = Path.Combine(gameDir, "Mods");
-            EnsureDirectory(modsDir);
-            string tempSurvival = Path.Combine(modsDir, $"VSSurvivalMod.dll.tmp-{Guid.NewGuid():N}");
-            try
-            {
-                ProcessOutcome outcome = RunPatcher(patcherPath, isDll,
-                    ["--mod", "vssurvivalmod", sourceSurvival, donorSurvival, tempSurvival]);
-                if (outcome.Started && outcome.ExitCode == 0 && probe.FileExists(tempSurvival))
-                {
-                    string vanillaHash = ComputeSha256(sourceSurvival);
-                    string patchedHash = ExtractPatchedHash(outcome.StandardOutput) ?? ComputeSha256(tempSurvival);
-                    MoveFile(tempSurvival, gameSurvival);
-                    string tempPdb = Path.ChangeExtension(tempSurvival, ".pdb");
-                    if (probe.FileExists(tempPdb))
-                        MoveFile(tempPdb, Path.ChangeExtension(gameSurvival, ".pdb"));
-
-                    patchedTargets.Add("Mods/VSSurvivalMod.dll");
-                    targetRecords.Add(new PatchTargetRecord
-                    {
-                        Assembly = "Mods/VSSurvivalMod.dll",
-                        VanillaHash = vanillaHash,
-                        PatchedHash = patchedHash,
-                    });
-                    observer?.Phase(ProgressPhase.Patch, 88, "patched Mods/VSSurvivalMod.dll");
-                }
-                else
-                {
-                    observer?.Log(LogLevel.Warn, $"skipping Mods/VSSurvivalMod.dll patch: {TrimOutput(outcome)}");
-                }
-            }
-            finally
-            {
-                TryDeleteFile(tempSurvival);
-            }
-        }
-
-        // Deploy contracts, shaders, lang strings, launcher
-        cancellationToken.ThrowIfCancellationRequested();
-        observer?.Phase(ProgressPhase.Patch, 90, "deploying contracts and overlay assets");
-        DeployOverlayAssets(overlayDir, gameDir, observer);
-
-        // Write marker and manifest
-        string optimumDir = Path.Combine(gameDir, ".optimum");
-        EnsureDirectory(optimumDir);
-        WriteText(Path.Combine(optimumDir, "version"), CoreInfo.Version);
-
-        var manifest = new PatchInstallManifest
-        {
-            OptimumVersion = CoreInfo.Version,
-            PatchedAtUtc = DateTimeOffset.UtcNow,
-            GameDirectory = gameDir,
-            Targets = targetRecords,
-        };
-        WriteText(Path.Combine(gameDir, PatchInstallManifest.RelativePath), manifest.Serialize());
-
-        // Validate patched runtime
-        observer?.Phase(ProgressPhase.Verify, 95, "validating patched runtime");
-        RuntimeValidationResult validation = _validator.Validate(gameDir);
-        if (!validation.Ok)
-        {
-            return Task.FromResult(PatchResult.Failure(FailureReason.VerificationFailed,
-                validation.Detail ?? "runtime validation failed"));
-        }
-
-        observer?.Phase(ProgressPhase.Verify, 99, "patch complete");
-        observer?.Log(LogLevel.Info, $"successfully patched {patchedTargets.Count} assemblies at {gameDir}");
-        return Task.FromResult(PatchResult.Success(gameDir, patchedTargets));
     }
 
     /// <summary>
@@ -445,6 +447,8 @@ public sealed class GamePatcher(
         RestoreFileAsset(gameDir, launcherName);
         RestoreDirectoryAssets(gameDir, Path.Combine("assets", "game", "lang"), restored);
         RestoreDirectoryAssets(gameDir, Path.Combine("assets", "darkvision", "config", "shaderpatches"));
+        TryDeleteFile(Path.Combine(gameDir, ".optimum", "version"));
+        TryDeleteFile(Path.Combine(gameDir, PatchInstallManifest.RelativePath));
 
         observer?.Log(LogLevel.Info, $"rollback complete: restored {restored.Count} vanilla assemblies");
         return PatchResult.Success(gameDir, restored);
@@ -871,6 +875,16 @@ public sealed class GamePatcher(
         {
             if (File.Exists(path))
                 File.Delete(path);
+        }
+        catch { /* best effort */ }
+    }
+
+    private void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
         }
         catch { /* best effort */ }
     }
