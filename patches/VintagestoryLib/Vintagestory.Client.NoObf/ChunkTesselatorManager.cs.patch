@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..3ded343 100644
+index 5714490..80fb765 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-@@ -1,22 +1,46 @@
+@@ -1,5 +1,10 @@
 +using System;
  using System.Collections.Generic;
 +using System.Runtime.CompilerServices;
@@ -13,10 +13,7 @@ index 5714490..3ded343 100644
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  using Vintagestory.Common.Database;
- 
- namespace Vintagestory.Client.NoObf;
- 
- public class ChunkTesselatorManager : ClientSystem
+@@ -10,11 +15,30 @@ public class ChunkTesselatorManager : ClientSystem
  {
  	internal int chunksize;
  
@@ -49,11 +46,7 @@ index 5714490..3ded343 100644
  
  	private Queue<TesselatedChunk> tessChunksQueuePriority = new Queue<TesselatedChunk>();
  
- 	private Vec3i chunkPos = new Vec3i();
- 
-@@ -24,20 +48,39 @@ public class ChunkTesselatorManager : ClientSystem
- 
- 	private int singleUploadDelayCounter;
+@@ -26,6 +50,22 @@ public class ChunkTesselatorManager : ClientSystem
  
  	private bool processPrioQueue;
  
@@ -76,10 +69,7 @@ index 5714490..3ded343 100644
  	public static long cumulativeTime;
  
  	public static int cumulativeCount;
- 
- 	public override string Name => "tete";
- 
- 	public ChunkTesselatorManager(ClientMain game)
+@@ -36,6 +76,9 @@ public class ChunkTesselatorManager : ClientSystem
  		: base(game)
  	{
  		chunksize = game.WorldMap.ClientChunkSize;
@@ -89,11 +79,7 @@ index 5714490..3ded343 100644
  		game.eventManager.RegisterRenderer(OnBeforeFrame, EnumRenderStage.Before, "chtema", 0.99);
  	}
  
- 	public override void Dispose(ClientMain game)
- 	{
-@@ -50,39 +93,42 @@ public class ChunkTesselatorManager : ClientSystem
- 		lock (tessChunksQueuePriorityLock)
- 		{
+@@ -52,6 +95,7 @@ public class ChunkTesselatorManager : ClientSystem
  			tessChunksQueuePriority?.Clear();
  			tessChunksQueuePriority = null;
  		}
@@ -101,9 +87,7 @@ index 5714490..3ded343 100644
  	}
  
  	public override int SeperateThreadTickIntervalMs()
- 	{
- 		return 0;
- 	}
+@@ -61,26 +105,36 @@ public class ChunkTesselatorManager : ClientSystem
  
  	public override void OnBlockTexturesLoaded()
  	{
@@ -113,6 +97,8 @@ index 5714490..3ded343 100644
  
  	public void OnBeforeFrame(float dt)
  	{
++		long uploadStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++		long maxUploadTicks = (System.Diagnostics.Stopwatch.Frequency * 3L) / 1000L;
  		RuntimeStats.chunksAwaitingTesselation = game.dirtyChunksPriority.Count + game.dirtyChunks.Count + game.dirtyChunksLast.Count;
 -		RuntimeStats.chunksAwaitingPooling = tessChunksQueuePriority.Count + tessChunksQueue.Count;
 +		RuntimeStats.chunksAwaitingPooling = uploadHandoff.Reserved;
@@ -122,9 +108,15 @@ index 5714490..3ded343 100644
  		{
  			lock (tessChunksQueuePriorityLock)
  			{
++				bool uploadedAny = false;
  				while (tessChunksQueuePriority.Count > 0)
  				{
++					if (uploadedAny && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)
++					{
++						break;
++					}
  					TesselatedChunk tesselatedChunk = tessChunksQueuePriority.Dequeue();
++					uploadedAny = true;
 +					uploadHandoff.Release();
  					tesselatedChunk.chunk.queuedForUpload = false;
  					ClientChunk chunkAtBlockPos = game.WorldMap.GetChunkAtBlockPos(tesselatedChunk.positionX, tesselatedChunk.positionYAndDimension, tesselatedChunk.positionZ);
@@ -134,11 +126,21 @@ index 5714490..3ded343 100644
  						game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos);
  						singleUploadDelayCounter = 10;
  						num2 += tesselatedChunk.VerticesCount;
- 						tmpPos.Set(tesselatedChunk.positionX / 32, tesselatedChunk.positionYAndDimension / 32, tesselatedChunk.positionZ / 32);
- 						game.eventManager?.TriggerChunkRetesselated(tmpPos, chunkAtBlockPos);
-@@ -102,22 +148,37 @@ public class ChunkTesselatorManager : ClientSystem
- 			return;
+@@ -92,8 +146,12 @@ public class ChunkTesselatorManager : ClientSystem
+ 						tesselatedChunk.UnusedDispose();
+ 					}
+ 				}
++				processPrioQueue = tessChunksQueuePriority.Count > 0;
++			}
++			if (processPrioQueue || (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)
++			{
++				return;
+ 			}
+-			processPrioQueue = false;
  		}
+ 		int count = tessChunksQueue.Count;
+ 		int num3 = num * (3 + count / (1 << ClientSettings.ChunkVerticesUploadRateLimiter));
+@@ -104,18 +162,33 @@ public class ChunkTesselatorManager : ClientSystem
  		singleUploadDelayCounter = 0;
  		lock (tessChunksQueueLock)
  		{
@@ -153,6 +155,7 @@ index 5714490..3ded343 100644
 -				eachTC.RecalcPriority(game.player);
 -			});
 -			tessChunksQueue.Sort();
+-			while (tessChunksQueue.Count > 0 && num2 < num3)
 +				queueNeedsSort = false;
 +				tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);
 +				tessChunksQueue.Sort();
@@ -164,7 +167,7 @@ index 5714490..3ded343 100644
 +			{
 +				OptimumDiagnostics.ChunkUploadSort.Skip();
 +			}
- 			while (tessChunksQueue.Count > 0 && num2 < num3)
++			while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)
  			{
  				TesselatedChunk tesselatedChunk = tessChunksQueue.Dequeue();
 +				uploadHandoff.Release();
@@ -176,11 +179,7 @@ index 5714490..3ded343 100644
  					game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos2);
  					num2 += tesselatedChunk.VerticesCount;
  					tmpPos.Set(tesselatedChunk.positionX / 32, tesselatedChunk.positionYAndDimension / 32, tesselatedChunk.positionZ / 32);
- 					game.eventManager?.TriggerChunkRetesselated(tmpPos, chunkAtBlockPos2);
- 				}
-@@ -127,13 +188,18 @@ public class ChunkTesselatorManager : ClientSystem
- 				}
- 			}
+@@ -129,9 +202,14 @@ public class ChunkTesselatorManager : ClientSystem
  		}
  	}
  
@@ -196,11 +195,7 @@ index 5714490..3ded343 100644
  		{
  			return;
  		}
- 		MeshDataRecycler recycler = MeshData.Recycler;
- 		if (!game.ShouldTesselateTerrain)
-@@ -244,21 +310,22 @@ public class ChunkTesselatorManager : ClientSystem
- 	}
- 
+@@ -246,6 +324,7 @@ public class ChunkTesselatorManager : ClientSystem
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
  	{
  		requeue = false;
@@ -208,10 +203,7 @@ index 5714490..3ded343 100644
  		ClientChunk clientChunk = game.WorldMap.GetClientChunk(chunkX, chunkY, chunkZ);
  		if (clientChunk == null || clientChunk.Empty)
  		{
- 			if (clientChunk != null)
- 			{
- 				clientChunk.quantityDrawn++;
- 				clientChunk.enquedForRedraw = false;
+@@ -256,7 +335,7 @@ public class ChunkTesselatorManager : ClientSystem
  			}
  			return 0;
  		}
@@ -220,11 +212,7 @@ index 5714490..3ded343 100644
  		lock (clientChunk.packUnpackLock)
  		{
  			if (!clientChunk.loadedFromServer)
- 			{
- 				requeue = true;
-@@ -308,27 +375,102 @@ public class ChunkTesselatorManager : ClientSystem
- 			num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
- 		}
+@@ -310,23 +389,98 @@ public class ChunkTesselatorManager : ClientSystem
  		catch (RetryTesselationException)
  		{
  			requeue = true;
@@ -249,20 +237,27 @@ index 5714490..3ded343 100644
 +		if (!uploadHandoff.TryReserve(priority))
  		{
 -			lock (tessChunksQueuePriorityLock)
+-			{
+-				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
+-			}
+-			processPrioQueue = true;
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;
 +			requeue = true;
 +			OptimumDiagnostics.RecordTessBackpressure();
 +			return 0;
-+		}
+ 		}
+-		else
 +
 +		bool queued = false;
 +		bool slotOwned = true;
 +		try
-+		{
+ 		{
+-			lock (tessChunksQueueLock)
 +			if (priority)
-+			{
+ 			{
+-				tessChunksQueue?.EnqueueOrMerge(tesselatedChunk);
 +				lock (tessChunksQueuePriorityLock)
 +				{
 +					if (tessChunksQueuePriority != null)
@@ -276,10 +271,9 @@ index 5714490..3ded343 100644
 +				{
 +					processPrioQueue = true;
 +				}
-+			}
+ 			}
 +			else
- 			{
--				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
++			{
 +				lock (tessChunksQueueLock)
 +				{
 +					if (tessChunksQueue != null)
@@ -302,25 +296,21 @@ index 5714490..3ded343 100644
 +			if (slotOwned)
 +			{
 +				uploadHandoff.Release();
- 			}
--			processPrioQueue = true;
++			}
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;
 +			requeue = true;
 +			OptimumDiagnostics.RecordTessBackpressure();
 +			return 0;
- 		}
--		else
++		}
 +
 +		if (!queued)
- 		{
--			lock (tessChunksQueueLock)
++		{
 +			if (slotOwned)
- 			{
--				tessChunksQueue?.EnqueueOrMerge(tesselatedChunk);
++			{
 +				uploadHandoff.Release();
- 			}
++			}
 +			tesselatedChunk.UnusedDispose();
 +			clientChunk.queuedForUpload = false;
 +			clientChunk.lastTesselationMs = 0L;
@@ -330,5 +320,3 @@ index 5714490..3ded343 100644
  		}
  		clientChunk.lastTesselationMs = 0L;
  		return num;
- 	}
- 
