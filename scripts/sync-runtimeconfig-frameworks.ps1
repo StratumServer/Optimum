@@ -45,6 +45,10 @@ function Ensure-GcConfigProperties($runtimeOptions) {
         $cfg | Add-Member -NotePropertyName 'System.GC.Concurrent' -NotePropertyValue $true -Force
         $modified = $true
     }
+    if ($cfg.PSObject.Properties['System.GC.DATAs'] -eq $null -or $cfg.'System.GC.DATAs' -ne 1) {
+        $cfg | Add-Member -NotePropertyName 'System.GC.DATAs' -NotePropertyValue 1 -Force
+        $modified = $true
+    }
     return $modified
 }
 
