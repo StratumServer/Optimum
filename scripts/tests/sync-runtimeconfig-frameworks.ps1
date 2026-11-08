@@ -39,11 +39,21 @@ try {
     if ($merged.runtimeOptions.configProperties.keep -ne $true) {
         throw 'The launcher runtimeconfig properties were not preserved.'
     }
+    if ($merged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true) {
+        throw 'The launcher runtimeconfig Server/Concurrent GC properties were not configured.'
+    }
+
+    $vanillaMerged = Get-Content -Raw -LiteralPath $vanillaPath | ConvertFrom-Json
+    if ($vanillaMerged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true) {
+        throw 'The vanilla runtimeconfig Server/Concurrent GC properties were not configured.'
+    }
 
     $before = Get-Content -Raw -LiteralPath $launcherPath
+    $beforeVanilla = Get-Content -Raw -LiteralPath $vanillaPath
     & $scriptPath -LauncherConfig $launcherPath -VanillaConfig $vanillaPath
     $after = Get-Content -Raw -LiteralPath $launcherPath
-    if ($before -cne $after) {
+    $afterVanilla = Get-Content -Raw -LiteralPath $vanillaPath
+    if ($before -cne $after -or $beforeVanilla -cne $afterVanilla) {
         throw 'Running the runtimeconfig sync twice changed the output.'
     }
 

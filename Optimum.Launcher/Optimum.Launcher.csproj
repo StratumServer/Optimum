@@ -9,7 +9,13 @@
     <Description>Runtime patcher that applies Optimum optimizations on launch with caching.</Description>
     <ApplicationIcon>optimum.ico</ApplicationIcon>
     <Version>$(OptimumVersion)</Version>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
   </PropertyGroup>
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
+  </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />
     <PackageReference Include="OpenTK" Version="4.9.4" />

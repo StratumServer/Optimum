@@ -30,15 +30,50 @@ function Get-FrameworkEntries($runtimeOptions) {
     return @()
 }
 
+function Ensure-GcConfigProperties($runtimeOptions) {
+    $modified = $false
+    if (-not $runtimeOptions.PSObject.Properties['configProperties']) {
+        $runtimeOptions | Add-Member -NotePropertyName configProperties -NotePropertyValue ([PSCustomObject]@{}) -Force
+        $modified = $true
+    }
+    $cfg = $runtimeOptions.configProperties
+    if ($cfg.PSObject.Properties['System.GC.Server'] -eq $null -or $cfg.'System.GC.Server' -ne $true) {
+        $cfg | Add-Member -NotePropertyName 'System.GC.Server' -NotePropertyValue $true -Force
+        $modified = $true
+    }
+    if ($cfg.PSObject.Properties['System.GC.Concurrent'] -eq $null -or $cfg.'System.GC.Concurrent' -ne $true) {
+        $cfg | Add-Member -NotePropertyName 'System.GC.Concurrent' -NotePropertyValue $true -Force
+        $modified = $true
+    }
+    return $modified
+}
+
 $launcher = Get-Content -Raw -LiteralPath $LauncherConfig | ConvertFrom-Json
 $vanilla = Get-Content -Raw -LiteralPath $VanillaConfig | ConvertFrom-Json
+
+$launcherModified = Ensure-GcConfigProperties $launcher.runtimeOptions
+$vanillaModified = $false
+if ($vanilla -and $vanilla.runtimeOptions) {
+    $vanillaModified = Ensure-GcConfigProperties $vanilla.runtimeOptions
+    if ($vanillaModified) {
+        $vanillaJson = $vanilla | ConvertTo-Json -Depth 10
+        [IO.File]::WriteAllText($VanillaConfig, $vanillaJson + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Configured Server and Concurrent GC in vanilla runtimeconfig."
+    }
+}
 
 $launcherFrameworks = @(Get-FrameworkEntries $launcher.runtimeOptions)
 $known = @($launcherFrameworks | ForEach-Object { $_.name })
 $missing = @(Get-FrameworkEntries $vanilla.runtimeOptions | Where-Object { $known -notcontains $_.name })
 
 if ($missing.Count -eq 0) {
-    Write-Host "Launcher runtimeconfig already names every framework vanilla names."
+    if ($launcherModified) {
+        $json = $launcher | ConvertTo-Json -Depth 10
+        [IO.File]::WriteAllText($LauncherConfig, $json + "`n", (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host "Configured Server and Concurrent GC in launcher runtimeconfig."
+    } else {
+        Write-Host "Launcher runtimeconfig already names every framework vanilla names."
+    }
     return
 }
 

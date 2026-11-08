@@ -293,14 +293,14 @@ public class SmokeTests
         if (!File.Exists(VintagestoryLibDll)) return;
 
         string content = File.ReadAllText(VintagestoryLibDll);
-        Assert.Contains("OptimumInfo", content);
+        Assert.Contains("OptimumBuildInfo", content);
     }
 
     [Fact]
-    public void Smoke_OptimumInfoSourceExists()
+    public void Smoke_OptimumBuildInfoSourceExists()
     {
-        string src = Path.Combine(RepoRoot, "sources", "VintagestoryLib", "Optimum", "OptimumInfo.cs");
-        Assert.True(File.Exists(src), "OptimumInfo.cs source not found");
+        string src = Path.Combine(RepoRoot, "sources", "VintagestoryLib", "Optimum", "OptimumBuildInfo.cs");
+        Assert.True(File.Exists(src), "OptimumBuildInfo.cs source not found");
     }
 
     [Fact]
