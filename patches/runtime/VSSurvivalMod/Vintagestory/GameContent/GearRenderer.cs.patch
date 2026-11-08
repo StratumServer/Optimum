@@ -5,21 +5,21 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/GearRenderer.cs b/VSSurvival
  
  	private EntityBehaviorTemporalStabilityAffected bh;
  
-+	private OptimumCircuitBreaker optimumGearBreaker;
++	private bool optimumGearRendererDisabled;
 +
-+	private bool optimumGearRendererDisabled => optimumGearBreaker.IsOpen;
-+
-+	private bool optimumGearRendererFailureLogged => !optimumGearBreaker.IsClosed;
++	private bool optimumGearRendererFailureLogged;
 +
 +	private void DisableOptimumGearRenderer(Exception error)
 +	{
-+		optimumGearBreaker.Trip(error, "gear renderer", msg => capi?.Logger?.Warning(msg));
++		optimumGearRendererDisabled = true;
++		if (optimumGearRendererFailureLogged)
++		{
++			return;
++		}
++		optimumGearRendererFailureLogged = true;
++		capi?.Logger?.Warning("[Optimum] GearRenderer disabled: {0}", error);
 +	}
 +
-+	private void ResetOptimumGearBreaker()
-+	{
-+		optimumGearBreaker.Reset();
-+	}
  	private float raiseyRelGears;
  
  	private float raiseyRelTripod;
