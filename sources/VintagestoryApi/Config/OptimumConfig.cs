@@ -125,6 +125,48 @@ public static class OptimumConfig
     /// </summary>
     public static bool GreedyMeshTextureGrad = true;
 
+    public const string GreedyMeshPresetOff = "off";
+    public const string GreedyMeshPresetBalanced = "balanced";
+    public const string GreedyMeshPresetAggressive = "aggressive";
+
+    public static string GetGreedyMeshPreset()
+    {
+        if (!GreedyMeshEnabled) return GreedyMeshPresetOff;
+        if (GreedyMeshMaxMergeWidth >= 8 && GreedyMeshLightTolerance >= 2) return GreedyMeshPresetAggressive;
+        return GreedyMeshPresetBalanced;
+    }
+
+    public static void SetGreedyMeshPreset(string? preset, bool save = false)
+    {
+        if (string.Equals(preset, GreedyMeshPresetOff, StringComparison.OrdinalIgnoreCase))
+        {
+            GreedyMeshEnabled = false;
+        }
+        else if (string.Equals(preset, GreedyMeshPresetAggressive, StringComparison.OrdinalIgnoreCase))
+        {
+            GreedyMeshEnabled = true;
+            GreedyMeshMaxMergeWidth = 8;
+            GreedyMeshMaxMergeHeight = 8;
+            GreedyMeshLightTolerance = 2;
+            GreedyMeshFarDistance = 0;
+            GreedyMeshFarDistanceSq = 0.0;
+        }
+        else
+        {
+            GreedyMeshEnabled = true;
+            GreedyMeshMaxMergeWidth = 4;
+            GreedyMeshMaxMergeHeight = 4;
+            GreedyMeshLightTolerance = 0;
+            GreedyMeshFarDistance = 64;
+            GreedyMeshFarDistanceSq = 64.0 * 64.0;
+        }
+
+        if (save)
+        {
+            Save();
+        }
+    }
+
     /// <summary>
     /// Set by the ShaderRegistry patch each time chunk shaders compile:
     /// true when they were stamped with #define GREEDYMESH 1. The emitter

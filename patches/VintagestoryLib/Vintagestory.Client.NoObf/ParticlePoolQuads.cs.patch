@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
-index 4db59d6..7d34819 100644
+index 4db59d6..37ae2e3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs
 @@ -1,6 +1,9 @@
@@ -12,19 +12,6 @@ index 4db59d6..7d34819 100644
  using Vintagestory.API.Config;
  using Vintagestory.API.MathTools;
  using Vintagestory.Common;
-@@ -25,11 +28,11 @@ public class ParticlePoolQuads : IParticlePool
- 
- 	private int writePosition = 1;
- 
- 	private int readPosition;
- 
--	private object advanceCountLock = new object();
-+	private readonly Lock advanceCountLock = new();
- 
- 	private int advanceCount;
- 
- 	protected int poolSize;
- 
 @@ -103,11 +106,11 @@ public class ParticlePoolQuads : IParticlePool
  			tickTimes = new float[5];
  			velocities = new float[5][];

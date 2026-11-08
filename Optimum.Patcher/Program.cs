@@ -211,6 +211,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumGuiRenderBackendChanged",
         "onOptimumGodRaysCapChanged",
 #if OPTIMUM_GREEDY_MESH
+        "GetOptimumGreedyMeshPresetIndex",
+        "onOptimumGreedyMeshPresetChanged",
         "onOptimumGreedyMeshChanged",
         "onOptimumGreedySpanChanged",
         "onOptimumGreedyLightTolChanged",
