@@ -1027,6 +1027,20 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void OptiTimeGuard_EnforcesCrashResilientLeaseAndRollback()
+    {
+        string guardSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryLib/Optimum/OptimumOptiTimeGuard.cs"));
+
+        Assert.Contains("OptiTimeLeaseManifest", guardSource);
+        Assert.Contains("WriteLeaseManifest", guardSource);
+        Assert.Contains("RestoreFromLease", guardSource);
+        Assert.Contains("optitime-lease.json", guardSource);
+        Assert.Contains("File.Move(entry.DisabledPath, entry.OriginalPath)", guardSource);
+        Assert.Contains("RestoreAll(logger)", guardSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

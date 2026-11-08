@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Text.Json;
 using Vintagestory.API.Config;
 
 namespace Optimum;
@@ -9,6 +10,36 @@ public static class OptimumOptiTimeGuard
 {
     private const string DisableSuffix = ".disabled-by-optimum";
     private static readonly List<string> DisabledFiles = new();
+    private static string? _customLeaseFilePath;
+    private static string? _customModsPath;
+
+    internal sealed class OptiTimeLeaseManifest
+    {
+        public int ProcessId { get; set; }
+        public DateTime TimestampUtc { get; set; }
+        public List<OptiTimeRenameEntry> Entries { get; set; } = new();
+    }
+
+    internal sealed class OptiTimeRenameEntry
+    {
+        public string OriginalPath { get; set; } = string.Empty;
+        public string DisabledPath { get; set; } = string.Empty;
+    }
+
+    internal static string GetDefaultLeaseFilePath()
+    {
+        string root = GamePaths.DataPath ?? AppDomain.CurrentDomain.BaseDirectory;
+        return Path.Combine(root, ".optimum", "optitime-lease.json");
+    }
+
+    internal static string LeaseFilePath => _customLeaseFilePath ?? GetDefaultLeaseFilePath();
+    internal static string TargetModsPath => _customModsPath ?? GamePaths.DataPathMods;
+
+    internal static void SetTestOverrides(string? modsPath, string? leaseFilePath)
+    {
+        _customModsPath = modsPath;
+        _customLeaseFilePath = leaseFilePath;
+    }
 
     public static void DisableOptiTimeIfPresent(Action<string> logger)
     {
@@ -16,12 +47,13 @@ public static class OptimumOptiTimeGuard
         {
             RestoreAll(logger);
 
-            string modsPath = GamePaths.DataPathMods;
-            if (!Directory.Exists(modsPath))
+            string modsPath = TargetModsPath;
+            if (string.IsNullOrEmpty(modsPath) || !Directory.Exists(modsPath))
             {
                 return;
             }
 
+            List<OptiTimeRenameEntry> candidates = new();
             foreach (string path in Directory.EnumerateFiles(modsPath, "*", SearchOption.TopDirectoryOnly))
             {
                 string extension = Path.GetExtension(path);
@@ -35,9 +67,28 @@ public static class OptimumOptiTimeGuard
                 }
 
                 string disabledPath = path + DisableSuffix;
-                File.Move(path, disabledPath);
-                DisabledFiles.Add(disabledPath);
-                logger?.Invoke($"[Optimum] Temporarily disabled OptiTime: {Path.GetFileName(path)}");
+                candidates.Add(new OptiTimeRenameEntry
+                {
+                    OriginalPath = path,
+                    DisabledPath = disabledPath
+                });
+            }
+
+            if (candidates.Count == 0)
+            {
+                return;
+            }
+
+            WriteLeaseManifest(candidates, logger);
+
+            foreach (var entry in candidates)
+            {
+                if (File.Exists(entry.OriginalPath))
+                {
+                    File.Move(entry.OriginalPath, entry.DisabledPath);
+                    DisabledFiles.Add(entry.DisabledPath);
+                    logger?.Invoke($"[Optimum] Temporarily disabled OptiTime: {Path.GetFileName(entry.OriginalPath)}");
+                }
             }
 
             if (DisabledFiles.Count == 0)
@@ -58,7 +109,8 @@ public static class OptimumOptiTimeGuard
     {
         try
         {
-            string modConfigPath = Path.Combine(GamePaths.DataPath, "ModConfig");
+            string root = GamePaths.DataPath ?? AppDomain.CurrentDomain.BaseDirectory;
+            string modConfigPath = Path.Combine(root, "ModConfig");
             if (!Directory.Exists(modConfigPath))
             {
                 return null;
@@ -87,12 +139,14 @@ public static class OptimumOptiTimeGuard
         RestoreAll(null);
     }
 
-    private static void RestoreAll(Action<string> logger)
+    public static void RestoreAll(Action<string> logger)
     {
         try
         {
-            string modsPath = GamePaths.DataPathMods;
-            if (!Directory.Exists(modsPath))
+            RestoreFromLease(logger);
+
+            string modsPath = TargetModsPath;
+            if (string.IsNullOrEmpty(modsPath) || !Directory.Exists(modsPath))
             {
                 return;
             }
@@ -113,9 +167,86 @@ public static class OptimumOptiTimeGuard
         }
         catch
         {
-            // Restoration is best effort during process shutdown.
+            // Restoration is best effort during process shutdown or crash recovery.
         }
 
         DisabledFiles.Clear();
+    }
+
+    private static void WriteLeaseManifest(List<OptiTimeRenameEntry> entries, Action<string> logger)
+    {
+        try
+        {
+            string leasePath = LeaseFilePath;
+            string leaseDir = Path.GetDirectoryName(leasePath)!;
+            if (!string.IsNullOrEmpty(leaseDir))
+            {
+                Directory.CreateDirectory(leaseDir);
+            }
+
+            OptiTimeLeaseManifest manifest = new()
+            {
+                ProcessId = Environment.ProcessId,
+                TimestampUtc = DateTime.UtcNow,
+                Entries = entries
+            };
+
+            string json = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
+            string tempPath = leasePath + ".tmp";
+            File.WriteAllText(tempPath, json);
+            File.Move(tempPath, leasePath, true);
+        }
+        catch (Exception ex)
+        {
+            logger?.Invoke($"[Optimum] Warning: failed to write OptiTime lease manifest: {ex.Message}");
+        }
+    }
+
+    private static void RestoreFromLease(Action<string> logger)
+    {
+        string leasePath = LeaseFilePath;
+        if (!File.Exists(leasePath))
+        {
+            return;
+        }
+
+        try
+        {
+            string json = File.ReadAllText(leasePath);
+            OptiTimeLeaseManifest? manifest = JsonSerializer.Deserialize<OptiTimeLeaseManifest>(json);
+            if (manifest?.Entries != null)
+            {
+                foreach (var entry in manifest.Entries)
+                {
+                    if (File.Exists(entry.DisabledPath))
+                    {
+                        if (File.Exists(entry.OriginalPath))
+                        {
+                            File.Delete(entry.DisabledPath);
+                        }
+                        else
+                        {
+                            File.Move(entry.DisabledPath, entry.OriginalPath);
+                            logger?.Invoke($"[Optimum] Restored OptiTime file from prior session lease: {Path.GetFileName(entry.OriginalPath)}");
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger?.Invoke($"[Optimum] Warning: failed to parse OptiTime lease manifest during recovery: {ex.Message}");
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(leasePath);
+            }
+            catch
+            {
+                // Best effort delete
+            }
+        }
     }
 }
