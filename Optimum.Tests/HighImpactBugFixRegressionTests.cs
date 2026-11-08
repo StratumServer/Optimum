@@ -1060,6 +1060,52 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("[Optimum.Launcher] Cache invalidated: {validationResult.Status}", programSource);
     }
 
+    [Fact]
+    public void CircuitBreaker_AllocationFreeEntityAndGearRendererRecovery()
+    {
+        // 1. Verify struct properties and allocation-free state transitions
+        var breaker = default(Vintagestory.API.Config.OptimumCircuitBreaker);
+        Assert.True(breaker.IsClosed);
+        Assert.False(breaker.IsOpen);
+        Assert.Equal(0, breaker.TripCount);
+
+        var logged = new List<string>();
+        breaker.Trip(new Exception("test failure"), "render-system", msg => logged.Add(msg));
+        Assert.True(breaker.IsOpen);
+        Assert.False(breaker.IsClosed);
+        Assert.Equal(1, breaker.TripCount);
+        Assert.Single(logged);
+
+        // Registry integration
+        Vintagestory.API.Config.OptimumCircuitBreakerRegistry.Register("render-system", () => breaker.GetStatus(), () => breaker.Reset());
+        string summary = Vintagestory.API.Config.OptimumCircuitBreakerRegistry.GetBreakersSummary();
+        Assert.Contains("render-system=open (tripped, count=1)", summary);
+
+        Vintagestory.API.Config.OptimumCircuitBreakerRegistry.ResetAll();
+        Assert.True(breaker.IsClosed);
+        Vintagestory.API.Config.OptimumCircuitBreakerRegistry.Unregister("render-system");
+
+        // 2. Verify SystemRenderEntities patch contains breaker fields and registration
+        string renderEntitiesPatch = PatchReader.ReadPatch(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch");
+        Assert.Contains("optimumEntityLightBreaker", renderEntitiesPatch);
+        Assert.Contains("optimumEntityShaderCacheBreaker", renderEntitiesPatch);
+        Assert.Contains("OptimumCircuitBreakerRegistry.Register(\"entity-light-batch\"", renderEntitiesPatch);
+        Assert.Contains("OptimumCircuitBreakerRegistry.Register(\"entity-shader-cache\"", renderEntitiesPatch);
+
+        // 3. Verify GearRenderer patch contains breaker fields and registration
+        string gearRendererPatch = PatchReader.ReadPatch(
+            "patches/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs.patch");
+        Assert.Contains("optimumGearBreaker", gearRendererPatch);
+        Assert.Contains("OptimumCircuitBreakerRegistry.Register(\"gear-renderer\"", gearRendererPatch);
+
+        // 4. Verify OptimumStatus surfaces circuit breaker summary and resets on /optimum reset
+        string statusSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VSEssentials/Systems/OptimumStatus.cs"));
+        Assert.Contains("OptimumCircuitBreakerRegistry.GetBreakersSummary()", statusSource);
+        Assert.Contains("OptimumCircuitBreakerRegistry.ResetAll()", statusSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

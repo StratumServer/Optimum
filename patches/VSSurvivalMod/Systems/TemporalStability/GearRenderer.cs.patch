@@ -1,22 +1,30 @@
 diff --git a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
-index d1f563b..b083a32 100644
+index d1f563b..901f3ae 100644
 --- a/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
 +++ b/VSSurvivalMod/Systems/TemporalStability/GearRenderer.cs
-@@ -34,10 +34,21 @@ namespace Vintagestory.GameContent
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.GameContent
+@@ -34,10 +35,18 @@ namespace Vintagestory.GameContent
          double tripodAccum;
          LoadedTexture rustTexture;
  
          EntityBehaviorTemporalStabilityAffected bh;
  
-+        bool optimumGearRendererDisabled;
-+        bool optimumGearRendererFailureLogged;
++        OptimumCircuitBreaker optimumGearBreaker;
++        bool optimumGearRendererDisabled => optimumGearBreaker.IsOpen;
 +
 +        void DisableOptimumGearRenderer(Exception error)
 +        {
-+            optimumGearRendererDisabled = true;
-+            if (optimumGearRendererFailureLogged) return;
-+            optimumGearRendererFailureLogged = true;
-+            capi?.Logger?.Warning("[Optimum] GearRenderer disabled: {0}", error);
++            optimumGearBreaker.Trip(error, "gear renderer", msg => capi?.Logger?.Warning(msg));
 +        }
 +
          public GearRenderer(ICoreClientAPI capi)
@@ -24,7 +32,7 @@ index d1f563b..b083a32 100644
              this.capi = capi;
  
              if (!capi.Assets.Exists("shapes/block/machine/machinegear2.json"))
-@@ -54,38 +65,51 @@ namespace Vintagestory.GameContent
+@@ -54,38 +63,52 @@ namespace Vintagestory.GameContent
              LoadShader();
          }
  
@@ -33,29 +41,26 @@ index d1f563b..b083a32 100644
 -            var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
 -            var block = capi.World.GetBlock(new AssetLocation("platepile"));
 -            if (block == null || shape == null) return;
+-
+-            capi.Tesselator.TesselateShape(block, shape, out var mesh);
+-            gearMeshref = capi.Render.UploadMesh(mesh);
+-            genGears();
+-
++            OptimumCircuitBreakerRegistry.Register("gear-renderer", () => optimumGearBreaker.GetStatus(), () => optimumGearBreaker.Reset());
 +            try
 +            {
 +                var shape = Shape.TryGet(capi, "shapes/block/machine/machinegear2.json");
 +                var block = capi.World.GetBlock(new AssetLocation("platepile"));
 +                if (block == null || shape == null) return;
  
--            capi.Tesselator.TesselateShape(block, shape, out var mesh);
--            gearMeshref = capi.Render.UploadMesh(mesh);
--            genGears();
+-            rustTexture = new LoadedTexture(capi);
+-            var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
+-            capi.Render.GetOrLoadTexture(loc, ref rustTexture);
 +                capi.Tesselator.TesselateShape(block, shape, out var mesh);
 +                gearMeshref = capi.Render.UploadMesh(mesh);
 +                genGears();
  
- 
--            rustTexture = new LoadedTexture(capi);
--            var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
--            capi.Render.GetOrLoadTexture(loc, ref rustTexture);
-+                rustTexture = new LoadedTexture(capi);
-+                var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
-+                capi.Render.GetOrLoadTexture(loc, ref rustTexture);
- 
 -            shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
-+                shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
  
 -            tripodAnim = new AnimationUtil(capi, tripodPos);
 -            tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
@@ -67,6 +72,13 @@ index d1f563b..b083a32 100644
 -            tripodAnim.renderer.LightAffected = false;
 -            tripodAnim.renderer.StabilityAffected = false;
 -            tripodAnim.renderer.ShouldRender = true;
++                rustTexture = new LoadedTexture(capi);
++                var loc = new AssetLocation("textures/block/metal/tarnished/rust.png");
++                capi.Render.GetOrLoadTexture(loc, ref rustTexture);
+ 
++                shape = Shape.TryGet(capi, "shapes/entity/lore/supermech/thunderlord.json");
+ 
+-            bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
 +                if (shape == null) return;
 +                tripodAnim = new AnimationUtil(capi, tripodPos);
 +                tripodAnim.InitializeShapeAndAnimator("tripod", shape, capi.Tesselator.GetTextureSource(block), null, out var _);
@@ -83,9 +95,8 @@ index d1f563b..b083a32 100644
 +                tripodAnim.renderer.LightAffected = false;
 +                tripodAnim.renderer.StabilityAffected = false;
 +                tripodAnim.renderer.ShouldRender = true;
- 
- 
--            bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
++
++
 +                bh = capi.World.Player.Entity.GetBehavior<EntityBehaviorTemporalStabilityAffected>();
 +            }
 +            catch (Exception e)
@@ -97,7 +108,7 @@ index d1f563b..b083a32 100644
          void genGears()
          {
              var rnd = capi.World.Rand;
-@@ -120,69 +144,114 @@ namespace Vintagestory.GameContent
+@@ -120,69 +143,114 @@ namespace Vintagestory.GameContent
  
  
  
@@ -135,32 +146,26 @@ index d1f563b..b083a32 100644
          {
 -            if (tripodAnim == null) return;
 -            if (capi.IsGamePaused) deltaTime = 0;
--
--            float targetRaiseyRel = 0;
--            if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 3f, 0, 1);
--            raiseyRelGears += (targetRaiseyRel - raiseyRelGears) * deltaTime;
--
--            capi.Render.GlToggleBlend(true);
--
--            if (raiseyRelGears >= 0.01f)
 +            if (optimumGearRendererDisabled || tripodAnim?.renderer == null || gearMeshref == null || gearMeshref.Disposed || prog == null || prog.Disposed) return;
 +            IShaderProgram previousShader = capi?.Render?.CurrentActiveShader;
 +            bool blendEnabled = false;
 +            try
-             {
--                renderGears(deltaTime);
--            }
++            {
 +                if (previousShader != null && !previousShader.Disposed) previousShader.Stop();
 +                if (capi.IsGamePaused) deltaTime = 0;
  
--            if (!capi.IsGamePaused)
+-            float targetRaiseyRel = 0;
+-            if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 3f, 0, 1);
+-            raiseyRelGears += (targetRaiseyRel - raiseyRelGears) * deltaTime;
 +                float targetRaiseyRel = 0;
 +                if (bh != null) targetRaiseyRel = GameMath.Clamp((float)bh.GlichEffectStrength * 5f - 3f, 0, 1);
 +                raiseyRelGears += (targetRaiseyRel - raiseyRelGears) * deltaTime;
-+
+ 
+-            capi.Render.GlToggleBlend(true);
 +                capi.Render.GlToggleBlend(true);
 +                blendEnabled = true;
-+
+ 
+-            if (raiseyRelGears >= 0.01f)
 +                if (raiseyRelGears >= 0.01f)
 +                {
 +                    renderGears(deltaTime);
@@ -174,12 +179,15 @@ index d1f563b..b083a32 100644
 +            }
 +            catch (Exception e)
              {
+-                renderGears(deltaTime);
++                DisableOptimumGearRenderer(e);
+             }
+-
+-            if (!capi.IsGamePaused)
++            finally
+             {
 -                tripodAnim.renderer.ShouldRender = raiseyRelTripod > 0.01f;
 -                updateSuperMechState(deltaTime, stage);
-+                DisableOptimumGearRenderer(e);
-+            }
-+            finally
-+            {
 +                if (blendEnabled)
 +                {
 +                    try { capi.Render.GlToggleBlend(false); } catch (Exception e) { DisableOptimumGearRenderer(e); }
@@ -248,7 +256,13 @@ index d1f563b..b083a32 100644
          private void renderGears(float deltaTime)
          {
              prog.Use();
-@@ -243,6 +312,5 @@ namespace Vintagestory.GameContent
+@@ -238,11 +306,11 @@ namespace Vintagestory.GameContent
+             prog.Stop();
+         }
+ 
+         public void Dispose()
+         {
++            OptimumCircuitBreakerRegistry.Unregister("gear-renderer");
              gearMeshref?.Dispose();
          }
  

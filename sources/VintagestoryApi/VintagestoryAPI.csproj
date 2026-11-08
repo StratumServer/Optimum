@@ -39,6 +39,7 @@
     <Compile Remove="Config\AdaptiveTessWorkerController.cs" />
     <Compile Remove="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Remove="Config\OptimumAnimLod.cs" />
+    <Compile Remove="Config\OptimumCircuitBreaker.cs" />
     <Compile Remove="Config\OptimumConfig.cs" />
     <Compile Remove="Config\OptimumGuiMetrics.cs" />
     <Compile Remove="Config\OptimumGreedyMesher.cs" />
