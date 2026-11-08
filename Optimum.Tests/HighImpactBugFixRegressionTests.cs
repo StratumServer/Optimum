@@ -549,6 +549,33 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void FrustumCullingAndMeshDataPool_ReordersRangeBeforePlanesAndBatchesCulling()
+    {
+        string frustumPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Client/Render/FrustumCulling.cs.patch"));
+        int distanceIdx = frustumPatch.IndexOf("+            double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);");
+        int planeIdx = frustumPatch.IndexOf("+            if (frustum[0].AABBisOutside(sphere)) return false;");
+        Assert.True(distanceIdx >= 0 && planeIdx >= 0 && distanceIdx < planeIdx,
+            "FrustumCulling.InFrustumAndRange must evaluate horizontal distance before frustum plane AABB tests.");
+
+        string meshPoolPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Client/MeshPool/MeshDataPool.cs.patch"));
+        Assert.Contains("switch (frustumCullMode)", meshPoolPatch);
+        Assert.Contains("int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;", meshPoolPatch);
+        Assert.Contains("case EnumFrustumCullMode.CullNormal:", meshPoolPatch);
+        Assert.Contains("case EnumFrustumCullMode.CullInstant:", meshPoolPatch);
+        Assert.Contains("case EnumFrustumCullMode.CullInstantShadowPassNear:", meshPoolPatch);
+        Assert.Contains("case EnumFrustumCullMode.CullInstantShadowPassFar:", meshPoolPatch);
+
+        string simdSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryApi/Config/OptimumFrustumCullSimd.cs"));
+        int simdDistanceIdx = simdSource.IndexOf("double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);");
+        int simdOutsideIdx = simdSource.IndexOf("ctx.IsOutside5");
+        Assert.True(simdDistanceIdx >= 0 && simdOutsideIdx >= 0 && simdDistanceIdx < simdOutsideIdx,
+            "OptimumFrustumCullSimd.InFrustumAndRange must evaluate distance before SIMD plane tests.");
+    }
+
+    [Fact]
     public void WeatherSimulationParticles_ResetsHeightmapOnBlockChangeAndLeaveWorld()
     {
         string patch = File.ReadAllText(

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/Render/FrustumCulling.cs b/VintagestoryApi/Client/Render/FrustumCulling.cs
-index f9dfad8..f816a86 100644
+index f9dfad8..76d25c1 100644
 --- a/VintagestoryApi/Client/Render/FrustumCulling.cs
 +++ b/VintagestoryApi/Client/Render/FrustumCulling.cs
 @@ -11,10 +11,11 @@
@@ -14,7 +14,7 @@ index f9dfad8..f816a86 100644
  #nullable disable
  
  namespace Vintagestory.API.Client
-@@ -136,11 +137,35 @@ namespace Vintagestory.API.Client
+@@ -136,40 +137,85 @@ namespace Vintagestory.API.Client
              if (frustum[5].AABBisOutside(sphere)) return false;
              return true;// && lodLevel == 1) || (distx < shadowRangeX * lodBias + 24 && distz < shadowRangeZ * lodBias + 24);
          }
@@ -28,7 +28,13 @@ index f9dfad8..f816a86 100644
 +        /// callers can simply AND it onto their existing visibility expression.
 +        /// </summary>
 +        public bool OptimumChiselLodVisible(Sphere sphere, int lodLevel, bool optimumUseChiselLodDistance)
-+        {
+         {
+-            if (frustum[0].AABBisOutside(sphere)) return false;
+-            if (frustum[1].AABBisOutside(sphere)) return false;
+-            if (frustum[2].AABBisOutside(sphere)) return false;
+-            if (frustum[3].AABBisOutside(sphere)) return false;
+-            if (frustum[4].AABBisOutside(sphere)) return false;
+-            // we do not test the Far plane as we have a range check instead  (and testing actually shows chunks are never beyond the Far plane anyhow)
 +            if (!optimumUseChiselLodDistance || !OptimumConfig.ChiselLodEnabled) return true;
 +
 +            double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
@@ -43,34 +49,72 @@ index f9dfad8..f816a86 100644
 +                    return true;
 +            }
 +        }
-+
-+
+ 
+ 
 +        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0, bool optimumUseChiselLodDistance = false)
-         {
-             if (frustum[0].AABBisOutside(sphere)) return false;
-             if (frustum[1].AABBisOutside(sphere)) return false;
-             if (frustum[2].AABBisOutside(sphere)) return false;
-             if (frustum[3].AABBisOutside(sphere)) return false;
-@@ -153,10 +178,22 @@ namespace Vintagestory.API.Client
++        {
+             // Lod level 3: implements Lod2: this is the mesh drawn at long distance  (may be empty)
+             // Lod level 2: implements Lod2: this is the mesh drawn at short and medium view distance
              // Lod level 1: drawn at all view distance
              // Lod level 0: only high detail stuff
  
              double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
  
-+            if (optimumUseChiselLodDistance && OptimumConfig.ChiselLodEnabled)
-+            {
+-            switch (lodLevel)
++            if (optimumUseChiselLodDistance && OptimumConfig.ChiselLodEnabled && (lodLevel == 2 || lodLevel == 3))
+             {
+-                case 0:
+-                    return lod0BiasSq > 0 && distance < lod0BiasSq + 32 * 32;
+-                case 1:
+-                    return distance < ViewDistanceSq;
+-                case 2:
+-                    return distance <= lod2BiasSq;
+-                case 3:
+-                    return distance > lod2BiasSq && distance < ViewDistanceSq;
+-                default:
+-                    return false;
 +                double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
 +                switch (lodLevel)
 +                {
 +                    case 2:
-+                        return distance <= chiselDistanceSq && distance < ViewDistanceSq;
++                        if (distance > chiselDistanceSq || distance >= ViewDistanceSq) return false;
++                        break;
 +                    case 3:
-+                        return distance > chiselDistanceSq && distance < ViewDistanceSq;
++                        if (distance <= chiselDistanceSq || distance >= ViewDistanceSq) return false;
++                        break;
 +                }
 +            }
++            else
++            {
++                switch (lodLevel)
++                {
++                    case 0:
++                        if (lod0BiasSq <= 0 || distance >= lod0BiasSq + 32 * 32) return false;
++                        break;
++                    case 1:
++                        if (distance >= ViewDistanceSq) return false;
++                        break;
++                    case 2:
++                        if (distance > lod2BiasSq) return false;
++                        break;
++                    case 3:
++                        if (distance <= lod2BiasSq || distance >= ViewDistanceSq) return false;
++                        break;
++                    default:
++                        return false;
++                }
+             }
 +
-             switch (lodLevel)
-             {
-                 case 0:
-                     return lod0BiasSq > 0 && distance < lod0BiasSq + 32 * 32;
-                 case 1:
++            if (frustum[0].AABBisOutside(sphere)) return false;
++            if (frustum[1].AABBisOutside(sphere)) return false;
++            if (frustum[2].AABBisOutside(sphere)) return false;
++            if (frustum[3].AABBisOutside(sphere)) return false;
++            if (frustum[4].AABBisOutside(sphere)) return false;
++            // we do not test the Far plane as we have a range check instead  (and testing actually shows chunks are never beyond the Far plane anyhow)
++
++            return true;
+         }
+ 
+         public void CalcFrustumEquations(BlockPos playerPos, double[] projectionMatrix, double[] cameraMatrix)
+         {
+             this.playerPos = playerPos;
