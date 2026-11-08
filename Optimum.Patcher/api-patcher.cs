@@ -83,6 +83,14 @@ public static class ApiPatcher
             method.Name == "InFrustumAndRange" && method.Parameters.Count == 5);
         var optimumShadowCheck = bridge.Methods.Single(method =>
             method.Name == "InFrustumShadowPass" && method.Parameters.Count == 3);
+        var frustumInFrustum = bridge.Methods.Single(method =>
+            method.Name == "InFrustum" && method.Parameters.Count == 2);
+        var frustumInFrustumShadowPass = bridge.Methods.Single(method =>
+            method.Name == "InFrustumShadowPass" && method.Parameters.Count == 2);
+        var frustumSphereInFrustum = bridge.Methods.Single(method =>
+            method.Name == "SphereInFrustum" && method.Parameters.Count == 5);
+        var frustumInFrustumAndRange = bridge.Methods.Single(method =>
+            method.Name == "InFrustumAndRange" && method.Parameters.Count == 4);
         var ascii85Encode = bridge.Methods.Single(method =>
             method.Name == "Ascii85Encode" && method.Parameters.Count == 1);
         var ascii85Decode = bridge.Methods.Single(method =>
@@ -156,6 +164,15 @@ public static class ApiPatcher
         if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
+
+        int frustumMethods = PatchFrustumCulling(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(frustumInFrustum),
+            vanilla.MainModule.ImportReference(frustumInFrustumShadowPass),
+            vanilla.MainModule.ImportReference(frustumInFrustumAndRange),
+            vanilla.MainModule.ImportReference(frustumSphereInFrustum));
+        if (frustumMethods != 4)
+            throw new InvalidOperationException($"Expected 4 FrustumCulling methods patched, applied {frustumMethods}.");
 
         if (inventoryHooks != 2)
         {
@@ -626,6 +643,99 @@ public static class ApiPatcher
         processor.Append(Instruction.Create(OpCodes.Ldarg_0));
         processor.Append(Instruction.Create(OpCodes.Ldarg_1));
         processor.Append(Instruction.Create(OpCodes.Ldarg_2));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
+    }
+
+    internal static int PatchFrustumCulling(
+        ModuleDefinition module,
+        MethodReference inFrustumBridge,
+        MethodReference inFrustumShadowPassBridge,
+        MethodReference inFrustumAndRangeBridge,
+        MethodReference sphereInFrustumBridge)
+    {
+        const string typeName = "Vintagestory.API.Client.FrustumCulling";
+        var culler = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var inFrustum = culler.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "InFrustum" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.Name == "Sphere")
+            ?? throw new InvalidOperationException($"{typeName}.InFrustum(Sphere) is missing from the vanilla API.");
+
+        var inFrustumShadowPass = culler.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "InFrustumShadowPass" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.Name == "Sphere")
+            ?? throw new InvalidOperationException($"{typeName}.InFrustumShadowPass(Sphere) is missing from the vanilla API.");
+
+        var inFrustumAndRange = culler.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "InFrustumAndRange" &&
+            method.Parameters.Count == 3 &&
+            method.Parameters[0].ParameterType.Name == "Sphere")
+            ?? throw new InvalidOperationException($"{typeName}.InFrustumAndRange(Sphere, bool, int) is missing from the vanilla API.");
+
+        var sphereInFrustum = culler.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "SphereInFrustum" &&
+            method.Parameters.Count == 4 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.Double)
+            ?? throw new InvalidOperationException($"{typeName}.SphereInFrustum(double, double, double, double) is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(inFrustum, inFrustumBridge);
+        RewriteTwoArgForwarder(inFrustumShadowPass, inFrustumShadowPassBridge);
+        RewriteFourArgForwarder(inFrustumAndRange, inFrustumAndRangeBridge);
+        RewriteFiveArgForwarder(sphereInFrustum, sphereInFrustumBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName} SIMD forwarders (InFrustum, InFrustumShadowPass, InFrustumAndRange, SphereInFrustum)");
+        return 4;
+    }
+
+    private static void RewriteFourArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_2));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_3));
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
+    }
+
+    private static void RewriteFiveArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_2));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_3));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_S, target.Parameters[3]));
         processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
         processor.Append(Instruction.Create(OpCodes.Ret));
         target.Body = body;
