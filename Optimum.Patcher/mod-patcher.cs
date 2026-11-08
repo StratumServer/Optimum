@@ -243,6 +243,10 @@ public static class ModPatcher
                     "GetRendererWhenInFirepit",
                     "GetDesiredFirepitModel",
                 ],
+                ["Vintagestory.GameContent.BlockEntityFirepit"] =
+                [
+                    "GetPotStaticMesh",
+                ],
                 ["Vintagestory.GameContent.EntityDressedHumanoid"] =
                 [
                     "optimumAnimatorCacheKey",
@@ -283,6 +287,10 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.GenStoryStructures", "InitWorldGen", 0),
                 new("Vintagestory.GameContent.GenStoryStructures", "OnChunkColumnGen", 1),
                 new("Vintagestory.GameContent.EntityBehaviorBodyTemperature", "updateFreezingAnimState", 0),
+                new("Vintagestory.GameContent.BlockEntityFirepit", "UpdateRenderer", 0),
+                new("Vintagestory.GameContent.BlockEntityFirepit", "FromTreeAttributes", 2),
+                new("Vintagestory.GameContent.BlockEntityFirepit", "getContentMesh", 2),
+                new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
             ]);
     }
 
