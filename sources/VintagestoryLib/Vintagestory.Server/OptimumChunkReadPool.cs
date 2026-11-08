@@ -22,7 +22,7 @@ internal sealed class OptimumChunkReadPool : IDisposable
     private readonly SqliteCommand[] getChunkCmds;
     private readonly SemaphoreSlim available;
     private readonly ConcurrentBag<int> freeSlots;
-    private readonly object disposeLock = new object();
+    private readonly Lock disposeLock = new();
     private bool disposed;
 
     public int WorkerCount => connections.Length;
