@@ -49,6 +49,7 @@ public static class ModPatcher
             Types:
             [
                 "Vintagestory.GameContent.OptimumStatusModSystem",
+                "Vintagestory.Essentials.OptimumColumnProbeResult",
             ],
             Members: new()
             {
@@ -60,6 +61,9 @@ public static class ModPatcher
                 ["Vintagestory.Essentials.AStar"] =
                 [
                     "scratchNode",
+                    "columnProbeCache",
+                    "ResolveColumnProbe",
+                    "GetColumnProbeKey",
                 ],
                 ["Vintagestory.GameContent.EntityShapeRenderer"] =
                 [
@@ -166,6 +170,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "UpdateColSelBoxes", 0),
                 new("Vintagestory.Essentials.AStar", "FindPathOrEscapePath", 9),
+                new("Vintagestory.Essentials.AStar", "traversable", 6),
                 new(
                     "Vintagestory.Essentials.PathNode",
                     "Equals",

@@ -576,6 +576,43 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void AStar_CachesDirectionIndependentColumnProbesInTraversable()
+    {
+        string runtimeAStar = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/Essentials/AStar.cs.patch"));
+        Assert.Contains("public struct OptimumColumnProbeResult", runtimeAStar);
+        Assert.Contains("columnProbeCache.Clear();", runtimeAStar);
+        Assert.Contains("columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", runtimeAStar);
+        Assert.Contains("ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);", runtimeAStar);
+        Assert.Contains("fromDir.IsDiagonal", runtimeAStar);
+
+        string sourceAStar = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Pathfinding/Astar/AStar.cs.patch"));
+        Assert.Contains("public struct OptimumColumnProbeResult", sourceAStar);
+        Assert.Contains("columnProbeCache.Clear();", sourceAStar);
+        Assert.Contains("columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", sourceAStar);
+        Assert.Contains("ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);", sourceAStar);
+
+        var manifestMethod = typeof(Optimum.Patcher.ModPatcher)
+            .GetMethod("EssentialsManifest", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object manifest = manifestMethod.Invoke(null, null)!;
+        var types = (IEnumerable<string>)manifest.GetType().GetProperty("Types")!.GetValue(manifest)!;
+        Assert.Contains("Vintagestory.Essentials.OptimumColumnProbeResult", types);
+
+        var members = (Dictionary<string, List<string>>)manifest.GetType().GetProperty("Members")!.GetValue(manifest)!;
+        Assert.True(members.ContainsKey("Vintagestory.Essentials.AStar"));
+        Assert.Contains("columnProbeCache", members["Vintagestory.Essentials.AStar"]);
+        Assert.Contains("ResolveColumnProbe", members["Vintagestory.Essentials.AStar"]);
+        Assert.Contains("GetColumnProbeKey", members["Vintagestory.Essentials.AStar"]);
+
+        var methods = (IEnumerable<Optimum.Patcher.MethodTarget>)manifest.GetType().GetProperty("Methods")!.GetValue(manifest)!;
+        Assert.Contains(methods, m =>
+            m.TypeFullName == "Vintagestory.Essentials.AStar" &&
+            m.MethodName == "traversable" &&
+            m.ParamCount == 6);
+    }
+
+    [Fact]
     public void WeatherSimulationParticles_ResetsHeightmapOnBlockChangeAndLeaveWorld()
     {
         string patch = File.ReadAllText(

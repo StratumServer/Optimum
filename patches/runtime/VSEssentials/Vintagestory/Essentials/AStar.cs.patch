@@ -1,16 +1,41 @@
 diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintagestory/Essentials/AStar.cs
+index 08b3868..f177bbf 100644
 --- a/VSEssentials/Vintagestory/Essentials/AStar.cs
 +++ b/VSEssentials/Vintagestory/Essentials/AStar.cs
-@@ -33,6 +33,8 @@ public class AStar
+@@ -7,6 +7,16 @@ using Vintagestory.API.Server;
+ 
+ namespace Vintagestory.Essentials;
+ 
++public struct OptimumColumnProbeResult
++{
++	public bool Traversable;
++	public bool IsStepUp;
++	public bool HasCollisionBoxes;
++	public int EndY;
++	public float BaseExtraCost;
++	public float SteponHeightAdjust;
++}
++
+ public class AStar
+ {
+ 	protected ICoreServerAPI api;
+@@ -33,6 +43,15 @@ public class AStar
  
  	protected Cuboidd tmpCub = new Cuboidd();
  
 +	protected PathNode scratchNode;
 +
++	protected readonly Dictionary<long, OptimumColumnProbeResult> columnProbeCache = new Dictionary<long, OptimumColumnProbeResult>();
++
++	private static long GetColumnProbeKey(int x, int y, int z)
++	{
++		return ((long)(x & 0x3FFFFFF) << 38) | ((long)(z & 0x3FFFFFF) << 12) | (long)(y & 0xFFF);
++	}
++
  	public AStar(ICoreServerAPI api)
  	{
  		this.api = api;
-@@ -68,6 +70,7 @@ public class AStar
+@@ -69,9 +88,11 @@ public class AStar
  		NodesChecked = 0;
  		PathNode pathNode = new PathNode(start);
  		PathNode pathNode2 = new PathNode(endOrAvoidPos);
@@ -18,7 +43,11 @@ diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintag
  		float num = modeMinFleeDistance * modeMinFleeDistance;
  		openSet.Clear();
  		closedSet.Clear();
-@@ -95,19 +98,28 @@ public class AStar
++		columnProbeCache.Clear();
+ 		openSet.Add(pathNode);
+ 		while (openSet.Count > 0)
+ 		{
+@@ -95,19 +116,28 @@ public class AStar
  			for (int i = 0; i < Cardinal.ALL.Length; i++)
  			{
  				Cardinal cardinal = Cardinal.ALL[i];
@@ -52,3 +81,279 @@ diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintag
  					UpdateNode(pathNode3, pathNode4, extraCost);
  					pathNode4.hCost = ((modeMinFleeDistance > 0f) ? (1f + modeMinFleeDistance - pathNode4.distanceTo(pathNode2)) : pathNode4.distanceTo(pathNode2));
  					openSet.Add(pathNode4);
+@@ -126,19 +156,105 @@ public class AStar
+ 
+ 	protected bool traversable(PathNode node, float stepHeight, int maxFallHeight, Cuboidf entityCollBox, Cardinal fromDir, ref float extraCost)
+ 	{
+-		tmpVec.Set((double)node.X + centerOffsetX, node.Y, (double)node.Z + centerOffsetZ);
++		int startX = node.X;
++		int startY = node.Y;
++		int startZ = node.Z;
++		long probeKey = GetColumnProbeKey(startX, startY, startZ);
++
++		if (!columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe))
++		{
++			probe = ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);
++			columnProbeCache[probeKey] = probe;
++		}
++
++		if (!probe.Traversable)
++		{
++			return false;
++		}
++
++		if (!probe.IsStepUp)
++		{
++			if (fromDir.IsDiagonal)
++			{
++				tmpVec.Set((double)startX + centerOffsetX - (double)fromDir.Normali.X / 2.0, probe.EndY, (double)startZ + centerOffsetZ - (double)fromDir.Normali.Z / 2.0);
++				if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
++				{
++					return false;
++				}
++			}
++
++			if (fromDir.IsDiagonal && creatureType == EnumAICreatureType.Humanoid)
++			{
++				tmpPos.Set(startX - fromDir.Normali.X, probe.EndY, startZ);
++				float traversalCost3 = blockAccess.GetBlock(tmpPos, 2).GetTraversalCost(tmpPos, creatureType);
++				extraCost += traversalCost3 - 1f;
++				if (traversalCost3 > 10000f)
++				{
++					return false;
++				}
++
++				tmpPos.Set(startX, probe.EndY, startZ - fromDir.Normali.Z);
++				traversalCost3 = blockAccess.GetBlock(tmpPos, 2).GetTraversalCost(tmpPos, creatureType);
++				extraCost += traversalCost3 - 1f;
++				if (traversalCost3 > 10000f)
++				{
++					return false;
++				}
++			}
++
++			node.Y = probe.EndY;
++			extraCost += probe.BaseExtraCost;
++			return true;
++		}
++		else
++		{
++			if (fromDir.IsDiagonal)
++			{
++				if (probe.HasCollisionBoxes)
++				{
++					tmpVec.Set((double)startX + centerOffsetX - (double)fromDir.Normali.X / 2.0, (float)startY + stepHeight + probe.SteponHeightAdjust, (double)startZ + centerOffsetZ - (double)fromDir.Normali.Z / 2.0);
++					if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
++					{
++						return false;
++					}
++
++					node.Y = probe.EndY;
++					extraCost += probe.BaseExtraCost;
++					return true;
++				}
++
++				return false;
++			}
++			else
++			{
++				node.Y = probe.EndY;
++				extraCost += probe.BaseExtraCost;
++				return true;
++			}
++		}
++	}
++
++	private OptimumColumnProbeResult ResolveColumnProbe(PathNode node, float stepHeight, int maxFallHeight, Cuboidf entityCollBox)
++	{
++		int startX = node.X;
++		int startY = node.Y;
++		int startZ = node.Z;
++		tmpVec.Set((double)startX + centerOffsetX, startY, (double)startZ + centerOffsetZ);
+ 		tmpPos.dimension = node.dimension;
+-		Block block;
++
++		float baseExtraCost = 0f;
++
+ 		if (!collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
+ 		{
+-			int num = 0;
++			int currentY = startY;
++
+ 			while (true)
+ 			{
+-				tmpPos.Set(node.X, node.Y - 1, node.Z);
+-				block = blockAccess.GetBlock(tmpPos, 1);
++				tmpPos.Set(startX, currentY - 1, startZ);
++				Block block = blockAccess.GetBlock(tmpPos, 1);
+ 				if (!block.CanStep)
+ 				{
+-					return false;
++					return default;
+ 				}
+ 				Block block2 = blockAccess.GetBlock(tmpPos, 2);
+ 				if (block2.IsLiquid())
+@@ -146,9 +262,9 @@ public class AStar
+ 					float traversalCost = block2.GetTraversalCost(tmpPos, creatureType);
+ 					if (traversalCost > 10000f)
+ 					{
+-						return false;
++						return default;
+ 					}
+-					extraCost += traversalCost;
++					baseExtraCost += traversalCost;
+ 					break;
+ 				}
+ 				if (block2.BlockMaterial == EnumBlockMaterial.Ice)
+@@ -161,109 +277,89 @@ public class AStar
+ 					float traversalCost2 = block.GetTraversalCost(tmpPos, creatureType);
+ 					if (traversalCost2 > 10000f)
+ 					{
+-						return false;
++						return default;
+ 					}
+-					extraCost += traversalCost2;
++					baseExtraCost += traversalCost2;
+ 					break;
+ 				}
+ 				tmpVec.Y--;
+ 				if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
+ 				{
+-					return false;
++					return default;
+ 				}
+-				num++;
+-				node.Y--;
++				currentY--;
+ 				maxFallHeight--;
+ 				if (maxFallHeight < 0)
+ 				{
+-					return false;
++					return default;
+ 				}
+ 			}
+-			if (fromDir.IsDiagonal)
+-			{
+-				tmpVec.Add((float)(-fromDir.Normali.X) / 2f, 0.0, (float)(-fromDir.Normali.Z) / 2f);
+-				if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
+-				{
+-					return false;
+-				}
+-			}
+-			tmpPos.Set(node.X, node.Y, node.Z);
++
++			tmpPos.Set(startX, currentY, startZ);
+ 			float traversalCost3 = blockAccess.GetBlock(tmpPos, 2).GetTraversalCost(tmpPos, creatureType);
+ 			if (traversalCost3 > 10000f)
+ 			{
+-				return false;
++				return default;
+ 			}
+-			extraCost += traversalCost3;
+-			if (fromDir.IsDiagonal && creatureType == EnumAICreatureType.Humanoid)
++			baseExtraCost += traversalCost3;
++
++			return new OptimumColumnProbeResult
+ 			{
+-				tmpPos.Set(node.X - fromDir.Normali.X, node.Y, node.Z);
+-				traversalCost3 = blockAccess.GetBlock(tmpPos, 2).GetTraversalCost(tmpPos, creatureType);
+-				extraCost += traversalCost3 - 1f;
+-				if (traversalCost3 > 10000f)
+-				{
+-					return false;
+-				}
+-				tmpPos.Set(node.X, node.Y, node.Z - fromDir.Normali.Z);
+-				traversalCost3 = blockAccess.GetBlock(tmpPos, 2).GetTraversalCost(tmpPos, creatureType);
+-				extraCost += traversalCost3 - 1f;
+-				if (traversalCost3 > 10000f)
+-				{
+-					return false;
+-				}
+-			}
+-			return true;
++				Traversable = true,
++				IsStepUp = false,
++				HasCollisionBoxes = false,
++				EndY = currentY,
++				BaseExtraCost = baseExtraCost,
++				SteponHeightAdjust = 0f
++			};
+ 		}
+-		tmpPos.Set(node.X, node.Y, node.Z);
+-		block = blockAccess.GetBlock(tmpPos, 4);
+-		if (!block.CanStep)
++
++		tmpPos.Set(startX, startY, startZ);
++		Block block4 = blockAccess.GetBlock(tmpPos, 4);
++		if (!block4.CanStep)
+ 		{
+-			return false;
++			return default;
+ 		}
+-		float traversalCost4 = block.GetTraversalCost(tmpPos, creatureType);
++		float traversalCost4 = block4.GetTraversalCost(tmpPos, creatureType);
+ 		if (traversalCost4 > 10000f)
+ 		{
+-			return false;
++			return default;
+ 		}
+-		if (block.Id != 0)
++		if (block4.Id != 0)
+ 		{
+-			extraCost += traversalCost4;
++			baseExtraCost += traversalCost4;
+ 		}
+ 		Block block3 = blockAccess.GetBlock(tmpPos, 2);
+ 		traversalCost4 = block3.GetTraversalCost(tmpPos, creatureType);
+ 		if (traversalCost4 > 10000f)
+ 		{
+-			return false;
++			return default;
+ 		}
+ 		if (block3.Id != 0)
+ 		{
+-			extraCost += traversalCost4;
++			baseExtraCost += traversalCost4;
+ 		}
+ 		float num2 = -1f;
+-		Cuboidf[] collisionBoxes2 = block.GetCollisionBoxes(blockAccess, tmpPos);
+-		if (collisionBoxes2 != null && collisionBoxes2.Length != 0)
++		Cuboidf[] collisionBoxes2 = block4.GetCollisionBoxes(blockAccess, tmpPos);
++		bool hasCollBoxes = collisionBoxes2 != null && collisionBoxes2.Length != 0;
++		if (hasCollBoxes)
+ 		{
+ 			num2 += collisionBoxes2.Max((Cuboidf cuboid) => cuboid.Y2);
+ 		}
+-		tmpVec.Set((double)node.X + centerOffsetX, (float)node.Y + stepHeight + num2, (double)node.Z + centerOffsetZ);
++		tmpVec.Set((double)startX + centerOffsetX, (float)startY + stepHeight + num2, (double)startZ + centerOffsetZ);
+ 		if (!collTester.GetCollidingCollisionBox(blockAccess, entityCollBox, tmpVec, ref tmpCub, alsoCheckTouch: false, node.dimension))
+ 		{
+-			if (!fromDir.IsDiagonal)
+-			{
+-				node.Y += (int)(1f + num2);
+-				return true;
+-			}
+-			if (collisionBoxes2 != null && collisionBoxes2.Length != 0)
++			return new OptimumColumnProbeResult
+ 			{
+-				tmpVec.Add((float)(-fromDir.Normali.X) / 2f, 0.0, (float)(-fromDir.Normali.Z) / 2f);
+-				if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, alsoCheckTouch: false))
+-				{
+-					return false;
+-				}
+-				node.Y += (int)(1f + num2);
+-				return true;
+-			}
++				Traversable = true,
++				IsStepUp = true,
++				HasCollisionBoxes = hasCollBoxes,
++				EndY = startY + (int)(1f + num2),
++				BaseExtraCost = baseExtraCost,
++				SteponHeightAdjust = num2
++			};
+ 		}
+-		return false;
++		return default;
+ 	}
+ 
+ 	protected List<PathNode> retracePath(PathNode startNode, PathNode endNode)
