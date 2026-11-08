@@ -142,7 +142,7 @@ public class ChiselLodCoverageTests
 
         Assert.Contains("optimumUseChiselLodDistance", source);
         Assert.Contains("OptimumConfig.ChiselLodDistanceSq", source);
-        Assert.Contains("distance <= chiselDistanceSq && distance < ViewDistanceSq", source);
+        Assert.Contains("distance > chiselDistanceSq || distance >= ViewDistanceSq", source);
         Assert.Contains("case 2:", source);
         Assert.Contains("case 3:", source);
     }

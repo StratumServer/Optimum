@@ -5,10 +5,10 @@ diff --git a/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs b/Vint
              bool oit = stage == EnumRenderStage.OIT;
              bool shadowPass = stage == EnumRenderStage.ShadowFar || stage == EnumRenderStage.ShadowNear;
  
-+            if (!shadowPass && capi.Render?.CurrentFrustumCuller != null)
++            if (!shadowPass && capi.Render?.DefaultFrustumCuller != null)
 +            {
 +                double radius = Math.Max(ScaleX, Math.Max(ScaleY, ScaleZ)) * 2.5;
-+                if (!capi.Render.CurrentFrustumCuller.SphereInFrustum(pos.X + 0.5, pos.Y + 0.5, pos.Z + 0.5, radius))
++                if (!capi.Render.DefaultFrustumCuller.SphereInFrustum(pos.X + 0.5, pos.Y + 0.5, pos.Z + 0.5, radius))
 +                {
 +                    return;
 +                }
