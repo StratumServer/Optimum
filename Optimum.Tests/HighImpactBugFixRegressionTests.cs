@@ -337,15 +337,18 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
 #endif
 
     [Fact]
-    public void CollisionTester_PreservesVerticalCollisionOnStationaryRestingEntitiesWithSolidGround()
+    public void CollisionTester_TranslatesEntityBoxUnconditionallyAndReusesWalkBlocksDelegate()
     {
         string patchSource = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryApi/Math/CollisionTester.cs.patch"));
-        Assert.Contains("if (entity.CollidedVertically)", patchSource);
-        Assert.Contains("Block blockBelow = blockAccessor.GetBlock(tmpPos);", patchSource);
-        Assert.Contains("if (blockBelow != null && blockBelow.SideSolid[BlockFacing.UP.Index])", patchSource);
-        Assert.Contains("entity.CollidedVertically = true;", patchSource);
-        Assert.DoesNotContain("entity.CollidedVertically = false;", patchSource);
+        Assert.Contains("protected Action<Block, int, int, int> walkBlocksDelegate;", patchSource);
+        Assert.Contains("blockAccessor.WalkBlocks(minPos, maxPos, walkBlocksDelegate, true);", patchSource);
+        Assert.DoesNotContain("if (motion.X == 0 && motion.Y == 0 && motion.Z == 0", patchSource);
+
+        string sortableQueuePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Datastructures/SortableQueue.cs.patch"));
+        Assert.Contains("ChunkTesselatorManager.tessChunksQueue", sortableQueuePatch);
+        Assert.DoesNotContain("A* open-set", sortableQueuePatch);
     }
 
     [Fact]
