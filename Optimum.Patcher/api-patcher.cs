@@ -1993,6 +1993,110 @@ public static class ApiPatcher
         Console.WriteLine(
             $"  API PATCHED: {ctor.FullName} CPU-scaled thread pool sizing + diagnostics capture " +
             "(SetMaxThreadsWorkerBefore/After, SetMaxThreadsIoBefore/After, SetMaxThreadsResult)");
+
+        int atomicCounters = PatchTyronThreadPoolAtomicCounters(module);
+        if (atomicCounters != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 TyronThreadPool atomic counter patches, applied {atomicCounters}.");
+        }
+        return 1;
+    }
+
+    internal static int PatchTyronThreadPoolAtomicCounters(ModuleDefinition module)
+    {
+        var threadPool = module.GetType("Vintagestory.API.Common.TyronThreadPool")
+            ?? throw new InvalidOperationException("TyronThreadPool is missing from the vanilla API.");
+
+        var keyCounterField = threadPool.Fields.Single(field => field.Name == "keyCounter");
+        var dedicatedCounterField = threadPool.Fields.Single(field => field.Name == "dedicatedCounter");
+        var markStarted = threadPool.Methods.Single(method => method.Name == "MarkStarted");
+        var createDedicatedThread = threadPool.Methods.Single(method => method.Name == "CreateDedicatedThread");
+
+        var interlockedIncrement = module.ImportReference(
+            typeof(Interlocked).GetMethod(
+                nameof(Interlocked.Increment),
+                new[] { typeof(int).MakeByRefType() })!);
+
+        int patched = 0;
+        patched += PatchAtomicPostIncrement(markStarted, keyCounterField, interlockedIncrement);
+        patched += PatchAtomicPostIncrement(createDedicatedThread, dedicatedCounterField, interlockedIncrement);
+        return patched;
+    }
+
+    private static int PatchAtomicPostIncrement(
+        MethodDefinition method,
+        FieldDefinition counterField,
+        MethodReference interlockedIncrement)
+    {
+        ClearDebugInformation(method);
+
+        var instructions = method.Body.Instructions;
+        var ldfld = instructions.SingleOrDefault(instruction =>
+            instruction.OpCode == OpCodes.Ldfld &&
+            instruction.Operand is FieldReference field &&
+            field.Name == counterField.Name &&
+            field.DeclaringType.FullName == counterField.DeclaringType.FullName);
+
+        if (ldfld is null)
+        {
+            bool alreadyPatched = instructions.Any(instruction =>
+                instruction.OpCode == OpCodes.Ldflda &&
+                instruction.Operand is FieldReference field &&
+                field.Name == counterField.Name &&
+                field.DeclaringType.FullName == counterField.DeclaringType.FullName);
+            if (alreadyPatched)
+            {
+                return 1;
+            }
+
+            throw new InvalidOperationException(
+                $"{method.FullName}: expected ldfld {counterField.Name} for atomic post-increment rewrite.");
+        }
+
+        int ldfldIndex = instructions.IndexOf(ldfld);
+        if (ldfldIndex < 2 || ldfldIndex + 6 >= instructions.Count)
+        {
+            throw new InvalidOperationException(
+                $"{method.FullName}: unexpected instruction layout around ldfld {counterField.Name} at index {ldfldIndex}.");
+        }
+
+        var stfld = instructions[ldfldIndex + 5];
+        if (stfld.OpCode != OpCodes.Stfld ||
+            stfld.Operand is not FieldReference storedField ||
+            storedField.Name != counterField.Name ||
+            storedField.DeclaringType.FullName != counterField.DeclaringType.FullName)
+        {
+            throw new InvalidOperationException(
+                $"{method.FullName}: expected stfld {counterField.Name} at offset +5 from ldfld, found {stfld.OpCode}.");
+        }
+
+        var duplicateInstanceLoad = instructions[ldfldIndex - 1];
+        if (duplicateInstanceLoad.OpCode != OpCodes.Ldarg_0 && duplicateInstanceLoad.OpCode != OpCodes.Dup)
+        {
+            throw new InvalidOperationException(
+                $"{method.FullName}: expected Ldarg_0 or Dup before ldfld {counterField.Name}, found {duplicateInstanceLoad.OpCode}.");
+        }
+
+        var toRemove = new Instruction[8];
+        for (int i = 0; i < 8; i++)
+        {
+            toRemove[i] = instructions[ldfldIndex - 1 + i];
+        }
+
+        var processor = method.Body.GetILProcessor();
+        processor.InsertBefore(duplicateInstanceLoad, Instruction.Create(OpCodes.Ldflda, counterField));
+        processor.InsertBefore(duplicateInstanceLoad, Instruction.Create(OpCodes.Call, interlockedIncrement));
+        processor.InsertBefore(duplicateInstanceLoad, Instruction.Create(OpCodes.Ldc_I4_1));
+        processor.InsertBefore(duplicateInstanceLoad, Instruction.Create(OpCodes.Sub));
+
+        foreach (var instruction in toRemove)
+        {
+            processor.Remove(instruction);
+        }
+
+        Console.WriteLine(
+            $"  API PATCHED: {method.FullName} atomic Interlocked.Increment on {counterField.Name}");
         return 1;
     }
 
