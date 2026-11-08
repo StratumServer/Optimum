@@ -28,6 +28,8 @@ public class ChiselLodCoverageTests
         Assert.DoesNotContain("tesselator.TesselateBlock(primaryBlock", source);
         Assert.Contains("GetMajorityMaterialId()", source);
         Assert.Contains("(BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId()", source);
+        Assert.Contains("primaryBlock.RenderPass == EnumChunkRenderPass.Opaque", source);
+        Assert.Contains("primaryBlock.VertexFlags.GlowLevel == 0", source);
         Assert.Contains("TesselatorManager.GetDefaultBlockMesh(primaryBlock)", source);
         Assert.DoesNotContain("?.Clone()", source);
     }
