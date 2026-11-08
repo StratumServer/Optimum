@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..d78e93e 100644
+index 374f827..4829726 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,15 +1,36 @@
+@@ -1,15 +1,50 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
@@ -18,7 +18,21 @@ index 374f827..d78e93e 100644
  {
 +	// Optimum: entities beyond the configured distance occupy sub-pixel
 +	// area in shadow map. Skip them.
-+	private static double ShadowCullDistanceSq => (double)ClientSettings.OptimumShadowCullDistance * ClientSettings.OptimumShadowCullDistance;
++	private static int _cachedShadowCullDistance = -1;
++	private static double _cachedShadowCullDistanceSq = 6400.0;
++	private static double ShadowCullDistanceSq
++	{
++		get
++		{
++			int dist = ClientSettings.OptimumShadowCullDistance;
++			if (dist != _cachedShadowCullDistance)
++			{
++				_cachedShadowCullDistance = dist;
++				_cachedShadowCullDistanceSq = (double)dist * dist;
++			}
++			return _cachedShadowCullDistanceSq;
++		}
++	}
 +
 +	private const int OptimumEntityLightBatchSize = 256;
 +
@@ -39,7 +53,7 @@ index 374f827..d78e93e 100644
  	public SystemRenderEntities(ClientMain game)
  		: base(game)
  	{
-@@ -20,39 +41,239 @@ public class SystemRenderEntities : ClientSystem
+@@ -20,39 +55,239 @@ public class SystemRenderEntities : ClientSystem
  		game.eventManager.RegisterRenderer(OnRenderFrame2D, EnumRenderStage.Ortho, Name, 0.4);
  		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowFar, Name, 0.4);
  		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowNear, Name, 0.4);
@@ -281,7 +295,7 @@ index 374f827..d78e93e 100644
  	public void OnRenderOpaque3D(float deltaTime)
  	{
  		RuntimeStats.renderedEntities = 0;
-@@ -82,15 +303,44 @@ public class SystemRenderEntities : ClientSystem
+@@ -82,15 +317,44 @@ public class SystemRenderEntities : ClientSystem
  		game.Platform.GlDisableCullFace();
  		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
@@ -329,7 +343,7 @@ index 374f827..d78e93e 100644
  		game.GlPopMatrix();
  		entityanimated.Stop();
  		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,11 +377,28 @@ public class SystemRenderEntities : ClientSystem
+@@ -127,11 +391,28 @@ public class SystemRenderEntities : ClientSystem
  			shaderProgramChunkshadowmap.Use();
  		}
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
