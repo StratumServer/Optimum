@@ -128,11 +128,11 @@ public static class Program
 
         // --- Cache validation ---
         var requiredAssemblies = PatchTargets.Select(target => target.AssemblyPath).ToArray();
-        CacheManifest? manifest;
+        CacheValidationResult validationResult;
         try
         {
-            manifest = validateOnly
-                ? null
+            validationResult = validateOnly
+                ? CacheValidationResult.Failure(CacheValidationStatus.ManifestMissing, detail: "Validation mode")
                 : cache.ValidateCache(requiredAssemblies);
 
             if (validateOnly)
@@ -147,7 +147,7 @@ public static class Program
             return AbortLaunch(gameDir, cache, ex.Message);
         }
 
-        if (manifest is not null)
+        if (validationResult.IsValid && validationResult.Manifest is not null)
         {
             // Cache hit - fast path
             var elapsed = sw.ElapsedMilliseconds;
@@ -155,6 +155,17 @@ public static class Program
         }
         else
         {
+            if (!validateOnly)
+            {
+                string target = !string.IsNullOrEmpty(validationResult.TargetAssembly)
+                    ? $" for {validationResult.TargetAssembly}"
+                    : string.Empty;
+                string detail = !string.IsNullOrEmpty(validationResult.Detail)
+                    ? $" ({validationResult.Detail})"
+                    : string.Empty;
+                Logger.Log($"[Optimum.Launcher] Cache invalidated: {validationResult.Status}{target}{detail} - rebuilding runtime cache...");
+            }
+
             // Cache miss - patch and save. Shows a splash screen styled after
             // the vanilla client's own loading screen while this runs, since
             // it can take a few seconds (see RunPatching).

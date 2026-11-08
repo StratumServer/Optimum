@@ -26,12 +26,15 @@ public sealed class CacheManagerTests : IDisposable
         cache.CommitPatchedAssembly("Mods/VSEssentials.dll", stagedPath);
         cache.CreateManifest([new PatchedTarget("Mods/VSEssentials.dll", "VSEssentials.Donor.dll", 1)]);
 
-        Assert.NotNull(cache.ValidateCache());
+        Assert.True(cache.ValidateCache().IsValid);
         Assert.True(File.Exists(Path.Combine(cacheDir, "Mods", "VSEssentials.dll")));
 
         File.WriteAllText(Path.Combine(donorDir, "VSEssentials.Donor.dll"), "donor-two");
 
-        Assert.Null(cache.ValidateCache());
+        var invalidated = cache.ValidateCache();
+        Assert.False(invalidated.IsValid);
+        Assert.Equal(CacheValidationStatus.DonorHashMismatch, invalidated.Status);
+        Assert.Equal("Mods/VSEssentials.dll", invalidated.TargetAssembly);
     }
 
     [Fact]
@@ -53,7 +56,52 @@ public sealed class CacheManagerTests : IDisposable
 
         File.WriteAllBytes(Path.Combine(cacheDir, "VintagestoryLib.dll"), [9, 9, 9]);
 
-        Assert.Null(cache.ValidateCache());
+        var corrupted = cache.ValidateCache();
+        Assert.False(corrupted.IsValid);
+        Assert.Equal(CacheValidationStatus.CachedAssemblyCorrupted, corrupted.Status);
+        Assert.Equal("VintagestoryLib.dll", corrupted.TargetAssembly);
+    }
+
+    [Fact]
+    public void MissingManifestReportsManifestMissingStatus()
+    {
+        var gameDir = Path.Combine(_root, "game");
+        var donorDir = Path.Combine(_root, "data", ".optimum", "donors");
+        var cacheDir = Path.Combine(_root, "data", ".optimum", "cache");
+        Directory.CreateDirectory(gameDir);
+        Directory.CreateDirectory(donorDir);
+
+        var cache = new CacheManager(gameDir, cacheDir, donorDir, "test");
+        var result = cache.ValidateCache();
+
+        Assert.False(result.IsValid);
+        Assert.Equal(CacheValidationStatus.ManifestMissing, result.Status);
+    }
+
+    [Fact]
+    public void VersionMismatchReportsVersionMismatchStatus()
+    {
+        var gameDir = Path.Combine(_root, "game");
+        var donorDir = Path.Combine(_root, "data", ".optimum", "donors");
+        var cacheDir = Path.Combine(_root, "data", ".optimum", "cache");
+        Directory.CreateDirectory(gameDir);
+        Directory.CreateDirectory(donorDir);
+
+        File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla");
+        File.WriteAllText(Path.Combine(donorDir, "VintagestoryLib.Donor.dll"), "donor");
+
+        var cache = new CacheManager(gameDir, cacheDir, donorDir, "v1.0.0");
+        cache.CommitPatchedAssembly("VintagestoryLib.dll",
+            WriteStagedDll(cacheDir, "VintagestoryLib.stage-test.dll", [1, 2, 3]));
+        cache.CreateManifest([new PatchedTarget("VintagestoryLib.dll", "VintagestoryLib.Donor.dll", 1)]);
+
+        // Open same cache with newer Optimum version
+        var newerCache = new CacheManager(gameDir, cacheDir, donorDir, "v1.0.1");
+        var result = newerCache.ValidateCache();
+
+        Assert.False(result.IsValid);
+        Assert.Equal(CacheValidationStatus.VersionMismatch, result.Status);
+        Assert.Contains("v1.0.1", result.Detail);
     }
 
     [Fact]
