@@ -455,6 +455,27 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void RecipeBaseAndContainers_ClearThreadStaticListsOnExit()
+    {
+        string recipePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Crafting/RecipeBase.cs.patch"));
+        Assert.Contains("if (--_optimumMatchDepth == 0)", recipePatch);
+        Assert.Contains("_optimumSuppliedStacks?.Clear();", recipePatch);
+        Assert.Contains("_optimumIngredientStacks?.Clear();", recipePatch);
+
+        string cookingPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs.patch"));
+        Assert.Contains("if (reuse)", cookingPatch);
+        Assert.Contains("optimumCookingStacks?.Clear();", cookingPatch);
+
+        string containerPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityContainer.cs.patch"));
+        Assert.Contains("if (reuse)", containerPatch);
+        Assert.Contains("optimumNonEmptyStacks?.Clear();", containerPatch);
+    }
+    }
+
+    [Fact]
     public void WeatherSimulationParticles_ResetsHeightmapOnBlockChangeAndLeaveWorld()
     {
         string patch = File.ReadAllText(

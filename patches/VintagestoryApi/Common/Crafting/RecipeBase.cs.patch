@@ -1,10 +1,8 @@
 diff --git a/VintagestoryApi/Common/Crafting/RecipeBase.cs b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-index 21b4330..a0d3a1f 100644
+index 21b4330..91e9765 100644
 --- a/VintagestoryApi/Common/Crafting/RecipeBase.cs
 +++ b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-@@ -774,34 +774,76 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
-         }
- 
+@@ -776,9 +776,33 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
          return true;
      }
  
@@ -39,8 +37,7 @@ index 21b4330..a0d3a1f 100644
  
          MergeStacks(suppliedSlots, suppliedStacks);
  
-         if (!MatchWildcardIngredients(suppliedStacks, ingredients))
-         {
+@@ -787,19 +811,41 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
              return false;
          }
  
@@ -53,7 +50,11 @@ index 21b4330..a0d3a1f 100644
 +        }
 +        finally
 +        {
-+            _optimumMatchDepth--;
++            if (--_optimumMatchDepth == 0)
++            {
++                _optimumSuppliedStacks?.Clear();
++                _optimumIngredientStacks?.Clear();
++            }
 +        }
      }
  
@@ -81,5 +82,3 @@ index 21b4330..a0d3a1f 100644
              if (similarStack != null)
              {
                  similarStack.StackSize += suppliedStack.StackSize;
-             }
-             else
