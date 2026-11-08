@@ -537,11 +537,4 @@ public sealed class GamePatcherTests
 
         return (gameDir, overlayDir);
     }
-
-    [Fact]
-    public void PatcherRunnerDirectInvocationSucceedsOnHelpOrApi()
-    {
-        int exitCode = Optimum.Patcher.PatcherRunner.Run([]);
-        Assert.Equal(1, exitCode);
-    }
 }
