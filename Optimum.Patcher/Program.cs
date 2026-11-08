@@ -149,6 +149,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumSingleIndirectBufferId",
         "_optimumSingleIndirectBufferCapacity",
         "_optimumSharedIndirectCommands",
+        "_optimumLastFsrInputWidth",
+        "_optimumLastFsrInputHeight",
+        "_optimumLastFsrOutputWidth",
+        "_optimumLastFsrOutputHeight",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..1bad182 100644
+index b1b2eea..919fc93 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -45,10 +45,124 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -45,10 +45,128 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private AssetManager assetManager;
  
@@ -27,6 +27,10 @@ index b1b2eea..1bad182 100644
 +	private static int _optimumSingleIndirectBufferId;
 +	private static int _optimumSingleIndirectBufferCapacity;
 +	private static DrawElementsIndirectCommand[] _optimumSharedIndirectCommands = new DrawElementsIndirectCommand[1024];
++	private static int _optimumLastFsrInputWidth = -1;
++	private static int _optimumLastFsrInputHeight = -1;
++	private static int _optimumLastFsrOutputWidth = -1;
++	private static int _optimumLastFsrOutputHeight = -1;
 +
 +	[DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
 +	private static extern uint OptimumTimeBeginPeriod(uint uPeriod);
@@ -127,7 +131,7 @@ index b1b2eea..1bad182 100644
  	private Logger logger;
  
  	private int doResize;
-@@ -93,10 +207,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -93,10 +211,14 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private List<string> drawCallStacks = new List<string>();
  
@@ -142,7 +146,7 @@ index b1b2eea..1bad182 100644
  	private bool serverRunning;
  
  	private bool gamepause;
-@@ -478,25 +596,111 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -478,25 +600,111 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameStopWatch.Start();
  	}
  
@@ -258,7 +262,7 @@ index b1b2eea..1bad182 100644
  		RenderBloom = ClientSettings.Bloom && base.DoPostProcessingEffects;
  		RenderGodRays = ClientSettings.GodRayQuality > 0 && base.DoPostProcessingEffects;
  		RenderFXAA = ClientSettings.FXAA && base.DoPostProcessingEffects;
-@@ -504,10 +708,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -504,10 +712,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		SetupSSAO = ClientSettings.SSAOQuality > 0;
  		ShadowMapQuality = ClientSettings.ShadowMapQuality;
  		ShaderProgramBase.shadowmapQuality = ShadowMapQuality;
@@ -270,7 +274,7 @@ index b1b2eea..1bad182 100644
  
  	public string GetGraphicsCardRenderer()
  	{
-@@ -1038,29 +1243,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1038,29 +1247,85 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		RenderMesh(modelRef, indices, indicesSizes, groupCount, useSSBOs: false);
  	}
  
@@ -360,7 +364,7 @@ index b1b2eea..1bad182 100644
  	public override void RenderMeshInstanced(MeshRef modelRef, int quantity = 1)
  	{
  		//IL_002f: Unknown result type (might be due to invalid IL or missing references)
-@@ -1210,11 +1471,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1210,11 +1475,15 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, 9728);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10242, 33071);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10243, 33071);
@@ -377,12 +381,16 @@ index b1b2eea..1bad182 100644
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10241, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.TexParameter((TextureTarget)3553, (TextureParameterName)10240, (ssaaLevel <= 1f) ? 9728 : 9729);
  		GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, frameBufferRef3.ColorTextureIds[0], 0);
-@@ -1436,10 +1701,35 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1436,10 +1705,39 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		frameBufferRef3 = (CurrentFrameBufferKeepVw = frameBufferRef);
  		frameBufferRef3.ColorTextureIds = new int[1] { GL.GenTexture() };
  		setupAttachment(frameBufferRef3, num, num2, 0, val, (PixelInternalFormat)34842);
  		GL.DrawBuffer((DrawBufferMode)36064);
  		CheckFboStatus((FramebufferTarget)36160, EnumFrameBuffer.Luma);
++		_optimumLastFsrInputWidth = -1;
++		_optimumLastFsrInputHeight = -1;
++		_optimumLastFsrOutputWidth = -1;
++		_optimumLastFsrOutputHeight = -1;
 +		if (!optimumFsrDisabled && ClientSettings.OptimumRenderScale < 1.0f)
 +		{
 +			int nativeWidth = ((NativeWindow)window).ClientSize.X;
@@ -413,7 +421,7 @@ index b1b2eea..1bad182 100644
  			FboId = GL.GenFramebuffer(),
  			Width = num / 4,
  			Height = num2 / 4
-@@ -1867,10 +2157,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -1867,10 +2165,11 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			LoadFrameBuffer(EnumFrameBuffer.GodRays);
  			ShaderProgramGodrays godrays = ShaderPrograms.Godrays;
@@ -425,7 +433,7 @@ index b1b2eea..1bad182 100644
  			godrays.PlayerViewVector = ShaderUniforms.PlayerViewVector;
  			godrays.Dusk = ShaderUniforms.Dusk;
  			godrays.IGlobalTimeIn = (float)EllapsedMs / 1000f;
-@@ -2023,17 +2314,69 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2023,17 +2322,79 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  				throw new Exception(text);
  			}
  		}
@@ -469,14 +477,24 @@ index b1b2eea..1bad182 100644
 +					GL.DrawBuffer((DrawBufferMode)36064);
 +					fsrEasu.Use();
 +					fsrEasu.BindTexture2D("inputScene", scene2D, 0);
-+					fsrEasu.Uniform("inputTexelSize", 1f / (float)frameBuffers[0].Width, 1f / (float)frameBuffers[0].Height);
++					if (frameBuffers[0].Width != _optimumLastFsrInputWidth || frameBuffers[0].Height != _optimumLastFsrInputHeight)
++					{
++						_optimumLastFsrInputWidth = frameBuffers[0].Width;
++						_optimumLastFsrInputHeight = frameBuffers[0].Height;
++						fsrEasu.Uniform("inputTexelSize", 1f / (float)_optimumLastFsrInputWidth, 1f / (float)_optimumLastFsrInputHeight);
++					}
 +					RenderFullscreenTriangle(screenQuad);
 +					fsrEasu.Stop();
 +
 +					LoadFrameBuffer(EnumFrameBuffer.Default);
 +					fsrRcas.Use();
 +					fsrRcas.BindTexture2D("inputScene", optimumFsrFramebuffer.ColorTextureIds[0], 0);
-+					fsrRcas.Uniform("inputTexelSize", 1f / (float)optimumFsrFramebuffer.Width, 1f / (float)optimumFsrFramebuffer.Height);
++					if (optimumFsrFramebuffer.Width != _optimumLastFsrOutputWidth || optimumFsrFramebuffer.Height != _optimumLastFsrOutputHeight)
++					{
++						_optimumLastFsrOutputWidth = optimumFsrFramebuffer.Width;
++						_optimumLastFsrOutputHeight = optimumFsrFramebuffer.Height;
++						fsrRcas.Uniform("inputTexelSize", 1f / (float)_optimumLastFsrOutputWidth, 1f / (float)_optimumLastFsrOutputHeight);
++					}
 +					RenderFullscreenTriangle(screenQuad);
 +					fsrRcas.Stop();
 +					GlToggleBlend(on: true);
@@ -495,7 +513,7 @@ index b1b2eea..1bad182 100644
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
  			blit.Use();
  			blit.Scene2D = scene2D;
-@@ -2337,15 +2676,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2337,15 +2698,30 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -526,7 +544,7 @@ index b1b2eea..1bad182 100644
  
  	public override void GenTexture(RawTexture tex)
  	{
-@@ -2367,11 +2721,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2367,11 +2743,37 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	{
  		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
  		{
@@ -565,7 +583,7 @@ index b1b2eea..1bad182 100644
  			{
  				GL.DeleteTexture(intoTexture.TextureId);
  			}
-@@ -2387,10 +2767,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2387,10 +2789,25 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			GL.BindTexture((TextureTarget)3553, intoTexture.TextureId);
  			GL.TexSubImage2D((TextureTarget)3553, 0, 0, 0, surface.Width, surface.Height, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
@@ -591,7 +609,7 @@ index b1b2eea..1bad182 100644
  	public override int LoadTexture(SKBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
  	{
  		if (bmp == null)
-@@ -2665,15 +3060,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2665,15 +3082,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(float[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -612,7 +630,7 @@ index b1b2eea..1bad182 100644
  		else
  		{
  			GL.BufferSubData<float>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2683,15 +3079,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2683,15 +3101,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(int[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -633,7 +651,7 @@ index b1b2eea..1bad182 100644
  		else
  		{
  			GL.BufferSubData<int>((BufferTarget)34962, (IntPtr)offset, 4 * count, data);
-@@ -2701,15 +3098,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2701,15 +3120,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(short[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -654,7 +672,7 @@ index b1b2eea..1bad182 100644
  		else
  		{
  			GL.BufferSubData<short>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2719,15 +3117,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2719,15 +3139,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(ushort[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -675,7 +693,7 @@ index b1b2eea..1bad182 100644
  		else
  		{
  			GL.BufferSubData<ushort>((BufferTarget)34962, (IntPtr)offset, 2 * count, data);
-@@ -2737,15 +3136,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2737,15 +3158,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  	private unsafe void updateVAO(byte[] data, int offset, int count, int vboId, nint vboPtr, bool pers)
  	{
  		GL.BindBuffer((BufferTarget)34962, vboId);
@@ -696,7 +714,7 @@ index b1b2eea..1bad182 100644
  		else
  		{
  			GL.BufferSubData<byte>((BufferTarget)34962, (IntPtr)offset, count, data);
-@@ -2759,15 +3159,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2759,15 +3181,16 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			return;
  		}
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);

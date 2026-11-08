@@ -136,6 +136,27 @@ public class FsrPipelineCoverageTests
         Assert.InRange(MathF.Log2(scale), expected - 0.001f, expected + 0.001f);
     }
 
+    [Fact]
+    public void BlitPrimaryToDefaultCachesFsrUniformTexelSize()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        Assert.Contains("_optimumLastFsrInputWidth", platform);
+        Assert.Contains("_optimumLastFsrInputHeight", platform);
+        Assert.Contains("_optimumLastFsrOutputWidth", platform);
+        Assert.Contains("_optimumLastFsrOutputHeight", platform);
+        Assert.Contains("if (frameBuffers[0].Width != _optimumLastFsrInputWidth || frameBuffers[0].Height != _optimumLastFsrInputHeight)", platform);
+        Assert.Contains("if (optimumFsrFramebuffer.Width != _optimumLastFsrOutputWidth || optimumFsrFramebuffer.Height != _optimumLastFsrOutputHeight)", platform);
+
+        string patcher = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("\"_optimumLastFsrInputWidth\"", patcher);
+        Assert.Contains("\"_optimumLastFsrInputHeight\"", patcher);
+        Assert.Contains("\"_optimumLastFsrOutputWidth\"", patcher);
+        Assert.Contains("\"_optimumLastFsrOutputHeight\"", patcher);
+    }
+
     private static int Count(string source, string value)
     {
         int count = 0;
