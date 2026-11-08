@@ -452,6 +452,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             m.TypeFullName == "Vintagestory.GameContent.ModSystemRenderFallingBlocksFast" &&
             m.MethodName == "genMesh" &&
             m.ParamCount == 1);
+    }
 
     [Fact]
     public void PathNodeSet_WiredIntoManifestAndRestoresHeapPriorityOnUpdateNode()
@@ -521,6 +522,30 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("if (uploadedAny && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)", patch);
         Assert.Contains("processPrioQueue = tessChunksQueuePriority.Count > 0;", patch);
         Assert.Contains("while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)", patch);
+    }
+
+    [Fact]
+    public void SystemRenderEntities_CachesVisibleRenderersAndReordersDimensionCheck()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch"));
+        Assert.Contains("private readonly List<EntityRenderer> renderedEntities = new List<EntityRenderer>();", patch);
+        Assert.Contains("private readonly List<EntityRenderer> shadowRenderedEntities = new List<EntityRenderer>();", patch);
+        Assert.Contains("renderedEntities.Clear();", patch);
+        Assert.Contains("renderedEntities.Add(entityRenderer.Value);", patch);
+        Assert.Contains("for (int i = 0; i < renderedEntities.Count; i++)", patch);
+        Assert.Contains("shadowRenderedEntities.Clear();", patch);
+        Assert.Contains("shadowRenderedEntities.Add(entityRenderer.Value);", patch);
+        Assert.Contains("for (int i = 0; i < shadowRenderedEntities.Count; i++)", patch);
+        Assert.Contains("entity.Pos.Dimension != dimension", patch);
+
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"renderedEntities\",", programSource);
+        Assert.Contains("\"shadowRenderedEntities\",", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"OnRenderAfterOIT\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"OnRenderFrame2D\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"Dispose\", 1)", programSource);
     }
 
     [Fact]

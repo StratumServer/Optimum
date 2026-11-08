@@ -113,6 +113,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumEntityLightBatchDisabled",
         "optimumEntityShaderCacheDisabled",
         "optimumEntityShaderFailureLogged",
+        "renderedEntities",
+        "shadowRenderedEntities",
         "PublishOptimumEntityLightSample",
         "PrepareOptimumEntityLights",
         "BeginOptimumEntityShaderSegment",
@@ -479,6 +481,10 @@ var targets = new List<MethodTarget>
     // Found missing from this list while wiring diagnostics counters (2026-07-03);
     // ShadowCullDistanceSq was injected but nothing ever called it.
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrameShadows", 1),
+    // Issue #385: visible and shadow entity list iteration in 3D/2D passes and lifecycle cleanup
+    new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderAfterOIT", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderFrame2D", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderEntities", "Dispose", 1),
     // Issue #286: snap shadow projection translation to texel grid to prevent edge shimmering
     new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "PrepareForShadowRendering", 3),
     // Issue #285: skip solar shadow cascades when deep underground with hysteresis
