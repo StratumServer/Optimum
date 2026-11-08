@@ -27,7 +27,9 @@ public class ChiselLodCoverageTests
         Assert.DoesNotContain("Block primaryBlock = Api.World.GetBlock(BlockIds[0])", source);
         Assert.DoesNotContain("tesselator.TesselateBlock(primaryBlock", source);
         Assert.Contains("GetMajorityMaterialId()", source);
-        Assert.Contains("TesselatorManager.GetDefaultBlockMesh(primaryBlock)?.Clone()", source);
+        Assert.Contains("(BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId()", source);
+        Assert.Contains("TesselatorManager.GetDefaultBlockMesh(primaryBlock)", source);
+        Assert.DoesNotContain("?.Clone()", source);
     }
 
     [Theory]

@@ -16,9 +16,9 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs b/V
 +		if (capi != null && OptimumConfig.ChiselLodEnabled && canChisel && BlockIds != null && BlockIds.Length > 0)
 +		{
 +			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
-+			int primaryBlockId = GetMajorityMaterialId();
++			int primaryBlockId = (BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId();
 +			Block primaryBlock = Api.World.GetBlock(primaryBlockId);
-+			MeshData lodMesh = capi.TesselatorManager.GetDefaultBlockMesh(primaryBlock)?.Clone();
++			MeshData lodMesh = (primaryBlock != null) ? capi.TesselatorManager.GetDefaultBlockMesh(primaryBlock) : null;
 +			bool fallback = lodMesh == null;
 +			lodMesh ??= Mesh;
 +			try
