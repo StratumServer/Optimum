@@ -85,6 +85,16 @@ public class WindowsRuntimeConfigFrameworksTests
     }
 
     [PwshFact]
+    public void ConfiguresServerAndConcurrentGarbageCollection()
+    {
+        string result = Run(LauncherConfig, VanillaWithDesktop);
+
+        JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.True(props["System.GC.Server"]!.GetValue<bool>());
+        Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
+    }
+
+    [PwshFact]
     public void LeavesFrameworksAloneWhenVanillaNamesOnlyTheCoreRuntime()
     {
         string result = Run(LauncherConfig, VanillaCoreOnly);
