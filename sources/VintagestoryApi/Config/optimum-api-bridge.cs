@@ -1,4 +1,6 @@
 using System;
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -14,6 +16,33 @@ namespace Vintagestory.API.Config;
 /// </summary>
 public static class OptimumApiBridge
 {
+    /// <summary>
+    /// Reinterprets an array of unmanaged primitives directly as a read-only byte span using MemoryMarshal.AsBytes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(T[]? array) where T : struct
+    {
+        return array == null ? ReadOnlySpan<byte>.Empty : MemoryMarshal.AsBytes(array.AsSpan());
+    }
+
+    /// <summary>
+    /// Reinterprets a slice of an array of unmanaged primitives directly as a read-only byte span using MemoryMarshal.AsBytes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(T[]? array, int start, int length) where T : struct
+    {
+        return array == null ? ReadOnlySpan<byte>.Empty : MemoryMarshal.AsBytes(array.AsSpan(start, length));
+    }
+
+    /// <summary>
+    /// Reinterprets a span of unmanaged primitives directly as a read-only byte span using MemoryMarshal.AsBytes.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(ReadOnlySpan<T> span) where T : struct
+    {
+        return MemoryMarshal.AsBytes(span);
+    }
+
     /// <summary>
     /// Converts RGB to HSV. Falls back to manual calculation if patched method unavailable.
     /// </summary>

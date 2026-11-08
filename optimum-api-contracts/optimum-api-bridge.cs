@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Threading;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -28,6 +29,36 @@ public static class OptimumApiBridge
     internal static readonly SearchValues<char> AssetColonDelimiter = SearchValues.Create(":");
     internal static readonly SearchValues<char> WildcardTriggerChars = SearchValues.Create("*@");
     internal static readonly SearchValues<char> AssetPathDelimiters = SearchValues.Create(":/");
+
+    /// <summary>
+    /// Reinterprets an array of unmanaged primitives (floats, ints, shorts, etc.) directly as a read-only byte span
+    /// using MemoryMarshal.AsBytes, eliminating intermediate byte array allocations and memcpy overhead for GL buffer uploads.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(T[]? array) where T : struct
+    {
+        return array == null ? ReadOnlySpan<byte>.Empty : MemoryMarshal.AsBytes(array.AsSpan());
+    }
+
+    /// <summary>
+    /// Reinterprets a slice of an array of unmanaged primitives directly as a read-only byte span
+    /// using MemoryMarshal.AsBytes, eliminating intermediate byte array allocations and memcpy overhead for GL buffer uploads.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(T[]? array, int start, int length) where T : struct
+    {
+        return array == null ? ReadOnlySpan<byte>.Empty : MemoryMarshal.AsBytes(array.AsSpan(start, length));
+    }
+
+    /// <summary>
+    /// Reinterprets a span of unmanaged primitives directly as a read-only byte span
+    /// using MemoryMarshal.AsBytes, eliminating intermediate byte array allocations and memcpy overhead for GL buffer uploads.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static ReadOnlySpan<byte> AsBytes<T>(ReadOnlySpan<T> span) where T : struct
+    {
+        return MemoryMarshal.AsBytes(span);
+    }
 
     public static void RgbToHsvInts(int red, int green, int blue, int[] destination)
     {
