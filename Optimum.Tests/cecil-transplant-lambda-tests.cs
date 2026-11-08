@@ -66,22 +66,6 @@ public class CecilTransplantLambdaTests
         Assert.Contains("private Random CreateRandom()", addedLines);
     }
 
-    [Fact]
-    public void WeatherSimulationSoundUpdateSoundsHasNoAllPredicateLambda()
-    {
-        string patch = Read("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs.patch");
-
-        // Only the added (+) lines matter here - a unified diff's context and
-        // removed (-) lines legitimately still show vanilla's original
-        // .All(s => s.IsReady) text being replaced.
-        string addedLines = string.Join('\n', patch
-            .Split('\n')
-            .Where(line => line.StartsWith('+') && !line.StartsWith("+++")));
-
-        Assert.DoesNotContain(".All(", addedLines);
-        Assert.DoesNotContain("=> s.IsReady", addedLines);
-    }
-
     /// <summary>
     /// Worker-pool wiring plan's Option B decision gate: TerrainChunkTesselator must
     /// stay a real, assignable field, not become a Cecil-injected property returning

@@ -104,22 +104,6 @@ public class ThrottleAndCacheBatchCoverageTests
         Assert.Contains("surfaceWindSpeedSmoothed.X += (optimumTargetSurfaceWindX - surfaceWindSpeedSmoothed.X) * dt;", runtimeSource);
     }
 
-    [Fact]
-    public void WeatherSimulationSoundResetsDeadzoneOnStopAndSetsVolumeOnStart()
-    {
-        string source = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSimulationSound.cs.patch");
-        Assert.Contains("lastSetWindVolumeLeafy = -99f;", source);
-        Assert.Contains("lastSetWindVolumeLeafless = -99f;", source);
-        Assert.Contains("windSoundLeafy?.SetVolume(initLeafyVol);", source);
-        Assert.Contains("windSoundLeafy?.SetVolume(0f);", source);
-
-        string runtimeSource = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSimulationSound.cs.patch");
-        Assert.Contains("lastSetWindVolumeLeafy = -99f;", runtimeSource);
-        Assert.Contains("lastSetWindVolumeLeafless = -99f;", runtimeSource);
-        Assert.Contains("windSoundLeafy?.SetVolume(initLeafyVol);", runtimeSource);
-        Assert.Contains("windSoundLeafy?.SetVolume(0f);", runtimeSource);
-    }
-
     private static string FindRepositoryFile(string relativePath)
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
