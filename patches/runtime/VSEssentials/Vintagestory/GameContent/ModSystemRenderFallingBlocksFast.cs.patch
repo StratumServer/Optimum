@@ -1,0 +1,40 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs b/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
+index 53a713f..a1e7465 100644
+--- a/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
++++ b/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs
+@@ -99,6 +99,7 @@ public class ModSystemRenderFallingBlocksFast : ModSystem, IRenderer, IDisposabl
+ 
+ 	private void genMesh(EntityBlockFalling entity)
+ 	{
++		mesh.Clear();
+ 		int x = entity.blockEntityAttributes?.GetInt("posx", entity.initialPos.X) ?? entity.initialPos.X;
+ 		int y = entity.blockEntityAttributes?.GetInt("posy", entity.initialPos.Y) ?? entity.initialPos.Y;
+ 		int z = entity.blockEntityAttributes?.GetInt("posz", entity.initialPos.Z) ?? entity.initialPos.Z;
+@@ -130,6 +131,7 @@ public class ModSystemRenderFallingBlocksFast : ModSystem, IRenderer, IDisposabl
+ 		{
+ 			return;
+ 		}
++		MeshData meshToUpload;
+ 		if (fallingBlockMeshSource != null)
+ 		{
+ 			fallingBlockMeshSource.OnFallingBlockTesselation(entity, this, capi.Tesselator);
+@@ -140,12 +142,17 @@ public class ModSystemRenderFallingBlocksFast : ModSystem, IRenderer, IDisposabl
+ 				mesh.CustomInts = null;
+ 				entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh);
+ 			}
++			meshToUpload = mesh;
+ 		}
+ 		else
+ 		{
+-			mesh = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
++			meshToUpload = capi.TesselatorManager.GetDefaultBlockMesh(entity.Block);
+ 		}
+-		orCreate[key] = (entity.meshRef = capi.Render.UploadMultiTextureMesh(mesh));
++		if (entity.meshRef == null)
++		{
++			entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);
++		}
++		orCreate[key] = entity.meshRef;
+ 	}
+ 
+ 	private bool IsRendered(EntityBlockFalling entity)

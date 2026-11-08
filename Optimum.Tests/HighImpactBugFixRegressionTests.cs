@@ -431,6 +431,30 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void ModSystemRenderFallingBlocksFast_ClearsMeshAndEliminatesDuplicateUpload()
+    {
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/ModSystemRenderFallingBlocksFast.cs.patch"));
+        Assert.Contains("mesh.Clear();", runtimePatch);
+        Assert.Contains("if (entity.meshRef == null)", runtimePatch);
+        Assert.Contains("entity.meshRef = capi.Render.UploadMultiTextureMesh(meshToUpload);", runtimePatch);
+
+        string sourcePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entities/EntityBlockFalling.cs.patch"));
+        Assert.Contains("mesh.Clear();", sourcePatch);
+        Assert.Contains("if (entity.meshRef == null)", sourcePatch);
+
+        var manifestMethod = typeof(Optimum.Patcher.ModPatcher)
+            .GetMethod("EssentialsManifest", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object manifest = manifestMethod.Invoke(null, null)!;
+        var methods = (IEnumerable<Optimum.Patcher.MethodTarget>)manifest.GetType().GetProperty("Methods")!.GetValue(manifest)!;
+        Assert.Contains(methods, m =>
+            m.TypeFullName == "Vintagestory.GameContent.ModSystemRenderFallingBlocksFast" &&
+            m.MethodName == "genMesh" &&
+            m.ParamCount == 1);
+    }
+
+    [Fact]
     public void WeatherSimulationParticles_ResetsHeightmapOnBlockChangeAndLeaveWorld()
     {
         string patch = File.ReadAllText(
