@@ -1058,6 +1058,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("ApiContractInvalid", resultSource);
         Assert.Contains("CacheValidationResult ValidateCache", cacheManagerSource);
         Assert.Contains("[Optimum.Launcher] Cache invalidated: {validationResult.Status}", programSource);
+    }
 
     [Fact]
     public void CircuitBreaker_AllocationFreeEntityAndGearRendererRecovery()
