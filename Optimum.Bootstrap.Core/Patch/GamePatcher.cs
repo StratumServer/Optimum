@@ -749,6 +749,10 @@ public sealed class GamePatcher(
                 return (dllPath, true);
         }
 
+        string inProcessLocation = typeof(Optimum.Patcher.PatcherRunner).Assembly.Location;
+        if (!string.IsNullOrEmpty(inProcessLocation) && probe.FileExists(inProcessLocation))
+            return (inProcessLocation, true);
+
         return (null, false);
     }
 
@@ -824,6 +828,19 @@ public sealed class GamePatcher(
 
     private ProcessOutcome RunPatcher(string patcherPath, bool isDll, IReadOnlyList<string> args)
     {
+        if (isDll && Path.GetFileName(patcherPath).Equals("Optimum.Patcher.dll", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                int exitCode = Optimum.Patcher.PatcherRunner.Run([.. args]);
+                return new ProcessOutcome(Started: true, ExitCode: exitCode, StandardOutput: string.Empty, StandardError: string.Empty);
+            }
+            catch (Exception ex)
+            {
+                return new ProcessOutcome(Started: true, ExitCode: 1, StandardOutput: string.Empty, StandardError: ex.Message);
+            }
+        }
+
         if (isDll)
         {
             var commandArgs = new List<string> { patcherPath };
