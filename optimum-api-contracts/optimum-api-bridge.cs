@@ -17,9 +17,10 @@ public static class OptimumApiBridge
     private sealed class ChiselLodMarker;
 
     private static readonly ConditionalWeakTable<ModelDataPoolLocation, ChiselLodMarker> ChiselLodLocations = new();
-    private static readonly FieldInfo FrustumPlayerPos =
-        typeof(FrustumCulling).GetField("playerPos", BindingFlags.Instance | BindingFlags.NonPublic)
-        ?? throw new MissingFieldException(typeof(FrustumCulling).FullName, "playerPos");
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "playerPos")]
+    internal static extern ref BlockPos GetPlayerPos(FrustumCulling culler);
+
     private static int inventoryDirty = 1;
 
     internal static readonly SearchValues<char> CodePartDelimiter = SearchValues.Create("-");
@@ -191,7 +192,7 @@ public static class OptimumApiBridge
 
     private static double ChiselDistanceSqTo(FrustumCulling culler, Sphere sphere)
     {
-        var playerPos = (BlockPos)FrustumPlayerPos.GetValue(culler)!;
+        BlockPos playerPos = GetPlayerPos(culler);
         return playerPos.HorDistanceSqTo(sphere.x, sphere.z);
     }
 
