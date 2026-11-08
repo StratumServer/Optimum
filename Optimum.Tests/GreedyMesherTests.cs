@@ -331,4 +331,105 @@ public class GreedyMesherTests
         int quantB = OptimumGreedyMesher.QuantizeLight(cornerB, 0);
         Assert.NotEqual(quantA, quantB); // Prevents stepped banding!
     }
+
+    [Fact]
+    public void MergeSlice_ProducesIdenticalQuadsToFullVolumeMergePass()
+    {
+        var blocks3d = new long[Size3];
+        var faceFlags3d = new byte[Size3];
+        var eligible3d = new bool[Size3];
+        var sliceKeys = new long[Size2];
+        var sliceEligible = new bool[Size2];
+        var sliceConsumed = new bool[Size2];
+
+        int face = 4; // Up (slice=Y, row=Z, col=X)
+        int slice = 12;
+        int faceBit = 1 << face;
+
+        for (int row = 1; row <= 30; row++)
+        for (int col = 1; col <= 30; col++)
+        {
+            if (row == 15 && col == 15) continue; // Interior gap
+            int blockId = col < 16 ? 10 : 20;
+            int light = row < 16 ? unchecked((int)0xF0000000) : unchecked((int)0xC0000000);
+            long key = ((long)(uint)blockId << 32) | (uint)light;
+
+            int idx3d = OptimumGreedyMesher.FaceSliceToIndex(face, slice, row, col);
+            blocks3d[idx3d] = key;
+            faceFlags3d[idx3d] = (byte)faceBit;
+            eligible3d[idx3d] = true;
+
+            int cell2d = row * Size + col;
+            sliceKeys[cell2d] = key;
+            sliceEligible[cell2d] = true;
+        }
+
+        var output3d = new OptimumGreedyMesher.MergedQuad[128];
+        var output2d = new OptimumGreedyMesher.MergedQuad[128];
+
+        int count3d = OptimumGreedyMesher.MergePass(blocks3d, faceFlags3d, eligible3d, output3d, maxWidth: 8, maxHeight: 8, onlyFace: face);
+        int count2d = OptimumGreedyMesher.MergeSlice(sliceKeys, sliceEligible, sliceConsumed, output2d, face, slice, maxWidth: 8, maxHeight: 8);
+
+        Assert.Equal(count3d, count2d);
+        for (int i = 0; i < count2d; i++)
+        {
+            Assert.Equal(output3d[i].Face, output2d[i].Face);
+            Assert.Equal(output3d[i].Slice, output2d[i].Slice);
+            Assert.Equal(output3d[i].ColStart, output2d[i].ColStart);
+            Assert.Equal(output3d[i].RowStart, output2d[i].RowStart);
+            Assert.Equal(output3d[i].Width, output2d[i].Width);
+            Assert.Equal(output3d[i].Height, output2d[i].Height);
+            Assert.Equal(output3d[i].MergeKey, output2d[i].MergeKey);
+        }
+    }
+
+    [Fact]
+    public void MergeSlice_ExtractsLightFromCompositeMergeKeyWithout3DCache()
+    {
+        var sliceKeys = new long[Size2];
+        var sliceEligible = new bool[Size2];
+        var sliceConsumed = new bool[Size2];
+        var output = new OptimumGreedyMesher.MergedQuad[16];
+
+        int expectedBlockId = 512;
+        int expectedLight = unchecked((int)0xFC102030);
+        long compositeKey = ((long)(uint)expectedBlockId << 32) | (uint)expectedLight;
+
+        for (int row = 2; row < 6; row++)
+        for (int col = 3; col < 9; col++)
+        {
+            int cell = row * Size + col;
+            sliceKeys[cell] = compositeKey;
+            sliceEligible[cell] = true;
+        }
+
+        int count = OptimumGreedyMesher.MergeSlice(sliceKeys, sliceEligible, sliceConsumed, output, face: 0, slice: 5);
+        Assert.Equal(1, count);
+        Assert.Equal(6, output[0].Width);
+        Assert.Equal(4, output[0].Height);
+        Assert.Equal(expectedBlockId, (int)(output[0].MergeKey >> 32));
+        Assert.Equal(expectedLight, unchecked((int)(uint)output[0].MergeKey));
+    }
+
+    [Fact]
+    public void OptimumGreedyMeshEmitter_Uses2DSliceScratchBuffersUnder16KB()
+    {
+        string emitterPath = PatchReader.FindRepositoryFile("sources/VintagestoryLib/Optimum/OptimumGreedyMeshEmitter.cs");
+        string source = System.IO.File.ReadAllText(emitterPath);
+
+        Assert.DoesNotContain("new bool[Size3]", source);
+        Assert.DoesNotContain("new byte[Size3]", source);
+        Assert.DoesNotContain("new long[Size3]", source);
+        Assert.DoesNotContain("new int[Size3 * 6]", source);
+        Assert.DoesNotContain("new int[Size3]", source);
+
+        Assert.Contains("new long[Size2]", source);
+        Assert.Contains("new int[Size2]", source);
+        Assert.Contains("new bool[Size2]", source);
+        Assert.Contains("OptimumGreedyMesher.MergeSlice(", source);
+
+        // 1x long[1024] (8192 B) + 1x int[1024] (4096 B) + 3x bool[1024] (3072 B) = 15360 B < 16 KB
+        int sliceScratchBytes = Size2 * sizeof(long) + Size2 * sizeof(int) + 3 * Size2 * sizeof(bool);
+        Assert.True(sliceScratchBytes < 16 * 1024, $"Expected < 16 KB 2D slice scratch footprint, got {sliceScratchBytes} bytes");
+    }
 }
