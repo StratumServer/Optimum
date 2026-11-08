@@ -1150,6 +1150,80 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("ShaderCompatibilityReportStatus", configSource);
     }
 
+    [Fact]
+    public void VoxelIndexer_TieredPGO_BitShiftEquivalence_AndBoundsCheckElimination()
+    {
+        // 1. Bitwise shift equivalence with 3D multiplication across all 32x32x32 combinations
+        for (int y = 0; y < 32; y++)
+        for (int z = 0; z < 32; z++)
+        for (int x = 0; x < 32; x++)
+        {
+            int expected = y * 1024 + z * 32 + x;
+            int actual = OptimumVoxelIndexer.ToIndex(x, y, z);
+            Assert.Equal(expected, actual);
+
+            OptimumVoxelIndexer.FromIndex(actual, out int ox, out int oy, out int oz);
+            Assert.Equal(x, ox);
+            Assert.Equal(y, oy);
+            Assert.Equal(z, oz);
+
+            Assert.Equal(y * 1024 + z * 32, OptimumVoxelIndexer.GetBaseIndex(y, z));
+        }
+
+        // 2. Greedy mesher FaceSliceToIndex equivalence across all faces and slices
+        for (int face = 0; face < 6; face++)
+        for (int slice = 0; slice < 32; slice++)
+        for (int row = 0; row < 32; row++)
+        for (int col = 0; col < 32; col++)
+        {
+            int mesherIdx = OptimumGreedyMesher.FaceSliceToIndex(face, slice, row, col);
+            int indexerIdx = OptimumVoxelIndexer.FaceSliceToIndex(face, slice, row, col);
+            Assert.Equal(mesherIdx, indexerIdx);
+        }
+
+        // 3. 1D span row retrieval and BCE
+        int[] chunk = new int[32768];
+        for (int i = 0; i < chunk.Length; i++) chunk[i] = i;
+
+        Span<int> chunkSpan = chunk;
+        var rowSpan = OptimumVoxelIndexer.GetRowSpan(chunkSpan, 12, 17);
+        Assert.Equal(32, rowSpan.Length);
+        Assert.Equal(OptimumVoxelIndexer.ToIndex(0, 12, 17), rowSpan[0]);
+        Assert.Equal(OptimumVoxelIndexer.ToIndex(31, 12, 17), rowSpan[31]);
+
+        // 4. ForEachVoxel 1D loop visitor
+        int visited = 0;
+        OptimumVoxelIndexer.ForEachVoxel(chunkSpan, (ref int v, int vx, int vy, int vz, int vidx) =>
+        {
+            Assert.Equal(vidx, v);
+            visited++;
+        });
+        Assert.Equal(32768, visited);
+
+        // 5. TieredPGO enabled in launcher runtime config calibration
+        string tempDir = Directory.CreateTempSubdirectory("optimum-tieredpgo-").FullName;
+        try
+        {
+            string cfgPath = System.IO.Path.Combine(tempDir, "Optimum.runtimeconfig.json");
+            File.WriteAllText(cfgPath, """
+                {
+                  "runtimeOptions": {
+                    "tfm": "net10.0",
+                    "configProperties": {}
+                  }
+                }
+                """);
+            Optimum.Launcher.Program.CalibrateRuntimeConfigForMemory(tempDir, []);
+            var node = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(cfgPath));
+            var props = node!["runtimeOptions"]!["configProperties"]!.AsObject();
+            Assert.True(props["System.Runtime.TieredPGO"]!.GetValue<bool>());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

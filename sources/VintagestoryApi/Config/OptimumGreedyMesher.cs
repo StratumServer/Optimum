@@ -107,34 +107,37 @@ public static class OptimumGreedyMesher
                 consumed.Clear();
 
                 for (int row = 0; row < Size; row++)
-                for (int col = 0; col < Size; col++)
                 {
-                    int seedIdx = FaceSliceToIndex(face, slice, row, col);
-                    if (consumed[row * Size + col]) continue;
-                    if (!eligible[seedIdx]) continue;
-                    if ((faceFlags[seedIdx] & faceBit) == 0) continue;
-
-                    long key = blocks[seedIdx];
-
-                    int width = ExtendWidth(blocks, faceFlags, eligible, consumed, face, slice, row, col, key, faceBit, maxWidth);
-                    int height = ExtendHeight(blocks, faceFlags, eligible, consumed, face, slice, row, col, width, key, faceBit, maxHeight);
-
-                    MarkConsumedAndClear(faceFlags, consumed, face, slice, row, col, width, height, faceBit);
-
-                    if (quadCount < output.Length)
+                    int rowBase = row << 5;
+                    for (int col = 0; col < Size; col++)
                     {
-                        output[quadCount] = new MergedQuad
+                        if (consumed[rowBase + col]) continue;
+                        int seedIdx = FaceSliceToIndex(face, slice, row, col);
+                        if (!eligible[seedIdx]) continue;
+                        if ((faceFlags[seedIdx] & faceBit) == 0) continue;
+
+                        long key = blocks[seedIdx];
+
+                        int width = ExtendWidth(blocks, faceFlags, eligible, consumed, face, slice, row, col, key, faceBit, maxWidth);
+                        int height = ExtendHeight(blocks, faceFlags, eligible, consumed, face, slice, row, col, width, key, faceBit, maxHeight);
+
+                        MarkConsumedAndClear(faceFlags, consumed, face, slice, row, col, width, height, faceBit);
+
+                        if (quadCount < output.Length)
                         {
-                            Face = face,
-                            Slice = slice,
-                            ColStart = col,
-                            Width = width,
-                            RowStart = row,
-                            Height = height,
-                            MergeKey = key,
-                        };
+                            output[quadCount] = new MergedQuad
+                            {
+                                Face = face,
+                                Slice = slice,
+                                ColStart = col,
+                                Width = width,
+                                RowStart = row,
+                                Height = height,
+                                MergeKey = key,
+                            };
+                        }
+                        quadCount++;
                     }
-                    quadCount++;
                 }
             }
         }
@@ -170,21 +173,24 @@ public static class OptimumGreedyMesher
                 consumed.Clear();
 
                 for (int row = 0; row < Size; row++)
-                for (int col = 0; col < Size; col++)
                 {
-                    int seedIdx = FaceSliceToIndex(face, slice, row, col);
-                    if (consumed[row * Size + col]) continue;
-                    if (!eligible[seedIdx]) continue;
-                    if ((faceFlagsCopy[seedIdx] & faceBit) == 0) continue;
+                    int rowBase = row << 5;
+                    for (int col = 0; col < Size; col++)
+                    {
+                        if (consumed[rowBase + col]) continue;
+                        int seedIdx = FaceSliceToIndex(face, slice, row, col);
+                        if (!eligible[seedIdx]) continue;
+                        if ((faceFlagsCopy[seedIdx] & faceBit) == 0) continue;
 
-                    long key = blocks[seedIdx];
+                        long key = blocks[seedIdx];
 
-                    int width = ExtendWidth(blocks, faceFlagsCopy, eligible, consumed, face, slice, row, col, key, faceBit, maxWidth);
-                    int height = ExtendHeight(blocks, faceFlagsCopy, eligible, consumed, face, slice, row, col, width, key, faceBit, maxHeight);
+                        int width = ExtendWidth(blocks, faceFlagsCopy, eligible, consumed, face, slice, row, col, key, faceBit, maxWidth);
+                        int height = ExtendHeight(blocks, faceFlagsCopy, eligible, consumed, face, slice, row, col, width, key, faceBit, maxHeight);
 
-                    MarkConsumedAndClear(faceFlagsCopy, consumed, face, slice, row, col, width, height, faceBit);
+                        MarkConsumedAndClear(faceFlagsCopy, consumed, face, slice, row, col, width, height, faceBit);
 
-                    quadCount++;
+                        quadCount++;
+                    }
                 }
             }
         }
@@ -306,7 +312,7 @@ public static class OptimumGreedyMesher
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int ToIndex(int x, int y, int z) => y * Size2 + z * Size + x;
+    private static int ToIndex(int x, int y, int z) => (y << 10) | (z << 5) | x;
 
     /// <summary>
     /// face 0,2 (N/S): slice=Z, row=Y, col=X.
@@ -318,9 +324,9 @@ public static class OptimumGreedyMesher
     {
         return face switch
         {
-            0 or 2 => ToIndex(col, row, slice),
-            1 or 3 => ToIndex(slice, row, col),
-            _ => ToIndex(col, slice, row), // 4, 5
+            0 or 2 => (row << 10) | (slice << 5) | col,
+            1 or 3 => (row << 10) | (col << 5) | slice,
+            _ => (slice << 10) | (row << 5) | col, // 4, 5
         };
     }
 
@@ -329,7 +335,7 @@ public static class OptimumGreedyMesher
         Span<bool> consumed, int face, int slice, int row, int col, long key, int faceBit)
     {
         if (row < 0 || row >= Size || col < 0 || col >= Size) return false;
-        if (consumed[row * Size + col]) return false;
+        if (consumed[(row << 5) | col]) return false;
         int idx = FaceSliceToIndex(face, slice, row, col);
         if (!eligible[idx]) return false;
         if ((faceFlags[idx] & faceBit) == 0) return false;
@@ -376,11 +382,14 @@ public static class OptimumGreedyMesher
     {
         int clearMask = ~faceBit;
         for (int r = row; r < row + height; r++)
-        for (int c = col; c < col + width; c++)
         {
-            consumed[r * Size + c] = true;
-            int idx = FaceSliceToIndex(face, slice, r, c);
-            faceFlags[idx] = (byte)(faceFlags[idx] & clearMask);
+            int rBase = r << 5;
+            for (int c = col; c < col + width; c++)
+            {
+                consumed[rBase | c] = true;
+                int idx = FaceSliceToIndex(face, slice, r, c);
+                faceFlags[idx] = (byte)(faceFlags[idx] & clearMask);
+            }
         }
     }
 }
