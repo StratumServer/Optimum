@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Threading;
 
 namespace Vintagestory.API.Config;
 
@@ -7,7 +8,7 @@ namespace Vintagestory.API.Config;
 /// </summary>
 public sealed class OptimumTesselationWorkerRegistry
 {
-    private readonly object _gate = new();
+    private readonly Lock _gate = new();
     private readonly Dictionary<int, int> _slotsByThreadId = new();
 
     /// <summary>

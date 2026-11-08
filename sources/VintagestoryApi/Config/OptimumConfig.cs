@@ -2678,7 +2678,7 @@ public static class OptimumDiagnostics
     private static long _tessBackpressureCount;
     private static long _tessHandoffCapacity;
     private static long _tessHandoffPeak;
-    private static readonly object _tessWorkerGate = new();
+    private static readonly Lock _tessWorkerGate = new();
     private static readonly List<int> _tessWorkerIds = new();
 
     /// <summary>Called after each chunk tessellation completes (success or retry).</summary>
