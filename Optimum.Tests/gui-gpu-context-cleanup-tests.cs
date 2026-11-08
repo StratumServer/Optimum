@@ -36,5 +36,19 @@ public sealed class GuiGpuContextCleanupTests
         Assert.True(deleteFramebuffer.Offset < restoreState.Offset,
             "Temporary framebuffer cleanup must happen before restoring the caller's framebuffer bindings.");
     }
+
+    [Theory]
+    [InlineData("TryCreateCandidateTexture")]
+    [InlineData("RunProbe")]
+    public void ContextResetOccursOnRenderCompletion(string methodName)
+    {
+        using var module = ModuleDefinition.ReadModule(typeof(Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend).Assembly.Location);
+        var type = module.GetType("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend");
+        var method = Assert.Single(type.Methods, m => m.Name == methodName);
+        var resetCalls = method.Body.Instructions.Where(i =>
+            i.Operand is MethodReference m && m.DeclaringType.FullName == "SkiaSharp.GRContext" && m.Name == "ResetContext").ToList();
+        Assert.True(resetCalls.Count >= 2,
+            $"Expected at least 2 ResetContext calls in {methodName} (pre-render and post-render), found {resetCalls.Count}");
+    }
 }
 #endif
