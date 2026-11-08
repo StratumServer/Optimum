@@ -27,7 +27,7 @@ public class FsrPipelineCoverageTests
     }
 
     [Fact]
-    public void RcasShaderUsesNativeFiveTapCrossAndFixedSharpness()
+    public void RcasShaderUsesNativeFiveTapCrossAndConfigurableSharpness()
     {
         string rcas = Read("sources/shaders/fsr-rcas.fsh");
 
@@ -36,7 +36,8 @@ public class FsrPipelineCoverageTests
         Assert.Contains("vec3 e = texture", rcas);
         Assert.Contains("vec3 f = texture", rcas);
         Assert.Contains("vec3 h = texture", rcas);
-        Assert.Contains("lobe *= exp2(-0.2);", rcas);
+        Assert.Contains("uniform float sharpness;", rcas);
+        Assert.Contains("lobe *= exp2(-sharpness);", rcas);
         Assert.Contains("lobe * (b + d + f + h) + e", rcas);
     }
 
@@ -124,6 +125,8 @@ public class FsrPipelineCoverageTests
         Assert.Contains("\"FsrRcas\"", patcher);
         Assert.Contains("\"optimumFsrDisabled\"", patcher);
         Assert.Contains("\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"DisableOptimumFsr\", 1", patcher);
+        Assert.Contains("\"OptimumFsrSharpness\"", patcher);
+        Assert.Contains("\"onOptimumFsrSharpnessChanged\"", patcher);
     }
 
     [Theory]
@@ -147,14 +150,18 @@ public class FsrPipelineCoverageTests
         Assert.Contains("_optimumLastFsrInputHeight", platform);
         Assert.Contains("_optimumLastFsrOutputWidth", platform);
         Assert.Contains("_optimumLastFsrOutputHeight", platform);
+        Assert.Contains("_optimumLastFsrSharpness", platform);
         Assert.Contains("if (frameBuffers[0].Width != _optimumLastFsrInputWidth || frameBuffers[0].Height != _optimumLastFsrInputHeight)", platform);
         Assert.Contains("if (optimumFsrFramebuffer.Width != _optimumLastFsrOutputWidth || optimumFsrFramebuffer.Height != _optimumLastFsrOutputHeight)", platform);
+        Assert.Contains("if (ClientSettings.OptimumFsrSharpness != _optimumLastFsrSharpness)", platform);
+        Assert.Contains("fsrRcas.Uniform(\"sharpness\", _optimumLastFsrSharpness);", platform);
 
         string patcher = Read("Optimum.Patcher/Program.cs");
         Assert.Contains("\"_optimumLastFsrInputWidth\"", patcher);
         Assert.Contains("\"_optimumLastFsrInputHeight\"", patcher);
         Assert.Contains("\"_optimumLastFsrOutputWidth\"", patcher);
         Assert.Contains("\"_optimumLastFsrOutputHeight\"", patcher);
+        Assert.Contains("\"_optimumLastFsrSharpness\"", patcher);
     }
 
     private static int Count(string source, string value)

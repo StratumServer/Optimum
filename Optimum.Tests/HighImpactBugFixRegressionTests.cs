@@ -834,6 +834,33 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"SetGfxValues\", 0)", programSource);
     }
 
+    [Fact]
+    public void FsrRcas_SharpnessSliderConfigurableAndUniformPassed()
+    {
+        // 1. Verify OptimumConfig defaults
+        Assert.Equal(0.2f, Vintagestory.API.Config.OptimumConfig.FsrSharpness);
+
+        // 2. Verify GuiCompositeSettings patch adds optFsrSharpness slider under optRenderScale
+        string guiPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
+        Assert.Contains("\"optFsrSharpness\"", guiPatch);
+        Assert.Contains("onOptimumFsrSharpnessChanged", guiPatch);
+        Assert.Contains("composer.GetSlider(\"optFsrSharpness\")?.SetValues", guiPatch);
+
+        // 3. Verify ClientPlatformWindows patch caches sharpness and passes uniform to fsrRcas
+        string platformPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch"));
+        Assert.Contains("_optimumLastFsrSharpness", platformPatch);
+        Assert.Contains("fsrRcas.Uniform(\"sharpness\", _optimumLastFsrSharpness);", platformPatch);
+
+        // 4. Verify Program.cs injects members
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"OptimumFsrSharpness\"", programSource);
+        Assert.Contains("\"_optimumLastFsrSharpness\"", programSource);
+        Assert.Contains("\"onOptimumFsrSharpnessChanged\"", programSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

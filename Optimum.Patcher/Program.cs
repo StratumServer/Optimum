@@ -95,6 +95,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumChiselLodDistance",
         "OptimumDynamicLightCache",
         "OptimumRenderScale",
+        "OptimumFsrSharpness",
     },
     ["Vintagestory.Client.NoObf.SystemRenderPlayerEffects"] = new()
     {
@@ -157,6 +158,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumLastFsrInputHeight",
         "_optimumLastFsrOutputWidth",
         "_optimumLastFsrOutputHeight",
+        "_optimumLastFsrSharpness",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -205,6 +207,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "onOptimumEntityLightBatchChanged",
         "onOptimumEntityShaderCacheChanged",
         "onOptimumRenderScaleChanged",
+        "onOptimumFsrSharpnessChanged",
         "onOptimumGuiRenderBackendChanged",
         "onOptimumGodRaysCapChanged",
 #if OPTIMUM_GREEDY_MESH

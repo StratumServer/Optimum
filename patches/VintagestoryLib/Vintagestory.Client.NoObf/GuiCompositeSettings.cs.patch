@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..736d2b5 100644
+index 4d08f84..7e33220 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -48,6 +48,10 @@ public class GuiCompositeSettings : GuiComposite
@@ -91,7 +91,7 @@ index 4d08f84..736d2b5 100644
  			{
  				Lang.Get("windowborder-resizable"),
  				Lang.Get("windowborder-fixed"),
-@@ -412,6 +432,10 @@ public class GuiCompositeSettings : GuiComposite
+@@ -412,6 +432,13 @@ public class GuiCompositeSettings : GuiComposite
  				.AddStaticText(Lang.Get("setting-name-resolution"), CairoFont.WhiteSmallishText(), elementBounds = elementBounds.BelowCopy(0.0, 4.0))
  				.AddHoverText(array[6], CairoFont.WhiteSmallText(), 250, elementBounds.FlatCopy().WithFixedHeight(25.0))
  				.AddSlider(onResolutionChanged, elementBounds2 = elementBounds2.BelowCopy(0.0, 21.0), "resolutionSlider")
@@ -99,10 +99,13 @@ index 4d08f84..736d2b5 100644
 +				.AddHoverText(Lang.Get("optimum-renderscale-tooltip"), CairoFont.WhiteSmallText(), 250, elementBounds.FlatCopy().WithFixedHeight(25.0));
 +			ElementBounds elementBoundsRenderScale = elementBounds2.BelowCopy(0.0, 18.0).WithFixedSize(num, 26.0);
 +			GuiComposerHelpers.AddDropDown(bounds: elementBounds2 = elementBoundsRenderScale, composer: composer, values: new string[] { "1.0", "0.85", "0.77", "0.67" }, names: new string[] { Lang.Get("optimum-renderscale-native"), Lang.Get("optimum-renderscale-quality"), Lang.Get("optimum-renderscale-balanced"), Lang.Get("optimum-renderscale-performance") }, selectedIndex: 0, onSelectionChanged: onOptimumRenderScaleChanged, key: "optRenderScale")
++				.AddStaticText(Lang.Get("optimum-fsrsharpness"), CairoFont.WhiteSmallishText(), elementBounds = elementBounds.BelowCopy(0.0, 4.0))
++				.AddHoverText(Lang.Get("optimum-fsrsharpness-tooltip"), CairoFont.WhiteSmallText(), 250, elementBounds.FlatCopy().WithFixedHeight(25.0))
++				.AddSlider(onOptimumFsrSharpnessChanged, elementBounds2 = elementBounds2.BelowCopy(0.0, 21.0).WithFixedSize(num, 20.0), "optFsrSharpness")
  				.AddRichtext(Lang.Get("help-framerateissues"), CairoFont.WhiteDetailText(), elementBounds = elementBounds.BelowCopy(0.0, 5.0))
  				.EndChildElements();
  		}
-@@ -521,6 +545,18 @@ public class GuiCompositeSettings : GuiComposite
+@@ -521,6 +548,24 @@ public class GuiCompositeSettings : GuiComposite
  				return num + "x (" + (int)(num * num * 100f) + "%)";
  			};
  			composer.GetSlider("lodbiasfarSlider").TriggerOnlyOnMouseUp();
@@ -118,10 +121,16 @@ index 4d08f84..736d2b5 100644
 +					renderScaleDropdown.Enabled = false;
 +				}
 +			}
++			composer.GetSlider("optFsrSharpness")?.SetValues((int)(ClientSettings.OptimumFsrSharpness * 100f), 0, 100, 5, " %");
++			var fsrSharpnessSlider = composer.GetSlider("optFsrSharpness");
++			if (fsrSharpnessSlider != null && Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("RenderScale"))
++			{
++				fsrSharpnessSlider.Enabled = false;
++			}
  		}
  		composer.GetSlider("gammaSlider").Enabled = true;
  		composer.GetSlider("gammaSlider").OnSliderTooltip = null;
-@@ -1742,6 +1778,310 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1742,6 +1787,319 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -367,6 +376,7 @@ index 4d08f84..736d2b5 100644
 +			case "RenderScale":
 +				if (optimumControls.TryGetValue("optRenderScale", out var optCtrl)) ((GuiElementDropDown)optCtrl).Enabled = false;
 +				composer.GetDropDown("optRenderScale")?.Enabled = false;
++				composer.GetSlider("optFsrSharpness")?.Enabled = false;
 +				break;
 +			case "GodRaysSampleCap": ((GuiElementSwitch)optimumControls["optGodRaysCap"]).Enabled = false; break;
 +			case "EntityLightBatch": ((GuiElementSwitch)optimumControls["optEntityLightBatch"]).Enabled = false; break;
@@ -414,6 +424,14 @@ index 4d08f84..736d2b5 100644
 +		ScreenManager.Platform.RebuildFrameBuffers();
 +		handler.ReloadShaders();
 +	}
++	private bool onOptimumFsrSharpnessChanged(int val)
++	{
++		float sharpness = Math.Clamp(val / 100f, 0f, 1f);
++		ClientSettings.OptimumFsrSharpness = sharpness;
++		Vintagestory.API.Config.OptimumConfig.FsrSharpness = sharpness;
++		Vintagestory.API.Config.OptimumConfig.Save();
++		return true;
++	}
 +	private void onOptimumGodRaysCapChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("GodRaysSampleCap")) return; Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumGuiRenderBackendChanged(string code, bool selected) { Vintagestory.API.Config.OptimumConfig.SetGuiRenderBackend(code, save: true); }
 +	private void onOptimumEntityLightBatchChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityLightBatch")) return; Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
@@ -432,7 +450,7 @@ index 4d08f84..736d2b5 100644
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
-@@ -1820,4 +2160,72 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1820,4 +2178,72 @@ public class GuiCompositeSettings : GuiComposite
  		OnDeveloperOptions(on: true);
  		return true;
  	}

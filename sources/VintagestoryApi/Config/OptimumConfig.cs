@@ -543,6 +543,12 @@ public static class OptimumConfig
     public static float RenderScale = 1.0f;
 
     /// <summary>
+    /// FSR RCAS contrast-adaptive sharpness: 0.0 to 1.0. Default 0.2.
+    /// </summary>
+    public static float FsrSharpness = 0.2f;
+    public static float OptimumFsrSharpness { get => FsrSharpness; set => FsrSharpness = value; }
+
+    /// <summary>
     /// R4: cap the god-rays post-process at 100 texture samples when enabled.
     /// The disabled path sends the vanilla 180-sample limit. This option can
     /// change the post-process image, so it stays off by default.
@@ -1003,6 +1009,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshFarDistance), GreedyMeshFarDistance.ToString()),
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
+        (nameof(OptimumConfigData.FsrSharpness), FsrSharpness.ToString("F2")),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
@@ -1119,6 +1126,7 @@ public static class OptimumConfig
             GreedyMeshFarDistanceSq = (double)GreedyMeshFarDistance * GreedyMeshFarDistance;
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
+            FsrSharpness = Math.Clamp(data.FsrSharpness, 0.0f, 1.0f);
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
@@ -1199,6 +1207,7 @@ public static class OptimumConfig
             GreedyMeshFarDistance = GreedyMeshFarDistance,
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
+            FsrSharpness = FsrSharpness,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
@@ -1302,6 +1311,7 @@ internal sealed class OptimumConfigData
     public int GreedyMeshFarDistance { get; set; } = 0;
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
+    public float FsrSharpness { get; set; } = 0.2f;
     public bool GodRaysSampleCap { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
