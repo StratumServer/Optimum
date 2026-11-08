@@ -176,4 +176,49 @@ public class UniqueQueueTests
 
         Assert.Equal(new[] { 5, 6, 7 }, seen);
     }
+
+    [Fact]
+    public void RemoveOnEmptyQueueDoesNotThrow()
+    {
+        var q = new UniqueQueue<int>();
+        q.Remove(42);
+        Assert.Equal(0, q.Count);
+    }
+
+    [Fact]
+    public void BackingFieldsUseQueueAndHashSetWithoutLinkedList()
+    {
+        var fields = typeof(UniqueQueue<int>).GetFields(
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.Public);
+
+        Assert.Contains(fields, f => f.FieldType == typeof(System.Collections.Generic.Queue<int>));
+        Assert.Contains(fields, f => f.FieldType == typeof(System.Collections.Generic.HashSet<int>));
+        Assert.DoesNotContain(fields, f => f.FieldType.Name.Contains("LinkedList"));
+    }
+
+    [Fact]
+    public void SteadyStateEnqueueDequeueDoesNotAllocateHeapMemory()
+    {
+        var q = new UniqueQueue<int>();
+        for (int i = 0; i < 1000; i++)
+        {
+            q.Enqueue(i);
+        }
+        for (int i = 0; i < 1000; i++)
+        {
+            q.Dequeue();
+        }
+
+        long allocatedBefore = System.GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 1000; i++)
+        {
+            q.Enqueue(i);
+            q.Dequeue();
+        }
+        long allocatedAfter = System.GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.Equal(0, allocatedAfter - allocatedBefore);
+    }
 }
