@@ -1,0 +1,358 @@
+name: 1.22.7 Vanilla Parity Gates
+
+on:
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'sources/**'
+      - 'patches/**'
+      - 'Optimum.Tests/**'
+      - 'scripts/**'
+      - '.github/workflows/ci-vanilla-parity.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================================
+  # Gate 1: Code, Contract & Mathematical Unit Parity
+  # ============================================================================
+  contract-and-unit-parity:
+    name: Contract & Unit Parity (1.22.7)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache Vanilla 1.22.7 Archive
+        uses: actions/cache@v6
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download Vanilla 1.22.7 Archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Bootstrap Environment
+        shell: bash
+        run: bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+
+      - name: Build Solution
+        shell: bash
+        run: dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: 1.1 Verify Patch Syntax & Strict Unavailable
+        shell: bash
+        run: bash scripts/check-patches.sh --strict-unavailable
+
+      - name: 1.2 Mathematical & Algorithmic Parity Tests
+        shell: bash
+        run: |
+          dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
+            --filter "FullyQualifiedName~Mat4f|FullyQualifiedName~SortableQueue|FullyQualifiedName~UniqueQueue|FullyQualifiedName~ColorUtil|FullyQualifiedName~Perception" \
+            --logger "trx;LogFileName=unit-parity-results.trx"
+
+  # ============================================================================
+  # Gate 2: Singleplayer Save Game Roundtrip Interchangeability
+  # ============================================================================
+  savegame-roundtrip-parity:
+    name: Singleplayer Save Game Roundtrip (Vanilla ⇄ Optimum)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache Vanilla 1.22.7 Archive
+        uses: actions/cache@v6
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download Vanilla 1.22.7 Archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Bootstrap & Build
+        shell: bash
+        run: |
+          bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+          dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Execute Save Game Roundtrip Test
+        shell: bash
+        run: bash scripts/test-savegame-roundtrip.sh
+
+  # ============================================================================
+  # Gate 3: Multiplayer Network Protocol & Movement Prediction Parity
+  # ============================================================================
+  multiplayer-protocol-parity:
+    name: Multiplayer Protocol & Movement Prediction
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache Vanilla 1.22.7 Archive
+        uses: actions/cache@v6
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download Vanilla 1.22.7 Archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Bootstrap & Build
+        shell: bash
+        run: |
+          bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+          dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Execute Multiplayer Protocol Parity Test
+        shell: bash
+        run: bash scripts/test-protocol-parity.sh
+
+  # ============================================================================
+  # Gate 4: Worldgen Statistical Parity
+  # ============================================================================
+  worldgen-statistical-parity:
+    name: Worldgen Statistical Chunk Parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache Vanilla 1.22.7 Archive
+        uses: actions/cache@v6
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download Vanilla 1.22.7 Archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Bootstrap & Build
+        shell: bash
+        run: |
+          bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+          dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Execute Worldgen Parity Harness (1,800 chunks)
+        shell: bash
+        run: bash scripts/worldgen-parity-harness.sh
+        env:
+          GENERATE_SECONDS: 120
+          OPTIMUM_WORLDGEN_MT: 0
+
+  # ============================================================================
+  # Gate 5: Clientside Headless Visual & GUI Certification
+  # ============================================================================
+  clientside-headless-gui:
+    name: Clientside Headless GUI & Mesher Certification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v6
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+          dotnet-quality: ga
+
+      - name: Install Headless Graphics Drivers (Xvfb & Mesa llvmpipe)
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libgl1-mesa-dri libglx-mesa0 libosmesa6
+
+      - name: Read VS version
+        id: vs_version
+        shell: bash
+        run: |
+          version=$(python3 -c "import json; print(json.load(open('forks.json'))['vintageStoryVersion'])")
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve client archive
+        id: client
+        shell: bash
+        run: |
+          version="${{ steps.vs_version.outputs.version }}"
+          name="vs_client_linux-x64_${version}.tar.gz"
+          {
+            echo "name=$name"
+            echo "url=https://cdn.vintagestory.at/gamefiles/stable/$name"
+            echo "path=.vanilla/archives/$name"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Cache Vanilla 1.22.7 Archive
+        uses: actions/cache@v6
+        id: cache_client
+        with:
+          path: .vanilla/archives
+          key: vs-client-linux-${{ steps.vs_version.outputs.version }}
+
+      - name: Download Vanilla 1.22.7 Archive
+        if: steps.cache_client.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          mkdir -p .vanilla/archives
+          curl -L --fail --retry 3 --retry-delay 5 \
+            -o "${{ steps.client.outputs.path }}.part" \
+            "${{ steps.client.outputs.url }}"
+          mv "${{ steps.client.outputs.path }}.part" "${{ steps.client.outputs.path }}"
+
+      - name: Bootstrap & Build
+        shell: bash
+        run: |
+          bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
+          dotnet build VintageStory.slnx -c Release --nologo
+
+      - name: Run Headless GUI & Mesher Scenario Tests
+        shell: bash
+        run: |
+          xvfb-run -a dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
+            --filter "FullyQualifiedName~GreedyMesher|FullyQualifiedName~Shader|FullyQualifiedName~ChiselLod" \
+            --logger "trx;LogFileName=gui-mesher-results.trx"
