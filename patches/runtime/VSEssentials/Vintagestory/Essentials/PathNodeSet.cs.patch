@@ -1,0 +1,336 @@
+diff --git a/VSEssentials/Vintagestory/Essentials/PathNodeSet.cs b/VSEssentials/Vintagestory/Essentials/PathNodeSet.cs
+index 25e84d9..d4545a6 100644
+--- a/VSEssentials/Vintagestory/Essentials/PathNodeSet.cs
++++ b/VSEssentials/Vintagestory/Essentials/PathNodeSet.cs
+@@ -1,3 +1,4 @@
++using System;
+ using System.Collections;
+ using System.Collections.Generic;
+ 
+@@ -5,68 +6,139 @@ namespace Vintagestory.Essentials;
+ 
+ public class PathNodeSet : IEnumerable<PathNode>, IEnumerable
+ {
+-	private int arraySize = 16;
++	private PathNode[] heap = new PathNode[64];
+ 
+-	private PathNode[][] buckets = new PathNode[4][];
++	private long[] sequences = new long[64];
+ 
+-	private int[] bucketCount = new int[4];
++	private readonly Dictionary<long, PathNode> nodeMap = new Dictionary<long, PathNode>(64);
+ 
+ 	private int size;
+ 
++	private long sequenceCounter;
++
+ 	public int Count => size;
+ 
+ 	public void Clear()
+ 	{
+-		for (int i = 0; i < 4; i++)
+-		{
+-			bucketCount[i] = 0;
+-		}
++		Array.Clear(heap, 0, size);
++		nodeMap.Clear();
+ 		size = 0;
++		sequenceCounter = 0L;
+ 	}
+ 
+ 	public PathNodeSet()
+ 	{
+-		for (int i = 0; i < 4; i++)
++	}
++
++	private static long ToKey(int x, int y, int z)
++	{
++		return ((long)(x & 0xFFFFFF)) | (((long)(z & 0xFFFFFF)) << 24) | (((long)(y & 0xFFFF)) << 48);
++	}
++
++	private static bool HasHigherPriority(PathNode a, long seqA, PathNode b, long seqB)
++	{
++		if (a.fCost < b.fCost)
+ 		{
+-			buckets[i] = new PathNode[arraySize];
++			return true;
++		}
++		if (a.fCost > b.fCost)
++		{
++			return false;
++		}
++		if (a.hCost < b.hCost)
++		{
++			return true;
++		}
++		if (a.hCost > b.hCost)
++		{
++			return false;
++		}
++		return seqA > seqB;
++	}
++
++	private void Swap(int i, int j)
++	{
++		PathNode tempNode = heap[i];
++		heap[i] = heap[j];
++		heap[j] = tempNode;
++		heap[i].HeapIndex = i;
++		heap[j].HeapIndex = j;
++
++		long tempSeq = sequences[i];
++		sequences[i] = sequences[j];
++		sequences[j] = tempSeq;
++	}
++
++	private void SiftUp(int i)
++	{
++		while (i > 0)
++		{
++			int parent = (i - 1) >> 1;
++			if (HasHigherPriority(heap[i], sequences[i], heap[parent], sequences[parent]))
++			{
++				Swap(i, parent);
++				i = parent;
++			}
++			else
++			{
++				break;
++			}
++		}
++	}
++
++	private void SiftDown(int i)
++	{
++		while (true)
++		{
++			int left = (i << 1) + 1;
++			int right = left + 1;
++			int best = i;
++
++			if (left < size && HasHigherPriority(heap[left], sequences[left], heap[best], sequences[best]))
++			{
++				best = left;
++			}
++
++			if (right < size && HasHigherPriority(heap[right], sequences[right], heap[best], sequences[best]))
++			{
++				best = right;
++			}
++
++			if (best != i)
++			{
++				Swap(i, best);
++				i = best;
++			}
++			else
++			{
++				break;
++			}
+ 		}
+ 	}
+ 
+ 	public bool Add(PathNode value)
+ 	{
+-		int num = value.Z % 2 * 2 + value.X % 2;
+-		num = (num + 4) % 4;
+-		PathNode[] array = buckets[num];
+-		int num2 = bucketCount[num];
+-		int num3 = num2;
+-		while (--num3 >= 0)
++		long key = ToKey(value.X, value.Y, value.Z);
++		if (nodeMap.ContainsKey(key))
+ 		{
+-			if (value.Equals(array[num3]))
+-			{
+-				return false;
+-			}
++			return false;
+ 		}
+-		if (num2 >= arraySize)
++
++		if (size >= heap.Length)
+ 		{
+-			ExpandArrays();
+-			array = buckets[num];
++			int newCapacity = heap.Length * 2;
++			Array.Resize(ref heap, newCapacity);
++			Array.Resize(ref sequences, newCapacity);
+ 		}
+-		float fCost = value.fCost;
+-		num3 = num2 - 1;
+-		while (num3 >= 0 && (array[num3].fCost < fCost || (array[num3].fCost == fCost && array[num3].hCost < value.hCost)))
+-		{
+-			num3--;
+-		}
+-		num3++;
+-		int num4 = num2;
+-		while (num4 > num3)
+-		{
+-			array[num4] = array[--num4];
+-		}
+-		array[num3] = value;
+-		num2++;
+-		bucketCount[num] = num2;
+-		size++;
++
++		int i = size++;
++		long seq = ++sequenceCounter;
++		heap[i] = value;
++		sequences[i] = seq;
++		value.HeapIndex = i;
++
++		nodeMap[key] = value;
++		SiftUp(i);
+ 		return true;
+ 	}
+ 
+@@ -76,89 +148,83 @@ public class PathNodeSet : IEnumerable<PathNode>, IEnumerable
+ 		{
+ 			return null;
+ 		}
+-		PathNode pathNode = null;
+-		int num = 0;
+-		for (int i = 0; i < 4; i++)
+-		{
+-			int num2 = bucketCount[i] - 1;
+-			if (num2 >= 0)
+-			{
+-				PathNode pathNode2 = buckets[i][num2];
+-				if ((object)pathNode == null || pathNode2.fCost < pathNode.fCost || (pathNode2.fCost == pathNode.fCost && pathNode2.hCost < pathNode.hCost))
+-				{
+-					pathNode = pathNode2;
+-					num = i;
+-				}
+-			}
+-		}
+-		bucketCount[num]--;
++
++		PathNode nearest = heap[0];
++		nodeMap.Remove(ToKey(nearest.X, nearest.Y, nearest.Z));
++
+ 		size--;
+-		return pathNode;
++		if (size > 0)
++		{
++			heap[0] = heap[size];
++			sequences[0] = sequences[size];
++			heap[0].HeapIndex = 0;
++			heap[size] = null;
++			SiftDown(0);
++		}
++		else
++		{
++			heap[0] = null;
++		}
++
++		return nearest;
+ 	}
+ 
+ 	public void Remove(PathNode value)
+ 	{
+-		int num = value.Z % 2 * 2 + value.X % 2;
+-		num = (num + 4) % 4;
+-		PathNode[] array = buckets[num];
+-		int num2 = bucketCount[num];
+-		int num3 = num2;
+-		while (--num3 >= 0)
++		long key = ToKey(value.X, value.Y, value.Z);
++		if (!nodeMap.TryGetValue(key, out PathNode existing))
+ 		{
+-			if (value.Equals(array[num3]))
++			return;
++		}
++
++		nodeMap.Remove(key);
++		int index = existing.HeapIndex;
++		if (index < 0 || index >= size || heap[index] != existing)
++		{
++			index = Array.IndexOf(heap, existing, 0, size);
++			if (index < 0)
+ 			{
+-				num2 = --bucketCount[num];
+-				while (num3 < num2)
+-				{
+-					array[num3] = array[++num3];
+-				}
+-				size--;
+-				break;
++				return;
+ 			}
+ 		}
++
++		size--;
++		if (index == size)
++		{
++			heap[size] = null;
++		}
++		else
++		{
++			heap[index] = heap[size];
++			sequences[index] = sequences[size];
++			heap[index].HeapIndex = index;
++			heap[size] = null;
++			SiftDown(index);
++			SiftUp(index);
++		}
++	}
++
++	public void UpdateNodePriority(PathNode node)
++	{
++		int index = node.HeapIndex;
++		if (index >= 0 && index < size && heap[index] == node)
++		{
++			SiftUp(index);
++		}
+ 	}
+ 
+ 	public PathNode TryFindValue(PathNode value)
+ 	{
+-		int num = value.Z % 2 * 2 + value.X % 2;
+-		num = (num + 4) % 4;
+-		PathNode[] array = buckets[num];
+-		int num2 = bucketCount[num];
+-		while (--num2 >= 0)
+-		{
+-			if (value.Equals(array[num2]))
+-			{
+-				return array[num2];
+-			}
+-		}
+-		return null;
+-	}
+-
+-	private void ExpandArrays()
+-	{
+-		int num = arraySize * 3 / 2;
+-		for (int i = 0; i < 4; i++)
+-		{
+-			PathNode[] array = new PathNode[num];
+-			int num2 = bucketCount[i];
+-			PathNode[] array2 = buckets[i];
+-			for (int j = 0; j < num2; j++)
+-			{
+-				array[j] = array2[j];
+-			}
+-			buckets[i] = array;
+-		}
+-		arraySize = num;
++		long key = ToKey(value.X, value.Y, value.Z);
++		nodeMap.TryGetValue(key, out PathNode existing);
++		return existing;
+ 	}
+ 
+ 	public IEnumerator<PathNode> GetEnumerator()
+ 	{
+-		for (int bucket = 0; bucket < 4; bucket++)
++		for (int i = 0; i < size; i++)
+ 		{
+-			for (int i = 0; i < bucketCount[bucket]; i++)
+-			{
+-				yield return buckets[bucket][i];
+-			}
++			yield return heap[i];
+ 		}
+ 	}
+ 

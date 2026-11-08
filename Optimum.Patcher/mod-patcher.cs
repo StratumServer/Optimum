@@ -129,6 +129,19 @@ public static class ModPatcher
                     "vineScratchPos",
                     "positionStack",
                 ],
+                ["Vintagestory.Essentials.PathNodeSet"] =
+                [
+                    "heap",
+                    "sequences",
+                    "nodeMap",
+                    "sequenceCounter",
+                    "ToKey",
+                    "HasHigherPriority",
+                    "Swap",
+                    "SiftUp",
+                    "SiftDown",
+                    "UpdateNodePriority",
+                ],
             },
             Interfaces: new()
             {
@@ -141,6 +154,13 @@ public static class ModPatcher
             Methods:
             [
                 new("Vintagestory.GameContent.ModSystemRenderFallingBlocksFast", "genMesh", 1),
+                new("Vintagestory.Essentials.PathNodeSet", ".ctor", 0),
+                new("Vintagestory.Essentials.PathNodeSet", "Clear", 0),
+                new("Vintagestory.Essentials.PathNodeSet", "Add", 1),
+                new("Vintagestory.Essentials.PathNodeSet", "RemoveNearest", 0),
+                new("Vintagestory.Essentials.PathNodeSet", "Remove", 1),
+                new("Vintagestory.Essentials.PathNodeSet", "TryFindValue", 1),
+                new("Vintagestory.Essentials.PathNodeSet", "GetEnumerator", 0),
                 new("Vintagestory.GameContent.BlockEntityParticleEmitter", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
