@@ -1,0 +1,19 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs b/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs
+--- a/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs
++++ b/VintagestoryApi/Common/Model/Animation/AnimatableRenderer.cs
+@@ -104,6 +104,15 @@
+             bool oit = stage == EnumRenderStage.OIT;
+             bool shadowPass = stage == EnumRenderStage.ShadowFar || stage == EnumRenderStage.ShadowNear;
+ 
++            if (!shadowPass && capi.Render?.CurrentFrustumCuller != null)
++            {
++                double radius = Math.Max(ScaleX, Math.Max(ScaleY, ScaleZ)) * 2.5;
++                if (!capi.Render.CurrentFrustumCuller.SphereInFrustum(pos.X + 0.5, pos.Y + 0.5, pos.Z + 0.5, radius))
++                {
++                    return;
++                }
++            }
++
+             if (!oit)
+             {
+                 capi.Render.GLDepthMask(true); // Tyron 28 Oct 2023, why is this line needed here? For some reason, in some cases depth masking is off when rendering here
