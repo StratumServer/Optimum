@@ -1,0 +1,29 @@
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs
+@@ -18,6 +18,8 @@
+ 
+ 	private float[] floatpool = new float[3];
+ 
++	private BlockPos tmpPos;
++
+ 	public BleedingJsonTesselator(JsonTesselator jsonTesselator)
+ 	{
+ 		this.jsonTesselator = jsonTesselator;
+@@ -32,7 +34,7 @@
+ 	{
+ 		helper.vars = vars;
+ 		currentShapeRotationSteps = 0;
+-		BlockPos blockPos = new BlockPos(0);
++		BlockPos blockPos = tmpPos ?? (tmpPos = new BlockPos(0));
+ 		blockPos.SetDimension(vars.dimension);
+ 		blockPos.Set(vars.posX, vars.posY, vars.posZ);
+ 		if (!vars.isDecorTesselate)
+@@ -114,7 +116,7 @@
+ 				currentShapeRotationSteps = ((int)Math.Round(rotateY / 90f) % 4 + 4) % 4;
+ 			}
+ 		}
+-		BlockPos blockPos = new BlockPos(0);
++		BlockPos blockPos = tmpPos ?? (tmpPos = new BlockPos(0));
+ 		blockPos.SetDimension(vars.dimension);
+ 		blockPos.Set(vars.posX, vars.posY, vars.posZ);
+ 		int[] lightRgbsByCorner = jsonTesselator.jsonLightRGB;

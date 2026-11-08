@@ -1,0 +1,45 @@
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SurfaceLayerTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SurfaceLayerTesselator.cs
+@@ -14,6 +14,8 @@
+ 
+ 	private float[] uv = new float[8];
+ 
++	private BlockPos tmpPos;
++
+ 	public void Tesselate(TCTCache vars)
+ 	{
+ 		int num = 0;
+@@ -45,19 +47,25 @@
+ 			for (i = 0; i < 6 && (num2 & (1 << i)) == 0; i++)
+ 			{
+ 			}
+-			if (i < 6 && !block.SideIsSolid(vars.tct.game.BlockAccessor, new BlockPos(vars.posX, vars.posY, vars.posZ), TileSideEnum.GetOpposite(i)))
++			if (i < 6)
+ 			{
+-				if (hasAlternates)
++				BlockPos blockPos = tmpPos ?? (tmpPos = new BlockPos(0));
++				blockPos.SetDimension(vars.dimension);
++				blockPos.Set(vars.posX, vars.posY, vars.posZ);
++				if (!block.SideIsSolid(vars.tct.game.BlockAccessor, blockPos, TileSideEnum.GetOpposite(i)))
+ 				{
+-					BakedCompositeTexture[] array2 = array[i];
+-					if (array2 != null)
++					if (hasAlternates)
+ 					{
+-						num3 = array2[GameMath.Mod(k, array2.Length)].TextureSubId;
+-						goto IL_0161;
++						BakedCompositeTexture[] array2 = array[i];
++						if (array2 != null)
++						{
++							num3 = array2[GameMath.Mod(k, array2.Length)].TextureSubId;
++							goto IL_0161;
++						}
+ 					}
++					num3 = fastBlockTextureSubidsByFace[i];
++					goto IL_0161;
+ 				}
+-				num3 = fastBlockTextureSubidsByFace[i];
+-				goto IL_0161;
+ 			}
+ 		}
+ 		EnumChunkRenderPass enumChunkRenderPass = vars.RenderPass;
