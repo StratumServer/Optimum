@@ -49,7 +49,7 @@ Console.WriteLine($"Patching {Path.GetFileName(vanillaPath)}...");
 // --- Phase 2a: Types to inject ---
 var typesToInject = new List<string>
 {
-    "Optimum.OptimumInfo",
+    "Optimum.Internal.OptimumBuildInfo",
     "Optimum.OptimumUpdateChecker",
     "Optimum.OptimumUpdateUi",
     "Optimum.Update.OverlayManifest",

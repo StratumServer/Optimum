@@ -1,6 +1,7 @@
 using System;
 using System.Net.Http;
 using System.Threading;
+using Optimum.Internal;
 using Optimum.Update;
 
 namespace Optimum;
@@ -22,7 +23,7 @@ public static class OptimumUpdateChecker
     public static bool UpdateAvailable { get; private set; }
 
     /// <summary>Direct URL to the release page (for the link).</summary>
-    public static string ReleaseUrl { get; private set; } = OptimumInfo.Url + "/releases/latest";
+    public static string ReleaseUrl { get; private set; } = OptimumBuildInfo.Url + "/releases/latest";
 
     private static int _started;
 
@@ -46,16 +47,16 @@ public static class OptimumUpdateChecker
             using var client = new HttpClient();
             client.Timeout = TimeSpan.FromSeconds(5);
             client.MaxResponseContentBufferSize = OverlayStager.MaxReleaseMetadataBytes;
-            client.DefaultRequestHeaders.Add("User-Agent", "Optimum/" + OptimumInfo.Version);
+            client.DefaultRequestHeaders.Add("User-Agent", "Optimum/" + OptimumBuildInfo.Version);
             var json = client.GetStringAsync(ReleasesUrl).GetAwaiter().GetResult();
 
             var tagName = ExtractTagName(json);
             if (tagName == null) return;
 
             LatestVersion = tagName.TrimStart('v', 'V');
-            ReleaseUrl = OptimumInfo.Url + "/releases/tag/" + tagName;
+            ReleaseUrl = OptimumBuildInfo.Url + "/releases/tag/" + tagName;
 
-            if (CompareVersions(LatestVersion, OptimumInfo.Version) > 0)
+            if (CompareVersions(LatestVersion, OptimumBuildInfo.Version) > 0)
             {
                 UpdateAvailable = true;
                 string rid = OperatingSystem.IsWindows() ? "win-x64" : "linux-x64";

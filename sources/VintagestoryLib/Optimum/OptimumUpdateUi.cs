@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using Optimum.Internal;
 using Optimum.Update;
 using Vintagestory.API.Config;
 using Vintagestory.Client;
@@ -119,7 +120,7 @@ public static class OptimumUpdateUi
 #endif
         _updater = new OptimumUpdater(
             GameDirectory,
-            OptimumInfo.Version,
+            OptimumBuildInfo.Version,
             GameVersion.ShortGameVersion,
             OperatingSystem.IsWindows() ? "win-x64" : "linux-x64",
             releaseBase: releaseBase,
@@ -138,7 +139,7 @@ public static class OptimumUpdateUi
         try
         {
             string dir = GameDirectory;
-            OverlayStager.SweepStale(dir, OptimumInfo.Version);
+            OverlayStager.SweepStale(dir, OptimumBuildInfo.Version);
             UpdateResult result = UpdateResult.Read(dir);
             if (result is null) return;
             UpdateResult.Clear(dir);
