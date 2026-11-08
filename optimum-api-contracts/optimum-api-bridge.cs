@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -20,6 +21,12 @@ public static class OptimumApiBridge
         typeof(FrustumCulling).GetField("playerPos", BindingFlags.Instance | BindingFlags.NonPublic)
         ?? throw new MissingFieldException(typeof(FrustumCulling).FullName, "playerPos");
     private static int inventoryDirty = 1;
+
+    internal static readonly SearchValues<char> CodePartDelimiter = SearchValues.Create("-");
+    internal static readonly SearchValues<char> WildcardStar = SearchValues.Create("*");
+    internal static readonly SearchValues<char> AssetColonDelimiter = SearchValues.Create(":");
+    internal static readonly SearchValues<char> WildcardTriggerChars = SearchValues.Create("*@");
+    internal static readonly SearchValues<char> AssetPathDelimiters = SearchValues.Create(":/");
 
     public static void RgbToHsvInts(int red, int green, int blue, int[] destination)
     {
@@ -416,7 +423,8 @@ public static class OptimumApiBridge
     {
         if (obj?.Code == null) return null;
         string path = obj.Code.Path;
-        if (posFromRight == 0 && !path.Contains('-')) return path;
+        ReadOnlySpan<char> pathSpan = path.AsSpan();
+        if (posFromRight == 0 && pathSpan.IndexOfAny(CodePartDelimiter) < 0) return path;
         if (posFromRight < 0)
         {
             _ = path.Length;
@@ -426,11 +434,11 @@ public static class OptimumApiBridge
         int end = path.Length;
         for (int skip = 0; skip < posFromRight; skip++)
         {
-            int dash = path.LastIndexOf('-', end - 1);
+            int dash = pathSpan.Slice(0, end).LastIndexOfAny(CodePartDelimiter);
             if (dash < 0) return null;
             end = dash;
         }
-        int start = path.LastIndexOf('-', end - 1) + 1;
+        int start = pathSpan.Slice(0, end).LastIndexOfAny(CodePartDelimiter) + 1;
         return path.Substring(start, end - start);
     }
 
@@ -438,7 +446,8 @@ public static class OptimumApiBridge
     {
         if (obj?.Code == null) return null;
         string path = obj.Code.Path;
-        if (posFromLeft == 0 && !path.Contains('-')) return path;
+        ReadOnlySpan<char> pathSpan = path.AsSpan();
+        if (posFromLeft == 0 && pathSpan.IndexOfAny(CodePartDelimiter) < 0) return path;
         if (posFromLeft < 0)
         {
             _ = path.Length;
@@ -447,16 +456,22 @@ public static class OptimumApiBridge
 
         int start = 0;
         int part = 0;
-        int pathLength = path.Length;
-        for (int i = 0; i < pathLength; i++)
+        ReadOnlySpan<char> remaining = pathSpan;
+        while (true)
         {
-            if (path[i] != '-') continue;
-            if (part == posFromLeft) return path.Substring(start, i - start);
+            int dashIdx = remaining.IndexOfAny(CodePartDelimiter);
+            if (dashIdx < 0)
+            {
+                return part == posFromLeft ? path.Substring(start) : null;
+            }
+            if (part == posFromLeft)
+            {
+                return path.Substring(start, dashIdx);
+            }
             part++;
-            start = i + 1;
+            start += dashIdx + 1;
+            remaining = remaining.Slice(dashIdx + 1);
         }
-
-        return part == posFromLeft ? path.Substring(start) : null;
     }
 
     public static bool WildcardUtilMatch(AssetLocation? needle, AssetLocation? haystack)
@@ -480,12 +495,13 @@ public static class OptimumApiBridge
         string? haystack = inCode.Path;
         if (needle == null || haystack == null) return false;
 
-        if (!needle.Contains('*') && !needle.StartsWith("@"))
+        ReadOnlySpan<char> needleSpan = needle.AsSpan();
+        if (needleSpan.IndexOfAny(WildcardTriggerChars) < 0)
             return needle.Length == haystack.Length && needle.Equals(haystack, StringComparison.OrdinalIgnoreCase);
 
         if (!WildcardUtil.Match(needle, haystack)) return false;
 
-        if (allowedVariants != null && allowedVariants.Length > 0 && needle.IndexOf('*') != -1)
+        if (allowedVariants != null && allowedVariants.Length > 0 && needleSpan.IndexOfAny(WildcardStar) >= 0)
         {
             if (!WildcardUtil.MatchesVariants(wildCard, inCode, allowedVariants)) return false;
         }
@@ -508,9 +524,13 @@ public static class OptimumApiBridge
         ReadOnlySpan<char> replacePath = replacePathStr.AsSpan();
 
         int starCount = 0;
-        for (int i = 0; i < searchPath.Length; i++)
+        ReadOnlySpan<char> searchScan = searchPath;
+        while (true)
         {
-            if (searchPath[i] == '*') starCount++;
+            int idx = searchScan.IndexOfAny(WildcardStar);
+            if (idx < 0) break;
+            starCount++;
+            searchScan = searchScan.Slice(idx + 1);
         }
 
         if (starCount == 0)
@@ -529,9 +549,13 @@ public static class OptimumApiBridge
         }
 
         int replaceStars = 0;
-        for (int i = 0; i < replacePath.Length; i++)
+        ReadOnlySpan<char> replaceScan = replacePath;
+        while (true)
         {
-            if (replacePath[i] == '*') replaceStars++;
+            int idx = replaceScan.IndexOfAny(WildcardStar);
+            if (idx < 0) break;
+            replaceStars++;
+            replaceScan = replaceScan.Slice(idx + 1);
         }
 
         int toFill = Math.Min(replaceStars, starCount);
@@ -555,7 +579,7 @@ public static class OptimumApiBridge
 
             while (repIdx < rSpan.Length)
             {
-                int nextStar = rSpan.Slice(repIdx).IndexOf('*');
+                int nextStar = rSpan.Slice(repIdx).IndexOfAny(WildcardStar);
                 if (nextStar < 0 || capIdx >= fillCount)
                 {
                     rSpan.Slice(repIdx).CopyTo(dest.Slice(destIdx));
@@ -578,7 +602,7 @@ public static class OptimumApiBridge
 
     private static bool MatchWildcardGreedy(ReadOnlySpan<char> text, ReadOnlySpan<char> pattern, Span<Range> captures, int captureIndex, int textOffset)
     {
-        int starIdx = pattern.IndexOf('*');
+        int starIdx = pattern.IndexOfAny(WildcardStar);
         if (starIdx < 0)
         {
             return text.SequenceEqual(pattern);
@@ -591,7 +615,7 @@ public static class OptimumApiBridge
         }
 
         ReadOnlySpan<char> restPattern = pattern.Slice(starIdx + 1);
-        int restStar = restPattern.IndexOf('*');
+        int restStar = restPattern.IndexOfAny(WildcardStar);
         if (restStar < 0)
         {
             if (!text.Slice(starIdx).EndsWith(restPattern))
@@ -663,7 +687,7 @@ public static class OptimumApiBridge
         }
 
         ReadOnlySpan<char> span = domainAndPath.AsSpan();
-        int colonIndex = span.IndexOf(':');
+        int colonIndex = span.IndexOfAny(AssetColonDelimiter);
 
         if (colonIndex == -1)
         {
