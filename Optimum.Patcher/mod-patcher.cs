@@ -140,6 +140,7 @@ public static class ModPatcher
             },
             Methods:
             [
+                new("Vintagestory.GameContent.ModSystemRenderFallingBlocksFast", "genMesh", 1),
                 new("Vintagestory.GameContent.BlockEntityParticleEmitter", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
