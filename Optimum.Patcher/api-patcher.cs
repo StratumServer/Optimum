@@ -101,6 +101,8 @@ public static class ApiPatcher
             method.Name == "EvolvingNatFloatEquals" && method.Parameters.Count == 2);
         var clientAnimatorInitMatrices = bridge.Methods.Single(method =>
             method.Name == "ClientAnimatorInitMatrices" && method.Parameters.Count == 2);
+        var assetLocationResolveToDomainAndPath = bridge.Methods.Single(method =>
+            method.Name == "AssetLocationResolveToDomainAndPath" && method.Parameters.Count == 3);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -131,6 +133,9 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(registryObjectFirstCodePart),
             vanilla.MainModule.ImportReference(registryObjectLastCodePart));
+        int assetLocationMethods = PatchAssetLocation(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(assetLocationResolveToDomainAndPath));
         int wildcardUtilMethods = PatchWildcardUtil(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(wildcardUtilMatchTwoArg),
@@ -207,6 +212,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 RegistryObject methods patched, applied {registryObjectMethods}.");
         }
+        if (assetLocationMethods != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 AssetLocation method patched, applied {assetLocationMethods}.");
+        }
         if (wildcardUtilMethods != 3)
         {
             throw new InvalidOperationException(
@@ -277,6 +287,7 @@ public static class ApiPatcher
                 $"{threadPoolDiagnostics} thread pool diagnostics patch, " +
                 $"{clientApiThreadContract} client API thread contract, " +
                 $"{ascii85Methods} Ascii85 methods, {registryObjectMethods} RegistryObject code part methods, " +
+                $"{assetLocationMethods} AssetLocation resolve method, " +
                 $"{wildcardUtilMethods} WildcardUtil methods, " +
                 $"{evolvingNatFloatOperators} EvolvingNatFloat equality operators, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
@@ -363,6 +374,26 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.FirstCodePart(int) + LastCodePart(int) -> OptimumApiBridge");
         return 2;
+    }
+
+    internal static int PatchAssetLocation(
+        ModuleDefinition module,
+        MethodReference resolveBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.AssetLocation";
+        var assetLocation = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var resolveMethod = assetLocation.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "ResolveToDomainAndPath" &&
+            method.Parameters.Count == 3)
+            ?? throw new InvalidOperationException($"{typeName}.ResolveToDomainAndPath is missing from the vanilla API.");
+
+        RewriteThreeArgForwarder(resolveMethod, resolveBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName}.ResolveToDomainAndPath -> OptimumApiBridge");
+        return 1;
     }
 
     private static void RewriteTwoArgForwarder(MethodDefinition target, MethodReference bridgeMethod)
