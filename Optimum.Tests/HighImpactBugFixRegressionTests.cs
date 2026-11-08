@@ -1124,6 +1124,32 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("OptimumCircuitBreakerRegistry.ResetAll()", statusSource);
     }
 
+    [Fact]
+    public void OptimumStatus_SurfacesControllerPhasesShaderReportAndBreakers()
+    {
+        string statusSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VSEssentials/Systems/OptimumStatus.cs"));
+        Assert.Contains("shader-report: {GetShaderCompatibilityStatusSummary()}", statusSource);
+        Assert.Contains("adaptive-workers: {GetAdaptiveWorkerSummary()}", statusSource);
+        Assert.Contains("adaptive-radius: {GetAdaptiveRadiusSummary()}", statusSource);
+
+        string workerSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryApi/Config/AdaptiveWorkerController.cs"));
+        Assert.Contains("enum AdaptiveWorkerPhase", workerSource);
+        Assert.Contains("CurrentPhase", workerSource);
+        Assert.Contains("PhaseName", workerSource);
+
+        string radiusSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryApi/Config/OptimumAdaptiveRadiusController.cs"));
+        Assert.Contains("enum AdaptiveRadiusPhase", radiusSource);
+        Assert.Contains("CurrentPhase", radiusSource);
+        Assert.Contains("PhaseName", radiusSource);
+
+        string configSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryApi/Config/OptimumConfig.cs"));
+        Assert.Contains("ShaderCompatibilityReportStatus", configSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

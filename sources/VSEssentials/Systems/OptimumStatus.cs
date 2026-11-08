@@ -384,7 +384,40 @@ public class OptimumStatusModSystem : ModSystem
         return TextCommandResult.Success(msg);
     }
 
-    private static string BuildStatus()
+    public static string GetShaderCompatibilityStatusSummary()
+    {
+        string status = OptimumConfig.ShaderCompatibilityReportStatus;
+        int disabledCount = OptimumConfig.ShaderCompatibilityDisabledFeatures.Count;
+        if (status == "clean" && disabledCount > 0)
+        {
+            return $"clean (disabled_features={disabledCount})";
+        }
+        return status;
+    }
+
+    public static string GetAdaptiveWorkerSummary()
+    {
+        var ctrl = AdaptiveWorkerController.ActiveInstance;
+        if (ctrl == null)
+        {
+            return "inactive (no controller registered)";
+        }
+        return $"phase={ctrl.PhaseName}, cap={ctrl.ActiveWorkerCap}, contention={ctrl.ContentionRatio:P1}, chunks={ctrl.TotalChunksGenerated}";
+    }
+
+    public static string GetAdaptiveRadiusSummary()
+    {
+        var ctrl = OptimumAdaptiveRadiusController.ActiveInstance;
+        if (ctrl == null)
+        {
+            if (!OptimumConfig.EffectiveAdaptiveRadiusEnabled)
+                return "disabled";
+            return $"phase=cold, effective={OptimumConfig.AdaptiveRadiusEffective}";
+        }
+        return $"phase={ctrl.PhaseName}, effective={ctrl.EffectiveRadius}, smoothedDepth={ctrl.SmoothedQueueDepth:F1}";
+    }
+
+    public static string BuildStatus()
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Optimum v{OptimumConfig.Version}");
@@ -393,6 +426,9 @@ public class OptimumStatusModSystem : ModSystem
             sb.AppendLine($"  {name}: {value}");
         }
         sb.AppendLine($"  threadpool: {GetThreadPoolMaxThreadsSummary()}");
+        sb.AppendLine($"  shader-report: {GetShaderCompatibilityStatusSummary()}");
+        sb.AppendLine($"  adaptive-workers: {GetAdaptiveWorkerSummary()}");
+        sb.AppendLine($"  adaptive-radius: {GetAdaptiveRadiusSummary()}");
         sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
         sb.AppendLine(OptimumCircuitBreakerRegistry.GetBreakersSummary());
         // Issue #119 follow-up: what the interop protocol agreed with a peer this session, so a
