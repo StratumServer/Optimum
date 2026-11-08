@@ -18,7 +18,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs b/V
  	private Cuboidi? attachmentArea;
  
  	private IAttachableToEntity? attrAtta;
-@@ -327,20 +333,33 @@ public class BlockCookingContainer : Block, IInFirepitRendererSupplier, IAttacha
+@@ -327,20 +333,37 @@ public class BlockCookingContainer : Block, IInFirepitRendererSupplier, IAttacha
  		return num;
  	}
  
@@ -50,6 +50,10 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCookingContainer.cs b/V
 +		}
 +		finally
 +		{
++			if (reuse)
++			{
++				optimumCookingStacks?.Clear();
++			}
 +			optimumCookingStacksDepth--;
  		}
 -		return list.ToArray();

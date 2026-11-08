@@ -18,7 +18,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityContainer.cs b/VS
  	public abstract InventoryBase Inventory { get; }
  
  	public abstract string InventoryClassName { get; }
-@@ -83,19 +89,32 @@ public abstract class BlockEntityContainer : BlockEntity, IBlockEntityContainer
+@@ -83,19 +89,36 @@ public abstract class BlockEntityContainer : BlockEntity, IBlockEntityContainer
  		base.OnBlockBroken(byPlayer);
  	}
  
@@ -48,6 +48,10 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityContainer.cs b/VS
 +		}
 +		finally
 +		{
++			if (reuse)
++			{
++				optimumNonEmptyStacks?.Clear();
++			}
 +			optimumNonEmptyDepth--;
  		}
 -		return list.ToArray();
