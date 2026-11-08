@@ -115,6 +115,7 @@ public class OptimumStatusModSystem : ModSystem
                 .HandleWith(_ =>
                 {
                     OptimumDiagnostics.ResetAllCounters();
+                    OptimumCircuitBreakerRegistry.ResetAll();
                     return TextCommandResult.Success(Lang.Get("optimum-cmd-reset-done"));
                 })
             .EndSubCommand()
@@ -393,6 +394,7 @@ public class OptimumStatusModSystem : ModSystem
         }
         sb.AppendLine($"  threadpool: {GetThreadPoolMaxThreadsSummary()}");
         sb.AppendLine(OptimumCompatibilityGuard.GetPerformanceModsReport());
+        sb.AppendLine(OptimumCircuitBreakerRegistry.GetBreakersSummary());
         // Issue #119 follow-up: what the interop protocol agreed with a peer this session, so a
         // field log says whether the negotiation ran and who holds what down.
         sb.AppendLine(VsModInterop.DescribeInterop());

@@ -154,16 +154,17 @@ public class EntityRenderP0Tests
         string renderer = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityShapeRenderer.cs.patch");
         string patcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
 
-        Assert.Contains("OptimumConfig.EffectiveEntityLightBatch && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0", system);
+        Assert.Contains("OptimumConfig.EffectiveEntityLightBatch && optimumEntityLightBreaker.IsClosed && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0", system);
         Assert.Contains("OptimumConfig.EffectiveEntityShaderStateCache", system);
-        Assert.Contains("!optimumEntityShaderCacheDisabled", system);
+        Assert.Contains("optimumEntityShaderCacheBreaker.IsClosed", system);
         Assert.Contains("OptimumEntityLightBatchSize = 256", system);
         Assert.Contains("OptimumEntityLightMinimumSamples = 4", system);
         Assert.Contains("optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples", system);
         Assert.Contains("worldChunk is ClientChunk", system);
         Assert.Contains("finally", system);
         Assert.Contains("batchId = 0;", system);
-        Assert.Contains("optimumEntityShaderFailureLogged", system);
+        Assert.Contains("optimumEntityLightBreaker", system);
+        Assert.Contains("optimumEntityShaderCacheBreaker", system);
         Assert.Contains("lock (packUnpackLock)", clientChunk);
         Assert.Contains("Unpack_ReadOnly();", clientChunk);
         Assert.Contains("if (Disposed)", clientChunk);

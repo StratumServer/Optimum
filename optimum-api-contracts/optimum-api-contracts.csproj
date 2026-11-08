@@ -15,6 +15,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveTessWorkerController.cs" Link="Config\AdaptiveTessWorkerController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAdaptiveRadiusController.cs" Link="Config\OptimumAdaptiveRadiusController.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumAnimLod.cs" Link="Config\OptimumAnimLod.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumCircuitBreaker.cs" Link="Config\OptimumCircuitBreaker.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumConfig.cs" Link="Config\OptimumConfig.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumGuiMetrics.cs" Link="Config\OptimumGuiMetrics.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Model\Mesh\OptimumMeshPartPool.cs" Link="Client\Model\Mesh\OptimumMeshPartPool.cs" />
