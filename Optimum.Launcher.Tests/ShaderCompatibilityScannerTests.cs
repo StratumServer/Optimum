@@ -142,6 +142,72 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
         }
     }
 
+    [Fact]
+    public void StandardRendererWithoutShadersPreservesEntityAndOitOptimizations()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "BogieRenderer.dll"), Encoding.UTF8.GetBytes(
+            "RegisterRenderer OnRenderFrame EnumRenderStage IRenderer"));
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains(report.Sources, source => source.Name == "BogieRenderer");
+        Assert.DoesNotContain("EntityLightBatch", report.DisabledFeatures);
+        Assert.DoesNotContain("EntityShaderStateCache", report.DisabledFeatures);
+        Assert.DoesNotContain("Oit", report.DisabledFeatures);
+        Assert.DoesNotContain("MapPageCache", report.DisabledFeatures);
+        Assert.DoesNotContain("ShaderPreprocessParallel", report.DisabledFeatures);
+    }
+
+    [Fact]
+    public void YangTransportModPreservesAllOptimizations()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "yangtransport.dll"), Encoding.UTF8.GetBytes(
+            "RegisterRenderer OnRenderFrame EnumRenderStage IRenderer"));
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains(report.Sources, source => source.Name == "yangtransport");
+        Assert.DoesNotContain("EntityLightBatch", report.DisabledFeatures);
+        Assert.DoesNotContain("EntityShaderStateCache", report.DisabledFeatures);
+        Assert.DoesNotContain("Oit", report.DisabledFeatures);
+        Assert.DoesNotContain("MapPageCache", report.DisabledFeatures);
+        Assert.DoesNotContain("ShaderPreprocessParallel", report.DisabledFeatures);
+    }
+
+    [Fact]
+    public void IntrusiveShaderHookDisablesExpectedFeatures()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "IntrusiveMod.dll"), Encoding.UTF8.GetBytes(
+            "Harmony ShaderRegistry LoadShader"));
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains(report.Sources, source => source.Name == "IntrusiveMod");
+        Assert.Contains("EntityLightBatch", report.DisabledFeatures);
+        Assert.Contains("EntityShaderStateCache", report.DisabledFeatures);
+        Assert.Contains("Oit", report.DisabledFeatures);
+        Assert.Contains("MapPageCache", report.DisabledFeatures);
+        Assert.Contains("ShaderPreprocessParallel", report.DisabledFeatures);
+    }
+
     private static void WriteHookAssembly(string path)
     {
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(
