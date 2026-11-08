@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..7e33220 100644
+index 4d08f84..0693ac0 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-@@ -48,6 +48,10 @@ public class GuiCompositeSettings : GuiComposite
+@@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
+ 
+ 	private ElementBounds iButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private ElementBounds dButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
@@ -13,7 +15,11 @@ index 4d08f84..7e33220 100644
  	private ElementBounds backButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
  	private List<ConfigItem> mousecontrolItems = new List<ConfigItem>();
-@@ -144,6 +148,7 @@ public class GuiCompositeSettings : GuiComposite
+ 
+ 	private bool mousecontrolsTabActive;
+@@ -142,19 +146,21 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds;
+ 			cButtonBounds.ParentBounds = elementBounds;
  			sButtonBounds.ParentBounds = elementBounds;
  			iButtonBounds.ParentBounds = elementBounds;
  			dButtonBounds.ParentBounds = elementBounds;
@@ -21,7 +27,8 @@ index 4d08f84..7e33220 100644
  			result = handler.dialogBase(dialogName + "main", elementBounds.fixedWidth, elementBounds.fixedHeight).BeginChildElements(elementBounds).AddToggleButton(Lang.Get("setting-graphics-header"), font, OnGraphicsOptions, gButtonBounds, "graphics")
  				.AddToggleButton(Lang.Get("setting-mouse-header"), font, OnMouseOptions, mButtonBounds, "mouse")
  				.AddToggleButton(Lang.Get("setting-controls-header"), font, OnControlOptions, cButtonBounds, "controls")
-@@ -152,7 +157,8 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-accessibility-header"), font, OnAccessibilityOptions, aButtonBounds, "accessibility")
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
  				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
@@ -31,7 +38,11 @@ index 4d08f84..7e33220 100644
  		}
  		else
  		{
-@@ -170,6 +176,7 @@ public class GuiCompositeSettings : GuiComposite
+ 			ElementBounds elementBounds2 = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterFixed).WithFixedPosition(0.0, 75.0);
+ 			double num = backButtonBounds.fixedX + backButtonBounds.fixedWidth + 35.0;
+@@ -168,10 +174,11 @@ public class GuiCompositeSettings : GuiComposite
+ 			mButtonBounds.ParentBounds = elementBounds3;
+ 			cButtonBounds.ParentBounds = elementBounds3;
  			sButtonBounds.ParentBounds = elementBounds3;
  			iButtonBounds.ParentBounds = elementBounds3;
  			dButtonBounds.ParentBounds = elementBounds3;
@@ -39,7 +50,11 @@ index 4d08f84..7e33220 100644
  			backButtonBounds.ParentBounds = elementBounds3;
  			result = handler.GuiComposers.Create(dialogName + "ingame", elementBounds2).AddShadedDialogBG(elementBounds3, withTitleBar: false).AddStaticCustomDraw(elementBounds3, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
  			{
-@@ -187,6 +194,7 @@ public class GuiCompositeSettings : GuiComposite
+ 				ctx.SetSourceRGBA(1.0, 1.0, 1.0, 0.1);
+ 				GuiElement.RoundRectangle(ctx, GuiElement.scaled(5.0) + bounds.bgDrawX, GuiElement.scaled(5.0) + bounds.bgDrawY, bounds.OuterWidth - GuiElement.scaled(10.0), GuiElement.scaled(75.0), 1.0);
+@@ -185,10 +192,11 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddToggleButton(Lang.Get("setting-sound-header"), font, OnSoundOptions, sButtonBounds, "sounds")
+ 				.AddToggleButton(Lang.Get("setting-interface-header"), font, OnInterfaceOptions, iButtonBounds, "interface")
  				.AddIf(ClientSettings.DeveloperMode)
  				.AddToggleButton(Lang.Get("setting-dev-header"), font, OnDeveloperOptions, dButtonBounds, "developer")
  				.EndIf()
@@ -47,7 +62,11 @@ index 4d08f84..7e33220 100644
  				.AddButton(Lang.Get("general-back"), delegate
  				{
  					clickedItemIndex = null;
-@@ -201,6 +209,7 @@ public class GuiCompositeSettings : GuiComposite
+ 					hotkeyCapturer?.EndCapture(wasCancelled: true);
+ 					return handler.OnBackPressed();
+@@ -199,10 +207,11 @@ public class GuiCompositeSettings : GuiComposite
+ 		result.GetToggleButton("controls").SetValue(currentTab == "controls");
+ 		result.GetToggleButton("accessibility").SetValue(currentTab == "accessibility");
  		result.GetToggleButton("sounds").SetValue(currentTab == "sounds");
  		result.GetToggleButton("interface").SetValue(currentTab == "interface");
  		result.GetToggleButton("developer")?.SetValue(currentTab == "developer");
@@ -55,7 +74,11 @@ index 4d08f84..7e33220 100644
  		return result;
  	}
  
-@@ -237,6 +246,8 @@ public class GuiCompositeSettings : GuiComposite
+ 	private void updateButtonBounds()
+ 	{
+@@ -235,20 +244,23 @@ public class GuiCompositeSettings : GuiComposite
+ 		double width5 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
+ 		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-interface-header"));
  		double width6 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		textExtents = cairoFont.GetTextExtents(Lang.Get("setting-dev-header"));
  		double width7 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
@@ -64,7 +87,9 @@ index 4d08f84..7e33220 100644
  		textExtents = cairoFont.GetTextExtents(Lang.Get("general-back"));
  		double width8 = textExtents.Width / (double)ClientSettings.GUIScale + 15.0;
  		gButtonBounds.WithFixedWidth(width);
-@@ -246,7 +257,8 @@ public class GuiCompositeSettings : GuiComposite
+ 		mButtonBounds.WithFixedWidth(width2).FixedRightOf(gButtonBounds, 15.0);
+ 		cButtonBounds.WithFixedWidth(width3).FixedRightOf(mButtonBounds, 15.0);
+ 		aButtonBounds.WithFixedWidth(width4).FixedRightOf(cButtonBounds, 15.0);
  		sButtonBounds.WithFixedWidth(width5).FixedRightOf(aButtonBounds, 15.0);
  		iButtonBounds.WithFixedWidth(width6).FixedRightOf(sButtonBounds, 15.0);
  		dButtonBounds.WithFixedWidth(width7).FixedRightOf(iButtonBounds, 15.0);
@@ -74,7 +99,11 @@ index 4d08f84..7e33220 100644
  	}
  
  	internal bool OpenSettingsMenu()
-@@ -363,7 +375,15 @@ public class GuiCompositeSettings : GuiComposite
+ 	{
+ 		OnGraphicsOptions(on: true);
+@@ -361,11 +373,19 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddSwitch(onOcclusionCullingChanged, elementBounds4 = elementBounds4.BelowCopy(0.0, 17.0), "occlusionCullingSwitch")
+ 				.AddStaticText(Lang.Get("setting-name-lodbiasfar"), CairoFont.WhiteSmallishText(), elementBounds3 = elementBounds3.BelowCopy(0.0, 4.0))
  				.AddHoverText(Lang.Get("setting-hover-lodbiasfar"), CairoFont.WhiteSmallText(), 250, elementBounds3.FlatCopy().WithFixedHeight(25.0));
  			ActionConsumable<int> onNewSliderValue2 = onLodbiasFarChanged;
  			ElementBounds elementBounds7 = elementBounds4.BelowCopy(0.0, 21.0).WithFixedSize(num, 20.0);
@@ -91,7 +120,11 @@ index 4d08f84..7e33220 100644
  			{
  				Lang.Get("windowborder-resizable"),
  				Lang.Get("windowborder-fixed"),
-@@ -412,6 +432,13 @@ public class GuiCompositeSettings : GuiComposite
+ 				Lang.Get("windowborder-hidden")
+ 			}, selectedIndex: (int)ScreenManager.Platform.WindowBorder, onSelectionChanged: OnWindowBorderChanged, key: "windowBorder");
+@@ -410,10 +430,17 @@ public class GuiCompositeSettings : GuiComposite
+ 				.AddSlider(onDynamicLightsChanged, elementBounds2 = elementBounds2.BelowCopy(0.0, 21.0).WithFixedSize(num, 20.0), "dynamicLightsSlider")
+ 				.AddHoverText(array[15], CairoFont.WhiteSmallText(), 250, elementBounds.FlatCopy().WithFixedHeight(25.0))
  				.AddStaticText(Lang.Get("setting-name-resolution"), CairoFont.WhiteSmallishText(), elementBounds = elementBounds.BelowCopy(0.0, 4.0))
  				.AddHoverText(array[6], CairoFont.WhiteSmallText(), 250, elementBounds.FlatCopy().WithFixedHeight(25.0))
  				.AddSlider(onResolutionChanged, elementBounds2 = elementBounds2.BelowCopy(0.0, 21.0), "resolutionSlider")
@@ -105,7 +138,11 @@ index 4d08f84..7e33220 100644
  				.AddRichtext(Lang.Get("help-framerateissues"), CairoFont.WhiteDetailText(), elementBounds = elementBounds.BelowCopy(0.0, 5.0))
  				.EndChildElements();
  		}
-@@ -521,6 +548,24 @@ public class GuiCompositeSettings : GuiComposite
+ 		else
+ 		{
+@@ -519,10 +546,28 @@ public class GuiCompositeSettings : GuiComposite
+ 			{
+ 				float num = (float)value / 100f;
  				return num + "x (" + (int)(num * num * 100f) + "%)";
  			};
  			composer.GetSlider("lodbiasfarSlider").TriggerOnlyOnMouseUp();
@@ -130,7 +167,11 @@ index 4d08f84..7e33220 100644
  		}
  		composer.GetSlider("gammaSlider").Enabled = true;
  		composer.GetSlider("gammaSlider").OnSliderTooltip = null;
-@@ -1742,6 +1787,319 @@ public class GuiCompositeSettings : GuiComposite
+ 		composer.GetSlider("gammaSlider").ComposeHoverTextElement();
+ 		composer.GetSlider("gammaSlider").SetValues((int)Math.Round(ClientSettings.GammaLevel * 100f), 30, 300, 5);
+@@ -1740,10 +1785,313 @@ public class GuiCompositeSettings : GuiComposite
+ 		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
+ 		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
  	}
  
@@ -148,27 +189,11 @@ index 4d08f84..7e33220 100644
 +		composer.CurParentBounds.WithChild(optimumContentBounds);
 +		optimumContainer = new GuiElementContainer(composer.Api, optimumContentBounds);
 +		AddOptimumSwitchRow("optimum-bgfps", "optimum-bgfps-tooltip", onOptimumBackgroundFpsChanged, "optBgFps");
-+		AddOptimumSwitchRow("optimum-framepacing", "optimum-framepacing-tooltip", onOptimumFramePacingChanged, "optFramePacing");
-+		AddOptimumSwitchRow("optimum-shadowcull", "optimum-shadowcull-tooltip", onOptimumShadowCullChanged, "optShadowCull");
-+		AddOptimumSliderRow("optimum-shadowdist", onOptimumShadowDistChanged, "optShadowDist");
-+		AddOptimumSwitchRow("optimum-repulsion", "optimum-repulsion-tooltip", onOptimumRepulsionChanged, "optRepulsion");
-+		AddOptimumSliderRow("optimum-repulsiondist", onOptimumRepulsionDistChanged, "optRepulsionDist");
-+		AddOptimumSwitchRow("optimum-dynlight", "optimum-dynlight-tooltip", onOptimumDynLightChanged, "optDynLight");
-+		AddOptimumSwitchRow("optimum-animblocklod", "optimum-animblocklod-tooltip", onOptimumAnimBlockLodChanged, "optAnimBlockLod");
-+		AddOptimumSwitchRow("optimum-shadowfarveg", "optimum-shadowfarveg-tooltip", onOptimumShadowFarVegChanged, "optShadowFarVeg");
-+		AddOptimumSwitchRow("optimum-weatherwind", "optimum-weatherwind-tooltip", onOptimumWeatherWindChanged, "optWeatherWind");
-+		AddOptimumSwitchRow("optimum-particledist", "optimum-particledist-tooltip", onOptimumParticleDistChanged, "optParticleDist");
-+		AddOptimumSwitchRow("optimum-occlusionscale", "optimum-occlusionscale-tooltip", onOptimumOcclusionScaleChanged, "optOcclusionScale");
-+		AddOptimumSwitchRow("optimum-dynlightcache", "optimum-dynlightcache-tooltip", onOptimumDynLightCacheChanged, "optDynLightCache");
-+		AddOptimumSwitchRow("optimum-entitylightbatch", "optimum-entitylightbatch-tooltip", onOptimumEntityLightBatchChanged, "optEntityLightBatch");
-+		AddOptimumSwitchRow("optimum-entityshadercache", "optimum-entityshadercache-tooltip", onOptimumEntityShaderCacheChanged, "optEntityShaderCache");
 +		AddOptimumDropdownRow("optimum-guigpu", "optimum-guigpu-tooltip", new string[] { "skia-gpu", "skia-cpu", "cairo" }, new string[] { "Skia GPU", "Skia CPU", "Cairo" }, 0, onOptimumGuiRenderBackendChanged, "optGuiRenderBackend");
 +		AddOptimumSwitchRow("optimum-godrayscap", "optimum-godrayscap-tooltip", onOptimumGodRaysCapChanged, "optGodRaysCap");
++		AddOptimumSliderRow("optimum-shadowdist", onOptimumShadowDistChanged, "optShadowDist");
 +#if OPTIMUM_GREEDY_MESH
-+		AddOptimumSwitchRow("optimum-greedymesh", "optimum-greedymesh-tooltip", onOptimumGreedyMeshChanged, "optGreedyMesh");
-+		AddOptimumSliderRow("optimum-greedyspan", onOptimumGreedySpanChanged, "optGreedySpan");
-+		AddOptimumSliderRow("optimum-greedylighttol", onOptimumGreedyLightTolChanged, "optGreedyLightTol");
-+		AddOptimumSliderRow("optimum-greedyfardist", onOptimumGreedyFarDistChanged, "optGreedyFarDist");
++		AddOptimumDropdownRow("optimum-greedymesh-preset", "optimum-greedymesh-preset-tooltip", new string[] { "off", "balanced", "aggressive" }, new string[] { Lang.Get("optimum-greedymesh-off"), Lang.Get("optimum-greedymesh-balanced"), Lang.Get("optimum-greedymesh-aggressive") }, 0, onOptimumGreedyMeshPresetChanged, "optGreedyMeshPreset");
 +#endif
 +		AddOptimumCompatibilityStatus();
 +		optimumContainer.CalcTotalHeight();
@@ -193,20 +218,6 @@ index 4d08f84..7e33220 100644
 +		handler.LoadComposer(composer);
 +		composer.GetToggleButton("optimum")?.SetValue(true);
 +		((GuiElementSwitch)optimumControls["optBgFps"]).SetValue(ClientSettings.OptimumBackgroundFpsLimit);
-+		((GuiElementSwitch)optimumControls["optFramePacing"]).SetValue(ClientSettings.OptimumPreciseFramePacing);
-+		((GuiElementSwitch)optimumControls["optShadowCull"]).SetValue(ClientSettings.OptimumEntityShadowCull);
-+		((GuiElementSlider)optimumControls["optShadowDist"]).SetValues(ClientSettings.OptimumShadowCullDistance, 20, 200, 10, " blocks");
-+		((GuiElementSwitch)optimumControls["optRepulsion"]).SetValue(ClientSettings.OptimumRepulsionGate);
-+		((GuiElementSlider)optimumControls["optRepulsionDist"]).SetValues(ClientSettings.OptimumRepulsionDistance, 16, 128, 8, " blocks");
-+		((GuiElementSwitch)optimumControls["optDynLight"]).SetValue(ClientSettings.OptimumDynamicLightScale);
-+		((GuiElementSwitch)optimumControls["optAnimBlockLod"]).SetValue(ClientSettings.OptimumAnimBlockLod);
-+		((GuiElementSwitch)optimumControls["optShadowFarVeg"]).SetValue(ClientSettings.OptimumShadowFarVegetation);
-+		((GuiElementSwitch)optimumControls["optWeatherWind"]).SetValue(ClientSettings.OptimumWeatherWindThrottle);
-+		((GuiElementSwitch)optimumControls["optParticleDist"]).SetValue(ClientSettings.OptimumParticleDistanceGate);
-+		((GuiElementSwitch)optimumControls["optOcclusionScale"]).SetValue(Vintagestory.API.Config.OptimumConfig.OcclusionCullingScaleEnabled);
-+		((GuiElementSwitch)optimumControls["optDynLightCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.DynamicLightCacheEnabled);
-+		((GuiElementSwitch)optimumControls["optEntityLightBatch"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled);
-+		((GuiElementSwitch)optimumControls["optEntityShaderCache"]).SetValue(Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled);
 +		string guiBackend = Vintagestory.API.Config.OptimumConfig.NormalizeGuiRenderBackend(Vintagestory.API.Config.OptimumConfig.GuiRenderBackend);
 +		if (!Vintagestory.API.Config.OptimumConfig.GuiGpuRenderEnabled && string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaGpu, StringComparison.Ordinal))
 +		{
@@ -215,11 +226,9 @@ index 4d08f84..7e33220 100644
 +		int guiBackendIdx = string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaGpu, StringComparison.Ordinal) ? 0 : string.Equals(guiBackend, Vintagestory.API.Config.OptimumConfig.GuiRenderBackendSkiaCpu, StringComparison.Ordinal) ? 1 : 2;
 +		((GuiElementDropDown)optimumControls["optGuiRenderBackend"]).SetSelectedIndex(guiBackendIdx);
 +		((GuiElementSwitch)optimumControls["optGodRaysCap"]).SetValue(Vintagestory.API.Config.OptimumConfig.GodRaysSampleCapEnabled);
++		((GuiElementSlider)optimumControls["optShadowDist"]).SetValues(ClientSettings.OptimumShadowCullDistance, 20, 200, 10, " blocks");
 +#if OPTIMUM_GREEDY_MESH
-+		((GuiElementSwitch)optimumControls["optGreedyMesh"]).SetValue(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
-+		((GuiElementSlider)optimumControls["optGreedySpan"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth, 1, 8, 1, " blocks");
-+		((GuiElementSlider)optimumControls["optGreedyLightTol"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance, 0, 4, 1);
-+		((GuiElementSlider)optimumControls["optGreedyFarDist"]).SetValues(Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance, 0, 256, 16, " blocks");
++		((GuiElementDropDown)optimumControls["optGreedyMeshPreset"]).SetSelectedIndex(GetOptimumGreedyMeshPresetIndex());
 +#endif
 +	}
 +
@@ -249,7 +258,8 @@ index 4d08f84..7e33220 100644
 +	{
 +		switch (labelKey)
 +		{
-+			case "optimum-greedymesh": return "GreedyMesh";
++			case "optimum-greedymesh":
++			case "optimum-greedymesh-preset": return "GreedyMesh";
 +			case "optimum-renderscale": return "RenderScale";
 +			case "optimum-godrayscap": return "GodRaysSampleCap";
 +			case "optimum-entitylightbatch": return "EntityLightBatch";
@@ -371,16 +381,25 @@ index 4d08f84..7e33220 100644
 +		switch (feature)
 +		{
 +#if OPTIMUM_GREEDY_MESH
-+			case "GreedyMesh": ((GuiElementSwitch)optimumControls["optGreedyMesh"]).Enabled = false; break;
++			case "GreedyMesh":
++				if (optimumControls.TryGetValue("optGreedyMeshPreset", out var gmPresetCtrl)) ((GuiElementDropDown)gmPresetCtrl).Enabled = false;
++				if (optimumControls.TryGetValue("optGreedyMesh", out var gmCtrl)) ((GuiElementSwitch)gmCtrl).Enabled = false;
++				break;
 +#endif
 +			case "RenderScale":
 +				if (optimumControls.TryGetValue("optRenderScale", out var optCtrl)) ((GuiElementDropDown)optCtrl).Enabled = false;
 +				composer.GetDropDown("optRenderScale")?.Enabled = false;
 +				composer.GetSlider("optFsrSharpness")?.Enabled = false;
 +				break;
-+			case "GodRaysSampleCap": ((GuiElementSwitch)optimumControls["optGodRaysCap"]).Enabled = false; break;
-+			case "EntityLightBatch": ((GuiElementSwitch)optimumControls["optEntityLightBatch"]).Enabled = false; break;
-+			case "EntityShaderStateCache": ((GuiElementSwitch)optimumControls["optEntityShaderCache"]).Enabled = false; break;
++			case "GodRaysSampleCap":
++				if (optimumControls.TryGetValue("optGodRaysCap", out var grCtrl)) ((GuiElementSwitch)grCtrl).Enabled = false;
++				break;
++			case "EntityLightBatch":
++				if (optimumControls.TryGetValue("optEntityLightBatch", out var elbCtrl)) ((GuiElementSwitch)elbCtrl).Enabled = false;
++				break;
++			case "EntityShaderStateCache":
++				if (optimumControls.TryGetValue("optEntityShaderCache", out var essCtrl)) ((GuiElementSwitch)essCtrl).Enabled = false;
++				break;
 +		}
 +	}
 +
@@ -437,6 +456,18 @@ index 4d08f84..7e33220 100644
 +	private void onOptimumEntityLightBatchChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityLightBatch")) return; Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityShaderStateCache")) return; Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
++	private static int GetOptimumGreedyMeshPresetIndex()
++	{
++		string preset = Vintagestory.API.Config.OptimumConfig.GetGreedyMeshPreset();
++		return string.Equals(preset, Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetAggressive, StringComparison.OrdinalIgnoreCase) ? 2 : string.Equals(preset, Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetBalanced, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
++	}
++
++	private void onOptimumGreedyMeshPresetChanged(string code, bool selected)
++	{
++		if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("GreedyMesh")) return;
++		Vintagestory.API.Config.OptimumConfig.SetGreedyMeshPreset(code, save: true);
++	}
++
 +	// Chunk shaders are stamped at compile time (GREEDYMESH define), so a
 +	// mid-session toggle only takes full effect after a restart; until
 +	// then the GreedyMeshShadersCompiledOn guard keeps emitter and shader
@@ -450,7 +481,11 @@ index 4d08f84..7e33220 100644
  	private void onErrorReporterChanged(bool on)
  	{
  		ClientSettings.StartupErrorDialog = on;
-@@ -1820,4 +2178,72 @@ public class GuiCompositeSettings : GuiComposite
+ 	}
+ 
+@@ -1818,6 +2166,74 @@ public class GuiCompositeSettings : GuiComposite
+ 	{
+ 		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
  		return true;
  	}

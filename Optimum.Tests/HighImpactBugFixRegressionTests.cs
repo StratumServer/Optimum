@@ -835,7 +835,6 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-<<<<<<< HEAD
     public void FsrRcas_SharpnessSliderConfigurableAndUniformPassed()
     {
         // 1. Verify OptimumConfig defaults
@@ -948,6 +947,83 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         finally
         {
             Directory.Delete(tempDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ExtraSettingsTab_StreamlinedAndGreedyMeshPresetsConfigured()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
+
+        // Verify streamlined player preference rows are present
+        Assert.Contains("AddOptimumSwitchRow(\"optimum-bgfps\"", patch);
+        Assert.Contains("AddOptimumDropdownRow(\"optimum-guigpu\"", patch);
+        Assert.Contains("AddOptimumSwitchRow(\"optimum-godrayscap\"", patch);
+        Assert.Contains("AddOptimumSliderRow(\"optimum-shadowdist\"", patch);
+        Assert.Contains("AddOptimumDropdownRow(\"optimum-greedymesh-preset\"", patch);
+        Assert.Contains("GetOptimumGreedyMeshPresetIndex()", patch);
+        Assert.Contains("onOptimumGreedyMeshPresetChanged", patch);
+
+        // Verify obsolete/lossless controls are no longer added in OnOptimumOptions
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-framepacing\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-shadowcull\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-repulsion\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-dynlight\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-animblocklod\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-shadowfarveg\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-weatherwind\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-particledist\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-occlusionscale\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-dynlightcache\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-entitylightbatch\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-entityshadercache\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-greedymesh\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSliderRow(\"optimum-greedyspan\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSliderRow(\"optimum-greedylighttol\"", patch);
+        Assert.DoesNotContain("+		AddOptimumSliderRow(\"optimum-greedyfardist\"", patch);
+
+        // Verify patcher injects the greedy mesh preset methods
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("\"GetOptimumGreedyMeshPresetIndex\",", programSource);
+        Assert.Contains("\"onOptimumGreedyMeshPresetChanged\",", programSource);
+
+        // Verify OptimumConfig preset configuration logic
+        bool origEnabled = Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled;
+        int origSpan = Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth;
+        int origTol = Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance;
+        int origFar = Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance;
+
+        try
+        {
+            Vintagestory.API.Config.OptimumConfig.SetGreedyMeshPreset(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetOff);
+            Assert.False(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
+            Assert.Equal(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetOff, Vintagestory.API.Config.OptimumConfig.GetGreedyMeshPreset());
+
+            Vintagestory.API.Config.OptimumConfig.SetGreedyMeshPreset(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetBalanced);
+            Assert.True(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
+            Assert.Equal(4, Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth);
+            Assert.Equal(4, Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeHeight);
+            Assert.Equal(0, Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance);
+            Assert.Equal(64, Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance);
+            Assert.Equal(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetBalanced, Vintagestory.API.Config.OptimumConfig.GetGreedyMeshPreset());
+
+            Vintagestory.API.Config.OptimumConfig.SetGreedyMeshPreset(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetAggressive);
+            Assert.True(Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled);
+            Assert.Equal(8, Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth);
+            Assert.Equal(8, Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeHeight);
+            Assert.Equal(2, Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance);
+            Assert.Equal(0, Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance);
+            Assert.Equal(Vintagestory.API.Config.OptimumConfig.GreedyMeshPresetAggressive, Vintagestory.API.Config.OptimumConfig.GetGreedyMeshPreset());
+        }
+        finally
+        {
+            Vintagestory.API.Config.OptimumConfig.GreedyMeshEnabled = origEnabled;
+            Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeWidth = origSpan;
+            Vintagestory.API.Config.OptimumConfig.GreedyMeshMaxMergeHeight = origSpan;
+            Vintagestory.API.Config.OptimumConfig.GreedyMeshLightTolerance = origTol;
+            Vintagestory.API.Config.OptimumConfig.GreedyMeshFarDistance = origFar;
         }
     }
 
