@@ -12,6 +12,7 @@ using System.Text.Json.Nodes;
 using System.Threading;
 
 [assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
+[assembly: InternalsVisibleTo("Optimum.Tests")]
 
 namespace Optimum.Launcher;
 
@@ -74,6 +75,7 @@ public static class Program
         CleanupStrayRootAssemblies(gameDir);
         RegisterNativeLibraryProbing(gameDir);
         CalibrateRuntimeConfigForMemory(gameDir, args);
+        RecoverIncompleteDeployment(gameDir);
 
         ShaderCompatibilityReport shaderCompatibility;
         try
@@ -610,8 +612,95 @@ public static class Program
         }
     }
 
-    private static void DeployPatchedMods(string cacheDir, string gameDir)
+    internal const string DeployJournalFileName = ".deploy-state.json";
+
+    internal static string GetDeployJournalPath(string gameDir) =>
+        Path.Combine(gameDir, CacheDirName, DeployJournalFileName);
+
+    internal static ModDeployState ReadDeployState(string gameDir)
     {
+        string journalPath = GetDeployJournalPath(gameDir);
+        if (!File.Exists(journalPath))
+            return ModDeployState.CleanVanilla;
+
+        try
+        {
+            string json = File.ReadAllText(journalPath);
+            var node = JsonNode.Parse(json);
+            if (node != null && Enum.TryParse<ModDeployState>(node["state"]?.GetValue<string>(), out var state))
+            {
+                return state;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[Optimum] Note: could not read deploy journal {journalPath}: {ex.Message}");
+        }
+
+        return ModDeployState.CleanVanilla;
+    }
+
+    internal static void WriteDeployState(string gameDir, ModDeployState state)
+    {
+        string journalPath = GetDeployJournalPath(gameDir);
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
+            var obj = new JsonObject
+            {
+                ["state"] = state.ToString(),
+                ["version"] = Version,
+                ["timestamp"] = DateTime.UtcNow.ToString("o")
+            };
+            string temp = $"{journalPath}.tmp-{Guid.NewGuid():N}";
+            File.WriteAllText(temp, obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            File.Move(temp, journalPath, overwrite: true);
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[Optimum] Note: could not write deploy journal {journalPath}: {ex.Message}");
+        }
+    }
+
+    internal static void RecoverIncompleteDeployment(string gameDir)
+    {
+        var state = ReadDeployState(gameDir);
+        if (state == ModDeployState.StagingPatched || state == ModDeployState.RestoringVanilla)
+        {
+            Logger.Log($"[Optimum] Incomplete mod deployment state '{state}' detected from previous run. Rolling back Mods/ to vanilla...");
+            TryRestoreVanillaMods(gameDir);
+            WriteDeployState(gameDir, ModDeployState.CleanVanilla);
+        }
+        CleanupStagingFiles(gameDir);
+    }
+
+    internal static void CleanupStagingFiles(string gameDir)
+    {
+        string modsDir = Path.Combine(gameDir, "Mods");
+        if (!Directory.Exists(modsDir)) return;
+
+        try
+        {
+            foreach (string file in Directory.EnumerateFiles(modsDir, "*.*", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileName(file);
+                if (name.Contains(".deploy-") || name.Contains(".restore-"))
+                {
+                    try { File.Delete(file); } catch { }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[Optimum] Note: could not clean up staging files in {modsDir}: {ex.Message}");
+        }
+    }
+
+    internal static void DeployPatchedMods(string cacheDir, string gameDir)
+    {
+        WriteDeployState(gameDir, ModDeployState.StagingPatched);
+
+        var plans = new List<DeployPlan>();
         foreach (var target in PatchTargets)
         {
             if (target.Mode != PatchMode.Mod) continue;
@@ -619,16 +708,71 @@ public static class Program
             var cachedDll = Path.Combine(cacheDir, target.AssemblyPath);
             var gameDll = Path.Combine(gameDir, target.AssemblyPath);
             Directory.CreateDirectory(Path.GetDirectoryName(gameDll)!);
-            File.Copy(cachedDll, gameDll, true);
 
             var cachedPdb = Path.ChangeExtension(cachedDll, ".pdb");
-            if (File.Exists(cachedPdb))
-                File.Copy(cachedPdb, Path.ChangeExtension(gameDll, ".pdb"), true);
+            plans.Add(new DeployPlan(
+                cachedDll,
+                gameDll,
+                File.Exists(cachedPdb) ? cachedPdb : null,
+                Path.ChangeExtension(gameDll, ".pdb")));
+        }
+
+        var committed = new List<DeployPlan>();
+        try
+        {
+            foreach (var plan in plans)
+            {
+                plan.TempDll = $"{plan.TargetDll}.deploy-{Guid.NewGuid():N}.tmp";
+                File.Copy(plan.SourceDll, plan.TempDll, true);
+                if (plan.SourcePdb is not null)
+                {
+                    plan.TempPdb = $"{plan.TargetPdb}.deploy-{Guid.NewGuid():N}.tmp";
+                    File.Copy(plan.SourcePdb, plan.TempPdb, true);
+                }
+            }
+
+            foreach (var plan in plans)
+            {
+                FileRetryHelper.Retry(() => File.Move(plan.TempDll!, plan.TargetDll, true));
+                committed.Add(plan);
+                if (plan.TempPdb is not null)
+                    FileRetryHelper.Retry(() => File.Move(plan.TempPdb!, plan.TargetPdb, true));
+                else if (File.Exists(plan.TargetPdb))
+                    FileRetryHelper.Retry(() => File.Delete(plan.TargetPdb));
+            }
+
+            WriteDeployState(gameDir, ModDeployState.ActivePatched);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError($"[Optimum] Patched mod deployment failed: {ex.Message}. Rolling back to vanilla...");
+            foreach (var plan in plans)
+            {
+                if (plan.TempDll is not null && File.Exists(plan.TempDll))
+                    try { File.Delete(plan.TempDll); } catch { }
+                if (plan.TempPdb is not null && File.Exists(plan.TempPdb))
+                    try { File.Delete(plan.TempPdb); } catch { }
+            }
+
+            TryRestoreVanillaMods(gameDir);
+            throw;
+        }
+        finally
+        {
+            foreach (var plan in plans)
+            {
+                if (plan.TempDll is not null && File.Exists(plan.TempDll))
+                    try { File.Delete(plan.TempDll); } catch { }
+                if (plan.TempPdb is not null && File.Exists(plan.TempPdb))
+                    try { File.Delete(plan.TempPdb); } catch { }
+            }
         }
     }
 
-    private static void RestoreVanillaMods(string gameDir)
+    internal static void RestoreVanillaMods(string gameDir)
     {
+        WriteDeployState(gameDir, ModDeployState.RestoringVanilla);
+
         var plans = new List<RestorePlan>();
         foreach (var target in PatchTargets)
         {
@@ -673,6 +817,8 @@ public static class Program
                 else if (File.Exists(plan.GamePdb))
                     FileRetryHelper.Retry(() => File.Delete(plan.GamePdb));
             }
+
+            WriteDeployState(gameDir, ModDeployState.CleanVanilla);
         }
         catch (Exception ex)
         {
@@ -1084,6 +1230,28 @@ internal sealed class RestorePlan(
     public string GameDll { get; } = gameDll;
     public string? BackupPdb { get; } = backupPdb;
     public string GamePdb { get; } = gamePdb;
+    public string? TempDll { get; set; }
+    public string? TempPdb { get; set; }
+}
+
+public enum ModDeployState
+{
+    CleanVanilla,
+    StagingPatched,
+    ActivePatched,
+    RestoringVanilla,
+}
+
+internal sealed class DeployPlan(
+    string sourceDll,
+    string targetDll,
+    string? sourcePdb,
+    string targetPdb)
+{
+    public string SourceDll { get; } = sourceDll;
+    public string TargetDll { get; } = targetDll;
+    public string? SourcePdb { get; } = sourcePdb;
+    public string TargetPdb { get; } = targetPdb;
     public string? TempDll { get; set; }
     public string? TempPdb { get; set; }
 }

@@ -1224,6 +1224,53 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Launcher_TransactionalModDeploymentAndCrashRollback()
+    {
+        string programSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Launcher/Program.cs"));
+
+        Assert.Contains("enum ModDeployState", programSource);
+        Assert.Contains("StagingPatched", programSource);
+        Assert.Contains("ActivePatched", programSource);
+        Assert.Contains("RestoringVanilla", programSource);
+        Assert.Contains("CleanVanilla", programSource);
+        Assert.Contains("RecoverIncompleteDeployment", programSource);
+        Assert.Contains("DeployPlan", programSource);
+        Assert.Contains("deploy-{Guid.NewGuid():N}.tmp", programSource);
+
+        string root = Directory.CreateTempSubdirectory("optimum-deploy-reg-").FullName;
+        try
+        {
+            string gameDir = System.IO.Path.Combine(root, "game");
+            string cacheDir = System.IO.Path.Combine(root, "cache");
+            string modsDir = System.IO.Path.Combine(gameDir, "Mods");
+            string vanillaDir = System.IO.Path.Combine(gameDir, ".optimum", "vanilla", "Mods");
+            string cacheModsDir = System.IO.Path.Combine(cacheDir, "Mods");
+
+            Directory.CreateDirectory(modsDir);
+            Directory.CreateDirectory(vanillaDir);
+            Directory.CreateDirectory(cacheModsDir);
+
+            File.WriteAllText(System.IO.Path.Combine(vanillaDir, "VSEssentials.dll"), "vanilla");
+            File.WriteAllText(System.IO.Path.Combine(vanillaDir, "VSSurvivalMod.dll"), "vanilla");
+            File.WriteAllText(System.IO.Path.Combine(modsDir, "VSEssentials.dll"), "stale");
+            File.WriteAllText(System.IO.Path.Combine(modsDir, "VSSurvivalMod.dll"), "stale");
+            File.WriteAllText(System.IO.Path.Combine(cacheModsDir, "VSEssentials.dll"), "patched");
+            File.WriteAllText(System.IO.Path.Combine(cacheModsDir, "VSSurvivalMod.dll"), "patched");
+
+            Optimum.Launcher.Program.WriteDeployState(gameDir, Optimum.Launcher.ModDeployState.StagingPatched);
+            Optimum.Launcher.Program.RecoverIncompleteDeployment(gameDir);
+
+            Assert.Equal("vanilla", File.ReadAllText(System.IO.Path.Combine(modsDir, "VSEssentials.dll")));
+            Assert.Equal(Optimum.Launcher.ModDeployState.CleanVanilla, Optimum.Launcher.Program.ReadDeployState(gameDir));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
