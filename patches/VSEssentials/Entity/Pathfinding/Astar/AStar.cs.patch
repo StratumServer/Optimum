@@ -1,10 +1,8 @@
 diff --git a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
-index c3fe425..8d21b1b 100644
+index c3fe425..80660c8 100644
 --- a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
 +++ b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
-@@ -75,10 +75,11 @@ namespace Vintagestory.Essentials
- 
-             NodesChecked = 0;
+@@ -77,6 +77,7 @@ namespace Vintagestory.Essentials
  
              PathNode startNode = new PathNode(start);
              PathNode targetNode = new PathNode(endOrAvoidPos);
@@ -12,11 +10,7 @@ index c3fe425..8d21b1b 100644
              
              var distSq = modeMinFleeDistance * modeMinFleeDistance;
  
-             openSet.Clear();
-             closedSet.Clear();
-@@ -112,30 +113,38 @@ namespace Vintagestory.Essentials
- 
-                 for (int i = 0; i < Cardinal.ALL.Length; i++)
+@@ -114,26 +115,35 @@ namespace Vintagestory.Essentials
                  {
                      Cardinal card = Cardinal.ALL[i];
  
@@ -44,6 +38,7 @@ index c3fe425..8d21b1b 100644
 +                            if (traversable(scratch, stepHeight, maxFallHeight, entityCollBox, card, ref extraCost) && existingNeighbourNode.gCost > baseCostToNeighbour + extraCost + 0.0001f)
                              {
                                  UpdateNode(nearestNode, existingNeighbourNode, extraCost);
++                                openSet.UpdateNodePriority(existingNeighbourNode);
                              }
                          }
                      }
@@ -57,11 +52,7 @@ index c3fe425..8d21b1b 100644
                              UpdateNode(nearestNode, neighbourNode, extraCost);
                              
                              neighbourNode.hCost = modeMinFleeDistance > 0 ? 1 + modeMinFleeDistance - neighbourNode.distanceTo(targetNode) : neighbourNode.distanceTo(targetNode);
-                             openSet.Add(neighbourNode);
-                         }
-@@ -161,10 +170,11 @@ namespace Vintagestory.Essentials
- 
- 
+@@ -163,6 +173,7 @@ namespace Vintagestory.Essentials
          protected readonly Vec3d tmpVec = new Vec3d();
          protected readonly BlockPos tmpPos = new BlockPos(API.Config.Dimensions.WillSetLater);
          protected Cuboidd tmpCub = new Cuboidd();
@@ -69,5 +60,3 @@ index c3fe425..8d21b1b 100644
  
          protected bool traversable(PathNode node, float stepHeight, int maxFallHeight, Cuboidf entityCollBox, Cardinal fromDir, ref float extraCost)
          {
-             tmpVec.Set(node.X + centerOffsetX, node.Y, node.Z + centerOffsetZ);
-             tmpPos.dimension = node.dimension;

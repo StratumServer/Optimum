@@ -452,6 +452,43 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             m.TypeFullName == "Vintagestory.GameContent.ModSystemRenderFallingBlocksFast" &&
             m.MethodName == "genMesh" &&
             m.ParamCount == 1);
+
+    [Fact]
+    public void PathNodeSet_WiredIntoManifestAndRestoresHeapPriorityOnUpdateNode()
+    {
+        string runtimeAStar = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/Essentials/AStar.cs.patch"));
+        Assert.Contains("openSet.UpdateNodePriority(pathNode5);", runtimeAStar);
+
+        string sourceAStar = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Pathfinding/Astar/AStar.cs.patch"));
+        Assert.Contains("openSet.UpdateNodePriority(existingNeighbourNode);", sourceAStar);
+
+        string runtimePathNodeSet = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/Essentials/PathNodeSet.cs.patch"));
+        Assert.Contains("public void UpdateNodePriority(PathNode node)", runtimePathNodeSet);
+        Assert.Contains("SiftUp(index);", runtimePathNodeSet);
+
+        string sourcePathNodeSet = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs.patch"));
+        Assert.Contains("public void UpdateNodePriority(PathNode node)", sourcePathNodeSet);
+
+        var manifestMethod = typeof(Optimum.Patcher.ModPatcher)
+            .GetMethod("EssentialsManifest", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object manifest = manifestMethod.Invoke(null, null)!;
+        var methods = (IEnumerable<Optimum.Patcher.MethodTarget>)manifest.GetType().GetProperty("Methods")!.GetValue(manifest)!;
+        Assert.Contains(methods, m =>
+            m.TypeFullName == "Vintagestory.Essentials.PathNodeSet" &&
+            m.MethodName == "Add" &&
+            m.ParamCount == 1);
+        Assert.Contains(methods, m =>
+            m.TypeFullName == "Vintagestory.Essentials.PathNodeSet" &&
+            m.MethodName == "RemoveNearest" &&
+            m.ParamCount == 0);
+
+        var members = (Dictionary<string, List<string>>)manifest.GetType().GetProperty("Members")!.GetValue(manifest)!;
+        Assert.True(members.ContainsKey("Vintagestory.Essentials.PathNodeSet"));
+        Assert.Contains("UpdateNodePriority", members["Vintagestory.Essentials.PathNodeSet"]);
     }
 
     [Fact]

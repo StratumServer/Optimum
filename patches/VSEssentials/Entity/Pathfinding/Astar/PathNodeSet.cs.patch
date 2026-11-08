@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs b/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
-index 80ab89e..dd88f61 100644
+index 80ab89e..a161ead 100644
 --- a/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
 +++ b/VSEssentials/Entity/Pathfinding/Astar/PathNodeSet.cs
 @@ -1,4 +1,5 @@
@@ -176,7 +176,7 @@ index 80ab89e..dd88f61 100644
              return true;
          }
  
-@@ -79,96 +133,70 @@ namespace Vintagestory.Essentials
+@@ -79,96 +133,79 @@ namespace Vintagestory.Essentials
          /// </summary>
          public PathNode RemoveNearest()
          {
@@ -262,6 +262,15 @@ index 80ab89e..dd88f61 100644
 +                heap[index].HeapIndex = index;
 +                heap[size] = null;
 +                SiftDown(index);
++                SiftUp(index);
++            }
++        }
++
++        public void UpdateNodePriority(PathNode node)
++        {
++            int index = node.HeapIndex;
++            if (index >= 0 && index < size && heap[index] == node)
++            {
 +                SiftUp(index);
              }
          }

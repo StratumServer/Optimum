@@ -18,7 +18,7 @@ diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintag
  		float num = modeMinFleeDistance * modeMinFleeDistance;
  		openSet.Clear();
  		closedSet.Clear();
-@@ -95,19 +98,27 @@ public class AStar
+@@ -95,19 +98,28 @@ public class AStar
  			for (int i = 0; i < Cardinal.ALL.Length; i++)
  			{
  				Cardinal cardinal = Cardinal.ALL[i];
@@ -42,6 +42,7 @@ diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintag
 +					if (pathNode5.gCost > num2 + 0.0001f && traversable(scratch, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost) && pathNode5.gCost > num2 + extraCost + 0.0001f)
  					{
  						UpdateNode(pathNode3, pathNode5, extraCost);
++						openSet.UpdateNodePriority(pathNode5);
  					}
  				}
 -				else if (!closedSet.Contains(pathNode4) && traversable(pathNode4, stepHeight, maxFallHeight, entityCollBox, cardinal, ref extraCost))
