@@ -1331,7 +1331,82 @@ public static class OptimumDiagnostics
     /// Version of the stable, numeric benchmark metrics contract. Bump when
     /// metric keys or their meanings change.
     /// </summary>
-    public const int BenchmarkMetricsSchemaVersion = 2;
+    public const int BenchmarkMetricsSchemaVersion = 3;
+
+    // Garbage collection pause instrumentation
+    private static long _gcPauseHitchCount;
+    private static long _gcMaxPauseDurationTicks;
+    private static long _gcLastTotalPauseTicks = GC.GetTotalPauseDuration().Ticks;
+
+    public static long GcPauseHitchCount => Interlocked.Read(ref _gcPauseHitchCount);
+    public static long GcMaxPauseDurationTicks => Interlocked.Read(ref _gcMaxPauseDurationTicks);
+
+    /// <summary>
+    /// Checks for garbage collection pauses since the last check. If a pause phase exceeds the
+    /// hitch threshold (default 16 ms), records the hitch and returns true with diagnostic details.
+    /// </summary>
+    public static bool CheckGcPauseHitch(double hitchThresholdMs, out double pauseMs, out int generation, out long committedHeapBytes)
+    {
+        long currentTotalTicks = GC.GetTotalPauseDuration().Ticks;
+        long lastTotal = Interlocked.Exchange(ref _gcLastTotalPauseTicks, currentTotalTicks);
+        long pauseTicks = currentTotalTicks - lastTotal;
+        pauseMs = pauseTicks > 0 ? pauseTicks * 1000.0 / Stopwatch.Frequency : 0.0;
+
+        GCMemoryInfo memInfo = GC.GetGCMemoryInfo();
+        generation = memInfo.Generation;
+        committedHeapBytes = memInfo.TotalCommittedBytes;
+
+        if (pauseTicks > 0)
+        {
+            long currentMax = Interlocked.Read(ref _gcMaxPauseDurationTicks);
+            while (pauseTicks > currentMax)
+            {
+                if (Interlocked.CompareExchange(ref _gcMaxPauseDurationTicks, pauseTicks, currentMax) == currentMax)
+                    break;
+                currentMax = Interlocked.Read(ref _gcMaxPauseDurationTicks);
+            }
+        }
+
+        if (pauseMs >= hitchThresholdMs)
+        {
+            Interlocked.Increment(ref _gcPauseHitchCount);
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Records an observed GC pause duration and updates hitch statistics.
+    /// </summary>
+    public static void RecordGcPauseHitch(double pauseMs, int generation, long committedHeapBytes)
+    {
+        Interlocked.Increment(ref _gcPauseHitchCount);
+        long ticks = (long)(pauseMs * Stopwatch.Frequency / 1000.0);
+        long currentMax = Interlocked.Read(ref _gcMaxPauseDurationTicks);
+        while (ticks > currentMax)
+        {
+            if (Interlocked.CompareExchange(ref _gcMaxPauseDurationTicks, ticks, currentMax) == currentMax)
+                break;
+            currentMax = Interlocked.Read(ref _gcMaxPauseDurationTicks);
+        }
+    }
+
+    public static void ResetGcPauseDiagnostics()
+    {
+        Interlocked.Exchange(ref _gcPauseHitchCount, 0);
+        Interlocked.Exchange(ref _gcMaxPauseDurationTicks, 0);
+        Interlocked.Exchange(ref _gcLastTotalPauseTicks, GC.GetTotalPauseDuration().Ticks);
+    }
+
+    public static string GetGcPauseSummary()
+    {
+        TimeSpan total = GC.GetTotalPauseDuration();
+        long hitches = Interlocked.Read(ref _gcPauseHitchCount);
+        long maxTicks = Interlocked.Read(ref _gcMaxPauseDurationTicks);
+        double maxMs = maxTicks * 1000.0 / Stopwatch.Frequency;
+        return $"Optimum GC pause: totalPauseMs={total.TotalMilliseconds:0.##}, hitches(>16ms)={hitches}, maxPauseMs={maxMs:0.##}";
+    }
 
     // Stratum-ported optimization counters (server-side ports)
     private static long _serverTickCount;
@@ -1726,7 +1801,7 @@ public static class OptimumDiagnostics
     {
         using Process process = Process.GetCurrentProcess();
         process.Refresh();
-        var values = new Dictionary<string, double>(208, StringComparer.Ordinal)
+        var values = new Dictionary<string, double>(216, StringComparer.Ordinal)
         {
             ["timing.stopwatchFrequencyHz"] = Stopwatch.Frequency,
             ["runtime.processorCount.count"] = Environment.ProcessorCount,
@@ -1740,6 +1815,10 @@ public static class OptimumDiagnostics
             ["runtime.gc.collections.gen0.count"] = GC.CollectionCount(0),
             ["runtime.gc.collections.gen1.count"] = GC.CollectionCount(1),
             ["runtime.gc.collections.gen2.count"] = GC.CollectionCount(2),
+            ["runtime.gc.totalPauseDuration.timeSpanTicks"] = GC.GetTotalPauseDuration().Ticks,
+            ["runtime.gc.totalPauseDuration.ms"] = GC.GetTotalPauseDuration().TotalMilliseconds,
+            ["runtime.gc.pauseHitches.count"] = Interlocked.Read(ref _gcPauseHitchCount),
+            ["runtime.gc.maxPauseDuration.stopwatchTicks"] = Interlocked.Read(ref _gcMaxPauseDurationTicks),
             ["counters.stratum.serverTicks.count"] = Interlocked.Read(ref _serverTickCount),
             ["counters.stratum.collisionFastPath.hits"] = Interlocked.Read(ref _collisionFastPathHits),
             ["counters.stratum.collisionFastPath.skips"] = Interlocked.Read(ref _collisionFastPathSkips),
@@ -1892,6 +1971,7 @@ public static class OptimumDiagnostics
         sb.Append("\n  ").Append(GetChunkRenderSummary());
         sb.Append("\n  ").Append(GetChunkUploadSummary());
         sb.Append("\n  ").Append(GetEntityAnimationSummary());
+        sb.Append("\n  ").Append(GetGcPauseSummary());
         {
             var (hits, skips) = EntityTesselationBudget.Snapshot();
             sb.Append($"\n  Optimum entity tesselation budget: tesselated={hits}, deferred={skips}");

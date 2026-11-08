@@ -400,6 +400,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetTessellationSummary());
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
+        sb.AppendLine(OptimumDiagnostics.GetGcPauseSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }
