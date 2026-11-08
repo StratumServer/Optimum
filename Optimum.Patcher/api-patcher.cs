@@ -95,6 +95,8 @@ public static class ApiPatcher
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 2);
         var wildcardUtilMatchThreeArg = bridge.Methods.Single(method =>
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 3);
+        var wildcardUtilWildCardReplace = bridge.Methods.Single(method =>
+            method.Name == "WildcardUtilWildCardReplace" && method.Parameters.Count == 3);
         var evolvingNatFloatEquals = bridge.Methods.Single(method =>
             method.Name == "EvolvingNatFloatEquals" && method.Parameters.Count == 2);
         var clientAnimatorInitMatrices = bridge.Methods.Single(method =>
@@ -132,7 +134,8 @@ public static class ApiPatcher
         int wildcardUtilMethods = PatchWildcardUtil(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(wildcardUtilMatchTwoArg),
-            vanilla.MainModule.ImportReference(wildcardUtilMatchThreeArg));
+            vanilla.MainModule.ImportReference(wildcardUtilMatchThreeArg),
+            vanilla.MainModule.ImportReference(wildcardUtilWildCardReplace));
         int evolvingNatFloatOperators = PatchEvolvingNatFloat(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(evolvingNatFloatEquals));
@@ -204,10 +207,10 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 RegistryObject methods patched, applied {registryObjectMethods}.");
         }
-        if (wildcardUtilMethods != 2)
+        if (wildcardUtilMethods != 3)
         {
             throw new InvalidOperationException(
-                $"Expected 2 WildcardUtil methods patched, applied {wildcardUtilMethods}.");
+                $"Expected 3 WildcardUtil methods patched, applied {wildcardUtilMethods}.");
         }
         if (evolvingNatFloatOperators != 2)
         {
@@ -385,7 +388,8 @@ public static class ApiPatcher
     internal static int PatchWildcardUtil(
         ModuleDefinition module,
         MethodReference matchTwoArgBridge,
-        MethodReference matchThreeArgBridge)
+        MethodReference matchThreeArgBridge,
+        MethodReference? wildCardReplaceBridge = null)
     {
         const string typeName = "Vintagestory.API.Util.WildcardUtil";
         var wildcardUtil = module.GetType(typeName)
@@ -413,8 +417,26 @@ public static class ApiPatcher
         RewriteTwoArgForwarder(matchTwoArg, matchTwoArgBridge);
         RewriteThreeArgForwarder(matchThreeArg, matchThreeArgBridge);
 
-        Console.WriteLine($"  API PATCHED: {typeName}.Match(AssetLocation, AssetLocation) + Match(..., string[]) -> OptimumApiBridge");
-        return 2;
+        int count = 2;
+        if (wildCardReplaceBridge != null)
+        {
+            var wildCardReplace = wildcardUtil.Methods.SingleOrDefault(method =>
+                method.IsStatic &&
+                method.Name == "WildCardReplace" &&
+                method.Parameters.Count == 3 &&
+                method.Parameters[0].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+                method.Parameters[1].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+                method.Parameters[2].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation");
+
+            if (wildCardReplace != null)
+            {
+                RewriteThreeArgForwarder(wildCardReplace, wildCardReplaceBridge);
+                count++;
+            }
+        }
+
+        Console.WriteLine($"  API PATCHED: {typeName}.Match(AssetLocation, AssetLocation) + Match(..., string[]) + {count - 2} additional methods -> OptimumApiBridge");
+        return count;
     }
 
     internal static int PatchEvolvingNatFloat(ModuleDefinition module, MethodReference equalsBridge)
