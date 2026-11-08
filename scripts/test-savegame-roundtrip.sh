@@ -86,6 +86,11 @@ setup_patched_server() {
                 echo "  Overlaid: Mods/$mod"
             fi
         done
+        local patched_lib="$REPO_ROOT/build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll"
+        if [ -f "$patched_lib" ]; then
+            cp -f "$patched_lib" "$PATCHED_SERVER_DIR/VintagestoryLib.dll"
+            echo "  Overlaid: VintagestoryLib.dll (Cecil-patched)"
+        fi
     fi
 }
 
@@ -175,17 +180,17 @@ cursor = conn.cursor()
 # Check required canonical tables
 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
 tables = {row[0] for row in cursor.fetchall()}
-required = {"chunks", "mapchunks", "mapregions", "gamedata"}
+required = {"chunk", "mapchunk", "mapregion", "gamedata"}
 
 missing = required - tables
 if missing:
     print(f"ERROR: Missing canonical tables in savegame: {missing}")
     sys.exit(1)
 
-cursor.execute("SELECT count(*) FROM chunks;")
+cursor.execute("SELECT count(*) FROM chunk;")
 chunk_count = cursor.fetchone()[0]
 
-cursor.execute("SELECT count(*) FROM mapchunks;")
+cursor.execute("SELECT count(*) FROM mapchunk;")
 mapchunk_count = cursor.fetchone()[0]
 
 print(f"[Database] SQLite integrity verified: {chunk_count} chunks, {mapchunk_count} mapchunks, tables: {sorted(list(tables))}")

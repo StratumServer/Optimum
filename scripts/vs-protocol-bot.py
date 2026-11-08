@@ -27,7 +27,21 @@ import time
 import threading
 import random
 import sys
+import os
+import json
 import io
+
+def _resolve_game_version():
+    try:
+        forks_path = os.path.join(os.path.dirname(__file__), "..", "forks.json")
+        if os.path.isfile(forks_path):
+            with open(forks_path, "r", encoding="utf-8") as f:
+                return json.load(f).get("vintageStoryVersion", "1.22.7")
+    except Exception:
+        pass
+    return "1.22.7"
+
+DEFAULT_GAME_VERSION = _resolve_game_version()
 
 # --- Protobuf-like wire format helpers ---
 
@@ -70,7 +84,7 @@ def read_varint(stream):
 
 # --- Packet builders ---
 
-def build_identification(player_name, player_uid, network_version="1.22.6", game_version="1.22.6"):
+def build_identification(player_name, player_uid, network_version="1.22.6", game_version=DEFAULT_GAME_VERSION):
     """Build Packet_ClientIdentification sub-message."""
     fields = b""
     fields += write_field_string(1, "2")  # MdProtocolVersion
@@ -503,30 +517,28 @@ def run_movement_test(port, mode="flight", duration=6.0, bot_id=9000):
     print(f"  [{name}] Connecting to port {port}...")
     sock.connect(('127.0.0.1', port))
 
+    reader = FrameReader(sock)
     ident = build_identification(name, uid)
     sock.sendall(frame_packet(build_packet_client(1, sub_field_num=2, sub_data=ident)))
-    sock.settimeout(10)
-    if not sock.recv(8192):
+    frames = reader.poll_frames(10)
+    if not frames:
         report["error"] = "no response to identification"
         return report
 
-    sock.sendall(frame_packet(build_request_join()))
-    drain_start = time.time()
-    while time.time() - drain_start < 5:
-        sock.settimeout(0.5)
-        try:
-            if not sock.recv(65536):
-                break
-        except socket.timeout:
-            break
+    server_ready = any(packet_id == 73 for packet_id, _ in frames)
+    ready_deadline = time.time() + 45
+    while not server_ready and time.time() < ready_deadline:
+        more = reader.poll_frames(0.5)
+        server_ready = any(packet_id == 73 for packet_id, _ in more)
 
+    sock.sendall(frame_packet(build_request_join()))
+    reader.poll_frames(3.0)
     sock.sendall(frame_packet(build_client_loaded()))
     time.sleep(0.1)
     sock.sendall(frame_packet(build_client_playing()))
     report["joined"] = True
     print(f"  [{name}] Joined. Waiting ~11s for server to flip this connection to FallBackToTcp...")
 
-    reader = FrameReader(sock)
     reader.poll_frames(11.0)  # ServerMain waits 20x500ms polls before marking FallBackToTcp
 
     print(f"  [{name}] Sending calibration packet (deliberately far off) to learn real spawn position...")
@@ -645,6 +657,8 @@ if __name__ == "__main__":
         print(f"VS Protocol Movement Test: mode={mode} duration={duration}s on port {port}")
         result = run_movement_test(port, mode=mode, duration=duration)
         print(f"\nResult: {result}")
+        if not result.get("joined") or result.get("error"):
+            sys.exit(1)
     else:
         bot_count = int(sys.argv[2])
         duration = int(sys.argv[3]) if len(sys.argv) > 3 else 120

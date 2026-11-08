@@ -146,6 +146,7 @@ jobs:
         run: |
           bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
           dotnet build VintageStory.slnx -c Release --nologo
+          make patch-il
 
       - name: Execute Save Game Roundtrip Test
         shell: bash
@@ -214,6 +215,7 @@ jobs:
         run: |
           bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
           dotnet build VintageStory.slnx -c Release --nologo
+          make patch-il
 
       - name: Execute Multiplayer Protocol Parity Test
         shell: bash
@@ -277,6 +279,7 @@ jobs:
         run: |
           bash scripts/bootstrap.sh --client-archive "${{ steps.client.outputs.path }}"
           dotnet build VintageStory.slnx -c Release --nologo
+          make patch-il
 
       - name: Execute Worldgen Parity Harness (1,800 chunks)
         shell: bash

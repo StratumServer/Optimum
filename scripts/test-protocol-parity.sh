@@ -67,10 +67,12 @@ cd "$VANILLA_SERVER"
 
 # Configure server
 dotnet VintagestoryServer.dll --dataPath "$DATA_DIR" \
-    --setconfig="{ Port: $PORT, MaxClients: 5, PassTimeWhenEmpty: false }" >/dev/null 2>&1 || true
+    --setconfig="{ Port: $PORT, MaxClients: 5, PassTimeWhenEmpty: false, VerifyPlayerAuth: false }" >/dev/null 2>&1 || true
 
 echo "[Server] Launching Vanilla 1.22.7 dedicated server on port $PORT..."
-dotnet VintagestoryServer.dll --dataPath "$DATA_DIR" > "$LOG_FILE" 2>&1 &
+dotnet VintagestoryServer.dll --dataPath "$DATA_DIR" \
+    --withconfig="{ Port: $PORT, MaxClients: 5, PassTimeWhenEmpty: false, VerifyPlayerAuth: false }" \
+    > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
 deadline=$((SECONDS + RUN_TIMEOUT))
