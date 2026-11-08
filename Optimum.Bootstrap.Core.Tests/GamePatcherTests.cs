@@ -400,4 +400,141 @@ public sealed class GamePatcherTests
         string? result = GamePatcher.ExtractPatchedHash(output);
         Assert.Equal(expected, result);
     }
+
+    [Fact]
+    public async Task SecondTargetPatchFailureLeavesGameDirectoryUntouchedAndCleansStaging()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-staged-fail-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: true);
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator());
+
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.False(result.Ok);
+            Assert.Equal(FailureReason.PatchConflict, result.Reason);
+            Assert.Contains("VintagestoryAPI.dll", result.Message);
+
+            // VintagestoryLib.dll must remain untouched vanilla even though its stage succeeded
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.Api.Contracts.dll")));
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RuntimeValidationFailureRollsBackPatchedAssembliesAndOverlayAssets()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-validation-rollback-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: false);
+            var patcher = new GamePatcher(
+                SystemProbe.Default,
+                new StubRuntimeValidator(ok: false, detail: "missing assembly reference"));
+
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.False(result.Ok);
+            Assert.Equal(FailureReason.VerificationFailed, result.Reason);
+            Assert.Contains("missing assembly reference", result.Message);
+
+            // Live binaries and assets must be restored to vanilla
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.Api.Contracts.dll")));
+            Assert.False(File.Exists(Path.Combine(gameDir, "Optimum.GameContent.dll")));
+            Assert.False(File.Exists(Path.Combine(gameDir, ".optimum", "manifest.json")));
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task MidCommitSwapFailureRollsBackToVanilla()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-midswap-rollback-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: false);
+            int swapCount = 0;
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator())
+            {
+                FailAtCommitStep = step =>
+                {
+                    if (step == "swap" && ++swapCount == 1)
+                        throw new IOException("simulated disk failure after first assembly swap");
+                },
+            };
+
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.False(result.Ok);
+            Assert.Equal(FailureReason.EngineInternal, result.Reason);
+            Assert.Contains("rolled back", result.Message);
+
+            // Even though VintagestoryLib.dll was swapped before the exception, rollback restores vanilla
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static (string GameDir, string OverlayDir) CreateTestGameAndOverlay(string root, bool failOnApi)
+    {
+        string gameDir = Path.Combine(root, "game");
+        Directory.CreateDirectory(gameDir);
+        Directory.CreateDirectory(Path.Combine(gameDir, "Mods"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "Lib"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "assets", "game", "lang"));
+
+        File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla-lib");
+        File.WriteAllText(Path.Combine(gameDir, "VintagestoryAPI.dll"), "vanilla-api");
+        File.WriteAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll"), "vanilla-essentials");
+        File.WriteAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json"), "{\"vanilla-key\": \"Vanilla Value\"}");
+
+        string overlayDir = Path.Combine(root, "overlay");
+        string donorsDir = Path.Combine(overlayDir, ".optimum", "donors");
+        Directory.CreateDirectory(donorsDir);
+        Directory.CreateDirectory(Path.Combine(overlayDir, "assets", "game", "lang"));
+
+        File.WriteAllText(Path.Combine(donorsDir, "VintagestoryLib.Donor.dll"), "donor-lib");
+        File.WriteAllText(Path.Combine(donorsDir, "VintagestoryAPI.Contracts.dll"), "donor-api");
+        File.WriteAllText(Path.Combine(donorsDir, "VSEssentials.Donor.dll"), "donor-essentials");
+        File.WriteAllText(Path.Combine(overlayDir, "Optimum.Api.Contracts.dll"), "contracts-dll");
+        File.WriteAllText(Path.Combine(overlayDir, "Optimum.GameContent.dll"), "game-content-dll");
+        File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "lang", "en.json"), "{\"optimum-key\": \"Optimum Value\"}");
+
+        string patcherExe = Path.Combine(overlayDir, OperatingSystem.IsWindows() ? "Optimum.Patcher.bat" : "Optimum.Patcher");
+        if (OperatingSystem.IsWindows())
+        {
+            string failCheck = failOnApi ? "if \"%~1\"==\"--api\" exit /b 1\r\n" : "";
+            File.WriteAllText(patcherExe,
+                $"@echo off\r\n{failCheck}set \"target=\"\r\nfor %%t in (%*) do set \"target=%%~t\"\r\necho patched > \"%target%\"\r\nexit /b 0\r\n");
+        }
+        else
+        {
+            string failCheck = failOnApi ? "if [ \"$1\" = \"--api\" ]; then echo \"api conflict\" >&2; exit 1; fi\n" : "";
+            File.WriteAllText(patcherExe, $"#!/usr/bin/env bash\n{failCheck}target=\"${{@: -1}}\"\necho \"patched\" > \"$target\"\nexit 0\n");
+            File.SetUnixFileMode(patcherExe, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return (gameDir, overlayDir);
+    }
 }
