@@ -409,6 +409,9 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string prewarmerSource = File.ReadAllText(
             PatchReader.FindRepositoryFile("sources/VSSurvivalMod/Lore/Village/OptimumOutfitTexturePrewarmer.cs"));
         Assert.Contains("api.Event.LeaveWorld += ClearCaches;", prewarmerSource);
+        Assert.Contains("api.Event.ReloadTextures += ClearCaches;", prewarmerSource);
+        Assert.Contains("capi.Event.LeaveWorld -= ClearCaches;", prewarmerSource);
+        Assert.Contains("capi.Event.ReloadTextures -= ClearCaches;", prewarmerSource);
         Assert.Contains("public override void Dispose()", prewarmerSource);
         Assert.Contains("OptimumOutfitShapeCache.Clear();", prewarmerSource);
         Assert.Contains("OptimumOutfitAnimatorCache.Clear();", prewarmerSource);
@@ -420,6 +423,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string runtimePatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/EntityDressedHumanoid.cs.patch"));
         Assert.Contains("optimumAnimatorCacheKey = OptimumOutfitAnimatorCache.BuildKey(optimumAnimatorCacheKey, cshape?.Overlays, willDisableElements);", runtimePatch);
+        Assert.Contains("if (outfitCodes != null && outfitSlots != null && array != null)", runtimePatch);
+        Assert.Contains("for (int j = 0; j < outfitCodes.Length && j < array.Length && j < outfitSlots.Length; j++)", runtimePatch);
     }
 
     [Fact]

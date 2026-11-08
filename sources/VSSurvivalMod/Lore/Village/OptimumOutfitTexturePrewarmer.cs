@@ -32,16 +32,25 @@ namespace Vintagestory.GameContent
     /// </summary>
     public class OptimumOutfitTexturePrewarmerModSystem : ModSystem
     {
+        private ICoreClientAPI capi;
+
         public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
 
         public override void StartClientSide(ICoreClientAPI api)
         {
+            capi = api;
             api.Event.LevelFinalize += () => Prewarm(api);
             api.Event.LeaveWorld += ClearCaches;
+            api.Event.ReloadTextures += ClearCaches;
         }
 
         public override void Dispose()
         {
+            if (capi != null)
+            {
+                capi.Event.LeaveWorld -= ClearCaches;
+                capi.Event.ReloadTextures -= ClearCaches;
+            }
             ClearCaches();
             base.Dispose();
         }
