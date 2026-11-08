@@ -44,3 +44,13 @@ index eb70684..1235212 100644
          }
  
          private void MarkEnded(int key)
+@@ -174,7 +193,8 @@ namespace Vintagestory.API.Common
+             Thread thread = new Thread(starter);
+             thread.IsBackground = true;
+             thread.Name = name;
+-            Inst.DedicatedThreads[Inst.dedicatedCounter++] = thread;
++            int key = Interlocked.Increment(ref Inst.dedicatedCounter) - 1;
++            Inst.DedicatedThreads[key] = thread;
+             return thread;
+         }
+ 
