@@ -103,6 +103,8 @@ var membersToInject = new Dictionary<string, List<string>>
     },
     ["Vintagestory.Client.NoObf.SystemRenderEntities"] = new()
     {
+        "_cachedShadowCullDistance",
+        "_cachedShadowCullDistanceSq",
         "ShadowCullDistanceSq",
         "OptimumEntityLightBatchSize",
         "OptimumEntityLightMinimumSamples",
