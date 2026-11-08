@@ -64,6 +64,21 @@ public class FsrPipelineCoverageTests
     }
 
     [Fact]
+    public void DisableOptimumFsrRestoresSsaaAndRebuildsFramebuffers()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        Assert.Contains("DisableOptimumFsr(Exception error)", platform);
+        Assert.Contains("ClientSettings.SSAA = 1f;", platform);
+        Assert.Contains("RebuildFrameBuffers();", platform);
+        Assert.Contains("optimumFsrDisabled = true;", platform);
+        Assert.Contains("logger.Warning(", platform);
+        Assert.Contains("!optimumFsrDisabled && ClientSettings.OptimumRenderScale < 1.0f", platform);
+    }
+
+    [Fact]
     public void TerrainBiasCoversTextureObjectsAndCustomSamplers()
     {
         string chunkRenderer = ReadPatchedOrSource(
