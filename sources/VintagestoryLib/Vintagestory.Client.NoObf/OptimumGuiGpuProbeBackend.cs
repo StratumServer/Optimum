@@ -432,6 +432,7 @@ namespace Vintagestory.Client.NoObf
 								// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
 								// from this upload are still caught after the state restore below.
 								context.Flush(submit: true, synchronous: false);
+								context.ResetContext(GRGlBackendState.All);
 								rendered = true;
 							}
 						}
@@ -952,6 +953,7 @@ namespace Vintagestory.Client.NoObf
 										surface.Flush();
 										context.Flush();
 										context.Submit(true);
+										context.ResetContext(GRGlBackendState.All);
 										GL.Finish();
 										GL.BindFramebuffer(FramebufferTarget.ReadFramebuffer, framebuffer);
 										GL.ReadBuffer(ReadBufferMode.ColorAttachment0);
