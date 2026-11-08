@@ -116,7 +116,7 @@ public class OptimumDiagnosticsCountersTests
     [Fact]
     public void BenchmarkMetricsAreVersionedStableAndNumeric()
     {
-        Assert.Equal(2, OptimumDiagnostics.BenchmarkMetricsSchemaVersion);
+        Assert.Equal(3, OptimumDiagnostics.BenchmarkMetricsSchemaVersion);
 
         var first = OptimumDiagnostics.CaptureBenchmarkMetrics();
         var second = OptimumDiagnostics.CaptureBenchmarkMetrics();
@@ -135,6 +135,10 @@ public class OptimumDiagnosticsCountersTests
         Assert.Contains("runtime.process.memory.workingSet.bytes", first.Keys);
         Assert.Contains("runtime.process.memory.private.bytes", first.Keys);
         Assert.Contains("runtime.gc.totalAllocated.bytes", first.Keys);
+        Assert.Contains("runtime.gc.totalPauseDuration.timeSpanTicks", first.Keys);
+        Assert.Contains("runtime.gc.totalPauseDuration.ms", first.Keys);
+        Assert.Contains("runtime.gc.pauseHitches.count", first.Keys);
+        Assert.Contains("runtime.gc.maxPauseDuration.stopwatchTicks", first.Keys);
         foreach (var name in OptimumDiagnostics.Counters.Keys)
         {
             Assert.Contains("counters." + name + ".hits", first.Keys);
