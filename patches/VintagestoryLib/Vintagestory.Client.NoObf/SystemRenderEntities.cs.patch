@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..4829726 100644
+index 374f827..948f46f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,15 +1,50 @@
+@@ -1,13 +1,52 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
@@ -48,14 +48,14 @@ index 374f827..4829726 100644
 +
 +	private bool optimumEntityShaderFailureLogged;
 +
++	private readonly List<EntityRenderer> renderedEntities = new List<EntityRenderer>();
++
++	private readonly List<EntityRenderer> shadowRenderedEntities = new List<EntityRenderer>();
++
  	public override string Name => "ree";
  
  	public SystemRenderEntities(ClientMain game)
- 		: base(game)
- 	{
-@@ -20,39 +55,239 @@ public class SystemRenderEntities : ClientSystem
- 		game.eventManager.RegisterRenderer(OnRenderFrame2D, EnumRenderStage.Ortho, Name, 0.4);
- 		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowFar, Name, 0.4);
+@@ -22,24 +61,221 @@ public class SystemRenderEntities : ClientSystem
  		game.eventManager.RegisterRenderer(OnRenderFrameShadows, EnumRenderStage.ShadowNear, Name, 0.4);
  	}
  
@@ -88,10 +88,10 @@ index 374f827..4829726 100644
 +		int maxBatchSize = 0;
 +		try
 +		{
-+			foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++			for (int i = 0; i < renderedEntities.Count; i++)
 +			{
-+				EntityRenderer renderer = entityRenderer.Value;
-+				if (!renderer.entity.IsRendered || renderer is not IOptimumEntityLightSampler sampler)
++				EntityRenderer renderer = renderedEntities[i];
++				if (renderer is not IOptimumEntityLightSampler sampler)
 +				{
 +					continue;
 +				}
@@ -229,6 +229,7 @@ index 374f827..4829726 100644
 +		OptimumDiagnostics.ResetEntityTesselationBudget();
 +		int optimumLightBatchId = OptimumConfig.EffectiveEntityLightBatch && !optimumEntityLightBatchDisabled && optimumEntityLightPreviousSampleCount >= OptimumEntityLightMinimumSamples ? PrepareOptimumEntityLights() : 0;
 +		int optimumLightSampleCount = 0;
++		renderedEntities.Clear();
  		int num = ClientSettings.ViewDistance * ClientSettings.ViewDistance;
 -		Vec3d xYZ = game.EntityPlayer.Pos.XYZ;
 +		double numHysteresis = num * OptimumConfig.HysteresisFactorSq;
@@ -249,6 +250,7 @@ index 374f827..4829726 100644
 +			if (entity.Pos.Dimension == dimension && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || (float)((plrX - entity.Pos.X) * (plrX - entity.Pos.X) + (plrZ - entity.Pos.Z) * (plrZ - entity.Pos.Z)) < (float)(entity.IsRendered ? numHysteresis : num)) && game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, entity.FrustumSphereRadius) && (entity == game.EntityPlayer || entity.AllowOutsideLoadedRange || game.WorldMap.IsChunkRendered(entity.Pos)))
  			{
  				entity.IsRendered = true;
++				renderedEntities.Add(entityRenderer.Value);
 +				OptimumDiagnostics.EntityRenderCull.Hit();
 +				if (entityRenderer.Value is IOptimumEntityLightSampler sampler)
 +				{
@@ -277,9 +279,7 @@ index 374f827..4829726 100644
  			try
  			{
  				entity.AnimManager?.OnClientFrame(dt);
- 			}
- 			catch (Exception)
- 			{
+@@ -49,8 +285,13 @@ public class SystemRenderEntities : ClientSystem
  				game.Logger.Error("Animations error for entity " + entity.Code.ToShortString() + " at " + entity.Pos.AsBlockPos);
  				throw;
  			}
@@ -293,11 +293,24 @@ index 374f827..4829726 100644
  	}
  
  	public void OnRenderOpaque3D(float deltaTime)
- 	{
- 		RuntimeStats.renderedEntities = 0;
-@@ -82,15 +317,44 @@ public class SystemRenderEntities : ClientSystem
+@@ -60,13 +301,10 @@ public class SystemRenderEntities : ClientSystem
  		game.Platform.GlDisableCullFace();
- 		game.GlMatrixModeModelView();
+ 		game.Platform.GlToggleBlend(on: true);
+ 		game.Platform.GlEnableDepthTest();
+-		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++		for (int i = 0; i < renderedEntities.Count; i++)
+ 		{
+-			if (entityRenderer.Value.entity.IsRendered)
+-			{
+-				entityRenderer.Value.DoRender3DOpaque(deltaTime, isShadowPass: false);
+-				RuntimeStats.renderedEntities++;
+-			}
++			renderedEntities[i].DoRender3DOpaque(deltaTime, isShadowPass: false);
++			RuntimeStats.renderedEntities++;
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("ree-op");
+ 		ShaderProgramEntityanimated entityanimated = ShaderPrograms.Entityanimated;
+@@ -84,11 +322,38 @@ public class SystemRenderEntities : ClientSystem
  		game.GlPushMatrix();
  		game.GlLoadMatrix(game.MainCamera.CameraMatrixOrigin);
  		game.Platform.GlToggleBlend(on: true);
@@ -309,24 +322,22 @@ index 374f827..4829726 100644
 +		try
  		{
 -			if (entityRenderer2.Value.entity.IsRendered)
-+			foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++			for (int i = 0; i < renderedEntities.Count; i++)
  			{
 -				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
-+				if (entityRenderer2.Value.entity.IsRendered)
++				EntityRenderer entityRenderer2 = renderedEntities[i];
++				bool supportsShaderStateCache = shaderStateCacheEnabled && !shaderSegmentUnavailable && entityRenderer2 is IOptimumEntityShaderRenderer shaderRenderer && shaderRenderer.OptimumShaderStateCompatible;
++				if (supportsShaderStateCache && !shaderSegmentActive)
 +				{
-+					bool supportsShaderStateCache = shaderStateCacheEnabled && !shaderSegmentUnavailable && entityRenderer2.Value is IOptimumEntityShaderRenderer shaderRenderer && shaderRenderer.OptimumShaderStateCompatible;
-+					if (supportsShaderStateCache && !shaderSegmentActive)
-+					{
-+						shaderSegmentActive = BeginOptimumEntityShaderSegment(entityanimated);
-+						shaderSegmentUnavailable = !shaderSegmentActive;
-+					}
-+					else if (!supportsShaderStateCache && shaderSegmentActive)
-+					{
-+						EndOptimumEntityShaderSegment();
-+						shaderSegmentActive = false;
-+					}
-+					entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++					shaderSegmentActive = BeginOptimumEntityShaderSegment(entityanimated);
++					shaderSegmentUnavailable = !shaderSegmentActive;
 +				}
++				else if (!supportsShaderStateCache && shaderSegmentActive)
++				{
++					EndOptimumEntityShaderSegment();
++					shaderSegmentActive = false;
++				}
++				entityRenderer2.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
 +			}
 +		}
 +		finally
@@ -341,15 +352,38 @@ index 374f827..4829726 100644
  			}
  		}
  		game.GlPopMatrix();
- 		entityanimated.Stop();
- 		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -127,11 +391,28 @@ public class SystemRenderEntities : ClientSystem
- 			shaderProgramChunkshadowmap.Use();
+@@ -107,18 +372,16 @@ public class SystemRenderEntities : ClientSystem
+ 		game.Platform.GlDisableCullFace();
+ 		game.Platform.GlToggleBlend(on: true);
+ 		game.Platform.GlEnableDepthTest();
+-		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++		for (int i = 0; i < renderedEntities.Count; i++)
+ 		{
+-			if (entityRenderer.Value.entity.IsRendered)
+-			{
+-				entityRenderer.Value.DoRender3DAfterOIT(dt, isShadowPass: false);
+-			}
++			renderedEntities[i].DoRender3DAfterOIT(dt, isShadowPass: false);
  		}
+ 	}
+ 
+ 	private void OnRenderFrameShadows(float dt)
+ 	{
+ 		int dimension = game.EntityPlayer.Pos.Dimension;
++		shadowRenderedEntities.Clear();
+ 		ShaderProgramChunkshadowmap shaderProgramChunkshadowmap = (ShaderProgramChunkshadowmap)ShaderProgramBase.CurrentShaderProgram;
+ 		if (game.api.Render.UseSSBOs)
+ 		{
+@@ -129,9 +392,32 @@ public class SystemRenderEntities : ClientSystem
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			Entity entity = entityRenderer.Value.entity;
 -			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, 3.0) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
++			if (entity.Pos.Dimension != dimension)
++			{
++				entity.IsShadowRendered = false;
++				continue;
++			}
 +			double shadowRadius = Math.Max(3.0, (double)entity.FrustumSphereRadius);
 +			// Optimum: cull entities beyond shadow distance threshold, scaled by bounding sphere radius.
 +			bool shadowCullEnabled = ClientSettings.OptimumEntityShadowCull;
@@ -367,9 +401,50 @@ index 374f827..4829726 100644
 +				}
 +				OptimumDiagnostics.EntityShadowCull.Hit();
 +			}
-+			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, shadowRadius) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))) && entity.Pos.Dimension == dimension)
++			if (game.frustumCuller.SphereInFrustum((float)entity.Pos.X, (float)entity.Pos.InternalY, (float)entity.Pos.Z, shadowRadius) && (entity == game.EntityPlayer || (game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos))))
  			{
  				entity.IsShadowRendered = true;
++				shadowRenderedEntities.Add(entityRenderer.Value);
  				entityRenderer.Value.DoRender3DOpaque(dt, isShadowPass: true);
  			}
  			else
+@@ -146,12 +432,9 @@ public class SystemRenderEntities : ClientSystem
+ 		shadowmapentityanimated.EntityTex2D = game.EntityAtlasManager.AtlasTextures[0].TextureId;
+ 		_ = game.api.Render;
+ 		_ = game.api.World.Player.Entity;
+-		foreach (KeyValuePair<long, EntityRenderer> entityRenderer2 in game.EntityRenderers)
++		for (int i = 0; i < shadowRenderedEntities.Count; i++)
+ 		{
+-			if (entityRenderer2.Value.entity.IsShadowRendered)
+-			{
+-				entityRenderer2.Value.DoRender3DOpaqueBatched(dt, isShadowPass: true);
+-			}
++			shadowRenderedEntities[i].DoRender3DOpaqueBatched(dt, isShadowPass: true);
+ 		}
+ 		shadowmapentityanimated.Stop();
+ 		shaderProgramChunkshadowmap.Use();
+@@ -160,20 +443,17 @@ public class SystemRenderEntities : ClientSystem
+ 
+ 	private void OnRenderFrame2D(float dt)
+ 	{
+-		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++		for (int i = 0; i < renderedEntities.Count; i++)
+ 		{
+-			Entity entity = entityRenderer.Value.entity;
+-			EntityRenderer value = entityRenderer.Value;
+-			if (entity.IsRendered)
+-			{
+-				value.DoRender2D(dt);
+-			}
++			renderedEntities[i].DoRender2D(dt);
+ 		}
+ 		ScreenManager.FrameProfiler.Mark("ree2d-d");
+ 	}
+ 
+ 	public override void Dispose(ClientMain game)
+ 	{
++		renderedEntities.Clear();
++		shadowRenderedEntities.Clear();
+ 		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
+ 		{
+ 			entityRenderer.Value.Dispose();
