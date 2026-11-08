@@ -292,21 +292,6 @@ public static class OptimumFrustumCullSimd
         int lodLevel,
         ModelDataPoolLocation location)
     {
-        Plane[] planes = GetFrustum(culler);
-        if (planes == null || planes.Length < 6)
-        {
-            return false;
-        }
-
-        var ctx = GetOrCreateContext(culler, planes);
-        if (ctx.IsOutside5(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ))
-        {
-            OptimumDiagnostics.RecordSimdFrustumTest(culled: true);
-            return false;
-        }
-
-        OptimumDiagnostics.RecordSimdFrustumTest(culled: false);
-
         if (OptimumConfig.ChiselLodEnabled
             && (lodLevel == 2 || lodLevel == 3)
             && OptimumApiBridge.IsChiselTracked(location))
@@ -323,23 +308,43 @@ public static class OptimumFrustumCullSimd
             double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
             double innerThreshold = chiselDistanceSq;
             double outerThreshold = chiselDistanceSq * OptimumConfig.HysteresisFactorSq;
-            return lodLevel == 2
+            bool chiselVisible = lodLevel == 2
                 ? chiselDistance <= (nowVisible ? outerThreshold : innerThreshold)
                 : chiselDistance > (nowVisible ? innerThreshold : outerThreshold);
+            if (!chiselVisible) return false;
+        }
+        else
+        {
+            var playerPos = GetPlayerPos(culler);
+            if (playerPos == null) return false;
+
+            double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
+            bool rangeVisible = lodLevel switch
+            {
+                0 => culler.lod0BiasSq > 0 && distance < culler.lod0BiasSq + 32 * 32,
+                1 => distance < culler.ViewDistanceSq,
+                2 => distance <= culler.lod2BiasSq,
+                3 => distance > culler.lod2BiasSq && distance < culler.ViewDistanceSq,
+                _ => false,
+            };
+            if (!rangeVisible) return false;
         }
 
-        var playerPos = GetPlayerPos(culler);
-        if (playerPos == null) return false;
-
-        double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
-        return lodLevel switch
+        Plane[] planes = GetFrustum(culler);
+        if (planes == null || planes.Length < 6)
         {
-            0 => culler.lod0BiasSq > 0 && distance < culler.lod0BiasSq + 32 * 32,
-            1 => distance < culler.ViewDistanceSq,
-            2 => distance <= culler.lod2BiasSq,
-            3 => distance > culler.lod2BiasSq && distance < culler.ViewDistanceSq,
-            _ => false,
-        };
+            return false;
+        }
+
+        var ctx = GetOrCreateContext(culler, planes);
+        if (ctx.IsOutside5(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ))
+        {
+            OptimumDiagnostics.RecordSimdFrustumTest(culled: true);
+            return false;
+        }
+
+        OptimumDiagnostics.RecordSimdFrustumTest(culled: false);
+        return true;
     }
 
     public static bool InFrustum(FrustumCulling culler, Sphere sphere)

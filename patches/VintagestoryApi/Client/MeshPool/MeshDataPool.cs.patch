@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..d81387f 100644
+index f9128b4..0bb5c0a 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -280,11 +280,15 @@ namespace Vintagestory.API.Client
@@ -18,7 +18,123 @@ index f9128b4..d81387f 100644
              // Assign a location to it
              ModelDataPoolLocation poolLocation = new ModelDataPoolLocation()
              {
-@@ -462,11 +466,15 @@ namespace Vintagestory.API.Client
+@@ -366,26 +370,104 @@ namespace Vintagestory.API.Client
+         {
+             indicesGroupsCount = 0;
+             RenderedTriangles = 0;
+             AllocatedTris = 0;
+ 
+-            for (int i = 0; i < poolLocations.Count; i++)
++            int count = poolLocations.Count;
++            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
++
++            switch (frustumCullMode)
+             {
+-                ModelDataPoolLocation location = poolLocations[i];
++                case EnumFrustumCullMode.CullNormal:
++                    for (int i = 0; i < count; i++)
++                    {
++                        ModelDataPoolLocation location = poolLocations[i];
++                        int size = location.IndicesEnd - location.IndicesStart;
++                        AllocatedTris += size / 3;
++
++                        if (!location.Hide && location.CullVisible[visibleBufIndex])
++                        {
++                            bool visible = frustumCuller.InFrustumAndRange(location.FrustumCullSphere, location.FrustumVisible, location.LodLevel, location.OptimumUseChiselLodDistance);
++                            location.FrustumVisible = visible;
++                            if (visible)
++                            {
++                                indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
++                                indicesSizes[indicesGroupsCount] = size;
++                                RenderedTriangles += size / 3;
++                                indicesGroupsCount++;
++                            }
++                        }
++                    }
++                    break;
+ 
+-                int size = location.IndicesEnd - location.IndicesStart;
+-                if (location.IsVisible(frustumCullMode, frustumCuller))
+-                {
+-                    indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
+-                    indicesSizes[indicesGroupsCount] = size;
++                case EnumFrustumCullMode.CullInstant:
++                    for (int i = 0; i < count; i++)
++                    {
++                        ModelDataPoolLocation location = poolLocations[i];
++                        int size = location.IndicesEnd - location.IndicesStart;
++                        AllocatedTris += size / 3;
++
++                        if (!location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustum(location.FrustumCullSphere))
++                        {
++                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
++                            indicesSizes[indicesGroupsCount] = size;
++                            RenderedTriangles += size / 3;
++                            indicesGroupsCount++;
++                        }
++                    }
++                    break;
+ 
+-                    RenderedTriangles += size / 3;
++                case EnumFrustumCullMode.CullInstantShadowPassNear:
++                    for (int i = 0; i < count; i++)
++                    {
++                        ModelDataPoolLocation location = poolLocations[i];
++                        int size = location.IndicesEnd - location.IndicesStart;
++                        AllocatedTris += size / 3;
++
++                        if (!location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && frustumCuller.OptimumChiselLodVisible(location.FrustumCullSphere, location.LodLevel, location.OptimumUseChiselLodDistance))
++                        {
++                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
++                            indicesSizes[indicesGroupsCount] = size;
++                            RenderedTriangles += size / 3;
++                            indicesGroupsCount++;
++                        }
++                    }
++                    break;
+ 
+-                    indicesGroupsCount++;
+-                }
++                case EnumFrustumCullMode.CullInstantShadowPassFar:
++                    for (int i = 0; i < count; i++)
++                    {
++                        ModelDataPoolLocation location = poolLocations[i];
++                        int size = location.IndicesEnd - location.IndicesStart;
++                        AllocatedTris += size / 3;
++
++                        if (!location.Hide && location.CullVisible[visibleBufIndex] && location.LodLevel >= 1 && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && frustumCuller.OptimumChiselLodVisible(location.FrustumCullSphere, location.LodLevel, location.OptimumUseChiselLodDistance))
++                        {
++                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
++                            indicesSizes[indicesGroupsCount] = size;
++                            RenderedTriangles += size / 3;
++                            indicesGroupsCount++;
++                        }
++                    }
++                    break;
+ 
+-                AllocatedTris += size / 3;
++                default:
++                    for (int i = 0; i < count; i++)
++                    {
++                        ModelDataPoolLocation location = poolLocations[i];
++                        int size = location.IndicesEnd - location.IndicesStart;
++                        AllocatedTris += size / 3;
++
++                        if (!location.Hide)
++                        {
++                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
++                            indicesSizes[indicesGroupsCount] = size;
++                            RenderedTriangles += size / 3;
++                            indicesGroupsCount++;
++                        }
++                    }
++                    break;
+             }
+         }
+ 
+         public void SetFullyVisible()
+         {
+@@ -462,11 +544,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -34,7 +150,7 @@ index f9128b4..d81387f 100644
  
  
      /// <summary>
-@@ -513,10 +521,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +599,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -47,7 +163,7 @@ index f9128b4..d81387f 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +545,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +623,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);
