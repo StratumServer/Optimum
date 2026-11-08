@@ -835,6 +835,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+<<<<<<< HEAD
     public void FsrRcas_SharpnessSliderConfigurableAndUniformPassed()
     {
         // 1. Verify OptimumConfig defaults
@@ -892,6 +893,62 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch", cecilList);
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch", cecilList);
+    }
+
+    [Fact]
+    public void RuntimeConfig_LowMemoryCalibrationDisablesDatasAndBindsHighMemoryPercent()
+    {
+        // 1. Verify sync-runtimeconfig-frameworks.ps1 handles low memory calibration
+        string script = File.ReadAllText(
+            PatchReader.FindRepositoryFile("scripts/sync-runtimeconfig-frameworks.ps1"));
+        Assert.Contains("TotalAvailableMemoryBytes", script);
+        Assert.Contains("DynamicAdaptationMode", script);
+        Assert.Contains("HighMemoryPercent", script);
+
+        // 2. Verify PackageDeployer calibrates runtime configs in staged deployment
+        string deployerSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Bootstrap.Core/Install/PackageDeployer.cs"));
+        Assert.Contains("CalibrateRuntimeConfigs(stageDir);", deployerSource);
+        Assert.Contains("DynamicAdaptationMode", deployerSource);
+        Assert.Contains("HighMemoryPercent", deployerSource);
+
+        // 3. Verify Launcher calibration logic
+        string tempDir = Directory.CreateTempSubdirectory("optimum-launcher-gc-").FullName;
+        try
+        {
+            string cfgPath = System.IO.Path.Combine(tempDir, "Vintagestory.runtimeconfig.json");
+            File.WriteAllText(cfgPath, """
+                {
+                  "runtimeOptions": {
+                    "tfm": "net10.0",
+                    "configProperties": {
+                      "System.GC.Server": true,
+                      "System.GC.DATAs": 1
+                    }
+                  }
+                }
+                """);
+
+            Optimum.Launcher.Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=aggressive"]);
+            string content = File.ReadAllText(cfgPath);
+            var node = System.Text.Json.Nodes.JsonNode.Parse(content);
+            var props = node!["runtimeOptions"]!["configProperties"]!.AsObject();
+            Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DATAs"));
+
+            Optimum.Launcher.Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=throughput"]);
+            content = File.ReadAllText(cfgPath);
+            node = System.Text.Json.Nodes.JsonNode.Parse(content);
+            props = node!["runtimeOptions"]!["configProperties"]!.AsObject();
+            Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DynamicAdaptationMode"));
+            Assert.False(props.ContainsKey("System.GC.HighMemoryPercent"));
+        }
+        finally
+        {
+            Directory.Delete(tempDir, recursive: true);
+        }
     }
 
     public class StubProxy<T> : DispatchProxy where T : class

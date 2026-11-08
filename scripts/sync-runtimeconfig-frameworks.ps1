@@ -18,7 +18,9 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$LauncherConfig,
-    [Parameter(Mandatory)][string]$VanillaConfig
+    [Parameter(Mandatory)][string]$VanillaConfig,
+    [long]$TotalAvailableMemoryBytes = 0,
+    [string]$MemoryProfile = ""
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,9 +47,42 @@ function Ensure-GcConfigProperties($runtimeOptions) {
         $cfg | Add-Member -NotePropertyName 'System.GC.Concurrent' -NotePropertyValue $true -Force
         $modified = $true
     }
-    if ($cfg.PSObject.Properties['System.GC.DATAs'] -eq $null -or $cfg.'System.GC.DATAs' -ne 1) {
-        $cfg | Add-Member -NotePropertyName 'System.GC.DATAs' -NotePropertyValue 1 -Force
-        $modified = $true
+
+    $isLowMemory = $false
+    if ($MemoryProfile -eq 'aggressive' -or $MemoryProfile -eq 'low' -or $MemoryProfile -eq 'conserve') {
+        $isLowMemory = $true
+    } elseif ($MemoryProfile -eq 'throughput' -or $MemoryProfile -eq 'high' -or $MemoryProfile -eq 'max') {
+        $isLowMemory = $false
+    } elseif ($TotalAvailableMemoryBytes -gt 0 -and $TotalAvailableMemoryBytes -le 8589934592) {
+        $isLowMemory = $true
+    }
+
+    if ($isLowMemory) {
+        if ($cfg.PSObject.Properties['System.GC.DATAs'] -ne $null) {
+            $cfg.PSObject.Properties.Remove('System.GC.DATAs')
+            $modified = $true
+        }
+        if ($cfg.PSObject.Properties['System.GC.DynamicAdaptationMode'] -eq $null -or $cfg.'System.GC.DynamicAdaptationMode' -ne 0) {
+            $cfg | Add-Member -NotePropertyName 'System.GC.DynamicAdaptationMode' -NotePropertyValue 0 -Force
+            $modified = $true
+        }
+        if ($cfg.PSObject.Properties['System.GC.HighMemoryPercent'] -eq $null -or $cfg.'System.GC.HighMemoryPercent' -ne 75) {
+            $cfg | Add-Member -NotePropertyName 'System.GC.HighMemoryPercent' -NotePropertyValue 75 -Force
+            $modified = $true
+        }
+    } else {
+        if ($cfg.PSObject.Properties['System.GC.DynamicAdaptationMode'] -ne $null) {
+            $cfg.PSObject.Properties.Remove('System.GC.DynamicAdaptationMode')
+            $modified = $true
+        }
+        if ($cfg.PSObject.Properties['System.GC.HighMemoryPercent'] -ne $null) {
+            $cfg.PSObject.Properties.Remove('System.GC.HighMemoryPercent')
+            $modified = $true
+        }
+        if ($cfg.PSObject.Properties['System.GC.DATAs'] -eq $null -or $cfg.'System.GC.DATAs' -ne 1) {
+            $cfg | Add-Member -NotePropertyName 'System.GC.DATAs' -NotePropertyValue 1 -Force
+            $modified = $true
+        }
     }
     return $modified
 }

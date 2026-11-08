@@ -1,3 +1,5 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Paths;
 using Optimum.Bootstrap.Core.Platform;
@@ -80,6 +82,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
 
             MakeExecutable(Path.Combine(stageDir, "Optimum"));
             MakeExecutable(Path.Combine(stageDir, "run.sh"));
+            CalibrateRuntimeConfigs(stageDir);
 
             var entries = Directory.EnumerateFileSystemEntries(stageDir)
                 .Select(Path.GetFileName).Where(n => n is not null).Select(n => n!).ToList();
@@ -558,5 +561,69 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
         }
         catch (IOException) { /* best effort */ }
         catch (UnauthorizedAccessException) { /* best effort */ }
+    }
+
+    internal static void CalibrateRuntimeConfigs(string directory, long? overrideMemoryBytes = null, string? memoryProfile = null)
+    {
+        try
+        {
+            long memBytes = overrideMemoryBytes ?? GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            bool isLowMemory = memoryProfile switch
+            {
+                "aggressive" or "low" or "conserve" => true,
+                "throughput" or "high" or "max" => false,
+                _ => memBytes > 0 && memBytes <= 8589934592L
+            };
+
+            string[] configs =
+            [
+                Path.Combine(directory, "Vintagestory.runtimeconfig.json"),
+                Path.Combine(directory, "Optimum.runtimeconfig.json")
+            ];
+
+            foreach (var cfgPath in configs)
+            {
+                if (!File.Exists(cfgPath)) continue;
+                string content = File.ReadAllText(cfgPath);
+                var node = JsonNode.Parse(content);
+                if (node?["runtimeOptions"]?["configProperties"] is not JsonObject cfg)
+                    continue;
+
+                bool modified = false;
+                if (isLowMemory)
+                {
+                    if (cfg.ContainsKey("System.GC.DATAs")) { cfg.Remove("System.GC.DATAs"); modified = true; }
+                    if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 0)
+                    {
+                        cfg["System.GC.DynamicAdaptationMode"] = 0;
+                        modified = true;
+                    }
+                    if (!cfg.ContainsKey("System.GC.HighMemoryPercent") || cfg["System.GC.HighMemoryPercent"]?.GetValue<int>() != 75)
+                    {
+                        cfg["System.GC.HighMemoryPercent"] = 75;
+                        modified = true;
+                    }
+                }
+                else
+                {
+                    if (cfg.ContainsKey("System.GC.DynamicAdaptationMode")) { cfg.Remove("System.GC.DynamicAdaptationMode"); modified = true; }
+                    if (cfg.ContainsKey("System.GC.HighMemoryPercent")) { cfg.Remove("System.GC.HighMemoryPercent"); modified = true; }
+                    if (!cfg.ContainsKey("System.GC.DATAs") || cfg["System.GC.DATAs"]?.GetValue<int>() != 1)
+                    {
+                        cfg["System.GC.DATAs"] = 1;
+                        modified = true;
+                    }
+                }
+
+                if (modified)
+                {
+                    File.WriteAllText(cfgPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                }
+            }
+        }
+        catch
+        {
+            // Best effort calibration
+        }
     }
 }

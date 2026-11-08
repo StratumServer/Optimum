@@ -8,6 +8,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Loader;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading;
 
 [assembly: InternalsVisibleTo("Optimum.Launcher.Tests")]
@@ -72,6 +73,7 @@ public static class Program
 
         CleanupStrayRootAssemblies(gameDir);
         RegisterNativeLibraryProbing(gameDir);
+        CalibrateRuntimeConfigForMemory(gameDir, args);
 
         ShaderCompatibilityReport shaderCompatibility;
         try
@@ -836,6 +838,109 @@ public static class Program
                     Logger.LogError($"[Optimum] Failed to remove stray root assembly '{assemblyName}': {ex.Message}");
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// Calibrates DATAS and GC memory limits based on available physical RAM or user memory profile.
+    /// On machines with 8 GB RAM or less (or with --optimum-memory-profile=aggressive), DATAS is disabled
+    /// and HighMemoryPercent is bounded to prevent swap thrashing and over-allocation.
+    /// </summary>
+    public static void CalibrateRuntimeConfigForMemory(string gameDir, string[]? args = null)
+    {
+        try
+        {
+            long totalMem;
+            try
+            {
+                totalMem = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            }
+            catch
+            {
+                totalMem = 0;
+            }
+
+            bool? forcedLow = null;
+            if (args != null)
+            {
+                foreach (string arg in args)
+                {
+                    if (arg.StartsWith("--optimum-memory-profile=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        string mode = arg["--optimum-memory-profile=".Length..].Trim().ToLowerInvariant();
+                        if (mode is "aggressive" or "low" or "conserve")
+                            forcedLow = true;
+                        else if (mode is "throughput" or "high" or "max")
+                            forcedLow = false;
+                    }
+                }
+            }
+
+            // 8.5 GB threshold (8 * 1024 * 1024 * 1024 = 8589934592)
+            bool isLowMemory = forcedLow ?? (totalMem > 0 && totalMem <= 8589934592L);
+
+            string[] configFiles =
+            [
+                Path.Combine(gameDir, "Vintagestory.runtimeconfig.json"),
+                Path.Combine(gameDir, "Optimum.runtimeconfig.json")
+            ];
+
+            foreach (string cfgPath in configFiles)
+            {
+                if (!File.Exists(cfgPath)) continue;
+                string json = File.ReadAllText(cfgPath);
+                var node = JsonNode.Parse(json);
+                if (node?["runtimeOptions"]?["configProperties"] is not JsonObject cfg)
+                    continue;
+
+                bool modified = false;
+                if (isLowMemory)
+                {
+                    if (cfg.ContainsKey("System.GC.DATAs"))
+                    {
+                        cfg.Remove("System.GC.DATAs");
+                        modified = true;
+                    }
+                    if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 0)
+                    {
+                        cfg["System.GC.DynamicAdaptationMode"] = 0;
+                        modified = true;
+                    }
+                    if (!cfg.ContainsKey("System.GC.HighMemoryPercent") || cfg["System.GC.HighMemoryPercent"]?.GetValue<int>() != 75)
+                    {
+                        cfg["System.GC.HighMemoryPercent"] = 75;
+                        modified = true;
+                    }
+                }
+                else
+                {
+                    if (cfg.ContainsKey("System.GC.DynamicAdaptationMode"))
+                    {
+                        cfg.Remove("System.GC.DynamicAdaptationMode");
+                        modified = true;
+                    }
+                    if (cfg.ContainsKey("System.GC.HighMemoryPercent"))
+                    {
+                        cfg.Remove("System.GC.HighMemoryPercent");
+                        modified = true;
+                    }
+                    if (!cfg.ContainsKey("System.GC.DATAs") || cfg["System.GC.DATAs"]?.GetValue<int>() != 1)
+                    {
+                        cfg["System.GC.DATAs"] = 1;
+                        modified = true;
+                    }
+                }
+
+                if (modified)
+                {
+                    File.WriteAllText(cfgPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+                    Logger.Log($"[Optimum] Calibrated GC configuration in {Path.GetFileName(cfgPath)} for {(isLowMemory ? "low-RAM (DynamicAdaptationMode=0, HighMemoryPercent=75)" : "standard (DATAs=1)")}.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Log($"[Optimum] Note: RuntimeConfig memory calibration skipped: {ex.Message}");
         }
     }
 
