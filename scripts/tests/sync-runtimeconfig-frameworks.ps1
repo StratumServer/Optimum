@@ -42,6 +42,9 @@ try {
     if ($merged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.DATAs' -ne 1) {
         throw 'The launcher runtimeconfig Server/Concurrent/DATAs GC properties were not configured.'
     }
+    if ($merged.runtimeOptions.configProperties.'System.Runtime.TieredPGO' -ne $true) {
+        throw 'The launcher runtimeconfig TieredPGO property was not configured.'
+    }
 
     $vanillaMerged = Get-Content -Raw -LiteralPath $vanillaPath | ConvertFrom-Json
     if ($vanillaMerged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.DATAs' -ne 1) {

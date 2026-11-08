@@ -43,6 +43,7 @@
     <Compile Remove="Config\OptimumConfig.cs" />
     <Compile Remove="Config\OptimumGuiMetrics.cs" />
     <Compile Remove="Config\OptimumGreedyMesher.cs" />
+    <Compile Remove="Config\OptimumVoxelIndexer.cs" />
     <Compile Remove="Config\OptimumThreadGuard.cs" />
     <Compile Remove="Config\OptimumWorkerInstances.cs" />
     <Compile Remove="Config\OptimumBoundedHandoff.cs" />

@@ -47,6 +47,10 @@ function Ensure-GcConfigProperties($runtimeOptions) {
         $cfg | Add-Member -NotePropertyName 'System.GC.Concurrent' -NotePropertyValue $true -Force
         $modified = $true
     }
+    if ($cfg.PSObject.Properties['System.Runtime.TieredPGO'] -eq $null -or $cfg.'System.Runtime.TieredPGO' -ne $true) {
+        $cfg | Add-Member -NotePropertyName 'System.Runtime.TieredPGO' -NotePropertyValue $true -Force
+        $modified = $true
+    }
 
     $isLowMemory = $false
     if ($MemoryProfile -eq 'aggressive' -or $MemoryProfile -eq 'low' -or $MemoryProfile -eq 'conserve') {

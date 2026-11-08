@@ -905,6 +905,12 @@ public static class Program
                     continue;
 
                 bool modified = false;
+                if (!cfg.ContainsKey("System.Runtime.TieredPGO") || cfg["System.Runtime.TieredPGO"]?.GetValue<bool>() != true)
+                {
+                    cfg["System.Runtime.TieredPGO"] = true;
+                    modified = true;
+                }
+
                 if (isLowMemory)
                 {
                     if (cfg.ContainsKey("System.GC.DATAs"))

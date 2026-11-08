@@ -81,7 +81,7 @@ public class WindowsRuntimeConfigFrameworksTests
 
         JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
         Assert.False(props["System.Reflection.Metadata.MetadataUpdater.IsSupported"]!.GetValue<bool>());
-        Assert.False(props.ContainsKey("System.Runtime.TieredPGO"));
+        Assert.True(props["System.Runtime.TieredPGO"]!.GetValue<bool>());
     }
 
     [PwshFact]
