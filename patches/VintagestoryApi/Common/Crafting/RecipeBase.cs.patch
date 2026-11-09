@@ -1,8 +1,234 @@
 diff --git a/VintagestoryApi/Common/Crafting/RecipeBase.cs b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-index 21b4330..91e9765 100644
+index 21b4330..2ca2c7a 100644
 --- a/VintagestoryApi/Common/Crafting/RecipeBase.cs
 +++ b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-@@ -776,9 +776,33 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+@@ -1,8 +1,9 @@
+ using Newtonsoft.Json;
+ using Newtonsoft.Json.Linq;
+ using System;
++using System.Collections.Concurrent;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
+ using System.Text.RegularExpressions;
+ using Vintagestory.API.Config;
+@@ -501,14 +502,27 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+ 
+         ingredient.Name ??= ingredient.Code;
+         mappings[ingredient.Name] = codes;
+     }
+ 
++    // Optimum: Cache compiled regular expressions and variant templates to avoid repeated parsing and compilation
++    private static readonly ConcurrentDictionary<string, Regex> _optimumRegexCache = new();
++    private static readonly ConcurrentDictionary<string, (Regex Regex, List<string> Variants)> _optimumTemplateCache = new();
++
+     protected virtual void GetNameToCodeMappingForAdvancedWildcard(IWorldAccessor world, IRecipeIngredient ingredient, Dictionary<string, HashSet<string>> mappings)
+     {
+         IEnumerable<CollectibleObject> collectibles = CollectiblePreSearchResultsCache.GetOrCreate(world, ingredient.Code, ingredient.Type);
+ 
++        // Optimum: If GetVariantValuesFromAdvancedWildcard is not overridden, perform single-pass matching
++        // directly across candidate collectibles instead of generating Cartesian products of AllowedVariants,
++        // compiling a new Regex per combination, and rescanning candidate collections.
++        if (GetType().GetMethod(nameof(GetVariantValuesFromAdvancedWildcard), System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public)?.DeclaringType == typeof(RecipeBase))
++        {
++            FastGetNameToCodeMappingForAdvancedWildcard(ingredient, collectibles, mappings);
++            return;
++        }
++
+         List<Dictionary<string, string>> allowedVariantsCombinations = GenerateAllowedVariantsCombinations(AllowedVariants);
+ 
+         if (allowedVariantsCombinations.Count > 0)
+         {
+             foreach (Dictionary<string, string> combination in allowedVariantsCombinations)
+@@ -524,20 +538,127 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+ 
+             AddVariantValuesToMapping(mappings, variantValues);
+         }
+     }
+ 
++    private void FastGetNameToCodeMappingForAdvancedWildcard(IRecipeIngredient ingredient, IEnumerable<CollectibleObject> collectibles, Dictionary<string, HashSet<string>> mappings)
++    {
++        string path = ingredient.Code.Path;
++        var (regex, variants) = _optimumTemplateCache.GetOrAdd(path, p =>
++        {
++            string t = ReplaceVariantsToRegex(p, out List<string> v, null);
++            return (new Regex(t, RegexOptions.Compiled), v);
++        });
++
++        bool hasTagsFilter = !ingredient.Tags.IsEmpty;
++        bool matchedAny = false;
++
++        foreach (CollectibleObject collectible in collectibles)
++        {
++            if (collectible.Code?.Path == null) continue;
++            if (collectible.Code.Domain != null && !WildcardUtil.Match(ingredient.Code.Domain, collectible.Code.Domain))
++            {
++                continue;
++            }
++
++            Match match = regex.Match(collectible.Code.Path);
++            if (!match.Success) continue;
++
++            if (hasTagsFilter && !ingredient.Tags.Matches(in collectible.Tags))
++            {
++                continue;
++            }
++
++            bool allValid = true;
++            for (int vIdx = 0; vIdx < variants.Count; vIdx++)
++            {
++                int groupIndex = vIdx + 1;
++                if (groupIndex >= match.Groups.Count) break;
++
++                string variant = match.Groups[groupIndex].Value;
++                string variantCode = variants[vIdx];
++
++                for (int priorIdx = 0; priorIdx < vIdx; priorIdx++)
++                {
++                    if (variants[priorIdx] == variantCode)
++                    {
++                        if (match.Groups[priorIdx + 1].Value != variant)
++                        {
++                            allValid = false;
++                            break;
++                        }
++                    }
++                }
++                if (!allValid) break;
++
++                if (AllowedVariants.TryGetValue(variantCode, out string[]? allowed) && !allowed.Contains(variant))
++                {
++                    allValid = false;
++                    break;
++                }
++
++                if (SkipVariants.TryGetValue(variantCode, out string[]? skipped) && skipped.Contains(variant))
++                {
++                    allValid = false;
++                    break;
++                }
++            }
++
++            if (!allValid) continue;
++
++            matchedAny = true;
++
++            for (int vIdx = 0; vIdx < variants.Count; vIdx++)
++            {
++                int groupIndex = vIdx + 1;
++                if (groupIndex >= match.Groups.Count) break;
++
++                string variant = match.Groups[groupIndex].Value;
++                string variantCode = variants[vIdx];
++
++                if (!mappings.TryGetValue(variantCode, out HashSet<string>? set))
++                {
++                    mappings[variantCode] = set = [];
++                }
++                set.Add(variant);
++            }
++        }
++
++        if (matchedAny && AllowedVariants.Count > 0)
++        {
++            foreach (var (k, vals) in AllowedVariants)
++            {
++                if (!variants.Contains(k))
++                {
++                    if (!mappings.TryGetValue(k, out HashSet<string>? set))
++                    {
++                        mappings[k] = set = [];
++                    }
++                    for (int i = 0; i < vals.Length; i++)
++                    {
++                        set.Add(vals[i]);
++                    }
++                }
++            }
++        }
++    }
++
+     protected virtual Dictionary<string, HashSet<string>> GetVariantValuesFromAdvancedWildcard(IRecipeIngredient ingredient, IEnumerable<CollectibleObject> collectibles, Dictionary<string, string> allowedVariantsCombination)
+     {
+         Dictionary<string, HashSet<string>> variantValues = [];
+         string regexTemplate = ReplaceVariantsToRegex(ingredient.Code.Path, out List<string> variants, allowedVariantsCombination);
+-        Regex regex = new(regexTemplate);
++        Regex regex = _optimumRegexCache.GetOrAdd(regexTemplate, static t => new Regex(t));
+ 
+         bool hasTagsFilter = !ingredient.Tags.IsEmpty;
+ 
+-        foreach (CollectibleObject collectible in collectibles.Where(collectible => WildcardUtil.Match(ingredient.Code.Domain, collectible.Code.Domain)))
++        foreach (CollectibleObject collectible in collectibles)
+         {
++            if (collectible.Code?.Domain != null && !WildcardUtil.Match(ingredient.Code.Domain, collectible.Code.Domain))
++            {
++                continue;
++            }
++
+             Match match = regex.Match(collectible.Code.Path);
+ 
+             if (!match.Success)
+             {
+                 continue;
+@@ -568,20 +689,52 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+         }
+     }
+ 
+     protected virtual List<Dictionary<string, string>> GenerateAllowedVariantsCombinations(Dictionary<string, string[]> allowedVariants)
+     {
+-        if (allowedVariants.Count == 0)
++        if (allowedVariants == null || allowedVariants.Count == 0)
+         {
+             return [];
+         }
+         string[] variants = allowedVariants.Keys.ToArray();
+-        List<Dictionary<string, string>> combinations = [];
+-        GenerateAllowedVariantsCombinationsRecursive(0, variants, [], allowedVariants, combinations);
++
++        int totalCombinations = 1;
++        for (int i = 0; i < variants.Length; i++)
++        {
++            string[] values = allowedVariants[variants[i]];
++            if (values == null || values.Length == 0) return [];
++            totalCombinations *= values.Length;
++        }
++
++        List<Dictionary<string, string>> combinations = new(totalCombinations);
++        (string variant, string value)[] buffer = new (string variant, string value)[variants.Length];
++        GenerateAllowedVariantsCombinationsFast(0, variants, buffer, allowedVariants, combinations);
+         return combinations;
+     }
+ 
++    private static void GenerateAllowedVariantsCombinationsFast(int index, string[] variants, (string variant, string value)[] buffer, Dictionary<string, string[]> allowedVariants, List<Dictionary<string, string>> combinations)
++    {
++        if (index >= variants.Length)
++        {
++            var dict = new Dictionary<string, string>(variants.Length);
++            for (int i = 0; i < variants.Length; i++)
++            {
++                dict[buffer[i].variant] = buffer[i].value;
++            }
++            combinations.Add(dict);
++            return;
++        }
++
++        string currentVariant = variants[index];
++        string[] values = allowedVariants[currentVariant];
++        for (int i = 0; i < values.Length; i++)
++        {
++            buffer[index] = (currentVariant, values[i]);
++            GenerateAllowedVariantsCombinationsFast(index + 1, variants, buffer, allowedVariants, combinations);
++        }
++    }
++
+     protected virtual void GenerateAllowedVariantsCombinationsRecursive(int index, string[] variants, IEnumerable<(string variant, string value)> combination, Dictionary<string, string[]> allowedVariants, List<Dictionary<string, string>> combinations)
+     {
+         if (index >= variants.Length)
+         {
+             combinations.Add(combination.ToDictionary(entry => entry.variant, entry => entry.value));
+@@ -774,34 +927,80 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+         }
+ 
          return true;
      }
  
@@ -37,7 +263,8 @@ index 21b4330..91e9765 100644
  
          MergeStacks(suppliedSlots, suppliedStacks);
  
-@@ -787,19 +811,41 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+         if (!MatchWildcardIngredients(suppliedStacks, ingredients))
+         {
              return false;
          }
  
@@ -82,3 +309,5 @@ index 21b4330..91e9765 100644
              if (similarStack != null)
              {
                  similarStack.StackSize += suppliedStack.StackSize;
+             }
+             else

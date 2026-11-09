@@ -1,0 +1,112 @@
+diff --git a/VintagestoryApi/Common/Crafting/CollectiblePreSearchResultsCache.cs b/VintagestoryApi/Common/Crafting/CollectiblePreSearchResultsCache.cs
+index 14beb3f..ae97b5d 100644
+--- a/VintagestoryApi/Common/Crafting/CollectiblePreSearchResultsCache.cs
++++ b/VintagestoryApi/Common/Crafting/CollectiblePreSearchResultsCache.cs
+@@ -1,10 +1,10 @@
+ 
+ using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
+-using System.Linq;
++using Vintagestory.API.Util;
+ 
+ namespace Vintagestory.API.Common
+ {
+     /// <summary>
+     /// Caches results of wildcard pre search among collectibles.
+@@ -13,13 +13,14 @@ namespace Vintagestory.API.Common
+     public sealed class CollectiblePreSearchResultsCache
+     {
+         public List<CollectibleObject> GetOrCreate(IWorldAccessor world, AssetLocation code, EnumItemClass collectibleType)
+         {
+             string codeStartsWith = getCodeBeforeWildcard(code.Path);
+-            string cacheKey = $"{code.Domain}:{codeStartsWith}:{collectibleType}";
++            string domain = code.Domain ?? "";
++            string cacheKey = $"{domain}:{codeStartsWith}:{collectibleType}";
+ 
+-            List<CollectibleObject> collectibles = cache.GetOrAdd(cacheKey, _ => search(world, collectibleType, codeStartsWith));
++            List<CollectibleObject> collectibles = cache.GetOrAdd(cacheKey, _ => search(world, collectibleType, domain, codeStartsWith));
+ 
+             return collectibles;
+         }
+ 
+         public void Clear() => cache.Clear();
+@@ -40,21 +41,67 @@ namespace Vintagestory.API.Common
+             }
+ 
+             return codePath;
+         }
+ 
+-        private static List<CollectibleObject> search(IWorldAccessor world, EnumItemClass collectibleType, string codeStartsWith)
++        private static List<CollectibleObject> search(IWorldAccessor world, EnumItemClass collectibleType, string domain, string codeStartsWith)
+         {
+-            IEnumerable<CollectibleObject> collectibles = collectibleType switch
++            bool matchAllDomains = string.IsNullOrEmpty(domain) || domain == "*";
++            bool isWildcardDomain = !matchAllDomains && (domain.IndexOfAny(['*', '?']) >= 0);
++            bool hasPrefix = !string.IsNullOrEmpty(codeStartsWith);
++
++            List<CollectibleObject> result = new();
++
++            if (collectibleType == EnumItemClass.Block)
++            {
++                IList<Block> blocks = world.Blocks;
++                int count = blocks.Count;
++                for (int i = 0; i < count; i++)
++                {
++                    FilterAndAdd(blocks[i], result, domain, matchAllDomains, isWildcardDomain, hasPrefix, codeStartsWith);
++                }
++            }
++            else if (collectibleType == EnumItemClass.Item)
++            {
++                IList<Item> items = world.Items;
++                int count = items.Count;
++                for (int i = 0; i < count; i++)
++                {
++                    FilterAndAdd(items[i], result, domain, matchAllDomains, isWildcardDomain, hasPrefix, codeStartsWith);
++                }
++            }
++            else
+             {
+-                EnumItemClass.Block => world.Blocks,
+-                EnumItemClass.Item => world.Items,
+-                _ => throw new NotImplementedException()
+-            };
+-
+-            return collectibles
+-                .Where(collectible => !collectible.IsMissing)
+-                .Where(collectible => collectible.Code?.Path != null && collectible.Code.Path.Contains(codeStartsWith))
+-                .ToList();
++                throw new NotImplementedException();
++            }
++
++            return result;
++        }
++
++        private static void FilterAndAdd(CollectibleObject? collectible, List<CollectibleObject> result, string domain, bool matchAllDomains, bool isWildcardDomain, bool hasPrefix, string codeStartsWith)
++        {
++            if (collectible == null || collectible.IsMissing) return;
++
++            var cCode = collectible.Code;
++            if (cCode?.Path == null) return;
++
++            if (!matchAllDomains)
++            {
++                if (isWildcardDomain)
++                {
++                    if (!WildcardUtil.Match(domain, cCode.Domain)) return;
++                }
++                else if (!string.Equals(cCode.Domain, domain, StringComparison.OrdinalIgnoreCase))
++                {
++                    return;
++                }
++            }
++
++            if (hasPrefix && !cCode.Path.Contains(codeStartsWith))
++            {
++                return;
++            }
++
++            result.Add(collectible);
+         }
+     }
+ }
