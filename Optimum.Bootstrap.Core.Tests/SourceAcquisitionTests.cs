@@ -37,10 +37,22 @@ public class SourceCacheTests
     }
 
     [Fact]
-    public void WindowsCacheWithBothRequiredScriptsIsUsable()
+    public void WindowsCacheWithoutOptimumSignatureIsNotUsable()
     {
         var probe = new FakeSystemProbe { Os = OsKind.Windows };
         probe.AddFile("/cache/forks.json");
+        probe.AddFile("/cache/scripts/bootstrap.ps1");
+        probe.AddFile("/cache/scripts/package.ps1");
+
+        Assert.False(SourceCache.IsUsableCheckout(probe, "/cache"));
+    }
+
+    [Fact]
+    public void WindowsCacheWithBothRequiredScriptsAndOptimumSignatureIsUsable()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.AddFile("/cache/forks.json");
+        probe.AddFile("/cache/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile("/cache/scripts/bootstrap.ps1");
         probe.AddFile("/cache/scripts/package.ps1");
 
@@ -122,6 +134,7 @@ public class RepoRootTests
     {
         var probe = new FakeSystemProbe { Os = OsKind.Windows };
         probe.AddFile("/repo/forks.json");
+        probe.AddFile("/repo/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile("/repo/scripts/bootstrap.sh");
 
         Assert.Null(RepoRoot.Discover(probe, "/repo"));
@@ -132,6 +145,7 @@ public class RepoRootTests
     {
         var probe = new FakeSystemProbe { Os = OsKind.Windows };
         probe.AddFile("/repo/forks.json");
+        probe.AddFile("/repo/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile("/repo/scripts/bootstrap.ps1");
         probe.AddFile("/repo/scripts/package.ps1");
 
@@ -139,10 +153,21 @@ public class RepoRootTests
     }
 
     [Fact]
-    public void UnixDiscoveryKeepsItsExistingBootstrapShellContract()
+    public void UnixDiscoveryRejectsCheckoutWithoutOptimumSignature()
     {
         var probe = new FakeSystemProbe { Os = OsKind.Linux };
         probe.AddFile("/repo/forks.json");
+        probe.AddFile("/repo/scripts/bootstrap.sh");
+
+        Assert.Null(RepoRoot.Discover(probe, "/repo"));
+    }
+
+    [Fact]
+    public void UnixDiscoveryAcceptsCheckoutWithOptimumSignature()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Linux };
+        probe.AddFile("/repo/forks.json");
+        probe.AddFile("/repo/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile("/repo/scripts/bootstrap.sh");
 
         Assert.Equal("/repo", RepoRoot.Discover(probe, "/repo"));
@@ -182,6 +207,7 @@ public class GitSourceProviderTests
         var probe = new FakeSystemProbe { HomeDirectory = "/home/tester" };
         string cached = "/home/tester/.cache/optimum/src-v0.3.14";
         probe.AddFile($"{cached}/forks.json");
+        probe.AddFile($"{cached}/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile($"{cached}/scripts/bootstrap.sh");
         // no git on PATH: proves the cached path never shells out.
 
@@ -216,6 +242,7 @@ public class GitSourceProviderTests
         probe.Environment["LOCALAPPDATA"] = @"C:\cache";
         string cached = @"C:\cache\optimum\src-v0.3.14";
         probe.AddFile($@"{cached}\forks.json");
+        probe.AddFile($@"{cached}\Optimum.Launcher\Optimum.Launcher.csproj");
         probe.AddFile($@"{cached}\scripts\bootstrap.ps1");
         probe.AddFile($@"{cached}\scripts\package.ps1");
         // No Git on PATH: proves the complete cached source is the one used.
