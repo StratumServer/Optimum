@@ -109,6 +109,11 @@ public static class SourceCache
         if (!probe.FileExists(Path.Combine(directory, "forks.json")))
             return false;
 
+        bool hasOptimumSignature = probe.FileExists(Path.Combine(directory, "Optimum.Launcher", "Optimum.Launcher.csproj"))
+            || probe.FileExists(Path.Combine(directory, "Optimum.Patcher", "Optimum.Patcher.csproj"));
+        if (!hasOptimumSignature)
+            return false;
+
         return probe.Os == OsKind.Windows
             ? probe.FileExists(Path.Combine(directory, "scripts", "bootstrap.ps1"))
                 && probe.FileExists(Path.Combine(directory, "scripts", "package.ps1"))
