@@ -1320,6 +1320,25 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void WeatherSystem_EvictsUnloadedRegionsUnderLock()
+    {
+        string basePatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemBase.cs.patch");
+        Assert.Contains("api.Event.MapRegionUnloaded += OnMapRegionUnloaded;", basePatch);
+        Assert.Contains("if (!weatherSimByMapRegion.Remove(index2d, out weatherSim))", basePatch);
+        Assert.Contains("region.SetModdata(\"weatherState\", weatherSim.ToBytes());", basePatch);
+
+        string runtimeBasePatch = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/WeatherSystemBase.cs.patch");
+        Assert.Contains("api.Event.MapRegionUnloaded += OnMapRegionUnloaded;", runtimeBasePatch);
+        Assert.Contains("if (!weatherSimByMapRegion.Remove(index2d, out weatherSim))", runtimeBasePatch);
+
+        string serverPatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemServer.cs.patch");
+        Assert.Contains("lock (GetWeatherSimLock())", serverPatch);
+
+        string clientPatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/WeatherSystemClient.cs.patch");
+        Assert.Contains("lock (GetWeatherSimLock())", clientPatch);
+    }
+
+    [Fact]
     public void Handbook_CategoryIndexing_And_GuiElementFlatList_O1_ViewportParity()
     {
         string handbookPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs.patch");

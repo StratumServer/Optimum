@@ -1,0 +1,42 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherSystemBase.cs b/VSEssentials/Systems/Weather/WeatherSystemBase.cs
+index ba0f710..e00e0bf 100644
+--- a/VSEssentials/Systems/Weather/WeatherSystemBase.cs
++++ b/VSEssentials/Systems/Weather/WeatherSystemBase.cs
+@@ -55,10 +55,37 @@ namespace Vintagestory.GameContent
+                .RegisterMessageType(typeof(LightningFlashPacket))
+                .RegisterMessageType(typeof(WeatherCloudYposPacket))
+             ;
+ 
+             api.Event.OnGetWindSpeed += Event_OnGetWindSpeed;
++            api.Event.MapRegionUnloaded += OnMapRegionUnloaded;
++        }
++
++        internal object GetWeatherSimLock()
++        {
++            return weatherSimByMapRegionLock;
++        }
++
++        private void OnMapRegionUnloaded(Vec2i mapCoord, IMapRegion region)
++        {
++            if (mapCoord == null)
++            {
++                return;
++            }
++            long index2d = MapRegionIndex2D(mapCoord.X, mapCoord.Y);
++            WeatherSimulationRegion weatherSim;
++            lock (weatherSimByMapRegionLock)
++            {
++                if (!weatherSimByMapRegion.Remove(index2d, out weatherSim))
++                {
++                    return;
++                }
++            }
++            if (api.Side == EnumAppSide.Server && region != null && weatherSim != null)
++            {
++                region.SetModdata("weatherState", weatherSim.ToBytes());
++            }
+         }
+ 
+         private void Event_OnGetWindSpeed(Vec3d pos, ref Vec3d windSpeed)
+         {
+             windSpeed.X = WeatherDataSlowAccess.GetWindSpeed(pos);

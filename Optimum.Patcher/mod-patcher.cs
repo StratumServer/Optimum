@@ -164,6 +164,11 @@ public static class ModPatcher
                     "reusableTileOffset",
                     "reusableCloudTilePos",
                 ],
+                ["Vintagestory.GameContent.WeatherSystemBase"] =
+                [
+                    "GetWeatherSimLock",
+                    "OnMapRegionUnloaded",
+                ],
             },
             Interfaces: new()
             {
@@ -200,6 +205,9 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityShapeRenderer", "DoRender3DOpaqueBatched", 2),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.WeatherSystemClient", "OnAssetsPacket", 1),
+                new("Vintagestory.GameContent.WeatherSystemBase", "Start", 1),
+                new("Vintagestory.GameContent.WeatherSystemServer", "OnSaveGameSaving", 0),
                 new("Vintagestory.GameContent.CloudRenderer", "UpdateCloudTilesOffThread", 1),
                 new("Vintagestory.GameContent.ChunkMapLayer", ".ctor", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "Event_OnChunkDirty", 3),

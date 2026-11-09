@@ -28,7 +28,26 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSystemClient.cs b/VSEs
  	private float flatFogd;
  
  	private float targetFlatFogd;
-@@ -144,29 +160,58 @@ public class WeatherSystemClient : WeatherSystemBase, IRenderer, IDisposable
+@@ -120,13 +136,16 @@ public class WeatherSystemClient : WeatherSystemBase, IRenderer, IDisposable
+ 		GeneralConfig = weatherPatternAssets.GeneralConfig;
+ 		GeneralConfig.Init(api.World);
+ 		WeatherConfigs = weatherPatternAssets.WeatherConfigs;
+ 		WindConfigs = weatherPatternAssets.WindConfigs;
+ 		WeatherEventConfigs = weatherPatternAssets.WeatherEventConfigs;
+-		foreach (KeyValuePair<long, WeatherSimulationRegion> item in weatherSimByMapRegion)
++		lock (GetWeatherSimLock())
+ 		{
+-			item.Value.ReloadPatterns(api.World.Seed);
++			foreach (KeyValuePair<long, WeatherSimulationRegion> item in weatherSimByMapRegion)
++			{
++				item.Value.ReloadPatterns(api.World.Seed);
++			}
+ 		}
+ 	}
+ 
+ 	public void OnRenderFrame(float dt, EnumRenderStage stage)
+ 	{
+@@ -144,29 +163,58 @@ public class WeatherSystemClient : WeatherSystemBase, IRenderer, IDisposable
  		}
  		if (stage != EnumRenderStage.Before)
  		{
@@ -96,7 +115,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSystemClient.cs b/VSEs
  		GlobalConstants.CurrentSurfaceWindSpeedClient.Set(surfaceWindSpeedSmoothed.X, surfaceWindSpeedSmoothed.Y, surfaceWindSpeedSmoothed.Z + (float)num * surfaceWindSpeedSmoothed.X);
  		capi.Ambient.CurrentModifiers["weather"] = WeatherDataAtPlayer.BlendedWeatherData.Ambient;
  		wetnessScanAccum2s += dt;
-@@ -180,11 +225,11 @@ public class WeatherSystemClient : WeatherSystemBase, IRenderer, IDisposable
+@@ -180,11 +228,11 @@ public class WeatherSystemClient : WeatherSystemBase, IRenderer, IDisposable
  				float num3 = 1f - (float)i / 20f;
  				num2 += num3 * capi.World.BlockAccessor.GetClimateAt(plrPos, EnumGetClimateMode.ForSuppliedDateValues, totalDays - (double)i / 24.0 / 4.0).Rainfall;
  			}
