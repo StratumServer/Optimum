@@ -1,8 +1,32 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..cb5daad 100644
+index f437458..88bbc5e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-@@ -738,11 +738,14 @@ public class ClientSystemStartup : ClientSystem
+@@ -578,10 +578,11 @@ public class ClientSystemStartup : ClientSystem
+ 			{
+ 				blocks[packet_BlockType.BlockId] = BlockTypeNet.ReadBlockTypePacket(packet_BlockType, game, ClientMain.ClassRegistry);
+ 				num++;
+ 			}
+ 		}
++		BlockTypeNet.ClearAttributesCache();
+ 		return num;
+ 	}
+ 
+ 	private int PopulateItems(List<Item> items, int listSize)
+ 	{
+@@ -600,10 +601,11 @@ public class ClientSystemStartup : ClientSystem
+ 			{
+ 				items[packet_ItemType.ItemId] = ItemTypeNet.ReadItemTypePacket(packet_ItemType, game, ClientMain.ClassRegistry);
+ 				num++;
+ 			}
+ 		}
++		ItemTypeNet.ClearAttributesCache();
+ 		return num;
+ 	}
+ 
+ 	private void LoadEntityTypes()
+ 	{
+@@ -738,11 +740,14 @@ public class ClientSystemStartup : ClientSystem
  	}
  
  	internal void FinaliseTextureAtlas(TextureAtlasManager manager, string type, Action onCompleted)
@@ -17,7 +41,7 @@ index f437458..cb5daad 100644
  		{
  			TyronThreadPool.QueueTask(delegate
  			{
-@@ -762,17 +765,23 @@ public class ClientSystemStartup : ClientSystem
+@@ -762,17 +767,23 @@ public class ClientSystemStartup : ClientSystem
  		}, "FinaliseTextureAtlas_StageC_" + type);
  	}
  

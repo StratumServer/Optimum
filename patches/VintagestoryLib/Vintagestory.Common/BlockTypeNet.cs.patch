@@ -1,0 +1,68 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs b/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
+index 4228b4b..0fcb468 100644
+--- a/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
++++ b/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
+@@ -12,10 +12,37 @@ using Vintagestory.Common.Datastructures;
+ 
+ namespace Vintagestory.Common;
+ 
+ public class BlockTypeNet : CollectibleNet
+ {
++	[ThreadStatic]
++	private static string lastAttributesJson;
++
++	[ThreadStatic]
++	private static JToken lastParsedAttributesToken;
++
++	internal static void ClearAttributesCache()
++	{
++		lastAttributesJson = null;
++		lastParsedAttributesToken = null;
++	}
++
++	private static JsonObject ParseAttributes(string json)
++	{
++		if (string.IsNullOrEmpty(json) || json == "{}")
++		{
++			return new JsonObject(new JObject());
++		}
++		if (string.Equals(json, lastAttributesJson, StringComparison.Ordinal) && lastParsedAttributesToken != null)
++		{
++			return new JsonObject(lastParsedAttributesToken.DeepClone());
++		}
++		lastAttributesJson = json;
++		lastParsedAttributesToken = JToken.Parse(json);
++		return new JsonObject(lastParsedAttributesToken.DeepClone());
++	}
++
+ 	public static Block ReadBlockTypePacket(Packet_BlockType packet, IWorldAccessor world, ClassRegistry registry)
+ 	{
+ 		Block block = registry.CreateBlock(packet.Blockclass);
+ 		block.IsMissing = packet.IsMissing > 0;
+ 		block.Code = new AssetLocation(packet.Code);
+@@ -105,11 +132,11 @@ public class BlockTypeNet : CollectibleNet
+ 				block.TexturesInventory.Add(inventoryTextureCodes[num3], CollectibleNet.FromPacket(packet.InventoryCompositeTextures[num3]));
+ 			}
+ 		}
+ 		if (packet.Attributes != null && packet.Attributes.Length > 0)
+ 		{
+-			block.Attributes = new JsonObject(JToken.Parse(packet.Attributes));
++			block.Attributes = ParseAttributes(packet.Attributes);
+ 		}
+ 		block.MatterState = (EnumMatterState)packet.MatterState;
+ 		block.WalkSpeedMultiplier = CollectibleNet.DeserializeFloatVeryPrecise(packet.WalkSpeedFloat);
+ 		block.DragMultiplier = CollectibleNet.DeserializeFloatVeryPrecise(packet.DragMultiplierFloat);
+ 		block.Climbable = packet.Climbable > 0;
+@@ -324,11 +351,11 @@ public class BlockTypeNet : CollectibleNet
+ 				bool flag = registry.blockbehaviorToTypeMapping.ContainsKey(packet_Behavior.Code);
+ 				bool flag2 = registry.collectibleBehaviorToTypeMapping.ContainsKey(packet_Behavior.Code);
+ 				if (packet_Behavior.ClientSideOptional <= 0 || flag || flag2)
+ 				{
+ 					CollectibleBehavior collectibleBehavior = (flag ? registry.CreateBlockBehavior(block, packet_Behavior.Code) : registry.CreateCollectibleBehavior(block, packet_Behavior.Code));
+-					JsonObject properties = ((!(packet_Behavior.Attributes != "")) ? new JsonObject(JToken.Parse("{}")) : new JsonObject(JToken.Parse(packet_Behavior.Attributes)));
++					JsonObject properties = ((!(packet_Behavior.Attributes != "")) ? new JsonObject(new JObject()) : ParseAttributes(packet_Behavior.Attributes));
+ 					collectibleBehavior.Initialize(properties);
+ 					list2.Add(collectibleBehavior);
+ 					if (collectibleBehavior is BlockBehavior item)
+ 					{
+ 						list.Add(item);

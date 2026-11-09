@@ -1768,6 +1768,49 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Equal((int)EnumDamageSource.Fall, packet.EntityDespawn.DeathDamageSource[0]);
         Assert.Equal((int)EnumDamageSource.Block, packet.EntityDespawn.DeathDamageSource[1]);
     }
+
+    [Fact]
+    public void BlockTypeNet_ItemTypeNet_DeduplicatedAttributesCloneAndStrictIsolation()
+    {
+        string json = "{\"handbook\":{\"groupBy\":[\"rock\"],\"extraInfo\":\"detailed\"},\"tier\":2}";
+        var blockPacket1 = new Packet_BlockType { Blockclass = "Block", Code = "game:rock-granite", Attributes = json };
+        var blockPacket2 = new Packet_BlockType { Blockclass = "Block", Code = "game:rock-andesite", Attributes = json };
+
+        var classRegistry = new ClassRegistry();
+        classRegistry.RegisterBlockClass("Block", typeof(Block));
+
+        Block block1 = BlockTypeNet.ReadBlockTypePacket(blockPacket1, null, classRegistry);
+        Block block2 = BlockTypeNet.ReadBlockTypePacket(blockPacket2, null, classRegistry);
+
+        Assert.NotNull(block1.Attributes);
+        Assert.NotNull(block2.Attributes);
+        Assert.Equal(2, block1.Attributes["tier"].AsInt());
+        Assert.Equal(2, block2.Attributes["tier"].AsInt());
+
+        // Strict isolation invariant: separate references, mutations on one must not affect the other
+        Assert.False(object.ReferenceEquals(block1.Attributes.Token, block2.Attributes.Token));
+        block1.Attributes.Token["tier"] = 99;
+        Assert.Equal(99, block1.Attributes["tier"].AsInt());
+        Assert.Equal(2, block2.Attributes["tier"].AsInt());
+
+        BlockTypeNet.ClearAttributesCache();
+
+        classRegistry.RegisterItemClass("Item", typeof(Item));
+        var itemPacket1 = new Packet_ItemType { ItemClass = "Item", Code = "game:gear-rusty", Attributes = json };
+        var itemPacket2 = new Packet_ItemType { ItemClass = "Item", Code = "game:gear-temporal", Attributes = json };
+
+        Item item1 = ItemTypeNet.ReadItemTypePacket(itemPacket1, null, classRegistry);
+        Item item2 = ItemTypeNet.ReadItemTypePacket(itemPacket2, null, classRegistry);
+
+        Assert.NotNull(item1.Attributes);
+        Assert.NotNull(item2.Attributes);
+        Assert.False(object.ReferenceEquals(item1.Attributes.Token, item2.Attributes.Token));
+        item1.Attributes.Token["tier"] = 77;
+        Assert.Equal(77, item1.Attributes["tier"].AsInt());
+        Assert.Equal(2, item2.Attributes["tier"].AsInt());
+
+        ItemTypeNet.ClearAttributesCache();
+    }
 #endif
 
     public class StubProxy<T> : DispatchProxy where T : class

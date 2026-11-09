@@ -1,0 +1,68 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/ItemTypeNet.cs b/VintagestoryLib/Vintagestory.Common/ItemTypeNet.cs
+index b9d3459..625b381 100644
+--- a/VintagestoryLib/Vintagestory.Common/ItemTypeNet.cs
++++ b/VintagestoryLib/Vintagestory.Common/ItemTypeNet.cs
+@@ -12,10 +12,37 @@ using Vintagestory.Common.Datastructures;
+ 
+ namespace Vintagestory.Common;
+ 
+ public class ItemTypeNet : CollectibleNet
+ {
++	[ThreadStatic]
++	private static string lastAttributesJson;
++
++	[ThreadStatic]
++	private static JToken lastParsedAttributesToken;
++
++	internal static void ClearAttributesCache()
++	{
++		lastAttributesJson = null;
++		lastParsedAttributesToken = null;
++	}
++
++	private static JsonObject ParseAttributes(string json)
++	{
++		if (string.IsNullOrEmpty(json) || json == "{}")
++		{
++			return new JsonObject(new JObject());
++		}
++		if (string.Equals(json, lastAttributesJson, StringComparison.Ordinal) && lastParsedAttributesToken != null)
++		{
++			return new JsonObject(lastParsedAttributesToken.DeepClone());
++		}
++		lastAttributesJson = json;
++		lastParsedAttributesToken = JToken.Parse(json);
++		return new JsonObject(lastParsedAttributesToken.DeepClone());
++	}
++
+ 	private static ModelTransform tfDefaultGui = ModelTransform.ItemDefaultGui();
+ 
+ 	private static ModelTransform tfDefaultFp = ModelTransform.ItemDefaultFp();
+ 
+ 	private static ModelTransform tfDefaultTp = ModelTransform.ItemDefaultTp();
+@@ -58,11 +85,11 @@ public class ItemTypeNet : CollectibleNet
+ 				Packet_Behavior packet_Behavior = packet.Behaviors[num];
+ 				bool flag = registry.collectibleBehaviorToTypeMapping.ContainsKey(packet_Behavior.Code);
+ 				if (packet_Behavior.ClientSideOptional <= 0 || flag)
+ 				{
+ 					CollectibleBehavior collectibleBehavior = registry.CreateCollectibleBehavior(item, packet_Behavior.Code);
+-					JsonObject properties = ((!(packet_Behavior.Attributes != "")) ? new JsonObject(JToken.Parse("{}")) : new JsonObject(JToken.Parse(packet_Behavior.Attributes)));
++					JsonObject properties = ((!(packet_Behavior.Attributes != "")) ? new JsonObject(new JObject()) : ParseAttributes(packet_Behavior.Attributes));
+ 					collectibleBehavior.Initialize(properties);
+ 					list.Add(collectibleBehavior);
+ 				}
+ 			}
+ 			item.CollectibleBehaviors = list.ToArray();
+@@ -114,11 +141,11 @@ public class ItemTypeNet : CollectibleNet
+ 		{
+ 			item.DamagedBy[num5] = (EnumItemDamageSource)packet.Damagedby[num5];
+ 		}
+ 		if (packet.Attributes != null && packet.Attributes.Length > 0)
+ 		{
+-			item.Attributes = new JsonObject(JToken.Parse(packet.Attributes));
++			item.Attributes = ParseAttributes(packet.Attributes);
+ 		}
+ 		if (packet.CombustibleProps != null)
+ 		{
+ 			item.CombustibleProps = CollectibleNet.FromPacket(packet.CombustibleProps, world);
+ 		}
