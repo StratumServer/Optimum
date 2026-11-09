@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
+index 7248005..8a1b10d 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
+@@ -227,10 +227,14 @@ public class GuiScreenRunningGame : GuiScreen
+ 
+ 	public override bool OnWindowClosed()
+ 	{
+ 		captureWarnings = false;
+ 		ExitOrRedirect(isDisconnect: false, "window close event");
++		while (ScreenManager.Platform.IsServerRunning)
++		{
++			Thread.Sleep(5);
++		}
+ 		return false;
+ 	}
+ 
+ 	private void Reconnect()
+ 	{
