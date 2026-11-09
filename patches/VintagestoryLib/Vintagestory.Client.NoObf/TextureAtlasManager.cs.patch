@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
-index acb970f..33936ba 100644
+index acb970f..ef51342 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
 @@ -26,11 +26,11 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
@@ -55,7 +55,23 @@ index acb970f..33936ba 100644
  	private void addCommonTextures()
  	{
  		foreach (KeyValuePair<AssetLocation, int> item in textureNamesDict)
-@@ -490,14 +495,19 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+@@ -412,10 +417,15 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 		texPos.RndColors = array;
+ 	}
+ 
+ 	public void RegenMipMaps(int atlasNumber)
+ 	{
++		if (atlasNumber < 0 || atlasNumber >= AtlasTextures.Count)
++		{
++			game.Logger.Warning("Cannot regen mipmaps for atlas number {0}, out of range (count: {1})", atlasNumber, AtlasTextures.Count);
++			return;
++		}
+ 		game.Platform.BuildMipMaps(AtlasTextures[atlasNumber].TextureId);
+ 	}
+ 
+ 	public bool InsertTexture(BitmapRef bmp, AssetLocationAndSource loc, out int textureSubIdOut)
+ 	{
+@@ -490,14 +500,19 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
  	{
  		TextureAtlasPositionsByTextureSubId = new TextureAtlasPosition[textureNamesDict.Count];
  		BakedBitmap[] bitmaps = new BakedBitmap[textureNamesDict.Count];
