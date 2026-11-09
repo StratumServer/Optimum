@@ -1864,6 +1864,36 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.False(directBytes[0] == 0xEF && directBytes[1] == 0xBB && directBytes[2] == 0xBF, "Direct UTF-8 bytes must not have a BOM preamble");
     }
 
+    [Fact]
+    public void LoadBlockShapes_MultiThreadedPartitioningAndCompositeShapeLoadAlternatesFastPath()
+    {
+        string tesselatorPatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs.patch");
+        Assert.True(File.Exists(tesselatorPatchPath), "ShapeTesselatorManager.cs.patch must exist");
+        string tesselatorPatch = File.ReadAllText(tesselatorPatchPath);
+        Assert.Contains("+		TargetSet[] array = new TargetSet[val];", tesselatorPatch);
+        Assert.Contains("-		TargetSet[] array = new TargetSet[1];", tesselatorPatch);
+
+        string compositePatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Model/Shape/CompositeShape.cs.patch");
+        Assert.True(File.Exists(compositePatchPath), "CompositeShape.cs.patch must exist");
+        string compositePatch = File.ReadAllText(compositePatchPath);
+        Assert.Contains("if (Base == null) return;", compositePatch);
+        Assert.Contains("if (BakedAlternates != null) return;", compositePatch);
+        Assert.Contains("lock (this)", compositePatch);
+        Assert.Contains("shape.Base.Path.Length - 1", compositePatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ShapeTesselatorManager\", \"LoadBlockShapes\", 1)", programSource);
+
+        // Test CompositeShape fast-path on non-wildcard shape without alternates
+        var shape = new CompositeShape
+        {
+            Base = new AssetLocation("game:block/stone/rock")
+        };
+        shape.LoadAlternates(null, null);
+        Assert.Null(shape.BakedAlternates);
+        Assert.Equal("block/stone/rock", shape.Base.ToShortString());
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
