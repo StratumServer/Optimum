@@ -1,0 +1,15 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
+index 7a2bf10..e9cd5c3 100644
+--- a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
++++ b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
+@@ -3,6 +3,10 @@ using Vintagestory.Common;
+ namespace Vintagestory.Server;
+ 
+ internal class BoxedPacket_ServerAssets : BoxedPacket
+ {
+ 	internal Packet_Server packet;
++	internal byte[] compressedBuffer;
++	internal int compressedLengthSent;
++	internal object compressionLock;
++	internal volatile bool isCompressedCached;
+ }

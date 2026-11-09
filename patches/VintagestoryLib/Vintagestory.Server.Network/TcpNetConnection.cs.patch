@@ -1,0 +1,47 @@
+diff --git a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
+index 1a155af..e618ff3 100644
+--- a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
++++ b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
+@@ -227,10 +227,42 @@ public class TcpNetConnection : NetConnection
+ 		return SendPreparedPacket(packet, compressed, Logger);
+ 	}
+ 
+ 	public override byte[] PreparePacketForSending(BoxedPacket box, bool compressionAllowed, out bool compressed)
+ 	{
++		if (box is BoxedPacket_ServerAssets assetsBox && compressionAllowed)
++		{
++			if (!assetsBox.isCompressedCached)
++			{
++				if (assetsBox.compressionLock == null)
++				{
++					Interlocked.CompareExchange(ref assetsBox.compressionLock, new object(), null);
++				}
++				lock (assetsBox.compressionLock)
++				{
++					if (!assetsBox.isCompressedCached)
++					{
++						int len = assetsBox.Length;
++						if (len > 1460)
++						{
++							byte[] comp = Compression.CompressOffset4(assetsBox.buffer, len);
++							int compLenSent = comp.Length - 4;
++							NetIncomingMessage.WriteInt(comp, compLenSent | unchecked((int)0x80000000));
++							assetsBox.compressedLengthSent = compLenSent;
++							assetsBox.compressedBuffer = comp;
++						}
++						assetsBox.isCompressedCached = true;
++					}
++				}
++			}
++			if (assetsBox.compressedBuffer != null)
++			{
++				compressed = true;
++				box.LengthSent = assetsBox.compressedLengthSent;
++				return assetsBox.compressedBuffer;
++			}
++		}
+ 		int num = box.Length;
+ 		compressed = false;
+ 		byte[] array;
+ 		if ((num > 1460) & compressionAllowed)
+ 		{
