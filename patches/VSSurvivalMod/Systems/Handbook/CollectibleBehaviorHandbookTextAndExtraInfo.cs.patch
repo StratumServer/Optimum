@@ -1,0 +1,282 @@
+diff --git a/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs b/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs
+index 55bb87d..ce860c0 100644
+--- a/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs
++++ b/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs
+@@ -78,37 +78,24 @@ namespace Vintagestory.GameContent
+ 
+             addGeneralInfo(inSlot, capi, stack, components, out float marginTop, out float marginBottom);
+ 
+             capi.World.FrameProfiler.Mark("handbook-CollectibleGetHandbookInfo-1");
+ 
+-            List<ItemStack> allCookingContainers = [];
+-            List<ItemStack> allFuels = [];
+-            List<ItemStack> allMolds = [];
+-            List<ItemStack> allAnvils = [];
++            var cachedCategories = getOrCreateHandbookCategoryCache(capi, allStacks);
++            List<ItemStack> allCookingContainers = cachedCategories.AllCookingContainers;
++            List<ItemStack> allFuels = cachedCategories.AllFuels;
++            List<ItemStack> allMolds = cachedCategories.AllMolds;
++            List<ItemStack> allAnvils = cachedCategories.AllAnvils;
+ 
+             List<ItemStack> breakBlocks = [];
+-
+-            foreach (var aStack in allStacks)
++            if (cachedCategories.BreakBlocksByDroppedId.TryGetValue(stack.Id, out var candidateBreakBlocks))
+             {
+-                if (aStack.ItemAttributes?.KeyExists("cookingContainerSlots") == true) allCookingContainers.Add(aStack);
+-
+-                var combustibleProps = aStack.Collectible?.GetCombustibleProperties(Api.World, aStack, null);
+-                if (combustibleProps?.BurnDuration != null || combustibleProps?.BurnTemperature != null) allFuels.Add(aStack);
+-
+-                if (aStack.Collectible is BlockToolMold or BlockIngotMold) allMolds.Add(aStack);
+-                if (aStack.Collectible is BlockAnvil) allAnvils.Add(aStack);
+-
+-                BlockDropItemStack[] droppedStacks = aStack.Block?.GetDropsForHandbook(aStack, capi.World.Player);
+-                if (droppedStacks != null)
++                foreach (var pair in candidateBreakBlocks)
+                 {
+-                    for (int i = 0; i < droppedStacks.Length; i++)
++                    if (pair.Value.Equals(capi.World, stack, GlobalConstants.IgnoredStackAttributes))
+                     {
+-                        ItemStack droppedStack = droppedStacks[i].ResolvedItemstack;
+-                        if (droppedStack.Equals(capi.World, stack, GlobalConstants.IgnoredStackAttributes))
+-                        {
+-                            breakBlocks.Add(aStack);
+-                        }
++                        breakBlocks.Add(pair.Key);
+                     }
+                 }
+             }
+ 
+             addDropsInfo(capi, openDetailPageFor, stack, components, marginTop, breakBlocks);
+@@ -319,30 +306,19 @@ namespace Vintagestory.GameContent
+                         }
+                     }
+                 }
+             }
+ 
+-            foreach (var aStack in allStacks)
++            var cachedCategories = getOrCreateHandbookCategoryCache(capi, allStacks);
++            if (cachedCategories.HarvestBlocksByDroppedId.TryGetValue(stack.Id, out var candidateHarvestBlocks))
+             {
+-                if (aStack.Block is not { } block) continue;
+-
+-                var harvestedStacks = block.GetBehavior<BlockBehaviorHarvestable>()?.harvestedStacks ??
+-                                      block.GetBehavior<BlockBehaviorFruitingBush>()?.harvestedStacks;
+-
+-                if (harvestedStacks == null)
++                foreach (var pair in candidateHarvestBlocks)
+                 {
+-                    if (block is BlockFruitTreeBranch branch && branch.TypeProps.TryGetValue(aStack.Attributes.GetString("type", "unknown"), out var props))
++                    if (pair.Value.Equals(capi.World, stack, GlobalConstants.IgnoredStackAttributes))
+                     {
+-                        harvestedStacks = props.FruitStacks;
++                        harvestBlocks.Add(pair.Key);
+                     }
+-
+-                    if (harvestedStacks == null) continue;
+-                }
+-
+-                if (harvestedStacks.Any(hStack => hStack?.ResolvedItemstack?.Equals(capi.World, stack, GlobalConstants.IgnoredStackAttributes) == true))
+-                {
+-                    harvestBlocks.Add(aStack);
+                 }
+             }
+ 
+ 
+             bool haveText = components.Count > 0;
+@@ -1383,27 +1359,32 @@ namespace Vintagestory.GameContent
+                 anvilweldable = true;
+             }
+ 
+ 
+             List<GridRecipe> grecipes = [];
+-            foreach (var recipe in capi.World.GridRecipes)
++            var gridRecipesByOutput = getOrCreateGridRecipesByOutput(capi);
++            long stackKey = ((long)(int)stack.Class << 32) | (uint)stack.Id;
++            if (gridRecipesByOutput.TryGetValue(stackKey, out var candidateRecipes))
+             {
+-                if (!recipe.ShowInCreatedBy) continue;
+-
+-                if (recipe.RecipeOutput.ResolvedItemStack?.Satisfies(stack) == true)
++                foreach (var recipe in candidateRecipes)
+                 {
+-                    grecipes.Add(recipe);
+-                    continue;
+-                }
++                    if (!recipe.ShowInCreatedBy) continue;
+ 
+-                // Searches through all recipe ingredients looking for ReturnedStack, that's a bit costly
+-                foreach (var ingred in recipe.ResolvedIngredients)
+-                {
+-                    if (ingred?.ReturnedStack?.ResolvedItemStack is not { } rstack) continue;
+-                    if (!rstack.Satisfies(stack) || ingred.ResolvedItemStack?.Satisfies(stack) != false) continue;
+-                    grecipes.Add(recipe);
+-                    break;
++                    if (recipe.RecipeOutput.ResolvedItemStack?.Satisfies(stack) == true)
++                    {
++                        grecipes.Add(recipe);
++                        continue;
++                    }
++
++                    // Searches through all recipe ingredients looking for ReturnedStack, that's a bit costly
++                    foreach (var ingred in recipe.ResolvedIngredients)
++                    {
++                        if (ingred?.ReturnedStack?.ResolvedItemStack is not { } rstack) continue;
++                        if (!rstack.Satisfies(stack) || ingred.ResolvedItemStack?.Satisfies(stack) != false) continue;
++                        grecipes.Add(recipe);
++                        break;
++                    }
+                 }
+             }
+ 
+ 
+             List<CookingRecipe> cookrecipes = [];
+@@ -2920,7 +2901,147 @@ namespace Vintagestory.GameContent
+             if (!list.Any(s => s.Equals(capi.World, entry, GlobalConstants.IgnoredStackAttributes)))
+             {
+                 list.Add(entry);
+             }
+         }
++
++        private class HandbookCategoryCache
++        {
++            public List<ItemStack> AllCookingContainers = [];
++            public List<ItemStack> AllFuels = [];
++            public List<ItemStack> AllMolds = [];
++            public List<ItemStack> AllAnvils = [];
++            public Dictionary<int, List<KeyValuePair<ItemStack, ItemStack>>> BreakBlocksByDroppedId = [];
++            public Dictionary<int, List<KeyValuePair<ItemStack, ItemStack>>> HarvestBlocksByDroppedId = [];
++        }
++
++        private static HandbookCategoryCache getOrCreateHandbookCategoryCache(ICoreClientAPI capi, ItemStack[] allStacks)
++        {
++            return ObjectCacheUtil.GetOrCreate(capi, "optimumHandbookCategoryCache", () =>
++            {
++                var cache = new HandbookCategoryCache();
++                if (allStacks == null) return cache;
++
++                foreach (var aStack in allStacks)
++                {
++                    if (aStack.ItemAttributes?.KeyExists("cookingContainerSlots") == true)
++                    {
++                        cache.AllCookingContainers.Add(aStack);
++                    }
++
++                    var combustibleProps = aStack.Collectible?.GetCombustibleProperties(capi.World, aStack, null);
++                    if (combustibleProps?.BurnDuration != null || combustibleProps?.BurnTemperature != null)
++                    {
++                        cache.AllFuels.Add(aStack);
++                    }
++
++                    if (aStack.Collectible is BlockToolMold or BlockIngotMold)
++                    {
++                        cache.AllMolds.Add(aStack);
++                    }
++
++                    if (aStack.Collectible is BlockAnvil)
++                    {
++                        cache.AllAnvils.Add(aStack);
++                    }
++
++                    if (aStack.Block is { } block)
++                    {
++                        BlockDropItemStack[] droppedStacks = block.GetDropsForHandbook(aStack, capi.World.Player);
++                        if (droppedStacks != null)
++                        {
++                            for (int i = 0; i < droppedStacks.Length; i++)
++                            {
++                                ItemStack droppedStack = droppedStacks[i]?.ResolvedItemstack;
++                                if (droppedStack != null)
++                                {
++                                    if (!cache.BreakBlocksByDroppedId.TryGetValue(droppedStack.Id, out var dList))
++                                    {
++                                        dList = [];
++                                        cache.BreakBlocksByDroppedId[droppedStack.Id] = dList;
++                                    }
++                                    dList.Add(new KeyValuePair<ItemStack, ItemStack>(aStack, droppedStack));
++                                }
++                            }
++                        }
++
++                        var harvestedStacks = block.GetBehavior<BlockBehaviorHarvestable>()?.harvestedStacks ??
++                                              block.GetBehavior<BlockBehaviorFruitingBush>()?.harvestedStacks;
++
++                        if (harvestedStacks == null)
++                        {
++                            if (block is BlockFruitTreeBranch branch && branch.TypeProps.TryGetValue(aStack.Attributes.GetString("type", "unknown"), out var props))
++                            {
++                                harvestedStacks = props.FruitStacks;
++                            }
++                        }
++
++                        if (harvestedStacks != null)
++                        {
++                            foreach (var hStack in harvestedStacks)
++                            {
++                                ItemStack rStack = hStack?.ResolvedItemstack;
++                                if (rStack != null)
++                                {
++                                    if (!cache.HarvestBlocksByDroppedId.TryGetValue(rStack.Id, out var hList))
++                                    {
++                                        hList = [];
++                                        cache.HarvestBlocksByDroppedId[rStack.Id] = hList;
++                                    }
++                                    hList.Add(new KeyValuePair<ItemStack, ItemStack>(aStack, rStack));
++                                }
++                            }
++                        }
++                    }
++                }
++
++                return cache;
++            });
++        }
++
++        private static Dictionary<long, List<GridRecipe>> getOrCreateGridRecipesByOutput(ICoreClientAPI capi)
++        {
++            return ObjectCacheUtil.GetOrCreate(capi, "optimumHandbookGridRecipesByOutput", () =>
++            {
++                var dict = new Dictionary<long, List<GridRecipe>>();
++                if (capi.World?.GridRecipes == null) return dict;
++
++                void AddCandidate(EnumItemClass itemClass, int id, GridRecipe recipe)
++                {
++                    long key = ((long)(int)itemClass << 32) | (uint)id;
++                    if (!dict.TryGetValue(key, out var list))
++                    {
++                        list = [];
++                        dict[key] = list;
++                    }
++                    if (!list.Contains(recipe))
++                    {
++                        list.Add(recipe);
++                    }
++                }
++
++                foreach (var recipe in capi.World.GridRecipes)
++                {
++                    if (!recipe.ShowInCreatedBy) continue;
++
++                    if (recipe.RecipeOutput?.ResolvedItemStack is { } outStack)
++                    {
++                        AddCandidate(outStack.Class, outStack.Id, recipe);
++                    }
++
++                    if (recipe.ResolvedIngredients != null)
++                    {
++                        foreach (var ingred in recipe.ResolvedIngredients)
++                        {
++                            if (ingred?.ReturnedStack?.ResolvedItemStack is { } rstack)
++                            {
++                                AddCandidate(rstack.Class, rstack.Id, recipe);
++                            }
++                        }
++                    }
++                }
++
++                return dict;
++            });
++        }
+     }
+ }
