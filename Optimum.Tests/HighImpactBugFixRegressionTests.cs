@@ -2032,6 +2032,27 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("-                mesher.AddMeshData(ownMesh.Clone().Rotate(0, MeshAngle, 0));", patch);
     }
 
+    [Fact]
+    public void Issue503_InventorySearch_UsesTieredMatchingAndStableSort()
+    {
+        string gridPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs.patch"));
+        Assert.Contains("+            var sortedSlots = new List<(int key, ItemSlot slot, float weight, int order)>(wSlots.Count);", gridPatch);
+        Assert.Contains("+            sortedSlots.Sort((a, b) =>", gridPatch);
+        Assert.Contains("+                int cmp = a.weight.CompareTo(b.weight);", gridPatch);
+        Assert.Contains("+                return cmp != 0 ? cmp : a.order.CompareTo(b.order);", gridPatch);
+        Assert.Contains("-            foreach (var pair in wSlots.OrderBy(pair => pair.Value.weight))", gridPatch);
+
+        string stackPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Collectible/ItemStack.cs.patch"));
+        Assert.Contains("+        [ThreadStatic]", stackPatch);
+        Assert.Contains("+        private static DummySlot searchDummySlot;", stackPatch);
+        Assert.Contains("+            string name = GetName();", stackPatch);
+        Assert.Contains("+            if (name != null && name.CaseInsensitiveContains(searchText)) return true;", stackPatch);
+        Assert.Contains("+            var slot = searchDummySlot ??= new DummySlot();", stackPatch);
+        Assert.Contains("-                || GetDescription(world, new DummySlot(this), false).CaseInsensitiveContains(searchText)", stackPatch);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

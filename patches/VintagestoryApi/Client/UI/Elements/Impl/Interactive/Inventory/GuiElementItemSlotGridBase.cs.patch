@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
-index 754d8c2..2f93607 100644
+index 754d8c2..e28b348 100644
 --- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 +++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 @@ -21,12 +21,12 @@ namespace Vintagestory.API.Client
@@ -45,3 +45,30 @@ index 754d8c2..2f93607 100644
              {
                  ItemSlot slot = inventory[val.Key];
  
+@@ -647,13 +647,24 @@ namespace Vintagestory.API.Client
+                         renderedSlots.Add(val.Key, slot);
+                     }
+                 }
+             }
+ 
+-            foreach (var pair in wSlots.OrderBy(pair => pair.Value.weight))
++            var sortedSlots = new List<(int key, ItemSlot slot, float weight, int order)>(wSlots.Count);
++            int order = 0;
++            foreach (var pair in wSlots)
+             {
+-                renderedSlots.Add(pair.Key, pair.Value.slot);
++                sortedSlots.Add((pair.Key, pair.Value.slot, pair.Value.weight, order++));
++            }
++            sortedSlots.Sort((a, b) =>
++            {
++                int cmp = a.weight.CompareTo(b.weight);
++                return cmp != 0 ? cmp : a.order.CompareTo(b.order);
++            });
++            for (int i = 0; i < sortedSlots.Count; i++)
++            {
++                renderedSlots.Add(sortedSlots[i].key, sortedSlots[i].slot);
+             }
+ 
+             rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
+             ComposeInteractiveElements();
+         }
