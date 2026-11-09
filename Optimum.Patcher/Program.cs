@@ -613,6 +613,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.GuiManager", "OnKeyDown", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnKeyUp", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnKeyPress", 1),
+    // Issue #479: unwrap IAsset in Asset.Equals so two Asset instances with the same AssetLocation compare equal
+    new("Vintagestory.Common.Asset", "Equals", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseDown", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseUp", 1),
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseMove", 1),
@@ -782,7 +784,6 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerMain", "BroadcastArbitraryUdpPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityAttributesPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityDebugAttributesPacket", 1),
-    new("Vintagestory.Server.ServerEventManager", "TriggerGameWorldBeingSaved", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(

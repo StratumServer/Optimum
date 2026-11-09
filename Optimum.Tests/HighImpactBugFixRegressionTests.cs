@@ -1272,6 +1272,39 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");
+        Assert.Contains("if (obj is IAsset asset)", patch);
+        Assert.Contains("return Location.Equals(asset.Location);", patch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Common.Asset\", \"Equals\", 1)", programSource);
+
+        string repoRoot = System.IO.Path.GetDirectoryName(PatchReader.FindRepositoryFile("VintageStory.slnx"))!;
+        string vsLibDll = System.IO.Path.Combine(repoRoot, "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (File.Exists(vsLibDll))
+        {
+            var asm = Assembly.LoadFrom(vsLibDll);
+            var assetType = asm.GetType("Vintagestory.Common.Asset");
+            Assert.NotNull(assetType);
+
+            var locSame1 = new AssetLocation("game", "textures/block/stone.png");
+            var locSame2 = new AssetLocation("game", "textures/block/stone.png");
+            var locDiff = new AssetLocation("game", "textures/block/dirt.png");
+
+            object asset1 = Activator.CreateInstance(assetType, new object[] { new byte[] { 1 }, locSame1, null })!;
+            object asset2 = Activator.CreateInstance(assetType, new object[] { new byte[] { 2 }, locSame2, null })!;
+            object asset3 = Activator.CreateInstance(assetType, new object[] { new byte[] { 1 }, locDiff, null })!;
+
+            Assert.True(asset1.Equals(asset2));
+            Assert.True(asset1.Equals(locSame2));
+            Assert.False(asset1.Equals(asset3));
+            Assert.Equal(asset1.GetHashCode(), asset2.GetHashCode());
+        }
+    }
+
+    [Fact]
     public void Handbook_CategoryIndexing_And_GuiElementFlatList_O1_ViewportParity()
     {
         string handbookPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs.patch");
