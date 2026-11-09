@@ -1,7 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
+index 3d487c5..86a85d0 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
-@@ -30,6 +30,13 @@
+@@ -28,10 +28,17 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 
+ 	private BlockAccessorWorldGenUpdateHeightmap blockAccessorWGUpdateHeightMap;
  
  	private Dictionary<long, ServerChunk> chunksCopy = new Dictionary<long, ServerChunk>();
  
@@ -15,7 +18,60 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  	private bool ignoreSave;
  
  	internal static PlayerSpawnPos SetDefaultSpawnOnce;
-@@ -155,6 +162,10 @@
+ 
+ 	private FastMemoryStream reusableStream => reusableMemoryStream ?? (reusableMemoryStream = new FastMemoryStream());
+@@ -87,10 +94,12 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		}
+ 		catch (Exception e)
+ 		{
+ 			ServerMain.Logger.Fatal("Unable to open or create savegame.");
+ 			ServerMain.Logger.Fatal(e);
++			chunkthread?.gameDatabase?.Dispose();
++			if (chunkthread != null) chunkthread.gameDatabase = null;
+ 			server.Stop("Failed opening savegame", EnumExitMode.HardExit);
+ 			return;
+ 		}
+ 		if (((server.SaveGameData == null) & flag) && server.Config.RepairMode)
+ 		{
+@@ -108,18 +117,21 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 			chunkthread.gameDatabase.IntegrityCheck();
+ 		}
+ 		if ((server.SaveGameData == null) & flag)
+ 		{
+ 			server.SaveGameData = null;
++			chunkthread?.gameDatabase?.Dispose();
++			if (chunkthread != null) chunkthread.gameDatabase = null;
+ 			ServerMain.Logger.Fatal("Failed opening savegame, possibly corrupted. Error Message: {0}. Will exit server now.", errorMessage);
+ 			server.Stop("Failed opening savegame", EnumExitMode.HardExit);
+ 			return;
+ 		}
+ 		if (isReadonly)
+ 		{
+ 			server.SaveGameData = null;
+-			chunkthread.gameDatabase.CloseConnection();
++			chunkthread?.gameDatabase?.Dispose();
++			if (chunkthread != null) chunkthread.gameDatabase = null;
+ 			ServerMain.Logger.Fatal("Failed opening savegame, have no write access to it. Make sure no other server is accessing it. Will exit server now.");
+ 			server.Stop("Failed opening savegame, it is readonly", EnumExitMode.HardExit);
+ 			return;
+ 		}
+ 		try
+@@ -128,10 +140,12 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 			long freeDiskSpace = ServerMain.xPlatInterface.GetFreeDiskSpace(fileInfo.DirectoryName);
+ 			if (freeDiskSpace >= 0 && freeDiskSpace < 1048576 * server.Config.DieBelowDiskSpaceMb)
+ 			{
+ 				string message = $"Disk space is below {server.Config.DieBelowDiskSpaceMb} megabytes ({freeDiskSpace / 1024 / 1024} mb left). A full harddisk can heavily corrupt a savegame. Please free up more disk space or adjust the threshold in the serverconfig.json (or set to -1 to disable this check). Will kill server now...";
+ 				ServerMain.Logger.Fatal(message);
++				chunkthread?.gameDatabase?.Dispose();
++				if (chunkthread != null) chunkthread.gameDatabase = null;
+ 				throw new Exception(message);
+ 			}
+ 		}
+ 		catch (ArgumentException)
+ 		{
+@@ -153,10 +167,14 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 				ServerMain.Logger.Event("Failed upgrading old savegame, giving up, sorry.");
+ 				throw new InvalidDataException("Failed upgrading savegame {0}", innerException);
  			}
  		}
  		chunkthread.gameDatabase.UpgradeToWriteAccess();
@@ -26,15 +82,34 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  		server.ModEventManager.OnWorldgenStartup += OnWorldgenStartup;
  		if (!string.IsNullOrWhiteSpace(server.progArgs.RestoreLogsFolder))
  		{
-@@ -209,6 +220,7 @@
+ 			server.ModEventManager.RegisterOnServerRunPhase(EnumServerRunPhase.RunGame, OnRestoreFromBuildLog);
+ 		}
+@@ -207,11 +225,21 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 		}
+ 	}
  
  	public override void OnSeperateThreadShutDown()
  	{
+-		chunkthread.gameDatabase.Dispose();
 +		DisposeOptimumChunkReadPool();
- 		chunkthread.gameDatabase.Dispose();
++		chunkthread?.gameDatabase?.Dispose();
++		if (chunkthread != null) chunkthread.gameDatabase = null;
++	}
++
++	public override void Dispose()
++	{
++		DisposeOptimumChunkReadPool();
++		chunkthread?.gameDatabase?.Dispose();
++		if (chunkthread != null) chunkthread.gameDatabase = null;
++		base.Dispose();
  	}
  
-@@ -400,7 +412,9 @@
+ 	public void OnWorldBeingSaved()
+ 	{
+ 		bool flag = server.RunPhase != EnumServerRunPhase.Shutdown;
+@@ -398,11 +426,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
  	private int SaveAllDirtyMapRegions(FastMemoryStream ms)
  	{
  		int num = 0;
@@ -45,7 +120,11 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  		foreach (KeyValuePair<long, ServerMapRegion> loadedMapRegion in server.loadedMapRegions)
  		{
  			if (loadedMapRegion.Value.DirtyForSaving)
-@@ -421,7 +435,9 @@
+ 			{
+ 				loadedMapRegion.Value.DirtyForSaving = false;
+@@ -419,11 +449,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
  	private int SaveAllDirtyMapChunks(FastMemoryStream ms)
  	{
  		int num = 0;
@@ -56,7 +135,11 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  		foreach (KeyValuePair<long, ServerMapChunk> loadedMapChunk in server.loadedMapChunks)
  		{
  			if (loadedMapChunk.Value.DirtyForSaving)
-@@ -448,38 +464,47 @@
+ 			{
+ 				loadedMapChunk.Value.DirtyForSaving = false;
+@@ -446,42 +478,51 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	}
+ 
  	internal int SaveAllDirtyLoadedChunks(bool isSaveLater, FastMemoryStream ms)
  	{
  		int num = 0;
@@ -83,13 +166,13 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
 -				});
 -				num++;
 -				if (list.Count > 300)
-+				if (item.Value.DirtyForSaving)
- 				{
+-				{
 -					chunkthread.gameDatabase.SetChunks(list);
 -					list.Clear();
 -				}
 -				if (num > 0 && num % 300 == 0)
--				{
++				if (item.Value.DirtyForSaving)
+ 				{
 -					ServerMain.Logger.Event("Saved {0} chunks...", num);
 +					item.Value.DirtyForSaving = false;
 +					ChunkPos position = server.WorldMap.ChunkPosFromChunkIndex3D(item.Key);
@@ -125,7 +208,11 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  		}
  		return num;
  	}
-@@ -506,7 +531,9 @@
+ 
+ 	private void PopulateChunksCopy()
+@@ -504,11 +545,13 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 	internal int SaveAllDirtyGeneratingChunks(FastMemoryStream ms)
+ 	{
  		int num = 0;
  		if (chunkthread.requestedChunkColumns.Count > 0)
  		{
@@ -136,7 +223,11 @@ diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs 
  			List<DbChunk> list2 = new List<DbChunk>();
  			foreach (ChunkColumnLoadRequest item in chunkthread.requestedChunkColumns.Snapshot())
  			{
-@@ -720,4 +747,43 @@
+ 				if (item.Chunks == null || item.Disposed || item.CurrentIncompletePass <= EnumWorldGenPass.Terrain)
+ 				{
+@@ -718,6 +761,45 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+ 			list.Clear();
+ 		}
  		ServerMain.Logger.Notification($"Block restore: Total of {dictionary.Count} chunks and {num} block have been restored from the build log. {num2} Blocks already had a new Block at their position.");
  		server.exitState.Mode = EnumExitMode.SoftExit;
  	}

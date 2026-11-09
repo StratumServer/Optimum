@@ -622,6 +622,8 @@ var targets = new List<MethodTarget>
     // Issue #361: relocate Render Scale and Chisel LOD to Graphics settings tab
     new("Vintagestory.Client.NoObf.GuiCompositeSettings", "OnGraphicsOptions", 1),
     new("Vintagestory.Client.NoObf.GuiCompositeSettings", "SetGfxValues", 0),
+    // Issue #477: await singleplayer server shutdown on window close
+    new("Vintagestory.Client.GuiScreenRunningGame", "OnWindowClosed", 0),
     // R3: scale the occlusion-culling engagement threshold by view distance
     new("Vintagestory.Client.NoObf.ChunkCuller", "CullInvisibleChunks", 0),
     // Issue #72: BFS visibility flood fill + its helpers, transplanted alongside
@@ -757,6 +759,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyMapChunks", 1),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyLoadedChunks", 2),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyGeneratingChunks", 1),
+    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "Dispose", 0),
     // OnSeperateThreadShutDown is deliberately not a target: its pre-existing
     // body references the class's shared <>c (SaveGameWorld's cached delegate).
     // DisposeOptimumChunkReadPool is injected and called by an IL hook immediately

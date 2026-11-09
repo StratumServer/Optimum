@@ -1407,6 +1407,26 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void ServerSystemLoadAndSaveGame_DisposesOnEarlyStop_AndWindowCloseAwaitsShutdown()
+    {
+        string savePatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch");
+        Assert.Contains("chunkthread?.gameDatabase?.Dispose();", savePatch);
+        Assert.Contains("public override void Dispose()", savePatch);
+
+        string windowPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs.patch");
+        Assert.Contains("while (ScreenManager.Platform.IsServerRunning)", windowPatch);
+        Assert.Contains("Thread.Sleep(5);", windowPatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Server.ServerSystemLoadAndSaveGame\", \"Dispose\", 0)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.GuiScreenRunningGame\", \"OnWindowClosed\", 0)", programSource);
+
+        string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch", cecilList);
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs.patch", cecilList);
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");
