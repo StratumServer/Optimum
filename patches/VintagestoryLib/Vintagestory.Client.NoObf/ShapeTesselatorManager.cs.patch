@@ -1,7 +1,23 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
+index dae3e90..12b6383 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-@@ -1142,7 +1142,7 @@
+@@ -231,11 +231,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 			Base = new AssetLocation("block/basic/cube")
+ 		};
+ 		int val = Environment.ProcessorCount / 2 - 3;
+ 		val = Math.Min(val, 4);
+ 		val = Math.Max(val, 2);
+-		TargetSet[] array = new TargetSet[1];
++		TargetSet[] array = new TargetSet[val];
+ 		int count2 = 0;
+ 		for (int i = 0; i < array.Length; i++)
+ 		{
+ 			TargetSet set = new TargetSet();
+ 			array[i] = set;
+@@ -1140,11 +1140,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		}
+ 		if (texSource == null)
  		{
  			texSource = texgen(shape, cshape.Base.ToShortString());
  		}
@@ -10,3 +26,5 @@ diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
  		return modeldata;
  	}
  
+ 	public void ThreadDispose()
+ 	{

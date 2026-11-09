@@ -1,0 +1,141 @@
+diff --git a/VintagestoryApi/Common/Model/Shape/CompositeShape.cs b/VintagestoryApi/Common/Model/Shape/CompositeShape.cs
+index a2ca5bd..1bef8c4 100644
+--- a/VintagestoryApi/Common/Model/Shape/CompositeShape.cs
++++ b/VintagestoryApi/Common/Model/Shape/CompositeShape.cs
+@@ -257,77 +257,93 @@ namespace Vintagestory.API.Common
+         /// <summary>
+         /// Expands the Composite Shape and populates the Baked field
+         /// </summary>
+         public void LoadAlternates(IAssetManager assetManager, ILogger logger)
+         {
+-            List<CompositeShape> resolvedAlternates = new List<CompositeShape>();
+-
+-            if (Base.Path.EndsWith('*'))
+-            {
+-                resolvedAlternates.AddRange(resolveShapeWildCards(this, assetManager, logger, true));
+-            }
+-            else resolvedAlternates.Add(this);
+-            if (Alternates != null)
+-            {
+-                foreach (var alt in this.Alternates)
+-                {
+-                    if (alt.Base == null) alt.Base = Base.Clone();
+-                    if (alt.Base.Path.EndsWith('*'))
+-                    {
+-                        resolvedAlternates.AddRange(resolveShapeWildCards(alt, assetManager, logger, false));
+-                    }
+-                    else resolvedAlternates.Add(alt);
+-                }
+-            }
+-
+-            Base = resolvedAlternates[0].Base;
+-
+-            if (resolvedAlternates.Count == 1)
++            if (Base == null) return;
++            if (BakedAlternates != null) return;
++            if (!Base.Path.EndsWith('*') && (Alternates == null || Alternates.Length == 0))
+             {
+                 return;
+             }
+ 
+-            Alternates = new CompositeShape[resolvedAlternates.Count - 1];
+-
+-            for (int i = 0; i < resolvedAlternates.Count - 1; i++)
++            lock (this)
+             {
+-                Alternates[i] = resolvedAlternates[i + 1];
+-            }
+-
+-            BakedAlternates = new CompositeShape[Alternates.Length + 1];
+-            BakedAlternates[0] = this.CloneWithoutAlternates();
++                if (BakedAlternates != null) return;
++                if (!Base.Path.EndsWith('*') && (Alternates == null || Alternates.Length == 0))
++                {
++                    return;
++                }
+ 
+-            for (int i = 0; i < Alternates.Length; i++)
+-            {
+-                CompositeShape altCS = BakedAlternates[i + 1] = Alternates[i];
++                List<CompositeShape> resolvedAlternates = new List<CompositeShape>();
+ 
+-                if (altCS.Base == null)
++                if (Base.Path.EndsWith('*'))
+                 {
+-                    altCS.Base = Base.Clone();
++                    resolvedAlternates.AddRange(resolveShapeWildCards(this, assetManager, logger, true));
++                }
++                else resolvedAlternates.Add(this);
++                if (Alternates != null)
++                {
++                    foreach (var alt in this.Alternates)
++                    {
++                        if (alt.Base == null) alt.Base = Base.Clone();
++                        if (alt.Base.Path.EndsWith('*'))
++                        {
++                            resolvedAlternates.AddRange(resolveShapeWildCards(alt, assetManager, logger, false));
++                        }
++                        else resolvedAlternates.Add(alt);
++                    }
+                 }
+ 
+-                if (altCS.QuantityElements == null)
++                Base = resolvedAlternates[0].Base;
++
++                if (resolvedAlternates.Count == 1)
+                 {
+-                    altCS.QuantityElements = QuantityElements;
++                    return;
+                 }
+ 
+-                if (altCS.SelectiveElements == null)
++                Alternates = new CompositeShape[resolvedAlternates.Count - 1];
++
++                for (int i = 0; i < resolvedAlternates.Count - 1; i++)
+                 {
+-                    altCS.SelectiveElements = SelectiveElements;
++                    Alternates[i] = resolvedAlternates[i + 1];
+                 }
+ 
+-                if (altCS.IgnoreElements == null)
++                BakedAlternates = new CompositeShape[Alternates.Length + 1];
++                BakedAlternates[0] = this.CloneWithoutAlternates();
++
++                for (int i = 0; i < Alternates.Length; i++)
+                 {
+-                    altCS.IgnoreElements = IgnoreElements;
++                    CompositeShape altCS = BakedAlternates[i + 1] = Alternates[i];
++
++                    if (altCS.Base == null)
++                    {
++                        altCS.Base = Base.Clone();
++                    }
++
++                    if (altCS.QuantityElements == null)
++                    {
++                        altCS.QuantityElements = QuantityElements;
++                    }
++
++                    if (altCS.SelectiveElements == null)
++                    {
++                        altCS.SelectiveElements = SelectiveElements;
++                    }
++
++                    if (altCS.IgnoreElements == null)
++                    {
++                        altCS.IgnoreElements = IgnoreElements;
++                    }
+                 }
+             }
+         }
+ 
+ 
+         CompositeShape[] resolveShapeWildCards(CompositeShape shape, IAssetManager assetManager, ILogger logger, bool addCubeIfNone)
+         {
+-            List<IAsset> assets = assetManager.GetManyInCategory("shapes", shape.Base.Path.Substring(0, Base.Path.Length - 1), shape.Base.Domain);
++            List<IAsset> assets = assetManager.GetManyInCategory("shapes", shape.Base.Path.Substring(0, shape.Base.Path.Length - 1), shape.Base.Domain);
+ 
+             if (assets.Count == 0)
+             {
+                 if (addCubeIfNone)
+                 {
