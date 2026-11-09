@@ -1,8 +1,10 @@
 diff --git a/VSEssentials/Loading/RegistryObjectType.cs b/VSEssentials/Loading/RegistryObjectType.cs
-index 7c78fc7..f58e814 100644
+index 7c78fc7c..59ae0fea 100644
 --- a/VSEssentials/Loading/RegistryObjectType.cs
 +++ b/VSEssentials/Loading/RegistryObjectType.cs
-@@ -73,7 +73,7 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -71,11 +71,11 @@ namespace Vintagestory.ServerMods.NoObf
+         public RegistryObjectVariantGroup[] VariantGroups;
+ 
          /// <summary>
          /// Variant values as resolved from blocktype/itemtype or entitytype
          /// </summary>
@@ -11,7 +13,51 @@ index 7c78fc7..f58e814 100644
  
          /// <summary>
          /// (Currently unused) A set of potential world interactions for this object. Used to display what the object is used for - e.g. Shift + Right Click to Knap Stones.
-@@ -262,12 +262,12 @@ namespace Vintagestory.ServerMods.NoObf
+         /// </summary>
+         [JsonProperty]
+@@ -126,16 +126,15 @@ namespace Vintagestory.ServerMods.NoObf
+         /// <param name="wildCard"></param>
+         /// <returns></returns>
+         public bool WildCardMatch(AssetLocation wildCard)
+         {
+             if (wildCard == Code) return true;
++            if (wildCard == null || Code == null || wildCard.Path == null || Code.Path == null) return false;
++            if (wildCard.Domain != Code.Domain) return false;
++            if (wildCard.Path.Length == 0 && Code.Path.Length == 0) return true;
+ 
+-            if (Code == null || wildCard.Domain != Code.Domain) return false;
+-
+-            string pattern = Regex.Escape(wildCard.Path).Replace(@"\*", @"(.*)");
+-
+-            return Regex.IsMatch(Code.Path, @"^" + pattern + @"$", RegexOptions.IgnoreCase);
++            return WildcardUtil.Match(wildCard.Path, Code.Path);
+         }
+ 
+         /*public static bool WildCardMatch(string wildCard, string text)
+         {
+             if (wildCard == text) return true;
+@@ -159,14 +158,15 @@ namespace Vintagestory.ServerMods.NoObf
+         }
+ 
+         public static bool WildCardMatch(AssetLocation wildCard, AssetLocation blockCode)
+         {
+             if (wildCard == blockCode) return true;
++            if (wildCard == null || blockCode == null || wildCard.Path == null || blockCode.Path == null) return false;
++            if (wildCard.Domain != blockCode.Domain) return false;
++            if (wildCard.Path.Length == 0 && blockCode.Path.Length == 0) return true;
+ 
+-            string pattern = Regex.Escape(wildCard.Path).Replace(@"\*", @"(.*)");
+-
+-            return Regex.IsMatch(blockCode.Path, @"^" + pattern + @"$", RegexOptions.IgnoreCase);
++            return WildcardUtil.Match(wildCard.Path, blockCode.Path);
+         }
+ 
+         public static bool WildCardMatches(AssetLocation blockCode, List<AssetLocation> wildCards, out AssetLocation matchingWildcard)
+         {
+             foreach (AssetLocation wildcard in wildCards)
+@@ -260,16 +260,16 @@ namespace Vintagestory.ServerMods.NoObf
+                 }
+             }
  
          }
  
@@ -26,7 +72,11 @@ index 7c78fc7..f58e814 100644
          {
              T resolvedType = new T()
              {
-@@ -303,8 +303,185 @@ namespace Vintagestory.ServerMods.NoObf
+                 Code = Code,
+                 VariantGroups = VariantGroups,
+@@ -301,12 +301,189 @@ namespace Vintagestory.ServerMods.NoObf
+             resolvedType.Code = fullcode;
+             resolvedType.jsonObject = null;
              return resolvedType;
          }
  
@@ -38,7 +88,7 @@ index 7c78fc7..f58e814 100644
 +        private static HashSet<JToken> t_dynamicTokens;
 +
 +        public static HashSet<JToken> GetOrCreateDynamicSet()
-+        {
+         {
 +            return t_dynamicTokens ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);
 +        }
 +
@@ -204,7 +254,7 @@ index 7c78fc7..f58e814 100644
 +        }
 +
 +        protected static void solveByType(JToken json, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
-         {
++        {
 +            if (optimumAlreadyResolved)
 +            {
 +                return;
@@ -213,3 +263,5 @@ index 7c78fc7..f58e814 100644
              if (json is JObject jsonObj)
              {
                  List<string> propertiesToRemove = null;
+                 Dictionary<string, JToken> propertiesToAdd = null;
+ 
