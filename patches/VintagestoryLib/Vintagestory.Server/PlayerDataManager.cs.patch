@@ -1,0 +1,92 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs b/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
+index 0e34935..0d01229 100644
+--- a/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
++++ b/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
+@@ -76,17 +76,18 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	}
+ 
+ 	private void OnCheckRequireSave(float dt)
+ 	{
+ 		GamePaths.EnsurePathExists(GamePaths.PlayerData);
++		JsonSerializer jsonSerializer = null;
+ 		if (playerDataDirty)
+ 		{
+ 			try
+ 			{
+ 				using (TextWriter textWriter = new StreamWriter(Path.Combine(GamePaths.PlayerData, "playerdata.json")))
+ 				{
+-					textWriter.Write(JsonConvert.SerializeObject((object)PlayerDataByUid.Values.ToList(), (Formatting)1));
++					(jsonSerializer ??= JsonSerializer.CreateDefault(new JsonSerializerSettings { Formatting = (Formatting)1 })).Serialize(textWriter, PlayerDataByUid.Values);
+ 					textWriter.Close();
+ 				}
+ 				playerDataDirty = false;
+ 			}
+ 			catch (Exception ex)
+@@ -98,11 +99,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		{
+ 			try
+ 			{
+ 				using (TextWriter textWriter2 = new StreamWriter(Path.Combine(GamePaths.PlayerData, "playergroups.json")))
+ 				{
+-					textWriter2.Write(JsonConvert.SerializeObject((object)PlayerGroupsById.Values.ToList(), (Formatting)1));
++					(jsonSerializer ??= JsonSerializer.CreateDefault(new JsonSerializerSettings { Formatting = (Formatting)1 })).Serialize(textWriter2, PlayerGroupsById.Values);
+ 					textWriter2.Close();
+ 				}
+ 				playerGroupsDirty = false;
+ 			}
+ 			catch (Exception ex2)
+@@ -114,11 +115,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		{
+ 			try
+ 			{
+ 				using (TextWriter textWriter3 = new StreamWriter(Path.Combine(GamePaths.PlayerData, "playersbanned.json")))
+ 				{
+-					textWriter3.Write(JsonConvert.SerializeObject((object)BannedPlayers, (Formatting)1));
++					(jsonSerializer ??= JsonSerializer.CreateDefault(new JsonSerializerSettings { Formatting = (Formatting)1 })).Serialize(textWriter3, BannedPlayers);
+ 					textWriter3.Close();
+ 				}
+ 				bannedListDirty = false;
+ 			}
+ 			catch (Exception ex3)
+@@ -132,11 +133,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		}
+ 		try
+ 		{
+ 			using (TextWriter textWriter4 = new StreamWriter(Path.Combine(GamePaths.PlayerData, "playerswhitelisted.json")))
+ 			{
+-				textWriter4.Write(JsonConvert.SerializeObject((object)WhitelistedPlayers, (Formatting)1));
++				(jsonSerializer ??= JsonSerializer.CreateDefault(new JsonSerializerSettings { Formatting = (Formatting)1 })).Serialize(textWriter4, WhitelistedPlayers);
+ 				textWriter4.Close();
+ 			}
+ 			whiteListDirty = false;
+ 		}
+ 		catch (Exception ex4)
+@@ -187,13 +188,14 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		}
+ 		foreach (PlayerGroup item2 in list2)
+ 		{
+ 			PlayerGroupsById[item2.Uid] = item2;
+ 		}
++		DateTime now = DateTime.Now;
+ 		foreach (PlayerEntry item3 in list3)
+ 		{
+-			if (item3.UntilDate >= DateTime.Now)
++			if (item3.UntilDate >= now)
+ 			{
+ 				BannedPlayers.Add(item3);
+ 			}
+ 			else
+ 			{
+@@ -431,11 +433,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	{
+ 		foreach (PlayerEntry item in list)
+ 		{
+ 			if (item.PlayerUID == null || playeruid == null)
+ 			{
+-				if (item.PlayerName?.ToLowerInvariant() == playername?.ToLowerInvariant())
++				if (string.Equals(item.PlayerName, playername, StringComparison.OrdinalIgnoreCase))
+ 				{
+ 					return item;
+ 				}
+ 			}
+ 			else if (item.PlayerUID == playeruid)

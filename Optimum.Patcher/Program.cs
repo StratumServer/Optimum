@@ -786,6 +786,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerMain", "BroadcastArbitraryUdpPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityAttributesPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityDebugAttributesPacket", 1),
+    new("Vintagestory.Server.ServerEventManager", "TriggerGameWorldBeingSaved", 0),
+    new("Vintagestory.Server.PlayerDataManager", "OnCheckRequireSave", 1),
+    new("Vintagestory.Server.PlayerDataManager", "Load", 0),
+    new("Vintagestory.Server.PlayerDataManager", "GetPlayerEntry", 3),
 };
 
 int total = ILPatcher.PatchWithInjection(
