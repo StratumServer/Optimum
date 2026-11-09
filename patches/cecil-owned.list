@@ -50,11 +50,13 @@ patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/GameMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/ItemTypeNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch

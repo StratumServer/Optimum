@@ -440,6 +440,21 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumCachedWindDelegate",
         "optimumCachedWindInvocations",
     },
+    // Issue #469: deduplicate consecutive JToken.Parse calls via DeepClone in BlockTypeNet and ItemTypeNet
+    ["Vintagestory.Common.BlockTypeNet"] = new()
+    {
+        "lastAttributesJson",
+        "lastParsedAttributesToken",
+        "ClearAttributesCache",
+        "ParseAttributes",
+    },
+    ["Vintagestory.Common.ItemTypeNet"] = new()
+    {
+        "lastAttributesJson",
+        "lastParsedAttributesToken",
+        "ClearAttributesCache",
+        "ParseAttributes",
+    },
     // ServerPackets.cs.patch: 14th file of cecil-owned.list's server section,
     // discovered during the wiring plan's triage but not audited there. Verified
     // separately: zero <>c references in either target method (the class-level
@@ -538,6 +553,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas", 3),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas_StageB", 2),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "FinaliseTextureAtlas_StageC", 3),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "PopulateBlocks", 3),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "PopulateItems", 2),
     // ClientMain: measure the existing one-launch-task-per-frame policy before
     // any pacing change. The donor keeps the vanilla queue order and fallback.
     new("Vintagestory.Client.NoObf.ClientMain", "ExecuteMainThreadTasks", 1),
@@ -732,6 +749,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.ModLoader", "CollectMods", 0),
     new("Vintagestory.Common.ModLoader", "instantiateMods", 1),
     new("Vintagestory.Common.ModContainer", "LoadModInfo", 2),
+    // Issue #469: deduplicate consecutive JToken.Parse calls via DeepClone fast path
+    new("Vintagestory.Common.BlockTypeNet", "ReadBlockTypePacket", 3),
+    new("Vintagestory.Common.ItemTypeNet", "ReadItemTypePacket", 3),
     // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
     // data when a mod holds a stale IAsset ref after texture unload.
     new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
