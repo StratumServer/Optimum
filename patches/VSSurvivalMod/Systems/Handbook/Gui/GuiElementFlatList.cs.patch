@@ -1,0 +1,194 @@
+diff --git a/VSSurvivalMod/Systems/Handbook/Gui/GuiElementFlatList.cs b/VSSurvivalMod/Systems/Handbook/Gui/GuiElementFlatList.cs
+index b4f6613..07d4e3c 100644
+--- a/VSSurvivalMod/Systems/Handbook/Gui/GuiElementFlatList.cs
++++ b/VSSurvivalMod/Systems/Handbook/Gui/GuiElementFlatList.cs
+@@ -35,10 +35,12 @@ namespace Vintagestory.GameContent
+         public Action<int> onLeftClick;
+ 
+         LoadedTexture hoverOverlayTexture;
+         public ElementBounds insideBounds;
+ 
++        protected List<int> visibleIndices = new List<int>();
++
+         public GuiElementFlatList(ICoreClientAPI capi, ElementBounds bounds, Action<int> onLeftClick, List<IFlatListItem> elements = null) : base(capi, bounds)
+         {
+             hoverOverlayTexture = new LoadedTexture(capi);
+ 
+             insideBounds = new ElementBounds().WithFixedPadding(unscaledCellSpacing).WithEmptyParent();
+@@ -54,11 +56,19 @@ namespace Vintagestory.GameContent
+         }
+         
+ 
+         public void CalcTotalHeight()
+         {
+-            double height = Elements.Where(e => e.Visible).Count() * (unscaledCellHeight + unscaledCellSpacing);
++            visibleIndices.Clear();
++            for (int i = 0; i < Elements.Count; i++)
++            {
++                if (Elements[i].Visible)
++                {
++                    visibleIndices.Add(i);
++                }
++            }
++            double height = visibleIndices.Count * (unscaledCellHeight + unscaledCellSpacing);
+             insideBounds.fixedHeight = height + unscaledCellSpacing;
+         }
+ 
+         public override void ComposeElements(Context ctxStatic, ImageSurface surfaceStatic)
+         {
+@@ -95,44 +105,48 @@ namespace Vintagestory.GameContent
+             if (!Bounds.ParentBounds.PointInside(args.X, args.Y)) return;
+             if (!wasMouseDownOnElement) return;
+ 
+             wasMouseDownOnElement = false;
+ 
+-            int i = 0;
++            double cellStep = scaled(unscaledCellHeight + unscaledCellSpacing);
++            if (cellStep <= 0) return;
++
+             int mx = api.Input.MouseX;
+             int my = api.Input.MouseY;
+-            double posY = insideBounds.absY;
++            double ypad = GuiElement.scaled(unscalledYPad);
++            double height = scaled(unscaledCellHeight);
+ 
+-            foreach (IFlatListItem element in Elements)
++            if (visibleIndices.Count == 0 && Elements.Count > 0)
+             {
+-                if (!element.Visible)
+-                {
+-                    i++;
+-                    continue;
+-                }
++                CalcTotalHeight();
++            }
+ 
+-                float y = (float)(5 + Bounds.absY + posY);
+-                double ypad = GuiElement.scaled(unscalledYPad);
++            double relY = my - (5 + Bounds.absY + insideBounds.absY - ypad);
++            int v = (int)Math.Floor(relY / cellStep);
+ 
+-                if (mx > Bounds.absX && mx <= Bounds.absX + Bounds.InnerWidth && my >= y - ypad && my <= y + scaled(unscaledCellHeight) - ypad)
++            if (v >= 0 && v < visibleIndices.Count)
++            {
++                double rowY = v * cellStep;
++                if (mx > Bounds.absX && mx <= Bounds.absX + Bounds.InnerWidth && relY >= rowY && relY <= rowY + height)
+                 {
+-                    api.World.FrameProfiler.Enter("guielement-clicked");
+-                    try
+-                    {
+-                        api.Gui.PlaySound("menubutton_press");
+-                        onLeftClick?.Invoke(i);
+-                        args.Handled = true;
+-                    }
+-                    finally
++                    int elemIdx = visibleIndices[v];
++                    if (elemIdx >= 0 && elemIdx < Elements.Count && Elements[elemIdx].Visible)
+                     {
+-                        api.World.FrameProfiler.Leave();
++                        api.World.FrameProfiler.Enter("guielement-clicked");
++                        try
++                        {
++                            api.Gui.PlaySound("menubutton_press");
++                            onLeftClick?.Invoke(elemIdx);
++                            args.Handled = true;
++                        }
++                        finally
++                        {
++                            api.World.FrameProfiler.Leave();
++                        }
++                        return;
+                     }
+-                    return;
+                 }
+-                
+-                posY += scaled(unscaledCellHeight + unscaledCellSpacing);
+-                i++;
+             }
+         }
+ 
+         public override void OnMouseMove(ICoreClientAPI api, MouseEvent args)
+         {
+@@ -184,10 +198,27 @@ namespace Vintagestory.GameContent
+             
+         }
+ 
+         protected void EachVisibleElem(Action<IFlatListItem> onElem)
+         {
++            if (visibleIndices.Count > 0)
++            {
++                for (int v = 0; v < visibleIndices.Count; v++)
++                {
++                    int elemIdx = visibleIndices[v];
++                    if (elemIdx >= 0 && elemIdx < Elements.Count)
++                    {
++                        IFlatListItem element = Elements[elemIdx];
++                        if (element.Visible)
++                        {
++                            onElem(element);
++                        }
++                    }
++                }
++                return;
++            }
++
+             foreach (IFlatListItem element in Elements)
+             {
+                 if (!element.Visible)
+                 {
+                     continue;
+@@ -203,31 +234,48 @@ namespace Vintagestory.GameContent
+         {
+             int mx = api.Input.MouseX;
+             int my = api.Input.MouseY;
+             bool inbounds = Bounds.ParentBounds.PointInside(mx, my);
+ 
+-            double posY = insideBounds.absY;
++            double cellStep = scaled(unscaledCellHeight + unscaledCellSpacing);
++            if (cellStep <= 0) return;
++
+             double ypad = GuiElement.scaled(unscalledYPad);
+             double height = scaled(unscaledCellHeight);
+ 
+-            foreach (IFlatListItem element in Elements)
++            if (visibleIndices.Count == 0 && Elements.Count > 0)
+             {
++                CalcTotalHeight();
++            }
++
++            int startV = (int)Math.Floor((-50.0 - height - insideBounds.absY) / cellStep);
++            if (startV < 0) startV = 0;
++
++            for (int v = startV; v < visibleIndices.Count; v++)
++            {
++                double posY = insideBounds.absY + v * cellStep;
++                if (posY >= Bounds.OuterHeight + 50)
++                {
++                    break;
++                }
++
++                int elemIdx = visibleIndices[v];
++                if (elemIdx < 0 || elemIdx >= Elements.Count) continue;
++                IFlatListItem element = Elements[elemIdx];
+                 if (!element.Visible) continue;
+ 
+                 float y = (float)(5 + Bounds.absY + posY);
+-                
+-                if (inbounds && mx > Bounds.absX && mx <= Bounds.absX + Bounds.InnerWidth && my >= y-ypad && my <= y + height - ypad)
++
++                if (inbounds && mx > Bounds.absX && mx <= Bounds.absX + Bounds.InnerWidth && my >= y - ypad && my <= y + height - ypad)
+                 {
+                     api.Render.Render2DLoadedTexture(hoverOverlayTexture, (float)Bounds.absX, y - (float)ypad);
+                 }
+ 
+                 if (posY > -50 && posY < Bounds.OuterHeight + 50)
+                 {
+                     element.RenderListEntryTo(api, deltaTime, Bounds.absX, y, Bounds.InnerWidth, height);
+                 }
+-
+-                posY += scaled(unscaledCellHeight + unscaledCellSpacing);
+             }
+         }
+ 
+         public override void Dispose()
+         {

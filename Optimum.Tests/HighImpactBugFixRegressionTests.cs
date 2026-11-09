@@ -1271,6 +1271,37 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Handbook_CategoryIndexing_And_GuiElementFlatList_O1_ViewportParity()
+    {
+        string handbookPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/Systems/Handbook/CollectibleBehaviorHandbookTextAndExtraInfo.cs.patch");
+        Assert.Contains("getOrCreateHandbookCategoryCache", handbookPatch);
+        Assert.Contains("BreakBlocksByDroppedId", handbookPatch);
+        Assert.Contains("HarvestBlocksByDroppedId", handbookPatch);
+        Assert.Contains("getOrCreateGridRecipesByOutput", handbookPatch);
+
+        string flatListPatch = PatchReader.ReadPatch("patches/VSSurvivalMod/Systems/Handbook/Gui/GuiElementFlatList.cs.patch");
+        Assert.Contains("visibleIndices", flatListPatch);
+        Assert.Contains("startV", flatListPatch);
+        Assert.Contains("insideBounds.absY + v * cellStep", flatListPatch);
+        Assert.Contains("Bounds.OuterHeight + 50", flatListPatch);
+
+        string survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        if (File.Exists(survivalDll))
+        {
+            var asm = Assembly.LoadFrom(survivalDll);
+            var flatListType = asm.GetType("Vintagestory.GameContent.GuiElementFlatList");
+            Assert.NotNull(flatListType);
+            Assert.NotNull(flatListType.GetMethod("CalcTotalHeight"));
+            Assert.NotNull(flatListType.GetMethod("RenderInteractiveElements"));
+            Assert.NotNull(flatListType.GetMethod("OnMouseUpOnElement"));
+
+            var handbookBehaviorType = asm.GetType("Vintagestory.GameContent.CollectibleBehaviorHandbookTextAndExtraInfo");
+            Assert.NotNull(handbookBehaviorType);
+            Assert.NotNull(handbookBehaviorType.GetMethod("GetHandbookInfo"));
+        }
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
