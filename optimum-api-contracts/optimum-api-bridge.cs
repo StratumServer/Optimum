@@ -522,6 +522,321 @@ public static class OptimumApiBridge
         }
     }
 
+    public static AssetLocation? RegistryObjectFillPlaceHolder(
+        AssetLocation? input,
+        OrderedDictionary<string, string> searchReplace)
+    {
+        if (searchReplace.Count == 0)
+        {
+            return input;
+        }
+
+        input!.Path = RegistryObjectFillPlaceHolder(input.Path, searchReplace)!;
+        return input;
+    }
+
+    public static string RegistryObjectFillPlaceHolder(
+        string input,
+        OrderedDictionary<string, string> searchReplace)
+    {
+        if (searchReplace.Count == 0)
+        {
+            return input;
+        }
+
+        ArgumentNullException.ThrowIfNull(input);
+
+        int firstOpen = input.IndexOf('{');
+        if (firstOpen < 0)
+        {
+            return input;
+        }
+
+        ReadOnlySpan<char> span = input.AsSpan();
+        char[]? rented = null;
+        Span<char> buffer = span.Length <= 128
+            ? stackalloc char[256]
+            : (rented = ArrayPool<char>.Shared.Rent(span.Length * 2));
+
+        int pos = 0;
+        bool changed = false;
+        bool replacementHasBrace = false;
+
+        try
+        {
+            if (firstOpen > 0)
+            {
+                EnsureCharBufferCapacity(ref buffer, ref rented, pos, firstOpen);
+                span.Slice(0, firstOpen).CopyTo(buffer.Slice(pos));
+                pos += firstOpen;
+                span = span.Slice(firstOpen);
+            }
+
+            while (!span.IsEmpty)
+            {
+                int openIdx = span.IndexOf('{');
+                if (openIdx < 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, span.Length);
+                    span.CopyTo(buffer.Slice(pos));
+                    pos += span.Length;
+                    break;
+                }
+
+                if (openIdx > 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, openIdx);
+                    span.Slice(0, openIdx).CopyTo(buffer.Slice(pos));
+                    pos += openIdx;
+                    span = span.Slice(openIdx);
+                }
+
+                int closeIdx = span.Slice(1).IndexOf('}');
+                if (closeIdx < 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, span.Length);
+                    span.CopyTo(buffer.Slice(pos));
+                    pos += span.Length;
+                    break;
+                }
+                closeIdx += 1;
+
+                ReadOnlySpan<char> inner = span.Slice(1, closeIdx - 1);
+                int nestedOpen = inner.LastIndexOf('{');
+                if (nestedOpen >= 0)
+                {
+                    int literalLen = nestedOpen + 1;
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, literalLen);
+                    span.Slice(0, literalLen).CopyTo(buffer.Slice(pos));
+                    pos += literalLen;
+                    span = span.Slice(nestedOpen + 1);
+                    continue;
+                }
+
+                string? replacement = MatchPlaceholder(inner, searchReplace);
+                if (replacement != null)
+                {
+                    changed = true;
+                    if (replacement.Contains('{'))
+                    {
+                        replacementHasBrace = true;
+                    }
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, replacement.Length);
+                    replacement.AsSpan().CopyTo(buffer.Slice(pos));
+                    pos += replacement.Length;
+                }
+                else
+                {
+                    int rawLen = closeIdx + 1;
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, rawLen);
+                    span.Slice(0, rawLen).CopyTo(buffer.Slice(pos));
+                    pos += rawLen;
+                }
+
+                span = span.Slice(closeIdx + 1);
+            }
+
+            if (!changed)
+            {
+                return input;
+            }
+
+            if (replacementHasBrace && searchReplace.Count > 1)
+            {
+                string current = input;
+                foreach (var val in searchReplace)
+                {
+                    current = RegistryObjectFillPlaceHolder(current, val.Key, val.Value);
+                }
+                return current;
+            }
+
+            return new string(buffer.Slice(0, pos));
+        }
+        finally
+        {
+            if (rented != null)
+            {
+                ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+    }
+
+    public static string RegistryObjectFillPlaceHolder(
+        string input,
+        string search,
+        string replace)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(search);
+        ArgumentNullException.ThrowIfNull(replace);
+
+        int firstOpen = input.IndexOf('{');
+        if (firstOpen < 0)
+        {
+            return input;
+        }
+
+        ReadOnlySpan<char> searchSpan = search.AsSpan();
+        ReadOnlySpan<char> span = input.AsSpan();
+        char[]? rented = null;
+        Span<char> buffer = span.Length <= 128
+            ? stackalloc char[256]
+            : (rented = ArrayPool<char>.Shared.Rent(span.Length * 2));
+
+        int pos = 0;
+        bool changed = false;
+
+        try
+        {
+            if (firstOpen > 0)
+            {
+                EnsureCharBufferCapacity(ref buffer, ref rented, pos, firstOpen);
+                span.Slice(0, firstOpen).CopyTo(buffer.Slice(pos));
+                pos += firstOpen;
+                span = span.Slice(firstOpen);
+            }
+
+            while (!span.IsEmpty)
+            {
+                int openIdx = span.IndexOf('{');
+                if (openIdx < 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, span.Length);
+                    span.CopyTo(buffer.Slice(pos));
+                    pos += span.Length;
+                    break;
+                }
+
+                if (openIdx > 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, openIdx);
+                    span.Slice(0, openIdx).CopyTo(buffer.Slice(pos));
+                    pos += openIdx;
+                    span = span.Slice(openIdx);
+                }
+
+                int closeIdx = span.Slice(1).IndexOf('}');
+                if (closeIdx < 0)
+                {
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, span.Length);
+                    span.CopyTo(buffer.Slice(pos));
+                    pos += span.Length;
+                    break;
+                }
+                closeIdx += 1;
+
+                ReadOnlySpan<char> inner = span.Slice(1, closeIdx - 1);
+                int nestedOpen = inner.LastIndexOf('{');
+                if (nestedOpen >= 0)
+                {
+                    int literalLen = nestedOpen + 1;
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, literalLen);
+                    span.Slice(0, literalLen).CopyTo(buffer.Slice(pos));
+                    pos += literalLen;
+                    span = span.Slice(nestedOpen + 1);
+                    continue;
+                }
+
+                bool matches = inner.IndexOf('|') < 0
+                    ? inner.SequenceEqual(searchSpan)
+                    : ContainsPipeSegment(inner, searchSpan);
+
+                if (matches)
+                {
+                    changed = true;
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, replace.Length);
+                    replace.AsSpan().CopyTo(buffer.Slice(pos));
+                    pos += replace.Length;
+                }
+                else
+                {
+                    int rawLen = closeIdx + 1;
+                    EnsureCharBufferCapacity(ref buffer, ref rented, pos, rawLen);
+                    span.Slice(0, rawLen).CopyTo(buffer.Slice(pos));
+                    pos += rawLen;
+                }
+
+                span = span.Slice(closeIdx + 1);
+            }
+
+            return changed ? new string(buffer.Slice(0, pos)) : input;
+        }
+        finally
+        {
+            if (rented != null)
+            {
+                ArrayPool<char>.Shared.Return(rented);
+            }
+        }
+    }
+
+    private static string? MatchPlaceholder(
+        ReadOnlySpan<char> inner,
+        OrderedDictionary<string, string> searchReplace)
+    {
+        if (inner.IndexOf('|') < 0)
+        {
+            foreach (var val in searchReplace)
+            {
+                if (val.Key != null && inner.SequenceEqual(val.Key.AsSpan()))
+                {
+                    return val.Value ?? string.Empty;
+                }
+            }
+            return null;
+        }
+
+        foreach (var val in searchReplace)
+        {
+            if (val.Key != null && ContainsPipeSegment(inner, val.Key.AsSpan()))
+            {
+                return val.Value ?? string.Empty;
+            }
+        }
+        return null;
+    }
+
+    private static bool ContainsPipeSegment(ReadOnlySpan<char> inner, ReadOnlySpan<char> key)
+    {
+        while (true)
+        {
+            int pipe = inner.IndexOf('|');
+            ReadOnlySpan<char> segment = pipe < 0 ? inner : inner.Slice(0, pipe);
+            if (segment.SequenceEqual(key))
+            {
+                return true;
+            }
+            if (pipe < 0)
+            {
+                return false;
+            }
+            inner = inner.Slice(pipe + 1);
+        }
+    }
+
+    private static void EnsureCharBufferCapacity(
+        ref Span<char> buffer,
+        ref char[]? rented,
+        int pos,
+        int needed)
+    {
+        if (pos + needed <= buffer.Length)
+        {
+            return;
+        }
+
+        int newSize = Math.Max(buffer.Length * 2, pos + needed);
+        char[] next = ArrayPool<char>.Shared.Rent(newSize);
+        buffer.Slice(0, pos).CopyTo(next);
+        if (rented != null)
+        {
+            ArrayPool<char>.Shared.Return(rented);
+        }
+        rented = next;
+        buffer = next;
+    }
+
     public static bool WildcardUtilMatch(AssetLocation? needle, AssetLocation? haystack)
     {
         if (needle == null || haystack == null) return false;

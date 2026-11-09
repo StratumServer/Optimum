@@ -1143,4 +1143,205 @@ public class StratumPortTests
     }
 
     #endregion
+
+    #region Issue 462 - RegistryObjectType Lazy Resolve and FillPlaceHolder Tests
+
+    [Theory]
+    [InlineData("block/wood/planks/{wood}1", "oak", "granite", "block/wood/planks/oak1")]
+    [InlineData("block/{type|rock}/brick", "oak", "granite", "block/granite/brick")]
+    [InlineData("block/{wood|rock}/brick", "oak", "granite", "block/oak/brick")]
+    [InlineData("{foo{rock}}", "oak", "granite", "{foogranite}")]
+    [InlineData("unclosed-{rock", "oak", "granite", "unclosed-{rock")]
+    [InlineData("no-placeholders-here", "oak", "granite", "no-placeholders-here")]
+    public void RegistryObjectFillPlaceHolder_MatchesVanillaSemantics(
+        string input,
+        string woodVal,
+        string rockVal,
+        string expected)
+    {
+        var dict = new Vintagestory.API.Datastructures.OrderedDictionary<string, string>
+        {
+            ["wood"] = woodVal,
+            ["rock"] = rockVal,
+        };
+
+        Assert.Equal(expected, OptimumApiBridge.RegistryObjectFillPlaceHolder(input, dict));
+        Assert.Equal(expected, RegistryObject.FillPlaceHolder(input, dict));
+    }
+
+    [Fact]
+    public void RegistryObjectFillPlaceHolder_UnchangedInput_ReturnsSameInstance()
+    {
+        var dict = new Vintagestory.API.Datastructures.OrderedDictionary<string, string>
+        {
+            ["wood"] = "oak",
+        };
+
+        string noBrace = "game:block/stone/granite";
+        Assert.Same(noBrace, OptimumApiBridge.RegistryObjectFillPlaceHolder(noBrace, dict));
+
+        string unmatchedBrace = "game:block/stone/{unknown}";
+        Assert.Same(unmatchedBrace, OptimumApiBridge.RegistryObjectFillPlaceHolder(unmatchedBrace, dict));
+    }
+
+    [Fact]
+    public void RegistryObjectFillPlaceHolder_LongStringAndAssetLocation_WorkCorrectly()
+    {
+        var dict = new Vintagestory.API.Datastructures.OrderedDictionary<string, string>
+        {
+            ["rock"] = "chert",
+            ["metal"] = "copper",
+        };
+
+        string prefix = new string('a', 300);
+        string longInput = $"{prefix}-{{rock}}-{{type|metal}}";
+        string result = OptimumApiBridge.RegistryObjectFillPlaceHolder(longInput, dict);
+        Assert.Equal($"{prefix}-chert-copper", result);
+
+        var loc = new AssetLocation("game", "ore-{metal}-{rock}");
+        var resolvedLoc = OptimumApiBridge.RegistryObjectFillPlaceHolder(loc, dict);
+        Assert.Same(loc, resolvedLoc);
+        Assert.Equal("ore-copper-chert", resolvedLoc!.Path);
+    }
+
+    [Fact]
+    public void RegistryObjectFillPlaceHolder_ApiPatcher_RewritesOverloadsToCallOptimumApiBridge()
+    {
+        using var module = ModuleDefinition.CreateModule("RegistryObjectFillPlaceHolderPatchTest", ModuleKind.Dll);
+        var registryObject = new TypeDefinition(
+            "Vintagestory.API.Common",
+            "RegistryObject",
+            TypeAttributes.Public | TypeAttributes.Abstract | TypeAttributes.BeforeFieldInit,
+            module.TypeSystem.Object);
+        module.Types.Add(registryObject);
+
+        var assetLocationType = module.ImportReference(typeof(AssetLocation));
+        var orderedDictType = module.ImportReference(typeof(Vintagestory.API.Datastructures.OrderedDictionary<string, string>));
+
+        var fillAsset = new MethodDefinition(
+            "FillPlaceHolder",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            assetLocationType);
+        fillAsset.Parameters.Add(new ParameterDefinition("input", ParameterAttributes.None, assetLocationType));
+        fillAsset.Parameters.Add(new ParameterDefinition("searchReplace", ParameterAttributes.None, orderedDictType));
+        fillAsset.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        fillAsset.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        registryObject.Methods.Add(fillAsset);
+
+        var fillString = new MethodDefinition(
+            "FillPlaceHolder",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            module.TypeSystem.String);
+        fillString.Parameters.Add(new ParameterDefinition("input", ParameterAttributes.None, module.TypeSystem.String));
+        fillString.Parameters.Add(new ParameterDefinition("searchReplace", ParameterAttributes.None, orderedDictType));
+        fillString.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        fillString.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        registryObject.Methods.Add(fillString);
+
+        var fillSingle = new MethodDefinition(
+            "FillPlaceHolder",
+            MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+            module.TypeSystem.String);
+        fillSingle.Parameters.Add(new ParameterDefinition("input", ParameterAttributes.None, module.TypeSystem.String));
+        fillSingle.Parameters.Add(new ParameterDefinition("search", ParameterAttributes.None, module.TypeSystem.String));
+        fillSingle.Parameters.Add(new ParameterDefinition("replace", ParameterAttributes.None, module.TypeSystem.String));
+        fillSingle.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ldnull));
+        fillSingle.Body.GetILProcessor().Append(Instruction.Create(OpCodes.Ret));
+        registryObject.Methods.Add(fillSingle);
+
+        var fillAssetBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(
+                nameof(OptimumApiBridge.RegistryObjectFillPlaceHolder),
+                new[] { typeof(AssetLocation), typeof(Vintagestory.API.Datastructures.OrderedDictionary<string, string>) })!);
+        var fillStringBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(
+                nameof(OptimumApiBridge.RegistryObjectFillPlaceHolder),
+                new[] { typeof(string), typeof(Vintagestory.API.Datastructures.OrderedDictionary<string, string>) })!);
+        var fillSingleBridge = module.ImportReference(
+            typeof(OptimumApiBridge).GetMethod(
+                nameof(OptimumApiBridge.RegistryObjectFillPlaceHolder),
+                new[] { typeof(string), typeof(string), typeof(string) })!);
+
+        int patched = ApiPatcher.PatchRegistryObjectFillPlaceHolder(
+            module,
+            fillAssetBridge,
+            fillStringBridge,
+            fillSingleBridge);
+
+        Assert.Equal(3, patched);
+    }
+
+    [Fact]
+    public void RegistryObjectType_BuildDynamicSetAndResolve_InjectedAndPreservesByTypeSemantics()
+    {
+        string essentialsDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSEssentials.dll");
+        if (!System.IO.File.Exists(essentialsDll))
+        {
+            essentialsDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSEssentials.dll");
+        }
+        Assert.True(System.IO.File.Exists(essentialsDll), $"VSEssentials.dll not found at {essentialsDll}");
+
+        var asm = System.Reflection.Assembly.LoadFrom(essentialsDll);
+        var regType = asm.GetType("Vintagestory.ServerMods.NoObf.RegistryObjectType");
+        Assert.NotNull(regType);
+
+        var buildDynamicSet = regType!.GetMethod(
+            "BuildDynamicSet",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        var resolve = regType.GetMethod(
+            "Resolve",
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(buildDynamicSet);
+        Assert.NotNull(resolve);
+
+        var baseJson = Newtonsoft.Json.Linq.JObject.Parse("""
+        {
+            "code": "clothes",
+            "staticSection": { "x": 1, "y": 2 },
+            "attributes": {
+                "warmthByType": {
+                    "*-surgeonhood": 0,
+                    "*": 1.5
+                },
+                "label": "cloth-{color}"
+            },
+            "attributesByType": {
+                "*-surgeonhood": 2.2,
+                "*-wintercoat-*": {
+                    "extraByType": {
+                        "*-blue": "winter-{color}",
+                        "*": "default"
+                    }
+                }
+            }
+        }
+        """);
+
+        var dynamicNodes = new System.Collections.Generic.HashSet<Newtonsoft.Json.Linq.JToken>(
+            System.Collections.Generic.ReferenceEqualityComparer.Instance);
+        buildDynamicSet!.Invoke(null, new object[] { baseJson, dynamicNodes });
+
+        // Static section must not be marked dynamic
+        Assert.DoesNotContain(baseJson["staticSection"]!, dynamicNodes);
+
+        // 1. Surgeonhood: attributesByType matches scalar 2.2, must not overwrite attributes JObject, warmth resolves to 0
+        var surgeonVars = new Vintagestory.API.Datastructures.OrderedDictionary<string, string> { ["color"] = "white" };
+        var resolvedSurgeon = (Newtonsoft.Json.Linq.JObject)resolve!.Invoke(
+            null,
+            new object[] { baseJson, "clothes-face-surgeonhood", surgeonVars, dynamicNodes })!;
+        Assert.Equal(0, (int)resolvedSurgeon["attributes"]!["warmth"]!);
+        Assert.Equal("cloth-white", (string?)resolvedSurgeon["attributes"]!["label"]!);
+        Assert.Null(resolvedSurgeon["attributesByType"]);
+
+        // 2. Wintercoat blue: attributesByType JObject merges into attributes and resolves nested extraByType + placeholder
+        var winterVars = new Vintagestory.API.Datastructures.OrderedDictionary<string, string> { ["color"] = "blue" };
+        var resolvedWinter = (Newtonsoft.Json.Linq.JObject)resolve.Invoke(
+            null,
+            new object[] { baseJson, "clothes-upperbody-wintercoat-blue", winterVars, dynamicNodes })!;
+        Assert.Equal(1.5, (double)resolvedWinter["attributes"]!["warmth"]!);
+        Assert.Equal("cloth-blue", (string?)resolvedWinter["attributes"]!["label"]!);
+        Assert.Equal("winter-blue", (string?)resolvedWinter["attributes"]!["extra"]!);
+    }
+
+    #endregion
 }

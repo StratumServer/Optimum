@@ -146,6 +146,19 @@ public static class ModPatcher
                     "SiftDown",
                     "UpdateNodePriority",
                 ],
+                ["Vintagestory.ServerMods.NoObf.RegistryObjectType"] =
+                [
+                    "optimumAlreadyResolved",
+                    "t_dynamicTokens",
+                    "GetOrCreateDynamicSet",
+                    "MarkDynamicTokens",
+                    "BuildDynamicSet",
+                    "Resolve",
+                ],
+                ["Vintagestory.ServerMods.NoObf.ModRegistryObjectTypeLoader"] =
+                [
+                    "reusableDynamicNodes",
+                ],
             },
             Interfaces: new()
             {
@@ -197,6 +210,8 @@ public static class ModPatcher
                 new("Vintagestory.ServerMods.GenCaves", "SetBlocks", 11),
                 new("Vintagestory.ServerMods.NoObf.BlockPatch", "Generate", 7),
                 new("Vintagestory.ServerMods.LerpedWeightedIndex2DMap", "WeightsAt", 3),
+                new("Vintagestory.ServerMods.NoObf.RegistryObjectType", "solveByType", 3),
+                new("Vintagestory.ServerMods.NoObf.ModRegistryObjectTypeLoader", "GatherVariantsAndPopulate", 2),
             ]);
     }
 
