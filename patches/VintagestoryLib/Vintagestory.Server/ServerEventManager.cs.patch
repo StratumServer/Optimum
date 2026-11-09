@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs b/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs
+index f7c9e74..0cdcc11 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs
+@@ -271,11 +271,11 @@ public class ServerEventManager : EventManager
+ 			{
+ 				action();
+ 				FrameProfilerUtil frameProfiler = ServerMain.FrameProfiler;
+ 				if (frameProfiler != null && frameProfiler.Enabled)
+ 				{
+-					ServerMain.FrameProfiler.Mark("beingsaved-", action.Target.ToString());
++					ServerMain.FrameProfiler.Mark("beingsaved-", action.Target?.ToString() ?? action.Method.DeclaringType?.FullName ?? action.Method.Name);
+ 				}
+ 			}
+ 			catch (Exception e)
+ 			{
+ 				ServerMain.Logger.Error("Exception thrown during handling event OnGameWorldBeingSaved. Will skip over.");
