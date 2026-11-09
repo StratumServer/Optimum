@@ -1372,6 +1372,41 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void TreeAttribute_DirectSwitchFactoryAndServerPacketsReusableTree()
+    {
+        string treePatch = PatchReader.ReadPatch("patches/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs.patch");
+        Assert.Contains("public static IAttribute CreateAttribute(byte attrId)", treePatch);
+        Assert.Contains("case 1: return new IntAttribute();", treePatch);
+        Assert.Contains("case 16: return new BoolArrayAttribute();", treePatch);
+        Assert.Contains("IAttribute attr = CreateAttribute(attrId);", treePatch);
+
+        string serverPacketsPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch");
+        Assert.Contains("t_reusableBlockEntityTree", serverPacketsPatch);
+        Assert.Contains("treeAttribute.Clear();", serverPacketsPatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Server.ServerPackets\", \"getBlockEntityData\", 3)", programSource);
+
+        for (byte i = 1; i <= 16; i++)
+        {
+            var attr = Vintagestory.API.Datastructures.TreeAttribute.CreateAttribute(i);
+            Assert.NotNull(attr);
+            Assert.Equal(i, (byte)attr.GetAttributeId());
+        }
+
+        var tree = new Vintagestory.API.Datastructures.TreeAttribute();
+        tree.SetInt("intVal", 42);
+        tree.SetString("strVal", "optimum");
+        tree.SetDouble("dblVal", 3.1415);
+        byte[] bytes = tree.ToBytes();
+
+        var roundtrip = Vintagestory.API.Datastructures.TreeAttribute.CreateFromBytes(bytes);
+        Assert.Equal(42, roundtrip.GetInt("intVal"));
+        Assert.Equal("optimum", roundtrip.GetString("strVal"));
+        Assert.Equal(3.1415, roundtrip.GetDouble("dblVal"));
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");

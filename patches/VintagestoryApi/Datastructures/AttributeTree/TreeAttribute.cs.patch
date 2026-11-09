@@ -1,8 +1,98 @@
 diff --git a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
-index ac15150..435bc72 100644
+index ac15150..ecd0ed3 100644
 --- a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
 +++ b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
-@@ -1035,14 +1035,14 @@ namespace Vintagestory.API.Datastructures
+@@ -155,13 +155,75 @@ namespace Vintagestory.API.Datastructures
+             RegisterAttribute(14, typeof(TreeArrayAttribute));
+             RegisterAttribute(15, typeof(LongArrayAttribute));
+             RegisterAttribute(16, typeof(BoolArrayAttribute));
+         }
+ 
++        private static bool customBuiltInRegistered = false;
++
+         public static void RegisterAttribute(int attrId, Type type)
+         {
+             AttributeIdMapping[attrId] = type;
++            if (attrId >= 1 && attrId <= 16 && type != GetDefaultAttributeType(attrId))
++            {
++                customBuiltInRegistered = true;
++            }
++        }
++
++        private static Type GetDefaultAttributeType(int attrId)
++        {
++            switch (attrId)
++            {
++                case 1: return typeof(IntAttribute);
++                case 2: return typeof(LongAttribute);
++                case 3: return typeof(DoubleAttribute);
++                case 4: return typeof(FloatAttribute);
++                case 5: return typeof(StringAttribute);
++                case 6: return typeof(TreeAttribute);
++                case 7: return typeof(ItemstackAttribute);
++                case 8: return typeof(ByteArrayAttribute);
++                case 9: return typeof(BoolAttribute);
++                case 10: return typeof(StringArrayAttribute);
++                case 11: return typeof(IntArrayAttribute);
++                case 12: return typeof(FloatArrayAttribute);
++                case 13: return typeof(DoubleArrayAttribute);
++                case 14: return typeof(TreeArrayAttribute);
++                case 15: return typeof(LongArrayAttribute);
++                case 16: return typeof(BoolArrayAttribute);
++                default: return null;
++            }
++        }
++
++        public static IAttribute CreateAttribute(byte attrId)
++        {
++            if (!customBuiltInRegistered)
++            {
++                switch (attrId)
++                {
++                    case 1: return new IntAttribute();
++                    case 2: return new LongAttribute();
++                    case 3: return new DoubleAttribute();
++                    case 4: return new FloatAttribute();
++                    case 5: return new StringAttribute();
++                    case 6: return new TreeAttribute();
++                    case 7: return new ItemstackAttribute();
++                    case 8: return new ByteArrayAttribute();
++                    case 9: return new BoolAttribute();
++                    case 10: return new StringArrayAttribute();
++                    case 11: return new IntArrayAttribute();
++                    case 12: return new FloatArrayAttribute();
++                    case 13: return new DoubleArrayAttribute();
++                    case 14: return new TreeArrayAttribute();
++                    case 15: return new LongArrayAttribute();
++                    case 16: return new BoolArrayAttribute();
++                }
++            }
++
++            if (AttributeIdMapping.TryGetValue(attrId, out Type t))
++            {
++                return (IAttribute)Activator.CreateInstance(t);
++            }
++            throw new Exception($"Cannot find attribute id mapping for {attrId}");
+         }
+ 
+         public TreeAttribute()
+         {
+ 
+@@ -196,12 +258,11 @@ namespace Vintagestory.API.Datastructures
+             byte attrId;
+             while ((attrId = stream.ReadByte()) != 0)
+             {
+                 string key = string.Intern(stream.ReadString());
+ 
+-                Type t = AttributeIdMapping[attrId];
+-                IAttribute attr = (IAttribute)Activator.CreateInstance(t);
++                IAttribute attr = CreateAttribute(attrId);
+ 
+                 if (attr is TreeAttribute)
+                 {
+                     ((TreeAttribute)attr).depth = depth + 1;
+                 }
+@@ -1035,14 +1096,14 @@ namespace Vintagestory.API.Datastructures
              {
                  dstTree.attributes[srcKey] = srcAttr.Clone();
              }
