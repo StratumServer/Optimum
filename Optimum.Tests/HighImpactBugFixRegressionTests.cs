@@ -1327,6 +1327,50 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.NotNull(freshMesh);
     }
 
+    private sealed class DummyRegistryObject : RegistryObject
+    {
+    }
+
+    [Fact]
+    public void RegistryObject_SpanBasedCodeWithMethods_MatchExactBehavior()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryApi/Common/Registry/RegistryObject.cs.patch");
+        Assert.Contains("string newPath = string.Create(totalLen, (Code.Path, index, components)", patch);
+        Assert.Contains("string.Concat(path.AsSpan(0, segStart), part, path.AsSpan(segEnd))", patch);
+
+        var obj = new DummyRegistryObject
+        {
+            Code = new AssetLocation("game", "rock-granite-raw"),
+            Variant = new Vintagestory.API.Util.RelaxedReadOnlyDictionary<string, string>(new Dictionary<string, string>
+            {
+                ["type"] = "granite",
+                ["state"] = "raw"
+            })
+        };
+
+        // CodeWithParts single and multi-param
+        Assert.Equal("game:rock-granite-lit", obj.CodeWithParts("lit").ToString());
+        Assert.Equal("game:rock-north-lit", obj.CodeWithParts("north", "lit").ToString());
+
+        // CodeWithVariant and CodeWithVariants overloads
+        Assert.Equal("game:rock-basalt-raw", obj.CodeWithVariant("type", "basalt").ToString());
+        Assert.Equal("game:rock-andesite-polished", obj.CodeWithVariants(new Dictionary<string, string>
+        {
+            ["type"] = "andesite",
+            ["state"] = "polished"
+        }).ToString());
+        Assert.Equal("game:rock-peridotite-cobble", obj.CodeWithVariants(new[] { "type", "state" }, new[] { "peridotite", "cobble" }).ToString());
+
+        // CodeWithPart segment replacements
+        Assert.Equal("game:copper-granite-raw", obj.CodeWithPart("copper", 0).ToString());
+        Assert.Equal("game:rock-basalt-raw", obj.CodeWithPart("basalt", 1).ToString());
+        Assert.Equal("game:rock-granite-fired", obj.CodeWithPart("fired", 2).ToString());
+
+        // Out of bounds IndexOutOfRangeException parity
+        Assert.Throws<IndexOutOfRangeException>(() => obj.CodeWithPart("stone", -1));
+        Assert.Throws<IndexOutOfRangeException>(() => obj.CodeWithPart("stone", 10));
+    }
+
     [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {

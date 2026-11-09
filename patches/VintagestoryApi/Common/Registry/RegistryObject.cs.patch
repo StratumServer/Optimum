@@ -1,14 +1,293 @@
 diff --git a/VintagestoryApi/Common/Registry/RegistryObject.cs b/VintagestoryApi/Common/Registry/RegistryObject.cs
-index f095fbc..0a89581 100644
+index f095fbc..e52f3e2 100644
 --- a/VintagestoryApi/Common/Registry/RegistryObject.cs
 +++ b/VintagestoryApi/Common/Registry/RegistryObject.cs
-@@ -1,4 +1,5 @@
+@@ -1,6 +1,7 @@
  ﻿using System;
 +using System.Buffers;
  using System.Collections.Generic;
  using System.Text;
  using System.Text.RegularExpressions;
-@@ -213,10 +214,25 @@ namespace Vintagestory.API.Common
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.Util;
+@@ -100,91 +101,185 @@ namespace Vintagestory.API.Common
+         /// <param name="components"></param>
+         /// <returns></returns>
+         public AssetLocation CodeWithParts(params string[] components)
+         {
+             if (Code == null) return null;
++            if (components == null || components.Length == 0)
++            {
++                return Code.CopyWithPath(CodeWithoutParts(0));
++            }
+ 
+-            AssetLocation newCode = Code.CopyWithPath(CodeWithoutParts(components.Length));
+-            for (int i = 0; i < components.Length; i++) newCode.Path += "-" + components[i];
+-            return newCode;
++            int toRemove = components.Length;
++            int i = Code.Path.Length;
++            int index = 0;
++            while (--i > 0 && toRemove > 0)
++            {
++                if (Code.Path[i] == '-')
++                {
++                    index = i;
++                    toRemove--;
++                }
++            }
++
++            int totalLen = index;
++            for (int c = 0; c < components.Length; c++)
++            {
++                totalLen += 1 + (components[c]?.Length ?? 0);
++            }
++
++            string newPath = string.Create(totalLen, (Code.Path, index, components), static (span, state) =>
++            {
++                state.Path.AsSpan(0, state.index).CopyTo(span);
++                int pos = state.index;
++                for (int c = 0; c < state.components.Length; c++)
++                {
++                    span[pos++] = '-';
++                    string comp = state.components[c];
++                    if (comp != null)
++                    {
++                        comp.AsSpan().CopyTo(span.Slice(pos));
++                        pos += comp.Length;
++                    }
++                }
++            });
++
++            return Code.CopyWithPath(newPath);
+         }
+ 
+         /// <summary>
+         /// More efficient version of CodeWithParts if there is only a single parameter
+         /// </summary>
+         /// <param name="component"></param>
+         public AssetLocation CodeWithParts(string component)
+         {
+             if (Code == null) return null;
+ 
+-            return Code.CopyWithPath(CodeWithoutParts(1) + "-" + component);
++            int i = Code.Path.Length;
++            int index = 0;
++            while (--i > 0)
++            {
++                if (Code.Path[i] == '-')
++                {
++                    index = i;
++                    break;
++                }
++            }
++
++            int compLen = component?.Length ?? 0;
++            string newPath = string.Create(index + 1 + compLen, (Code.Path, index, component), static (span, state) =>
++            {
++                state.Path.AsSpan(0, state.index).CopyTo(span);
++                span[state.index] = '-';
++                if (state.component != null)
++                {
++                    state.component.AsSpan().CopyTo(span.Slice(state.index + 1));
++                }
++            });
++
++            return Code.CopyWithPath(newPath);
+         }
+ 
+         public AssetLocation CodeWithVariant(string type, string value)
+         {
+-            StringBuilder sb = new StringBuilder(FirstCodePart());
+-
++            string first = FirstCodePart();
++            int totalLen = first?.Length ?? 0;
+             foreach (var val in Variant)
+             {
+-                sb.Append("-");
++                string part = val.Key == type ? value : val.Value;
++                totalLen += 1 + (part?.Length ?? 0);
++            }
+ 
+-                if (val.Key == type)
++            string newPath = string.Create(totalLen, (first, Variant, type, value), static (span, state) =>
++            {
++                int pos = 0;
++                if (state.first != null)
+                 {
+-                    sb.Append(value);
+-                } else
++                    state.first.AsSpan().CopyTo(span);
++                    pos += state.first.Length;
++                }
++                foreach (var val in state.Variant)
+                 {
+-                    sb.Append(val.Value);
++                    span[pos++] = '-';
++                    string part = val.Key == state.type ? state.value : val.Value;
++                    if (part != null)
++                    {
++                        part.AsSpan().CopyTo(span.Slice(pos));
++                        pos += part.Length;
++                    }
+                 }
+-            }
++            });
+ 
+-            return new AssetLocation(Code.Domain, sb.ToString());
++            return new AssetLocation(Code.Domain, newPath);
+         }
+ 
+ 
+         public AssetLocation CodeWithVariants(Dictionary<string, string> valuesByType)
+         {
+-            StringBuilder sb = new StringBuilder(FirstCodePart());
+-
++            string first = FirstCodePart();
++            int totalLen = first?.Length ?? 0;
+             foreach (var val in Variant)
+             {
+-                sb.Append("-");
+-
++                string part = valuesByType.TryGetValue(val.Key, out string value) ? value : val.Value;
++                totalLen += 1 + (part?.Length ?? 0);
++            }
+ 
+-                if (valuesByType.TryGetValue(val.Key, out string value))
++            string newPath = string.Create(totalLen, (first, Variant, valuesByType), static (span, state) =>
++            {
++                int pos = 0;
++                if (state.first != null)
+                 {
+-                    sb.Append(value);
++                    state.first.AsSpan().CopyTo(span);
++                    pos += state.first.Length;
+                 }
+-                else
++                foreach (var val in state.Variant)
+                 {
+-                    sb.Append(val.Value);
++                    span[pos++] = '-';
++                    string part = state.valuesByType.TryGetValue(val.Key, out string value) ? value : val.Value;
++                    if (part != null)
++                    {
++                        part.AsSpan().CopyTo(span.Slice(pos));
++                        pos += part.Length;
++                    }
+                 }
+-            }
++            });
+ 
+-            return new AssetLocation(Code.Domain, sb.ToString());
++            return new AssetLocation(Code.Domain, newPath);
+         }
+ 
+         public AssetLocation CodeWithVariants(string[] types, string[] values)
+         {
+-            StringBuilder sb = new StringBuilder(FirstCodePart());
+-
++            string first = FirstCodePart();
++            int totalLen = first?.Length ?? 0;
+             foreach (var val in Variant)
+             {
+-                sb.Append("-");
+-
+                 int index = types.IndexOf(val.Key);
++                string part = index >= 0 ? values[index] : val.Value;
++                totalLen += 1 + (part?.Length ?? 0);
++            }
+ 
+-                if (index >= 0)
++            string newPath = string.Create(totalLen, (first, Variant, types, values), static (span, state) =>
++            {
++                int pos = 0;
++                if (state.first != null)
+                 {
+-                    sb.Append(values[index]);
++                    state.first.AsSpan().CopyTo(span);
++                    pos += state.first.Length;
+                 }
+-                else
++                foreach (var val in state.Variant)
+                 {
+-                    sb.Append(val.Value);
++                    span[pos++] = '-';
++                    int index = state.types.IndexOf(val.Key);
++                    string part = index >= 0 ? state.values[index] : val.Value;
++                    if (part != null)
++                    {
++                        part.AsSpan().CopyTo(span.Slice(pos));
++                        pos += part.Length;
++                    }
+                 }
+-            }
++            });
+ 
+-            return new AssetLocation(Code.Domain, sb.ToString());
++            return new AssetLocation(Code.Domain, newPath);
+         }
+ 
+ 
+         /// <summary>
+         /// Replaces one part from the blocks code and replaces it with components by splitting it up at every occurence of a dash ('-')
+@@ -193,16 +288,51 @@ namespace Vintagestory.API.Common
+         /// <param name="atPosition"></param>
+         /// <returns></returns>
+         public AssetLocation CodeWithPart(string part, int atPosition = 0)
+         {
+             if (Code == null) return null;
++            string path = Code.Path;
++            if (atPosition < 0)
++            {
++                _ = path.Length;
++                throw new IndexOutOfRangeException();
++            }
+ 
+-            AssetLocation newCode = Code.Clone();
+-            string[] parts = newCode.Path.Split('-');
+-            parts[atPosition] = part;
+-            newCode.Path = String.Join("-", parts);
++            int segStart = 0;
++            int segEnd = -1;
++            int currentSeg = 0;
++            int pathLength = path.Length;
++
++            for (int i = 0; i < pathLength; i++)
++            {
++                if (path[i] == '-')
++                {
++                    if (currentSeg == atPosition)
++                    {
++                        segEnd = i;
++                    }
++                    currentSeg++;
++                    if (currentSeg == atPosition)
++                    {
++                        segStart = i + 1;
++                    }
++                }
++            }
+ 
++            if (currentSeg == atPosition)
++            {
++                segEnd = pathLength;
++            }
++
++            if (atPosition > currentSeg)
++            {
++                throw new IndexOutOfRangeException();
++            }
++
++            string newPath = string.Concat(path.AsSpan(0, segStart), part, path.AsSpan(segEnd));
++            AssetLocation newCode = Code.Clone();
++            newCode.Path = newPath;
+             return newCode;
+         }
+ 
+ 
+         /// <summary>
+@@ -211,28 +341,61 @@ namespace Vintagestory.API.Common
+         /// <param name="posFromRight"></param>
+         /// <returns></returns>
          public string LastCodePart(int posFromRight = 0)
          {
              if (Code == null) return null;
@@ -37,7 +316,10 @@ index f095fbc..0a89581 100644
          }
  
          /// <summary>
-@@ -227,10 +243,28 @@ namespace Vintagestory.API.Common
+         /// Returns the n-th code part. If the code contains no dash ('-') the whole code is returned. Returns null if posFromLeft is too high.
+         /// </summary>
+         /// <param name="posFromLeft"></param>
+         /// <returns></returns>
          public string FirstCodePart(int posFromLeft = 0)
          {
              if (Code == null) return null;
@@ -69,7 +351,11 @@ index f095fbc..0a89581 100644
          }
  
          /// <summary>
-@@ -293,11 +327,12 @@ namespace Vintagestory.API.Common
+         /// Returns true if any given wildcard matches the blocks/items code. E.g. water-* will match all water blocks
+         /// </summary>
+@@ -291,15 +454,16 @@ namespace Vintagestory.API.Common
+         /// <param name="input"></param>
+         /// <param name="searchReplace"></param>
          /// <returns></returns>
          public static AssetLocation FillPlaceHolder(AssetLocation input, Datastructures.OrderedDictionary<string, string> searchReplace)
          {
@@ -84,7 +370,11 @@ index f095fbc..0a89581 100644
              return input;
          }
  
-@@ -309,12 +344,128 @@ namespace Vintagestory.API.Common
+         /// <summary>
+         /// Used by the block loader to replace wildcards with their final values
+@@ -307,16 +471,132 @@ namespace Vintagestory.API.Common
+         /// <param name="input"></param>
+         /// <param name="searchReplace"></param>
          /// <returns></returns>
          public static string FillPlaceHolder(string input, Datastructures.OrderedDictionary<string, string> searchReplace)
          {
@@ -216,7 +506,11 @@ index f095fbc..0a89581 100644
          }
  
          /// <summary>
-@@ -326,9 +477,168 @@ namespace Vintagestory.API.Common
+         /// Used by the block loader to replace wildcards with their final values
+         /// </summary>
+@@ -324,12 +604,171 @@ namespace Vintagestory.API.Common
+         /// <param name="search"></param>
+         /// <param name="replace"></param>
          /// <returns></returns>
          public static string FillPlaceHolder(string input, string search, string replace)
          {
@@ -237,8 +531,7 @@ index f095fbc..0a89581 100644
 +            Span<char> buffer = span.Length <= 128
 +                ? stackalloc char[256]
 +                : (rented = ArrayPool<char>.Shared.Rent(span.Length * 2));
- 
--            return Regex.Replace(input, pattern, replace);
++
 +            int pos = 0;
 +            bool changed = false;
 +
@@ -374,7 +667,8 @@ index f095fbc..0a89581 100644
 +            {
 +                return;
 +            }
-+
+ 
+-            return Regex.Replace(input, pattern, replace);
 +            int newSize = Math.Max(buffer.Length * 2, pos + needed);
 +            char[] next = ArrayPool<char>.Shared.Rent(newSize);
 +            buffer.Slice(0, pos).CopyTo(next);
@@ -387,3 +681,4 @@ index f095fbc..0a89581 100644
          }
      }
  
+ }
