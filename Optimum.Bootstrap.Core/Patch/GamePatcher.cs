@@ -824,6 +824,28 @@ public sealed class GamePatcher(
 
     private ProcessOutcome RunPatcher(string patcherPath, bool isDll, IReadOnlyList<string> args)
     {
+        if (isDll && Path.GetFileName(patcherPath).Equals("Optimum.Patcher.dll", StringComparison.OrdinalIgnoreCase) && File.Exists(patcherPath))
+        {
+            try
+            {
+                var asm = System.Reflection.Assembly.LoadFrom(patcherPath);
+                var entryType = asm.GetType("Optimum.Patcher.Program") ?? asm.GetType("Program");
+                var runMethod = entryType?.GetMethod("Run", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
+                    ?? entryType?.GetMethod("Main", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                if (runMethod != null)
+                {
+                    string[] runnerArgs = [.. args];
+                    var result = runMethod.Invoke(null, [runnerArgs]);
+                    int exitCode = result is int code ? code : 0;
+                    return new ProcessOutcome(Started: true, ExitCode: exitCode, StandardOutput: string.Empty, StandardError: string.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                return new ProcessOutcome(Started: true, ExitCode: 1, StandardOutput: string.Empty, StandardError: ex.Message);
+            }
+        }
+
         if (isDll)
         {
             var commandArgs = new List<string> { patcherPath };

@@ -4,19 +4,27 @@ using System.IO;
 using Mono.Cecil;
 using Optimum.Patcher;
 
-// Verification mode for check-vanilla-compat.sh: report decompiler
-// type-misbinding artifacts (same-named cast target bound to the wrong
-// namespace, the EventHelper System.Func/API Func class of bug).
-if (args.Length == 3 && args[0] == "--compare-casts")
+namespace Optimum.Patcher;
+
+public static class Program
 {
-    if (!File.Exists(args[1])) { Console.Error.WriteLine($"Not found: {args[1]}"); return 1; }
-    if (!File.Exists(args[2])) { Console.Error.WriteLine($"Not found: {args[2]}"); return 1; }
-    var divergences = CastComparer.Compare(args[1], args[2]);
-    foreach (var d in divergences)
-        Console.Error.WriteLine($"  CAST DIVERGENCE: {d}");
-    Console.WriteLine($"{divergences.Count} cast divergence(s) between {Path.GetFileName(args[1])} and {Path.GetFileName(args[2])}");
-    return divergences.Count == 0 ? 0 : 1;
-}
+    public static int Main(string[] args) => Run(args);
+
+    public static int Run(string[] args)
+    {
+        // Verification mode for check-vanilla-compat.sh: report decompiler
+        // type-misbinding artifacts (same-named cast target bound to the wrong
+        // namespace, the EventHelper System.Func/API Func class of bug).
+        if (args.Length == 3 && args[0] == "--compare-casts")
+        {
+            if (!File.Exists(args[1])) { Console.Error.WriteLine($"Not found: {args[1]}"); return 1; }
+            if (!File.Exists(args[2])) { Console.Error.WriteLine($"Not found: {args[2]}"); return 1; }
+            var divergences = CastComparer.Compare(args[1], args[2]);
+            foreach (var d in divergences)
+                Console.Error.WriteLine($"  CAST DIVERGENCE: {d}");
+            Console.WriteLine($"{divergences.Count} cast divergence(s) between {Path.GetFileName(args[1])} and {Path.GetFileName(args[2])}");
+            return divergences.Count == 0 ? 0 : 1;
+        }
 
 if (args.Length == 4 && args[0] == "--api")
 {
@@ -815,5 +823,7 @@ int total = ILPatcher.PatchWithInjection(
     },
     fieldsToRetype: fieldsToRetype);
 
-Console.WriteLine($"\nDone.");
-return total > 0 ? 0 : 1;
+        Console.WriteLine($"\nDone.");
+        return total > 0 ? 0 : 1;
+    }
+}
