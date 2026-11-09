@@ -1,0 +1,40 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/CloudRenderer.cs b/VSEssentials/Vintagestory/GameContent/CloudRenderer.cs
+--- a/VSEssentials/Vintagestory/GameContent/CloudRenderer.cs
++++ b/VSEssentials/Vintagestory/GameContent/CloudRenderer.cs
+@@ -70,10 +70,14 @@ public class CloudRenderer : CloudRendererBase, IRenderer, IDisposable
+ 
+ 	public bool instantTileBlend;
+ 
+ 	private int accum = 20;
+ 
++	private Vec3i reusableTileOffset;
++
++	private Vec3d reusableCloudTilePos;
++
+ 	public double RenderOrder => 0.35;
+ 
+ 	public int RenderRange => 9999;
+ 
+ 	public CloudRenderer(ICoreClientAPI capi, WeatherSystemClient weatherSys)
+@@ -286,19 +290,19 @@ public class CloudRenderer : CloudRendererBase, IRenderer, IDisposable
+ 			flag = true;
+ 		}
+ 		int num = CloudTileLength * CloudTileLength;
+ 		int num2 = -9999;
+ 		int num3 = -9999;
+-		Vec3i tilePos = new Vec3i(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
++		Vec3i tilePos = (reusableTileOffset ??= new Vec3i()).Set(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
+ 		Vec3i centerTilePos = offThreadState.CenterTilePos;
+ 		for (int i = 0; i < num; i++)
+ 		{
+ 			CloudTile cloudTile = Tiles[i];
+ 			int num4 = centerTilePos.X + cloudTile.GridXOffset;
+ 			int num5 = centerTilePos.Z + cloudTile.GridZOffset;
+ 			cloudTile.brightnessRand.InitPositionSeed(num4 - offThreadState.WindTileOffsetX, num5 - offThreadState.WindTileOffsetZ);
+-			Vec3d vec3d = new Vec3d(num4 * base.CloudTileSize, capi.World.SeaLevel, num5 * base.CloudTileSize);
++			Vec3d vec3d = (reusableCloudTilePos ??= new Vec3d()).Set(num4 * base.CloudTileSize, capi.World.SeaLevel, num5 * base.CloudTileSize);
+ 			int regionSize = capi.World.BlockAccessor.RegionSize;
+ 			int num6 = (int)Math.Round(vec3d.X / (double)regionSize) - 1;
+ 			int num7 = (int)Math.Round(vec3d.Z / (double)regionSize) - 1;
+ 			if (num6 != num2 || num7 != num3)
+ 			{

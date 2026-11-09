@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/Weather/CloudRenderer.cs b/VSEssentials/Systems/Weather/CloudRenderer.cs
-index 9fb4264..6055755 100644
+index 9fb4264..38519d4 100644
 --- a/VSEssentials/Systems/Weather/CloudRenderer.cs
 +++ b/VSEssentials/Systems/Weather/CloudRenderer.cs
 @@ -116,11 +116,12 @@ namespace Vintagestory.GameContent
@@ -60,4 +60,43 @@ index 9fb4264..6055755 100644
              QuantityCloudTiles = CloudTileLength * CloudTileLength;
              Tiles = new CloudTile[QuantityCloudTiles];
              tempTiles = new CloudTile[QuantityCloudTiles];
+ 
+@@ -383,10 +397,12 @@ namespace Vintagestory.GameContent
+         }
+ 
+ 
+ 
+         int accum = 20;
++        private Vec3i reusableTileOffset;
++        private Vec3d reusableCloudTilePos;
+ 
+         
+         public void UpdateCloudTilesOffThread(int changeSpeed)
+         {
+             bool reloadRainNoiseValues = false;
+@@ -401,11 +417,11 @@ namespace Vintagestory.GameContent
+             int cnt = CloudTileLength * CloudTileLength;
+ 
+            
+             int prevTopLeftRegX = -9999;
+             int prevTopLeftRegZ = -9999;
+-            Vec3i tileOffset = new Vec3i(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
++            Vec3i tileOffset = (reusableTileOffset ??= new Vec3i()).Set(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
+             Vec3i tileCenterPos = offThreadState.CenterTilePos;
+ 
+             for (int i = 0; i < cnt; i++)
+             {
+                 CloudTile cloudTile = Tiles[i];
+@@ -419,11 +435,11 @@ namespace Vintagestory.GameContent
+                 }*/
+ 
+                 cloudTile.brightnessRand.InitPositionSeed(tileXPos - offThreadState.WindTileOffsetX, tileZPos - offThreadState.WindTileOffsetZ);
+ 
+                 // This is a block position
+-                Vec3d cloudTilePos = new Vec3d(tileXPos * CloudTileSize, capi.World.SeaLevel, tileZPos * CloudTileSize);
++                Vec3d cloudTilePos = (reusableCloudTilePos ??= new Vec3d()).Set(tileXPos * CloudTileSize, capi.World.SeaLevel, tileZPos * CloudTileSize);
+ 
+                 int regSize = capi.World.BlockAccessor.RegionSize;
+                 int topLeftRegX = (int)Math.Round(cloudTilePos.X / regSize) - 1;
+                 int topLeftRegZ = (int)Math.Round(cloudTilePos.Z / regSize) - 1;
  
