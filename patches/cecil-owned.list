@@ -55,6 +55,8 @@ patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/GameMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch

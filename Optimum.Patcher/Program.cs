@@ -383,6 +383,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "optimumSaveBatch",
         "TryStartOptimumChunkReadPool",
         "DisposeOptimumChunkReadPool",
+        "Dispose",
     },
     ["Vintagestory.Server.ServerSystemBlockSimulation"] = new()
     {
@@ -725,6 +726,10 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.Compression", "DecompressCombined", 4),
     new("Vintagestory.Common.Compression", "DecompressToInts", 2),
     new("Vintagestory.Common.LoadBalancer", "CreateDedicatedWorkerThread", 3),
+    // Issue #481: guard dot-prefixed folders, empty modinfo.json, and sided mod loading
+    new("Vintagestory.Common.ModLoader", "CollectMods", 0),
+    new("Vintagestory.Common.ModLoader", "instantiateMods", 1),
+    new("Vintagestory.Common.ModContainer", "LoadModInfo", 2),
     // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
     // data when a mod holds a stale IAsset ref after texture unload.
     new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),
@@ -759,7 +764,6 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyMapChunks", 1),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyLoadedChunks", 2),
     new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "SaveAllDirtyGeneratingChunks", 1),
-    new("Vintagestory.Server.ServerSystemLoadAndSaveGame", "Dispose", 0),
     // OnSeperateThreadShutDown is deliberately not a target: its pre-existing
     // body references the class's shared <>c (SaveGameWorld's cached delegate).
     // DisposeOptimumChunkReadPool is injected and called by an IL hook immediately
