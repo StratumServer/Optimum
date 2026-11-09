@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerPackets.cs b/VintagestoryLib/Vintagestory.Server/ServerPackets.cs
-index d4a0736..c6d8bc0 100644
+index d4a0736..0add249 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerPackets.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerPackets.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,7 @@ index d4a0736..c6d8bc0 100644
  using Vintagestory.API.Datastructures;
  using Vintagestory.Common;
  using Vintagestory.Common.Network.Packets;
-@@ -169,31 +171,61 @@ public class ServerPackets
+@@ -169,31 +171,64 @@ public class ServerPackets
  		packet_EntityAttributeUpdate.SetAttributes(array);
  		packet_EntityAttributeUpdate.EntityId = entity.EntityId;
  		return packet_EntityAttributeUpdate;
@@ -30,6 +30,9 @@ index d4a0736..c6d8bc0 100644
 +
 +	[ThreadStatic]
 +	private static Packet_Server t_bulkEntityDebugAttributesWrapper;
++
++	[ThreadStatic]
++	private static TreeAttribute t_reusableBlockEntityTree;
 +
  	public static Packet_Server GetBulkEntityAttributesPacket(List<Packet_EntityAttributes> fullPackets, List<Packet_EntityAttributeUpdate> partialPackets)
  	{
@@ -60,21 +63,20 @@ index d4a0736..c6d8bc0 100644
  	public static Packet_Server GetBulkEntityDebugAttributesPacket(List<Packet_EntityAttributes> fullPackets)
  	{
 -		Packet_BulkEntityDebugAttributes packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
--		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
--		return new Packet_Server
 +		Packet_BulkEntityDebugAttributes packet_BulkEntityDebugAttributes = t_bulkEntityDebugAttributes;
 +		if (packet_BulkEntityDebugAttributes == null)
++		{
++			packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
++			t_bulkEntityDebugAttributes = packet_BulkEntityDebugAttributes;
++		}
+ 		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
+-		return new Packet_Server
++		Packet_Server wrapper = t_bulkEntityDebugAttributesWrapper;
++		if (wrapper == null)
  		{
 -			Id = 62,
 -			BulkEntityDebugAttributes = packet_BulkEntityDebugAttributes
 -		};
-+			packet_BulkEntityDebugAttributes = new Packet_BulkEntityDebugAttributes();
-+			t_bulkEntityDebugAttributes = packet_BulkEntityDebugAttributes;
-+		}
-+		packet_BulkEntityDebugAttributes.SetFullUpdates(fullPackets.ToArray());
-+		Packet_Server wrapper = t_bulkEntityDebugAttributesWrapper;
-+		if (wrapper == null)
-+		{
 +			wrapper = new Packet_Server();
 +			t_bulkEntityDebugAttributesWrapper = wrapper;
 +		}
@@ -86,3 +88,31 @@ index d4a0736..c6d8bc0 100644
  	public static Packet_Server GetEntityAttributesPacket(Entity entity)
  	{
  		Packet_EntityAttributes packet_EntityAttributes = new Packet_EntityAttributes();
+@@ -377,11 +412,23 @@ public class ServerPackets
+ 	}
+ 
+ 	private static byte[] getBlockEntityData(BlockEntity blockEntity, FastMemoryStream ms, BinaryWriter writer)
+ 	{
+ 		ms.Reset();
+-		TreeAttribute treeAttribute = new TreeAttribute();
+-		blockEntity.ToTreeAttributes(treeAttribute);
+-		treeAttribute.ToBytes(writer);
+-		return ms.ToArray();
++		TreeAttribute treeAttribute = t_reusableBlockEntityTree;
++		if (treeAttribute == null)
++		{
++			treeAttribute = new TreeAttribute();
++			t_reusableBlockEntityTree = treeAttribute;
++		}
++		try
++		{
++			blockEntity.ToTreeAttributes(treeAttribute);
++			treeAttribute.ToBytes(writer);
++			return ms.ToArray();
++		}
++		finally
++		{
++			treeAttribute.Clear();
++		}
+ 	}
+ }
