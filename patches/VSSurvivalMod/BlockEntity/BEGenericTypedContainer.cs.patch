@@ -1,0 +1,67 @@
+diff --git a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
+index e8d9ce57..6b702973 100644
+--- a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
++++ b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
+@@ -32,14 +32,16 @@ namespace Vintagestory.GameContent
+             get { return meshangle; }
+             set
+             {
+                 meshangle = value;
+                 rendererRot.Y = value * GameMath.RAD2DEG;
++                rotatedOwnMesh = null;
+             }
+         }
+ 
+         MeshData ownMesh;
++        MeshData rotatedOwnMesh;
+         public Cuboidf[] collisionSelectionBoxes;
+ 
+         public virtual string DialogTitle
+         {
+             get { return Lang.Get(dialogTitleLangCode); }
+@@ -155,10 +157,11 @@ namespace Vintagestory.GameContent
+ 
+ 
+             if (Api != null && Api.Side == EnumAppSide.Client)
+             {
+                 ownMesh = null;
++                rotatedOwnMesh = null;
+                 MarkDirty(true);
+             }
+ 
+             base.FromTreeAttributes(tree, worldForResolving);
+         }
+@@ -429,23 +432,32 @@ namespace Vintagestory.GameContent
+             {
+                 if (ownMesh == null)
+                 {
+                     ownMesh = GenMesh(tesselator);
+                     if (ownMesh == null) return false;
++                    rotatedOwnMesh = null;
+                 }
+ 
+-                mesher.AddMeshData(ownMesh.Clone().Rotate(0, MeshAngle, 0));
++                var mesh = rotatedOwnMesh;
++                if (mesh == null)
++                {
++                    mesh = MeshAngle == 0 ? ownMesh : ownMesh.Clone().Rotate(0, MeshAngle, 0);
++                    rotatedOwnMesh = mesh;
++                }
++
++                mesher.AddMeshData(mesh);
+             }
+ 
+             return true;
+         }
+ 
+         public void OnTransformed(IWorldAccessor worldAccessor, ITreeAttribute tree, int degreeRotation, Dictionary<int, AssetLocation> oldBlockIdMapping, Dictionary<int, AssetLocation> oldItemIdMapping, EnumAxis? flipAxis)
+         {
+             MeshAngle = tree.GetFloat("meshAngle");
+             MeshAngle -= degreeRotation * GameMath.DEG2RAD;
+             tree.SetFloat("meshAngle", MeshAngle);
++            rotatedOwnMesh = null;
+         }
+ 
+         public override void GetBlockInfo(IPlayer forPlayer, StringBuilder dsc)
+         {
+             base.GetBlockInfo(forPlayer, dsc);
