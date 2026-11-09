@@ -1,0 +1,45 @@
+diff --git a/VintagestoryApi/Common/Collectible/ItemStack.cs b/VintagestoryApi/Common/Collectible/ItemStack.cs
+index 25633b3..fbb2110 100644
+--- a/VintagestoryApi/Common/Collectible/ItemStack.cs
++++ b/VintagestoryApi/Common/Collectible/ItemStack.cs
+@@ -363,23 +363,36 @@ namespace Vintagestory.API.Common
+                 if (item == null) return false;
+             }
+             return true;
+         }
+ 
++        [ThreadStatic]
++        private static DummySlot searchDummySlot;
++
+         /// <summary>
+         /// Returns true if searchText is found in the item/block name as supplied from GetName()
+         /// </summary>
+         /// <param name="world"></param>
+         /// <param name="searchText"></param>
+         /// <returns></returns>
+         public bool MatchesSearchText(IWorldAccessor world, string searchText)
+         {
+-           return
+-                GetName().CaseInsensitiveContains(searchText)
+-                || GetDescription(world, new DummySlot(this), false).CaseInsensitiveContains(searchText)
+-            ;
++            if (string.IsNullOrEmpty(searchText)) return true;
+ 
++            string name = GetName();
++            if (name != null && name.CaseInsensitiveContains(searchText)) return true;
++
++            var slot = searchDummySlot ??= new DummySlot();
++            slot.Set(this);
++            try
++            {
++                return GetDescription(world, slot, false)?.CaseInsensitiveContains(searchText) == true;
++            }
++            finally
++            {
++                slot.Set(null);
++            }
+         }
+ 
+         /// <summary>
+         /// Returns a human readable name of the item/block
+         /// </summary>
