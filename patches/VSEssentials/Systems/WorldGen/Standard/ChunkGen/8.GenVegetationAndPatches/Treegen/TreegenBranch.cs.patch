@@ -1,0 +1,53 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreegenBranch.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreegenBranch.cs
+index 2c55203..261ab7f 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreegenBranch.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreegenBranch.cs
+@@ -111,18 +111,42 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+         }
+ 
+         public void InheritFrom(TreeGenBranch treeGenTrunk, string[] skip)
+         {
+-            FieldInfo[] fields = GetType().GetFields();
+-            foreach (FieldInfo field in fields)
++            if (treeGenTrunk == null) return;
++
++            if (!ShouldSkip(skip, nameof(widthMultiplier))) widthMultiplier = treeGenTrunk.widthMultiplier;
++            if (!ShouldSkip(skip, nameof(widthloss))) widthloss = treeGenTrunk.widthloss;
++            if (!ShouldSkip(skip, nameof(randomWidthLoss))) randomWidthLoss = treeGenTrunk.randomWidthLoss;
++            if (!ShouldSkip(skip, nameof(widthlossCurve))) widthlossCurve = treeGenTrunk.widthlossCurve;
++            if (!ShouldSkip(skip, nameof(dieAt))) dieAt = treeGenTrunk.dieAt;
++            if (!ShouldSkip(skip, nameof(gravityDrag))) gravityDrag = treeGenTrunk.gravityDrag;
++            if (!ShouldSkip(skip, nameof(angleVert))) angleVert = treeGenTrunk.angleVert;
++            if (!ShouldSkip(skip, nameof(angleHori))) angleHori = treeGenTrunk.angleHori;
++            if (!ShouldSkip(skip, nameof(branchWidthLossMul))) branchWidthLossMul = treeGenTrunk.branchWidthLossMul;
++            if (!ShouldSkip(skip, nameof(angleVertEvolve))) angleVertEvolve = treeGenTrunk.angleVertEvolve;
++            if (!ShouldSkip(skip, nameof(angleHoriEvolve))) angleHoriEvolve = treeGenTrunk.angleHoriEvolve;
++            if (!ShouldSkip(skip, nameof(NoLogs))) NoLogs = treeGenTrunk.NoLogs;
++            if (!ShouldSkip(skip, nameof(branchStart))) branchStart = treeGenTrunk.branchStart;
++            if (!ShouldSkip(skip, nameof(branchSpacing))) branchSpacing = treeGenTrunk.branchSpacing;
++            if (!ShouldSkip(skip, nameof(branchVerticalAngle))) branchVerticalAngle = treeGenTrunk.branchVerticalAngle;
++            if (!ShouldSkip(skip, nameof(branchHorizontalAngle))) branchHorizontalAngle = treeGenTrunk.branchHorizontalAngle;
++            if (!ShouldSkip(skip, nameof(branchWidthMultiplier))) branchWidthMultiplier = treeGenTrunk.branchWidthMultiplier;
++            if (!ShouldSkip(skip, nameof(branchWidthMultiplierEvolve))) branchWidthMultiplierEvolve = treeGenTrunk.branchWidthMultiplierEvolve;
++            if (!ShouldSkip(skip, nameof(branchQuantity))) branchQuantity = treeGenTrunk.branchQuantity;
++            if (!ShouldSkip(skip, nameof(branchQuantityEvolve))) branchQuantityEvolve = treeGenTrunk.branchQuantityEvolve;
++        }
++
++        protected static bool ShouldSkip(string[] skip, string name)
++        {
++            if (skip == null || skip.Length == 0) return false;
++            for (int i = 0; i < skip.Length; i++)
+             {
+-                if (skip == null || !skip.Contains(field.Name))
+-                {
+-                    field.SetValue(this, treeGenTrunk.GetType().GetField(field.Name).GetValue(treeGenTrunk));
+-                }
++                if (string.Equals(skip[i], name, StringComparison.Ordinal)) return true;
+             }
++            return false;
+         }
+ 
+         [OnDeserialized]
+         internal void OnDeserializedMethod(StreamingContext context)
+         {

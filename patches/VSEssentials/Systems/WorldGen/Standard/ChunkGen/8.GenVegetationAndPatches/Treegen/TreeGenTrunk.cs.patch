@@ -1,0 +1,31 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGenTrunk.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGenTrunk.cs
+index cb6e4be..a22a972 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGenTrunk.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGenTrunk.cs
+@@ -14,18 +14,18 @@ namespace Vintagestory.ServerMods.NoObf
+         public float probability = 1;
+         public int segment = 0;
+ 
+         public void InheritFrom(TreeGenTrunk treeGenTrunk, string[] skip)
+         {
+-            FieldInfo[] fields = GetType().GetFields();
+-            foreach (FieldInfo field in fields)
+-            {
+-                if (!skip.Contains(field.Name) && field.Name != "inherit")
+-                {
+-                    field.SetValue(this, treeGenTrunk.GetType().GetField(field.Name).GetValue(treeGenTrunk));
+-                }
+-            }
++            if (treeGenTrunk == null) return;
++
++            base.InheritFrom(treeGenTrunk, skip);
++
++            if (!ShouldSkip(skip, nameof(dx))) dx = treeGenTrunk.dx;
++            if (!ShouldSkip(skip, nameof(dz))) dz = treeGenTrunk.dz;
++            if (!ShouldSkip(skip, nameof(probability))) probability = treeGenTrunk.probability;
++            if (!ShouldSkip(skip, nameof(segment))) segment = treeGenTrunk.segment;
+         }
+ 
+         [OnDeserialized]
+         internal new void OnDeserializedMethod(StreamingContext context)
+         {

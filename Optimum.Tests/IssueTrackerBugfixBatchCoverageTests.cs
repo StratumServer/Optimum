@@ -154,6 +154,69 @@ public class IssueTrackerBugfixBatchCoverageTests
         Assert.True(guardIndex >= 0 && scratchBranchIndex > guardIndex, "the zero guard must precede scratch allocation");
     }
 
+    [Fact]
+    public void TreeGenInheritFromDoesNotUseReflection()
+    {
+        // Issue #460: TreegenBranch.InheritFrom and TreeGenTrunk.InheritFrom
+        // must use direct member assignment instead of runtime reflection.
+        string branchPatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreegenBranch.cs.patch");
+        string trunkPatch = PatchReader.ReadPatch("patches/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/TreeGenTrunk.cs.patch");
+
+        Assert.DoesNotContain("GetType().GetFields()", branchPatch);
+        Assert.DoesNotContain("GetType().GetFields()", trunkPatch);
+        Assert.Contains("nameof(widthMultiplier)", branchPatch);
+        Assert.Contains("base.InheritFrom(treeGenTrunk, skip);", trunkPatch);
+    }
+
+    [Fact]
+    public void TreeGenInheritFromCopiesPropertiesAndHonorsSkip()
+    {
+        // Issue #460: runtime verification of member copy and skip logic
+        var parentTrunk = new Vintagestory.ServerMods.NoObf.TreeGenTrunk
+        {
+            dx = 0.8f,
+            dz = 0.9f,
+            probability = 0.75f,
+            segment = 3,
+            widthMultiplier = 2.5f,
+            widthloss = 0.12f,
+            NoLogs = true
+        };
+
+        var childTrunk = new Vintagestory.ServerMods.NoObf.TreeGenTrunk
+        {
+            dx = 0.1f,
+            dz = 0.2f,
+            probability = 0.3f,
+            segment = 1,
+            widthMultiplier = 1.0f,
+            widthloss = 0.05f,
+            NoLogs = false
+        };
+
+        // Test with skip array containing both base and derived fields
+        string[] skip = new[] { "dx", "widthloss" };
+        childTrunk.InheritFrom(parentTrunk, skip);
+
+        // Skipped fields retain original values
+        Assert.Equal(0.1f, childTrunk.dx);
+        Assert.Equal(0.05f, childTrunk.widthloss);
+
+        // Non-skipped fields are inherited
+        Assert.Equal(0.9f, childTrunk.dz);
+        Assert.Equal(0.75f, childTrunk.probability);
+        Assert.Equal(3, childTrunk.segment);
+        Assert.Equal(2.5f, childTrunk.widthMultiplier);
+        Assert.True(childTrunk.NoLogs);
+
+        // Test null skip parameter (verifying bug fix against vanilla NullReferenceException)
+        var childTrunkNullSkip = new Vintagestory.ServerMods.NoObf.TreeGenTrunk();
+        childTrunkNullSkip.InheritFrom(parentTrunk, null);
+        Assert.Equal(0.8f, childTrunkNullSkip.dx);
+        Assert.Equal(0.9f, childTrunkNullSkip.dz);
+        Assert.Equal(2.5f, childTrunkNullSkip.widthMultiplier);
+    }
+
     private static string FindRepositoryFile(string relativePath)
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
