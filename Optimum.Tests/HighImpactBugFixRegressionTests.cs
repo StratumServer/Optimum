@@ -1894,6 +1894,33 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Equal("block/stone/rock", shape.Base.ToShortString());
     }
 
+    [Fact]
+    public void BoxedPacketServerAssets_CompressedBufferCachedAndBuildSleepsRemoved()
+    {
+        string tcpNetPatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs.patch");
+        Assert.True(File.Exists(tcpNetPatchPath), "TcpNetConnection.cs.patch must exist");
+        string tcpNetPatch = File.ReadAllText(tcpNetPatchPath);
+        Assert.Contains("assetsBox.compressedBuffer", tcpNetPatch);
+        Assert.Contains("assetsBox.isCompressedCached", tcpNetPatch);
+
+        string boxedPacketPatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs.patch");
+        Assert.True(File.Exists(boxedPacketPatchPath), "BoxedPacket_ServerAssets.cs.patch must exist");
+        string boxedPacketPatch = File.ReadAllText(boxedPacketPatchPath);
+        Assert.Contains("internal byte[] compressedBuffer;", boxedPacketPatch);
+        Assert.Contains("internal volatile bool isCompressedCached;", boxedPacketPatch);
+
+        string serverMainPatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch");
+        Assert.True(File.Exists(serverMainPatchPath), "ServerMain.cs.patch must exist");
+        string serverMainPatch = File.ReadAllText(serverMainPatchPath);
+        Assert.Contains("buildServerAssetsLock", serverMainPatch);
+        Assert.Contains("serverAssetsPacketBuilt", serverMainPatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Server.Network.TcpNetConnection\", \"PreparePacketForSending\", 3)", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"WaitOnBuildServerAssetsPacket\", 0)", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"BuildServerAssetsPacket\", 0)", programSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

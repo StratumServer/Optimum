@@ -61,6 +61,7 @@ patches/VintagestoryLib/Vintagestory.Common/LoadBalancer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
@@ -77,6 +78,7 @@ patches/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs.patch
 # patch, reverse-apply proves the donor source carries the change, but reports
 # Pending Program.cs wiring: field-type upgrades and method body changes that
 # Server-side worldgen scheduler and chunk read pool (Cecil-transplanted into
