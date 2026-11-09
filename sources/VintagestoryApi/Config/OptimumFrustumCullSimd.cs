@@ -258,6 +258,55 @@ public static class OptimumFrustumCullSimd
 
             return false;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool IsSphereOutside6(float sx, float sy, float sz, float radius)
+        {
+            if (Vector256.IsHardwareAccelerated)
+            {
+                var vSx = Vector256.Create(sx);
+                var vSy = Vector256.Create(sy);
+                var vSz = Vector256.Create(sz);
+                var vRad = Vector256.Create(radius);
+
+                Vector256<float> acc = D;
+                acc = Fma.IsSupported ? Fma.MultiplyAdd(vSx, Nx, acc) : (vSx * Nx + acc);
+                acc = Fma.IsSupported ? Fma.MultiplyAdd(vSy, Ny, acc) : (vSy * Ny + acc);
+                acc = Fma.IsSupported ? Fma.MultiplyAdd(vSz, Nz, acc) : (vSz * Nz + acc);
+                acc += vRad;
+
+                Vector256<float> cmp = Vector256.LessThanOrEqual(acc, Vector256<float>.Zero);
+                return (cmp.ExtractMostSignificantBits() & 0x3Fu) != 0;
+            }
+
+            if (Vector128.IsHardwareAccelerated)
+            {
+                var vSx = Vector128.Create(sx);
+                var vSy = Vector128.Create(sy);
+                var vSz = Vector128.Create(sz);
+                var vRad = Vector128.Create(radius);
+
+                Vector128<float> acc0 = D0;
+                acc0 = Fma.IsSupported ? Fma.MultiplyAdd(vSx, Nx0, acc0) : (vSx * Nx0 + acc0);
+                acc0 = Fma.IsSupported ? Fma.MultiplyAdd(vSy, Ny0, acc0) : (vSy * Ny0 + acc0);
+                acc0 = Fma.IsSupported ? Fma.MultiplyAdd(vSz, Nz0, acc0) : (vSz * Nz0 + acc0);
+                acc0 += vRad;
+
+                Vector128<float> cmp0 = Vector128.LessThanOrEqual(acc0, Vector128<float>.Zero);
+                if ((cmp0.ExtractMostSignificantBits() & 0x0Fu) != 0) return true;
+
+                Vector128<float> acc1 = D1;
+                acc1 = Fma.IsSupported ? Fma.MultiplyAdd(vSx, Nx1, acc1) : (vSx * Nx1 + acc1);
+                acc1 = Fma.IsSupported ? Fma.MultiplyAdd(vSy, Ny1, acc1) : (vSy * Ny1 + acc1);
+                acc1 = Fma.IsSupported ? Fma.MultiplyAdd(vSz, Nz1, acc1) : (vSz * Nz1 + acc1);
+                acc1 += vRad;
+
+                Vector128<float> cmp1 = Vector128.LessThanOrEqual(acc1, Vector128<float>.Zero);
+                return (cmp1.ExtractMostSignificantBits() & 0x03u) != 0;
+            }
+
+            return false;
+        }
     }
 
     [ThreadStatic]
@@ -336,14 +385,23 @@ public static class OptimumFrustumCullSimd
             return false;
         }
 
-        var ctx = GetOrCreateContext(culler, planes);
-        if (ctx.IsOutside5(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ))
+        if (OptimumConfig.EffectiveSimdCulling)
         {
-            OptimumDiagnostics.RecordSimdFrustumTest(culled: true);
-            return false;
+            var ctx = GetOrCreateContext(culler, planes);
+            if (ctx.IsOutside5(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ))
+            {
+                OptimumDiagnostics.RecordSimdFrustumTest(culled: true);
+                return false;
+            }
+
+            OptimumDiagnostics.RecordSimdFrustumTest(culled: false);
+            return true;
         }
 
-        OptimumDiagnostics.RecordSimdFrustumTest(culled: false);
+        for (int i = 0; i < 5; i++)
+        {
+            if (planes[i].AABBisOutside(sphere)) return false;
+        }
         return true;
     }
 
@@ -355,10 +413,19 @@ public static class OptimumFrustumCullSimd
             return false;
         }
 
-        var ctx = GetOrCreateContext(culler, planes);
-        bool outside = ctx.IsOutside6(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ);
-        OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
-        return !outside;
+        if (OptimumConfig.EffectiveSimdCulling)
+        {
+            var ctx = GetOrCreateContext(culler, planes);
+            bool outside = ctx.IsOutside6(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ);
+            OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
+            return !outside;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (planes[i].AABBisOutside(sphere)) return false;
+        }
+        return true;
     }
 
     public static bool InFrustumShadowPass(FrustumCulling culler, Sphere sphere)
@@ -378,9 +445,41 @@ public static class OptimumFrustumCullSimd
             return false;
         }
 
-        var ctx = GetOrCreateContext(culler, planes);
-        bool outside = ctx.IsOutside6(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ);
-        OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
-        return !outside;
+        if (OptimumConfig.EffectiveSimdCulling)
+        {
+            var ctx = GetOrCreateContext(culler, planes);
+            bool outside = ctx.IsOutside6(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ);
+            OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
+            return !outside;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (planes[i].AABBisOutside(sphere)) return false;
+        }
+        return true;
+    }
+
+    public static bool SphereInFrustum(FrustumCulling culler, double x, double y, double z, double radius)
+    {
+        Plane[] planes = GetFrustum(culler);
+        if (planes == null || planes.Length < 6)
+        {
+            return false;
+        }
+
+        if (OptimumConfig.EffectiveSimdCulling)
+        {
+            var ctx = GetOrCreateContext(culler, planes);
+            bool outside = ctx.IsSphereOutside6((float)x, (float)y, (float)z, (float)radius);
+            OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
+            return !outside;
+        }
+
+        for (int i = 0; i < 6; i++)
+        {
+            if (planes[i].distanceOfPoint(x, y, z) <= -radius) return false;
+        }
+        return true;
     }
 }

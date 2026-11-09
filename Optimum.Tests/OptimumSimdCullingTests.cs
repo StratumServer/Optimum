@@ -166,4 +166,34 @@ public class OptimumSimdCullingTests
                 $"Shadow mismatch at {i}: scalar={scalarShadow}, simd={simdShadow}");
         }
     }
+
+    [Fact]
+    public void SimdCullingMatchesScalarSphereInFrustumAcrossRandomSpheres()
+    {
+        var culler = new FrustumCulling();
+        var playerPos = new BlockPos(1000, 150, 1000);
+
+        double[] proj = Mat4d.Create();
+        Mat4d.Perspective(proj, 70f * GameMath.DEG2RAD, 1.777f, 0.1f, 500f);
+
+        double[] cam = Mat4d.Create();
+        Mat4d.LookAt(cam, [1000, 150, 1000], [1000, 150, 1100], [0, 1, 0]);
+
+        culler.CalcFrustumEquations(playerPos, proj, cam);
+
+        var rng = new Random(445566);
+        for (int i = 0; i < 500; i++)
+        {
+            double sx = 1000 + (rng.NextDouble() - 0.5) * 600;
+            double sy = 150 + (rng.NextDouble() - 0.5) * 100;
+            double sz = 1000 + (rng.NextDouble() - 0.1) * 600;
+            double radius = 1.0 + rng.NextDouble() * 30.0;
+
+            bool scalarSphere = culler.SphereInFrustum(sx, sy, sz, radius);
+            bool simdSphere = OptimumFrustumCullSimd.SphereInFrustum(culler, sx, sy, sz, radius);
+
+            Assert.True(scalarSphere == simdSphere,
+                $"SphereInFrustum mismatch at {i}: scalar={scalarSphere}, simd={simdSphere}, point=({sx}, {sy}, {sz}), radius={radius}");
+        }
+    }
 }

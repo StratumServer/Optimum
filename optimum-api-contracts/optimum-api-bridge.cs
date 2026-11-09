@@ -131,6 +131,22 @@ public static class OptimumApiBridge
     internal static bool IsChiselTracked(ModelDataPoolLocation location) =>
         location != null && ChiselLodLocations.TryGetValue(location, out _);
 
+    public static bool InFrustum(FrustumCulling culler, Sphere sphere) =>
+        OptimumFrustumCullSimd.InFrustum(culler, sphere);
+
+    public static bool InFrustumShadowPass(FrustumCulling culler, Sphere sphere) =>
+        OptimumFrustumCullSimd.InFrustumShadowPass(culler, sphere);
+
+    public static bool SphereInFrustum(FrustumCulling culler, double x, double y, double z, double radius) =>
+        OptimumFrustumCullSimd.SphereInFrustum(culler, x, y, z, radius);
+
+    public static bool InFrustumAndRange(
+        FrustumCulling culler,
+        Sphere sphere,
+        bool nowVisible,
+        int lodLevel) =>
+        OptimumFrustumCullSimd.InFrustumAndRange(culler, sphere, nowVisible, lodLevel, null!);
+
     public static bool InFrustumAndRange(
         FrustumCulling culler,
         Sphere sphere,
