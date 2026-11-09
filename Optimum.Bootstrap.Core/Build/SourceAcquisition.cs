@@ -148,8 +148,22 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
     {
         string targetDir = SourceCache.Directory(probe, request.Version, request.CacheRoot);
 
+        string? tagRef = SourceCache.TagRef(request.Version);
+
         if (!request.Refresh && SourceCache.IsUsableCheckout(probe, targetDir))
         {
+            if (tagRef is null && probe.DirectoryExists(Path.Combine(targetDir, ".git")))
+            {
+                string? gitBin = probe.Os == OsKind.Windows
+                    ? GitForWindows.FindExecutable(probe)
+                    : CommandSearch.Which(probe, "git");
+                if (gitBin is not null)
+                {
+                    observer.Log(LogLevel.Info, $"Updating cached Optimum source at {targetDir}");
+                    await PullFastForward(gitBin, targetDir, observer, cancellationToken);
+                }
+            }
+
             observer.Log(LogLevel.Info, $"Using the cached Optimum source at {targetDir}");
             return SourceAcquisitionResult.Success(targetDir);
         }
@@ -188,7 +202,6 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
         }
 
         string staging = targetDir + ".partial-" + Guid.NewGuid().ToString("N")[..8];
-        string? tagRef = SourceCache.TagRef(request.Version);
 
         try
         {
@@ -232,6 +245,32 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
             TryDelete(staging);
             return SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable,
                 $"could not place the downloaded source: {ex.Message}");
+        }
+    }
+
+    private static async Task PullFastForward(
+        string git, string directory, IBuildObserver observer, CancellationToken cancellationToken)
+    {
+        try
+        {
+            Command cmd = Cli.Wrap(git)
+                .WithWorkingDirectory(directory)
+                .WithArguments(["pull", "--ff-only"])
+                .WithValidation(CommandResultValidation.None);
+
+            await foreach (CommandEvent cmdEvent in cmd.ListenAsync(Encoding.UTF8, cancellationToken))
+            {
+                if (cmdEvent is StandardOutputCommandEvent stdout)
+                {
+                    string trimmed = stdout.Text.Trim();
+                    if (!string.IsNullOrEmpty(trimmed))
+                        observer.Log(LogLevel.Info, trimmed);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            observer.Log(LogLevel.Warn, $"Could not fast-forward cached source: {ex.Message}");
         }
     }
 
