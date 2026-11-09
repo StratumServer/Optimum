@@ -1,10 +1,8 @@
 diff --git a/VSEssentials/Loading/RegistryObjectTypeLoader.cs b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
-index 07a34c5..c27b560 100644
+index 07a34c5..7b5e465 100644
 --- a/VSEssentials/Loading/RegistryObjectTypeLoader.cs
 +++ b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
-@@ -24,11 +24,11 @@ namespace Vintagestory.ServerMods.NoObf
-         public List<string> Types;
-     }
+@@ -26,7 +26,7 @@ namespace Vintagestory.ServerMods.NoObf
  
      public class ResolvedVariant
      {
@@ -13,11 +11,61 @@ index 07a34c5..c27b560 100644
  
          public AssetLocation Code;
  
-         public void ResolveCode(AssetLocation baseCode)
-         {
-@@ -498,11 +498,11 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -439,25 +439,39 @@ namespace Vintagestory.ServerMods.NoObf
  
-         List<ResolvedVariant> GatherVariants(AssetLocation baseCode, RegistryObjectVariantGroup[] variantgroups, AssetLocation location, AssetLocation[] allowedVariants, AssetLocation[] skipVariants)
+             var deserializer = JsonUtil.CreateSerializerForDomain(baseType.Code.Domain);
+ 
+-            // Single variant
+-            if (variants == null || variants.Count == 0)
++            var dynamicTokens = RegistryObjectType.GetOrCreateDynamicSet();
++            dynamicTokens.Clear();
++            try
+             {
+-                RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, baseType.Code.Clone(), baseType.jsonObject, deserializer, new ());
+-                typesResolved.Add(resolvedType);
+-            }
+-            else
+-            {
+-                // Multiple variants
+-                int count = 1;
+-                foreach (ResolvedVariant variant in variants)
++                if (baseType.jsonObject != null)
+                 {
+-                    JObject jobject = count++ == variants.Count ? baseType.jsonObject : baseType.jsonObject.DeepClone() as JObject;
+-                    // This DeepClone() is expensive, can we find a better way one day?
+-
+-                    RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, jobject, deserializer, variant.CodeParts);
++                    RegistryObjectType.MarkDynamicTokens(baseType.jsonObject, dynamicTokens);
++                }
+ 
++                // Single variant
++                if (variants == null || variants.Count == 0)
++                {
++                    string codePath = baseType.Code.Path;
++                    JObject resolvedJson = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, codePath, new (), dynamicTokens);
++                    RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, baseType.Code.Clone(), resolvedJson, deserializer, new ());
+                     typesResolved.Add(resolvedType);
+                 }
++                else
++                {
++                    // Multiple variants: Resolve lazily without full-tree DeepClone
++                    foreach (ResolvedVariant variant in variants)
++                    {
++                        string codePath = variant.Code.Path;
++                        JObject resolvedJson = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, codePath, variant.CodeParts, dynamicTokens);
++                        RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, resolvedJson, deserializer, variant.CodeParts);
++
++                        typesResolved.Add(resolvedType);
++                    }
++                }
++            }
++            finally
++            {
++                dynamicTokens.Clear();
+             }
+ 
+             baseType.jsonObject = null;
+@@ -500,7 +514,7 @@ namespace Vintagestory.ServerMods.NoObf
          {
              List<ResolvedVariant> variantsFinal = new List<ResolvedVariant>();
  
@@ -26,11 +74,7 @@ index 07a34c5..c27b560 100644
  
  
              // 1. Collect all types
-             for (int i = 0; i < variantgroups.Length; i++)
-             {
-@@ -615,11 +615,11 @@ namespace Vintagestory.ServerMods.NoObf
-             }
- 
+@@ -617,7 +631,7 @@ namespace Vintagestory.ServerMods.NoObf
              return variantsFinal;
          }
  
@@ -39,11 +83,7 @@ index 07a34c5..c27b560 100644
          {
              if (variantGroup.Code == null)
              {
-                 api.Server.LogError(
-                     "Error in itemtype {0}, a variantgroup using a state list must have a code. Ignoring.",
-@@ -698,16 +698,16 @@ namespace Vintagestory.ServerMods.NoObf
- 
-             }
+@@ -700,12 +714,12 @@ namespace Vintagestory.ServerMods.NoObf
          }
  
  
@@ -58,5 +98,3 @@ index 07a34c5..c27b560 100644
          {
              if (propList.Length > 1 && variantGroup.Code == null)
              {
-                 api.Server.LogError(
-                     "Error in item or block {0}, defined a variantgroup with loadFromPropertiesCombine (first element: {1}), but did not explicitly declare a code for this variant group, hence I do not know which code to use. Ignoring.",
