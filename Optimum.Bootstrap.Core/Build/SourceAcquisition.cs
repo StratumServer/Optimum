@@ -152,15 +152,25 @@ public sealed class GitSourceProvider(ISystemProbe probe) : ISourceProvider
 
         if (!request.Refresh && SourceCache.IsUsableCheckout(probe, targetDir))
         {
-            if (tagRef is null && probe.DirectoryExists(Path.Combine(targetDir, ".git")))
+            if (probe.DirectoryExists(Path.Combine(targetDir, ".git")))
             {
                 string? gitBin = probe.Os == OsKind.Windows
                     ? GitForWindows.FindExecutable(probe)
                     : CommandSearch.Which(probe, "git");
                 if (gitBin is not null)
                 {
-                    observer.Log(LogLevel.Info, $"Updating cached Optimum source at {targetDir}");
-                    await PullFastForward(gitBin, targetDir, observer, cancellationToken);
+                    bool shouldUpdate = tagRef is null;
+                    if (!shouldUpdate)
+                    {
+                        ProcessOutcome branchOutcome = probe.Run(gitBin, ["-C", targetDir, "branch", "--show-current"], TimeSpan.FromSeconds(5));
+                        shouldUpdate = branchOutcome.Started && branchOutcome.ExitCode == 0 && !string.IsNullOrWhiteSpace(branchOutcome.StandardOutput.Trim());
+                    }
+
+                    if (shouldUpdate)
+                    {
+                        observer.Log(LogLevel.Info, $"Updating cached Optimum source at {targetDir}");
+                        await PullFastForward(gitBin, targetDir, observer, cancellationToken);
+                    }
                 }
             }
 

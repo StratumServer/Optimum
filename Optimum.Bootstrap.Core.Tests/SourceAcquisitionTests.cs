@@ -255,6 +255,28 @@ public class GitSourceProviderTests
     }
 
     [Fact]
+    public async Task FastForwardsCachedCheckoutWhenOnActiveBranch()
+    {
+        var probe = new FakeSystemProbe { HomeDirectory = "/home/tester" };
+        probe.Path.Add("/usr/bin");
+        probe.AddFile("/usr/bin/git");
+        string cached = "/home/tester/.cache/optimum/src-v0.3.23";
+        probe.AddFile($"{cached}/forks.json");
+        probe.AddFile($"{cached}/Optimum.Launcher/Optimum.Launcher.csproj");
+        probe.AddFile($"{cached}/scripts/bootstrap.sh");
+        probe.AddDirectory($"{cached}/.git");
+
+        probe.OnCommand("/usr/bin/git", $"-C {cached} branch --show-current", stdout: "main\n");
+        probe.OnCommand("/usr/bin/git", $"-C {cached} pull --ff-only", stdout: "Already up to date.\n");
+
+        var result = await new GitSourceProvider(probe)
+            .EnsureAsync(new SourceRequest("0.3.23"), NullBuildObserver.Instance, CancellationToken.None);
+
+        Assert.True(result.Ok);
+        Assert.Equal(cached, result.RepoRoot);
+    }
+
+    [Fact]
     public async Task FailsWithSourceUnavailableWhenGitIsMissing()
     {
         var probe = new FakeSystemProbe { HomeDirectory = "/home/tester" };
