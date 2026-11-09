@@ -1,0 +1,12 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
+@@ -1142,7 +1142,7 @@
+ 		{
+ 			texSource = texgen(shape, cshape.Base.ToShortString());
+ 		}
+-		Tesselator.TesselateShape(typeForLogging, shape, out var modeldata, texSource, (cshape.rotateX == 0f && cshape.rotateY == 0f && cshape.rotateZ == 0f) ? null : new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ), 0, 0, 0);
++		Tesselator.TesselateShape(typeForLogging, shape, out var modeldata, texSource, (cshape.rotateX == 0f && cshape.rotateY == 0f && cshape.rotateZ == 0f) ? null : new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ), 0, 0, 0, cshape.QuantityElements, cshape.SelectiveElements);
+ 		return modeldata;
+ 	}
+ 

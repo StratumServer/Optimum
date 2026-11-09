@@ -1,0 +1,130 @@
+diff --git a/VintagestoryApi/Client/Model/Mesh/MeshData.cs b/VintagestoryApi/Client/Model/Mesh/MeshData.cs
+--- a/VintagestoryApi/Client/Model/Mesh/MeshData.cs
++++ b/VintagestoryApi/Client/Model/Mesh/MeshData.cs
+@@ -802,10 +802,10 @@
+             var sourceRgba = data.Rgba;
+             var sourceFlags = data.Flags;
+             var sourceIndices = data.Indices;
+-            int valsPerVertex_Ints = data.CustomInts == null ? 0 : data.CustomInts.InterleaveStride == 0 ? data.CustomInts.InterleaveSizes[0] : data.CustomInts.InterleaveStride;
+-            int valsPerVertex_Floats = data.CustomFloats == null ? 0 : data.CustomFloats.InterleaveStride == 0 ? data.CustomFloats.InterleaveSizes[0] : data.CustomFloats.InterleaveStride;
+-            int valsPerVertex_Shorts = data.CustomShorts == null ? 0 : data.CustomShorts.InterleaveStride == 0 ? data.CustomShorts.InterleaveSizes[0] : data.CustomShorts.InterleaveStride;
+-            int valsPerVertex_Bytes = data.CustomBytes == null ? 0 : data.CustomBytes.InterleaveStride == 0 ? data.CustomBytes.InterleaveSizes[0] : data.CustomBytes.InterleaveStride;
++            int valsPerVertex_Ints = (data.CustomInts != null && data.VerticesCount > 0) ? (data.CustomInts.Count / data.VerticesCount) : 0;
++            int valsPerVertex_Floats = (data.CustomFloats != null && data.VerticesCount > 0) ? (data.CustomFloats.Count / data.VerticesCount) : 0;
++            int valsPerVertex_Shorts = (data.CustomShorts != null && data.VerticesCount > 0) ? (data.CustomShorts.Count / data.VerticesCount) : 0;
++            int valsPerVertex_Bytes = (data.CustomBytes != null && data.VerticesCount > 0) ? (data.CustomBytes.Count / data.VerticesCount) : 0;
+ 
+             int faceCount = data.VerticesCount / verticesPerFace;
+             for (int i = 0; i < faceCount; i++)
+@@ -879,7 +879,7 @@
+ 
+                         for (int j = 0; j < valsPerVertex_Ints; j++)
+                         {
+-                            CustomInts.Add(dataCustomInts.Values[vertexNum / valsPerVertex_Ints + j]);
++                            CustomInts.Add(dataCustomInts.Values[vertexNum * valsPerVertex_Ints + j]);
+                         }
+                     }
+ 
+@@ -890,7 +890,7 @@
+ 
+                         for (int j = 0; j < valsPerVertex_Floats; j++)
+                         {
+-                            CustomFloats.Add(dataCustomFloats.Values[vertexNum / valsPerVertex_Floats + j]);
++                            CustomFloats.Add(dataCustomFloats.Values[vertexNum * valsPerVertex_Floats + j]);
+                         }
+                     }
+ 
+@@ -901,7 +901,7 @@
+ 
+                         for (int j = 0; j < valsPerVertex_Shorts; j++)
+                         {
+-                            CustomShorts.Add(dataCustomShorts.Values[vertexNum / valsPerVertex_Shorts + j]);
++                            CustomShorts.Add(dataCustomShorts.Values[vertexNum * valsPerVertex_Shorts + j]);
+                         }
+                     }
+ 
+@@ -912,7 +912,7 @@
+ 
+                         for (int j = 0; j < valsPerVertex_Bytes; j++)
+                         {
+-                            CustomBytes.Add(dataCustomBytes.Values[vertexNum / valsPerVertex_Bytes + j]);
++                            CustomBytes.Add(dataCustomBytes.Values[vertexNum * valsPerVertex_Bytes + j]);
+                         }
+                     }
+ 
+@@ -1126,10 +1126,16 @@
+                 }
+                 else  // We are adding meshData which has no CustomInts of its own (!!), but the array length still needs to match the vertices count
+                 {
+-                    if (CustomInts.Values.Length < VerticesCount)
++                    int prevVertices = VerticesCount - sourceMesh.VerticesCount;
++                    int stride = prevVertices > 0 ? (CustomInts.Count / prevVertices) : 1;
++                    if (stride <= 0) stride = 1;
++                    int countToAdd = sourceMesh.VerticesCount * stride;
++                    if (CustomInts.Count + countToAdd > CustomInts.BufferSize)
+                     {
+-                        Array.Resize(ref CustomInts.Values, VerticesCount);
++                        CustomInts.GrowBuffer(countToAdd);
+                     }
++                    Array.Clear(CustomInts.Values, CustomInts.Count, countToAdd);
++                    CustomInts.Count += countToAdd;
+                 }
+             }
+ 
+@@ -1147,10 +1153,16 @@
+                 }
+                 else  // We are adding meshData which has no CustomFloats of its own (!!), but the array length still needs to match the vertices count
+                 {     // An example is in BlockClutterBookshelfWithLore when merging the shelf mesh and the book mesh
+-                    if (CustomFloats.Values.Length < VerticesCount)
++                    int prevVertices = VerticesCount - sourceMesh.VerticesCount;
++                    int stride = prevVertices > 0 ? (CustomFloats.Count / prevVertices) : 1;
++                    if (stride <= 0) stride = 1;
++                    int countToAdd = sourceMesh.VerticesCount * stride;
++                    if (CustomFloats.Count + countToAdd > CustomFloats.BufferSize)
+                     {
+-                        Array.Resize(ref CustomFloats.Values, VerticesCount);
++                        CustomFloats.GrowBuffer(countToAdd);
+                     }
++                    Array.Clear(CustomFloats.Values, CustomFloats.Count, countToAdd);
++                    CustomFloats.Count += countToAdd;
+                 }
+             }
+ 
+@@ -1168,10 +1180,16 @@
+                 }
+                 else  // We are adding meshData which has no CustomShorts of its own (!!), but the array length still needs to match the vertices count
+                 {
+-                    if (CustomShorts.Values.Length < VerticesCount)
++                    int prevVertices = VerticesCount - sourceMesh.VerticesCount;
++                    int stride = prevVertices > 0 ? (CustomShorts.Count / prevVertices) : 1;
++                    if (stride <= 0) stride = 1;
++                    int countToAdd = sourceMesh.VerticesCount * stride;
++                    if (CustomShorts.Count + countToAdd > CustomShorts.BufferSize)
+                     {
+-                        Array.Resize(ref CustomShorts.Values, VerticesCount);
++                        CustomShorts.GrowBuffer(countToAdd);
+                     }
++                    Array.Clear(CustomShorts.Values, CustomShorts.Count, countToAdd);
++                    CustomShorts.Count += countToAdd;
+                 }
+             }
+ 
+@@ -1189,10 +1207,16 @@
+                 }
+                 else  // We are adding meshData which has no CustomBytes of its own (!!), but the array length still needs to match the vertices count
+                 {
+-                    if (CustomBytes.Values.Length < VerticesCount)
++                    int prevVertices = VerticesCount - sourceMesh.VerticesCount;
++                    int stride = prevVertices > 0 ? (CustomBytes.Count / prevVertices) : 1;
++                    if (stride <= 0) stride = 1;
++                    int countToAdd = sourceMesh.VerticesCount * stride;
++                    if (CustomBytes.Count + countToAdd > CustomBytes.BufferSize)
+                     {
+-                        Array.Resize(ref CustomBytes.Values, VerticesCount);
++                        CustomBytes.GrowBuffer(countToAdd);
+                     }
++                    Array.Clear(CustomBytes.Values, CustomBytes.Count, countToAdd);
++                    CustomBytes.Count += countToAdd;
+                 }
+             }
+         }

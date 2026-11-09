@@ -1449,6 +1449,81 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void MeshData_CustomVertexDataStrideAndSelectiveElements()
+    {
+        string meshDataPatch = PatchReader.ReadPatch("patches/VintagestoryApi/Client/Model/Mesh/MeshData.cs.patch");
+        Assert.Contains("data.CustomInts.Count / data.VerticesCount", meshDataPatch);
+        Assert.Contains("vertexNum * valsPerVertex_Ints + j", meshDataPatch);
+        Assert.Contains("CustomInts.Count += countToAdd", meshDataPatch);
+
+        string tesselatorPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs.patch");
+        Assert.Contains("cshape.QuantityElements, cshape.SelectiveElements", tesselatorPatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ShapeTesselatorManager\", \"CreateMesh\", 4)", programSource);
+
+        string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs.patch", cecilList);
+
+        // Functional behavior of MeshData AddMeshData with CustomInts
+        var dst = new MeshData(4, 6);
+        dst.CustomInts = new CustomMeshDataPartInt(8)
+        {
+            Count = 0,
+            InterleaveSizes = new[] { 2 },
+            InterleaveStride = 8
+        };
+
+        var src = new MeshData(4, 6);
+        src.xyz = new float[12];
+        src.Normals = new int[4];
+        src.Uv = new float[8];
+        src.Rgba = new byte[16];
+        src.Flags = new int[4];
+        src.Indices = new[] { 0, 1, 2, 0, 2, 3 };
+        src.IndicesCount = 6;
+        src.VerticesCount = 4;
+        src.CustomInts = new CustomMeshDataPartInt(8)
+        {
+            Values = new[] { 10, 11, 20, 21, 30, 31, 40, 41 },
+            Count = 8,
+            InterleaveSizes = new[] { 2 },
+            InterleaveStride = 8
+        };
+
+        dst.AddMeshData(src);
+        Assert.Equal(4, dst.VerticesCount);
+        Assert.Equal(8, dst.CustomInts.Count);
+        Assert.Equal(10, dst.CustomInts.Values[0]);
+        Assert.Equal(11, dst.CustomInts.Values[1]);
+        Assert.Equal(20, dst.CustomInts.Values[2]);
+        Assert.Equal(21, dst.CustomInts.Values[3]);
+        Assert.Equal(30, dst.CustomInts.Values[4]);
+        Assert.Equal(31, dst.CustomInts.Values[5]);
+        Assert.Equal(40, dst.CustomInts.Values[6]);
+        Assert.Equal(41, dst.CustomInts.Values[7]);
+
+        // Merge mesh without CustomInts into mesh with CustomInts
+        var emptySrc = new MeshData(4, 6);
+        emptySrc.xyz = new float[12];
+        emptySrc.Normals = new int[4];
+        emptySrc.Uv = new float[8];
+        emptySrc.Rgba = new byte[16];
+        emptySrc.Flags = new int[4];
+        emptySrc.Indices = new[] { 0, 1, 2, 0, 2, 3 };
+        emptySrc.IndicesCount = 6;
+        emptySrc.VerticesCount = 4;
+
+        dst.AddMeshData(emptySrc);
+        Assert.Equal(8, dst.VerticesCount);
+        Assert.Equal(16, dst.CustomInts.Count);
+        for (int i = 8; i < 16; i++)
+        {
+            Assert.Equal(0, dst.CustomInts.Values[i]);
+        }
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");

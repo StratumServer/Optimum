@@ -32,6 +32,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticlePoolQuads.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderPrograms.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SurfaceLayerTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SvgLoader.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemMouseInWorldInteractions.cs.patch
