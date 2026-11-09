@@ -1365,6 +1365,28 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void CloudRenderer_UpdateCloudTilesOffThread_ReusesTileOffsetAndCloudTilePosVectors()
+    {
+        string patch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/CloudRenderer.cs.patch");
+        Assert.Contains("private Vec3i reusableTileOffset;", patch);
+        Assert.Contains("private Vec3d reusableCloudTilePos;", patch);
+        Assert.Contains("(reusableTileOffset ??= new Vec3i()).Set(", patch);
+        Assert.Contains("(reusableCloudTilePos ??= new Vec3d()).Set(", patch);
+
+        string runtimePatch = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/CloudRenderer.cs.patch");
+        Assert.Contains("private Vec3i reusableTileOffset;", runtimePatch);
+        Assert.Contains("private Vec3d reusableCloudTilePos;", runtimePatch);
+        Assert.Contains("(reusableTileOffset ??= new Vec3i()).Set(", runtimePatch);
+        Assert.Contains("(reusableCloudTilePos ??= new Vec3d()).Set(", runtimePatch);
+
+        string modPatcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("[\"Vintagestory.GameContent.CloudRenderer\"]", modPatcherSource);
+        Assert.Contains("\"reusableTileOffset\"", modPatcherSource);
+        Assert.Contains("\"reusableCloudTilePos\"", modPatcherSource);
+        Assert.Contains("new(\"Vintagestory.GameContent.CloudRenderer\", \"UpdateCloudTilesOffThread\", 1)", modPatcherSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

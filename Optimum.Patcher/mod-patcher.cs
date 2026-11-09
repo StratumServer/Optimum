@@ -159,6 +159,11 @@ public static class ModPatcher
                 [
                     "reusableDynamicNodes",
                 ],
+                ["Vintagestory.GameContent.CloudRenderer"] =
+                [
+                    "reusableTileOffset",
+                    "reusableCloudTilePos",
+                ],
             },
             Interfaces: new()
             {
@@ -195,6 +200,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityShapeRenderer", "DoRender3DOpaqueBatched", 2),
                 new("Vintagestory.GameContent.WeatherSimulationParticles", "asyncParticleSpawn", 2),
                 new("Vintagestory.GameContent.WeatherSystemClient", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.CloudRenderer", "UpdateCloudTilesOffThread", 1),
                 new("Vintagestory.GameContent.ChunkMapLayer", ".ctor", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "Event_OnChunkDirty", 3),
                 new("Vintagestory.GameContent.ChunkMapLayer", "OnMapOpenedClient", 0),
