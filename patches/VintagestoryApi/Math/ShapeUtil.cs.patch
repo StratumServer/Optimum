@@ -1,0 +1,55 @@
+diff --git a/VintagestoryApi/Math/ShapeUtil.cs b/VintagestoryApi/Math/ShapeUtil.cs
+index e535e4e..6dd52a1 100644
+--- a/VintagestoryApi/Math/ShapeUtil.cs
++++ b/VintagestoryApi/Math/ShapeUtil.cs
+@@ -158,38 +158,39 @@ namespace Vintagestory.API.MathTools
+             if (r == 0)
+             {
+                 return new Vec2i[] { new Vec2i(x, y) };
+             }
+ 
+-            List<Vec2i> points = new List<Vec2i>();
+-
+             int th = 9; // Math.Max(9, r / 2); - can't, it will skip some chunks then
+ 
+             int S = 2 * r;
+             int a = Math.Min(S, th);
+             int b = (int)Math.Ceiling(Math.Max(0, S - th) / 2.0);
+ 
+             int a2 = (a / 2);
+ 
++            Vec2i[] points = new Vec2i[4 * (a + b)];
++            int idx = 0;
++
+             for (var i = 0; i < a; i++)
+             {
+-                points.Add(new Vec2i(x + i - a2, y - r));
+-                points.Add(new Vec2i(x - i + a2, y + r));
+-                points.Add(new Vec2i(x - r, y - i + a2));
+-                points.Add(new Vec2i(x + r, y + i - a2));
++                points[idx++] = new Vec2i(x + i - a2, y - r);
++                points[idx++] = new Vec2i(x - i + a2, y + r);
++                points[idx++] = new Vec2i(x - r, y - i + a2);
++                points[idx++] = new Vec2i(x + r, y + i - a2);
+             }
+ 
+             for (var i = 0; i < b; i++)
+             {
+-                points.Add(new Vec2i(x + a2 + i, y - r + i));
+-                points.Add(new Vec2i(x - r + i, y + a2 + i));
++                points[idx++] = new Vec2i(x + a2 + i, y - r + i);
++                points[idx++] = new Vec2i(x - r + i, y + a2 + i);
+ 
+-                points.Add(new Vec2i(x - r + i, y - a2 - i));
+-                points.Add(new Vec2i(x + a2 + i, y + r - i));
++                points[idx++] = new Vec2i(x - r + i, y - a2 - i);
++                points[idx++] = new Vec2i(x + a2 + i, y + r - i);
+             }
+ 
+-            return points.ToArray<Vec2i>();
++            return points;
+         }
+ 
+ 
+         // This algo returns a point outline or shell of 
+         // - A square until radius 9

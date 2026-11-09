@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-index 277d286..c68549e 100644
+index 277d286..2513d08 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -80,11 +80,11 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -80,37 +80,36 @@ internal class ServerSystemSendChunks : ServerSystem
  	}
  
  	private void sendAndEnqueueChunks(ConnectedClient client)
@@ -15,3 +15,41 @@ index 277d286..c68549e 100644
  			return;
  		}
  		chunksToSend.Clear();
+ 		mapChunksToSend.Clear();
+ 		toRemove.Clear();
+ 		int num2 = MagicNum.ChunksToSendPerTick * ((!client.IsLocalConnection) ? 1 : 8);
+-		List<long> list = new List<long>(1);
+-		foreach (long forceSendMapChunk in client.forceSendMapChunks)
++		if (client.forceSendMapChunks.Count > 0)
+ 		{
+-			Vec2i vec2i = server.WorldMap.MapChunkPosFromChunkIndex2D(forceSendMapChunk);
+-			server.loadedMapChunks.TryGetValue(forceSendMapChunk, out var value);
+-			if (value != null)
++			foreach (long forceSendMapChunk in client.forceSendMapChunks)
+ 			{
+-				server.SendPacketFast(client.Id, value.ToPacket(vec2i.X, vec2i.Y));
++				Vec2i vec2i = server.WorldMap.MapChunkPosFromChunkIndex2D(forceSendMapChunk);
++				server.loadedMapChunks.TryGetValue(forceSendMapChunk, out var value);
++				if (value != null)
++				{
++					server.SendPacketFast(client.Id, value.ToPacket(vec2i.X, vec2i.Y));
++					toRemove.Add(forceSendMapChunk);
++				}
+ 			}
+-			else
++			for (int i = 0; i < toRemove.Count; i++)
+ 			{
+-				list.Add(forceSendMapChunk);
++				client.forceSendMapChunks.Remove(toRemove[i]);
+ 			}
+-		}
+-		client.forceSendMapChunks.Clear();
+-		foreach (long item2 in list)
+-		{
+-			client.forceSendMapChunks.Add(item2);
++			toRemove.Clear();
+ 		}
+ 		foreach (long forceSendChunk in client.forceSendChunks)
+ 		{
+ 			ServerChunk loadedChunk = server.GetLoadedChunk(forceSendChunk);
+ 			if (loadedChunk != null)
