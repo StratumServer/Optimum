@@ -14,6 +14,12 @@
     <GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Remove="ShaderCompatibilityScanner.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" />
     <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
     <RuntimeHostConfigurationOption Include="System.GC.DATAs" Value="1" />

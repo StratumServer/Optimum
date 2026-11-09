@@ -906,6 +906,19 @@ public static class OptimumConfig
                         if (!_shaderCompatibilityFeatureMods.ContainsKey(feature)) _shaderCompatibilityFeatureMods[feature] = approximate;
                 }
             }
+
+            if (report.Sources != null && report.Sources.Count > 0)
+            {
+                var specificSources = report.Sources.Where(s => !string.IsNullOrWhiteSpace(s.SourcePath)).ToList();
+                if (specificSources.Count > 0 && specificSources.All(s => !IsSourcePathPresent(s.SourcePath)) && !report.ScanFailed)
+                {
+                    _shaderCompatibilityDisabledFeatures.Clear();
+                    _shaderCompatibilityFeatureMods.Clear();
+                    _shaderCompatibilityFeatureReasons.Clear();
+                    _shaderCompatibilityFeatureSources.Clear();
+                    _shaderCompatibilityReportStale = true;
+                }
+            }
         }
         catch (Exception)
         {
@@ -923,6 +936,90 @@ public static class OptimumConfig
     public static void ReloadShaderCompatibilityReport()
     {
         LoadShaderCompatibilityReport();
+    }
+
+    private static bool IsSourcePathPresent(string? sourcePath)
+    {
+        if (string.IsNullOrWhiteSpace(sourcePath)) return true;
+        if (Path.IsPathRooted(sourcePath) && (File.Exists(sourcePath) || Directory.Exists(sourcePath))) return true;
+        if (_dataPath != null)
+        {
+            string p = Path.Combine(_dataPath, sourcePath);
+            if (File.Exists(p) || Directory.Exists(p)) return true;
+        }
+        string? baseDir = AppContext.BaseDirectory;
+        if (baseDir != null)
+        {
+            string p = Path.Combine(baseDir, sourcePath);
+            if (File.Exists(p) || Directory.Exists(p)) return true;
+        }
+        return false;
+    }
+
+    public static bool RefreshShaderCompatibilityIfStale(string? dataPath, string? gameDir)
+    {
+        if (string.IsNullOrWhiteSpace(dataPath)) return false;
+        string reportPath = Path.Combine(dataPath, ".optimum", "shader-compatibility.json");
+        bool needsRescan = false;
+
+        if (!File.Exists(reportPath))
+        {
+            needsRescan = true;
+        }
+        else
+        {
+            try
+            {
+                string json = File.ReadAllText(reportPath);
+                var report = JsonSerializer.Deserialize<ShaderCompatibilityState>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true
+                });
+
+                if (report == null || report.SchemaVersion < CurrentShaderReportSchemaVersion)
+                {
+                    needsRescan = true;
+                }
+                else if (report.Sources != null && report.Sources.Count > 0)
+                {
+                    foreach (var src in report.Sources)
+                    {
+                        if (!string.IsNullOrWhiteSpace(src.SourcePath))
+                        {
+                            string p1 = Path.Combine(dataPath, src.SourcePath);
+                            string? p2 = gameDir != null ? Path.Combine(gameDir, src.SourcePath) : null;
+                            if (!File.Exists(p1) && !Directory.Exists(p1) && (p2 == null || (!File.Exists(p2) && !Directory.Exists(p2))))
+                            {
+                                needsRescan = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                needsRescan = true;
+            }
+        }
+
+        if (needsRescan)
+        {
+            try
+            {
+                string targetGameDir = !string.IsNullOrWhiteSpace(gameDir) ? gameDir : AppContext.BaseDirectory;
+                var freshReport = Optimum.Launcher.ShaderCompatibilityScanner.Scan(dataPath, targetGameDir, Version);
+                Optimum.Launcher.ShaderCompatibilityScanner.SaveReport(dataPath, freshReport);
+                SetDataPath(dataPath);
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     private static string? _configPath;
@@ -1312,6 +1409,7 @@ public static class OptimumConfig
     private sealed class ShaderCompatibilitySourceState
     {
         public string? Name { get; set; }
+        public string? SourcePath { get; set; }
         public List<string>? ShaderFiles { get; set; }
         public List<string>? Indicators { get; set; }
     }

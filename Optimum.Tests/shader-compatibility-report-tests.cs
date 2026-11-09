@@ -252,6 +252,47 @@ public sealed class ShaderCompatibilityReportTests : IDisposable
         Assert.Equal(string.Empty, OptimumConfig.GetShaderFeatureBlockMods("RenderScale"));
     }
 
+    [Fact]
+    public void ReportWithUninstalledSources_DoesNotDisableFeatures()
+    {
+        WriteReport("""
+            {
+                "schemaVersion": 1,
+                "scanFailed": false,
+                "disabledFeatures": ["EntityLightBatch", "EntityShaderStateCache"],
+                "sources": [
+                    {
+                        "name": "OptiTime",
+                        "sourcePath": "Mods/OptiTime-1.5.16.zip",
+                        "shaderFiles": ["assets/game/shaders/blur.fsh"]
+                    }
+                ]
+            }
+            """);
+
+        Assert.True(OptimumConfig.IsShaderCompatibilityReportStale);
+        Assert.False(OptimumConfig.IsShaderFeatureDisabled("EntityLightBatch"));
+        Assert.False(OptimumConfig.IsShaderFeatureDisabled("EntityShaderStateCache"));
+        Assert.Equal(string.Empty, OptimumConfig.GetShaderFeatureBlockMods("EntityLightBatch"));
+    }
+
+    [Fact]
+    public void RefreshShaderCompatibilityIfStale_GeneratesFreshReport()
+    {
+        string dataDir = Path.Combine(_tempDataDir, "refresh_test");
+        string gameDir = Path.Combine(_tempDataDir, "game_test");
+        Directory.CreateDirectory(Path.Combine(dataDir, "Mods"));
+        Directory.CreateDirectory(Path.Combine(gameDir, "Mods"));
+
+        bool refreshed = OptimumConfig.RefreshShaderCompatibilityIfStale(dataDir, gameDir);
+        Assert.True(refreshed);
+
+        string reportPath = Path.Combine(dataDir, ".optimum", "shader-compatibility.json");
+        Assert.True(File.Exists(reportPath));
+        Assert.False(OptimumConfig.IsShaderCompatibilityReportMissing);
+        Assert.False(OptimumConfig.IsShaderCompatibilityReportStale);
+    }
+
     private void WriteReport(string json)
     {
         string optimumDir = Path.Combine(_tempDataDir, ".optimum");
