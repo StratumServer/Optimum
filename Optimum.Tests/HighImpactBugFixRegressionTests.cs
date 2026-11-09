@@ -2018,6 +2018,20 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("-                    Vec4f vec = ColorUtil.ToRGBAVec4f(capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId));", patch);
     }
 
+    [Fact]
+    public void Issue502_BlockEntityGenericTypedContainer_CachesRotatedMesh()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs.patch"));
+        Assert.Contains("+        MeshData rotatedOwnMesh;", patch);
+        Assert.Contains("+                rotatedOwnMesh = null;", patch);
+        Assert.Contains("+                var mesh = rotatedOwnMesh;", patch);
+        Assert.Contains("+                    mesh = MeshAngle == 0 ? ownMesh : ownMesh.Clone().Rotate(0, MeshAngle, 0);", patch);
+        Assert.Contains("+                    rotatedOwnMesh = mesh;", patch);
+        Assert.Contains("+                mesher.AddMeshData(mesh);", patch);
+        Assert.Contains("-                mesher.AddMeshData(ownMesh.Clone().Rotate(0, MeshAngle, 0));", patch);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
