@@ -1921,6 +1921,88 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"BuildServerAssetsPacket\", 0)", programSource);
     }
 
+    private class TestRecipe : Vintagestory.API.Common.RecipeBase
+    {
+        public override Vintagestory.API.Common.IRecipeIngredient[] RecipeIngredients => Ingredients;
+        public Vintagestory.API.Common.IRecipeIngredient[] Ingredients { get; set; } = [];
+        public override Vintagestory.API.Common.IRecipeOutput RecipeOutput => null!;
+        public override bool Resolve(Vintagestory.API.Common.IWorldAccessor world, string sourceForLogging) => true;
+        public override Vintagestory.API.Common.RecipeBase Clone() => new TestRecipe();
+
+        public List<Dictionary<string, string>> TestGenerateAllowedVariantsCombinations(Dictionary<string, string[]> allowedVariants)
+        {
+            return GenerateAllowedVariantsCombinations(allowedVariants);
+        }
+
+        public Dictionary<string, HashSet<string>> TestGetNameToCodeMapping(Vintagestory.API.Common.IWorldAccessor world)
+        {
+            return GetNameToCodeMapping(world);
+        }
+    }
+
+    [Fact]
+    public void RecipeBase_AdvancedWildcardSinglePassAndDomainIndexedPreSearchCache()
+    {
+        // 1. Verify patches exist and contain optimizations
+        string recipePatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Crafting/RecipeBase.cs.patch");
+        Assert.True(File.Exists(recipePatchPath), "RecipeBase.cs.patch must exist");
+        string recipePatch = File.ReadAllText(recipePatchPath);
+        Assert.Contains("_optimumRegexCache", recipePatch);
+        Assert.Contains("FastGetNameToCodeMappingForAdvancedWildcard", recipePatch);
+        Assert.Contains("GenerateAllowedVariantsCombinationsFast", recipePatch);
+
+        string cachePatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryApi/Common/Crafting/CollectiblePreSearchResultsCache.cs.patch");
+        Assert.True(File.Exists(cachePatchPath), "CollectiblePreSearchResultsCache.cs.patch must exist");
+        string cachePatch = File.ReadAllText(cachePatchPath);
+        Assert.Contains("search(world, collectibleType, domain, codeStartsWith)", cachePatch);
+        Assert.Contains("FilterAndAdd", cachePatch);
+
+        // 2. Behavioral verification of GenerateAllowedVariantsCombinations fast path
+        var recipe = new TestRecipe();
+        var allowedVariants = new Dictionary<string, string[]>
+        {
+            ["wood"] = ["pine", "oak", "birch"],
+            ["metal"] = ["copper", "tin"]
+        };
+        var combinations = recipe.TestGenerateAllowedVariantsCombinations(allowedVariants);
+        Assert.Equal(6, combinations.Count);
+        Assert.Contains(combinations, c => c["wood"] == "pine" && c["metal"] == "copper");
+        Assert.Contains(combinations, c => c["wood"] == "pine" && c["metal"] == "tin");
+        Assert.Contains(combinations, c => c["wood"] == "oak" && c["metal"] == "copper");
+        Assert.Contains(combinations, c => c["wood"] == "oak" && c["metal"] == "tin");
+        Assert.Contains(combinations, c => c["wood"] == "birch" && c["metal"] == "copper");
+        Assert.Contains(combinations, c => c["wood"] == "birch" && c["metal"] == "tin");
+
+        // 3. Behavioral verification of CollectiblePreSearchResultsCache domain-indexed filtering
+        var cache = new Vintagestory.API.Common.CollectiblePreSearchResultsCache();
+        var item1 = new Vintagestory.API.Common.Item { Code = new AssetLocation("game", "iron-plate") };
+        var item2 = new Vintagestory.API.Common.Item { Code = new AssetLocation("game", "iron-wire") };
+        var item3 = new Vintagestory.API.Common.Item { Code = new AssetLocation("game", "copper-plate") };
+        var item4 = new Vintagestory.API.Common.Item { Code = new AssetLocation("modx", "iron-plate") };
+        var itemsList = new List<Vintagestory.API.Common.Item> { item1, item2, item3, item4 };
+
+        var mockWorld = StubProxy<Vintagestory.API.Common.IWorldAccessor>.Create((method, args) =>
+        {
+            if (method.Name == "get_Items") return itemsList;
+            if (method.Name == "get_Blocks") return new List<Vintagestory.API.Common.Block>();
+            return null;
+        });
+
+        var results = cache.GetOrCreate(mockWorld, new AssetLocation("game", "iron-*"), Vintagestory.API.Common.EnumItemClass.Item);
+        Assert.Equal(2, results.Count);
+        Assert.Contains(item1, results);
+        Assert.Contains(item2, results);
+        Assert.DoesNotContain(item3, results); // copper-plate
+        Assert.DoesNotContain(item4, results); // wrong domain modx
+
+        // Domain-specific lookup for modx
+        var modxResults = cache.GetOrCreate(mockWorld, new AssetLocation("modx", "iron-*"), Vintagestory.API.Common.EnumItemClass.Item);
+        Assert.Single(modxResults);
+        Assert.Contains(item4, modxResults);
+
+        cache.Clear();
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
