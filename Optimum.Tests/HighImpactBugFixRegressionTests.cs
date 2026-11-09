@@ -1302,6 +1302,14 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void CheckGlErrorAlways_ThrottlesSynchronousGlGetErrorWhenDebuggingDisabled()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
+        Assert.Contains("public override void CheckGlErrorAlways", patch);
+        Assert.Contains("if (!GlErrorChecking && !GlDebugMode)", patch);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

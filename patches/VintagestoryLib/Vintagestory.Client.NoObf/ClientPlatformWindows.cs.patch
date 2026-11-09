@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-index b1b2eea..2f2ed62 100644
+index b1b2eea..0ad2c76 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 @@ -47,6 +47,126 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
@@ -484,7 +484,18 @@ index b1b2eea..2f2ed62 100644
  			LoadFrameBuffer(EnumFrameBuffer.Default);
  			GL.Viewport(0, 0, ((NativeWindow)window).ClientSize.X, ((NativeWindow)window).ClientSize.Y);
  			ShaderProgramBlit blit = ShaderPrograms.Blit;
-@@ -2339,11 +2707,26 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2097,6 +2465,10 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+ 
+ 	public override void CheckGlErrorAlways(string errmsg = null)
+ 	{
++		if (!GlErrorChecking && !GlDebugMode)
++		{
++			return;
++		}
+ 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0005: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
+@@ -2339,11 +2711,26 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
  		}
@@ -511,7 +522,7 @@ index b1b2eea..2f2ed62 100644
  		return num;
  	}
  
-@@ -2369,7 +2752,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2369,7 +2756,33 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		{
  			throw new InvalidOperationException("Texture uploads must happen in the main thread. We only have one OpenGL context.");
  		}
@@ -546,7 +557,7 @@ index b1b2eea..2f2ed62 100644
  		{
  			if (intoTexture.TextureId != 0)
  			{
-@@ -2389,6 +2798,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2389,6 +2802,21 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  			GL.TexSubImage2D((TextureTarget)3553, 0, 0, 0, surface.Width, surface.Height, (PixelFormat)32993, (PixelType)5121, surface.DataPtr);
  		}
  		CheckGlError("LoadOrUpdateCairoTexture");
@@ -568,7 +579,7 @@ index b1b2eea..2f2ed62 100644
  	}
  
  	public override int LoadTexture(SKBitmap bmp, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
-@@ -2667,11 +3091,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2667,11 +3095,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34962, vboId);
  		if (pers)
  		{
@@ -585,7 +596,7 @@ index b1b2eea..2f2ed62 100644
  			}
  		}
  		else
-@@ -2685,11 +3110,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2685,11 +3114,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34962, vboId);
  		if (pers)
  		{
@@ -602,7 +613,7 @@ index b1b2eea..2f2ed62 100644
  			}
  		}
  		else
-@@ -2703,11 +3129,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2703,11 +3133,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34962, vboId);
  		if (pers)
  		{
@@ -619,7 +630,7 @@ index b1b2eea..2f2ed62 100644
  			}
  		}
  		else
-@@ -2721,11 +3148,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2721,11 +3152,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34962, vboId);
  		if (pers)
  		{
@@ -636,7 +647,7 @@ index b1b2eea..2f2ed62 100644
  			}
  		}
  		else
-@@ -2739,11 +3167,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2739,11 +3171,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34962, vboId);
  		if (pers)
  		{
@@ -653,7 +664,7 @@ index b1b2eea..2f2ed62 100644
  			}
  		}
  		else
-@@ -2761,11 +3190,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -2761,11 +3194,12 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  		GL.BindBuffer((BufferTarget)34963, vao.vboIdIndex);
  		if (pers)
  		{
