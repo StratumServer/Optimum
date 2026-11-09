@@ -664,6 +664,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBeforeFrame", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnSeperateThreadGameTick", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "TesselateChunk", 6),
+    // Issue #482: pass SelectiveElements and QuantityElements in CreateMesh
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "CreateMesh", 4),
     // Texture atlas overflow recovery and decode worker scaling.
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeCreateNewAtlas", 1),
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "PopulateTextureAtlassesFromTextures", 0),
