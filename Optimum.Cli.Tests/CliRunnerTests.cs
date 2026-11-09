@@ -417,6 +417,7 @@ public class CliRunnerTests
     {
         var probe = new FakeSystemProbe();
         probe.AddFile("/repo/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        probe.AddFile("/repo/Optimum.Launcher/Optimum.Launcher.csproj");
         probe.AddFile("/repo/scripts/bootstrap.sh");
         return probe;
     }
