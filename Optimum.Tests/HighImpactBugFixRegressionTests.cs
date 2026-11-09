@@ -1302,6 +1302,47 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         }
     }
 
+    [Fact]
+    public void Installer_InProcessCecilPatcher_DirectInvocationAndErrorForwarding()
+    {
+        // 1. Verify project reference from Bootstrap.Core to Patcher
+        string coreCsproj = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Bootstrap.Core/Optimum.Bootstrap.Core.csproj"));
+        Assert.Contains("Optimum.Patcher.csproj", coreCsproj);
+
+        // 2. Verify Program.Patch method exists and is callable
+        var patchMethod = typeof(Optimum.Patcher.Program).GetMethod(
+            "Patch",
+            BindingFlags.Public | BindingFlags.Static,
+            [typeof(string), typeof(string), typeof(string)]);
+        Assert.NotNull(patchMethod);
+
+        // 3. Verify ApiPatcher.Patch and ModPatcher.Patch exist and are callable
+        var apiPatchMethod = typeof(Optimum.Patcher.ApiPatcher).GetMethod(
+            "Patch",
+            BindingFlags.Public | BindingFlags.Static,
+            [typeof(string), typeof(string), typeof(string)]);
+        Assert.NotNull(apiPatchMethod);
+
+        var modPatchMethod = typeof(Optimum.Patcher.ModPatcher).GetMethod(
+            "Patch",
+            BindingFlags.Public | BindingFlags.Static,
+            [typeof(string), typeof(string), typeof(string), typeof(string)]);
+        Assert.NotNull(modPatchMethod);
+
+        // 4. In-process invocation with non-existent assembly returns structured false
+        bool ok = Optimum.Patcher.Program.Patch("/nonexistent/vanilla.dll", "/nonexistent/compiled.dll", "/nonexistent/out.dll");
+        Assert.False(ok);
+
+        // 5. Verify GamePatcher uses in-process patching
+        string gamePatcherSource = File.ReadAllText(
+            PatchReader.FindRepositoryFile("Optimum.Bootstrap.Core/Patch/GamePatcher.cs"));
+        Assert.Contains("RunPatcherOrInProcess", gamePatcherSource);
+        Assert.Contains("Optimum.Patcher.Program.Patch", gamePatcherSource);
+        Assert.Contains("ApiPatcher.Patch", gamePatcherSource);
+        Assert.Contains("ModPatcher.Patch", gamePatcherSource);
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

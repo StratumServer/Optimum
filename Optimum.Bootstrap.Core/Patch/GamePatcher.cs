@@ -5,6 +5,7 @@ using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Paths;
 using Optimum.Bootstrap.Core.Platform;
+using Optimum.Patcher;
 
 namespace Optimum.Bootstrap.Core.Patch;
 
@@ -220,7 +221,10 @@ public sealed class GamePatcher(
             cancellationToken.ThrowIfCancellationRequested();
             observer?.Phase(ProgressPhase.Patch, 20, "patching VintagestoryLib.dll");
             string stagedLib = Path.Combine(stagingDir, "VintagestoryLib.dll");
-            ProcessOutcome libOutcome = RunPatcher(patcherPath, isDll, [sourceLib, donorLib, stagedLib]);
+            ProcessOutcome libOutcome = RunPatcherOrInProcess(
+                isDll, patcherPath, [sourceLib, donorLib, stagedLib],
+                () => Optimum.Patcher.Program.Patch(sourceLib, donorLib, stagedLib),
+                "VintagestoryLib.dll", observer);
             if (!libOutcome.Started || libOutcome.ExitCode != 0 || !probe.FileExists(stagedLib))
             {
                 return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
@@ -243,7 +247,10 @@ public sealed class GamePatcher(
             cancellationToken.ThrowIfCancellationRequested();
             observer?.Phase(ProgressPhase.Patch, 45, "patching VintagestoryAPI.dll");
             string stagedApi = Path.Combine(stagingDir, "VintagestoryAPI.dll");
-            ProcessOutcome apiOutcome = RunPatcher(patcherPath, isDll, ["--api", sourceApi, donorApi, stagedApi]);
+            ProcessOutcome apiOutcome = RunPatcherOrInProcess(
+                isDll, patcherPath, ["--api", sourceApi, donorApi, stagedApi],
+                () => ApiPatcher.Patch(sourceApi, donorApi, stagedApi),
+                "VintagestoryAPI.dll", observer);
             if (!apiOutcome.Started || apiOutcome.ExitCode != 0 || !probe.FileExists(stagedApi))
             {
                 return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
@@ -270,8 +277,11 @@ public sealed class GamePatcher(
                 string stagedModsDir = Path.Combine(stagingDir, "Mods");
                 EnsureDirectory(stagedModsDir);
                 string stagedEssentials = Path.Combine(stagedModsDir, "VSEssentials.dll");
-                ProcessOutcome essentialsOutcome = RunPatcher(patcherPath, isDll,
-                    ["--mod", "vsessentials", sourceEssentials, donorEssentials, stagedEssentials]);
+                ProcessOutcome essentialsOutcome = RunPatcherOrInProcess(
+                    isDll, patcherPath,
+                    ["--mod", "vsessentials", sourceEssentials, donorEssentials, stagedEssentials],
+                    () => ModPatcher.Patch("vsessentials", sourceEssentials, donorEssentials, stagedEssentials),
+                    "Mods/VSEssentials.dll", observer);
                 if (!essentialsOutcome.Started || essentialsOutcome.ExitCode != 0 || !probe.FileExists(stagedEssentials))
                 {
                     return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
@@ -299,8 +309,11 @@ public sealed class GamePatcher(
                 string stagedModsDir = Path.Combine(stagingDir, "Mods");
                 EnsureDirectory(stagedModsDir);
                 string stagedSurvival = Path.Combine(stagedModsDir, "VSSurvivalMod.dll");
-                ProcessOutcome survivalOutcome = RunPatcher(patcherPath, isDll,
-                    ["--mod", "vssurvivalmod", sourceSurvival, donorSurvival, stagedSurvival]);
+                ProcessOutcome survivalOutcome = RunPatcherOrInProcess(
+                    isDll, patcherPath,
+                    ["--mod", "vssurvivalmod", sourceSurvival, donorSurvival, stagedSurvival],
+                    () => ModPatcher.Patch("vssurvivalmod", sourceSurvival, donorSurvival, stagedSurvival),
+                    "Mods/VSSurvivalMod.dll", observer);
                 if (!survivalOutcome.Started || survivalOutcome.ExitCode != 0 || !probe.FileExists(stagedSurvival))
                 {
                     return Task.FromResult(PatchResult.Failure(FailureReason.PatchConflict,
@@ -820,6 +833,43 @@ public sealed class GamePatcher(
             }
         }
         return null;
+    }
+
+    private ProcessOutcome RunPatcherOrInProcess(
+        bool isDll,
+        string patcherPath,
+        IReadOnlyList<string> args,
+        Func<bool> inProcessPatch,
+        string targetName,
+        IBuildObserver? observer)
+    {
+        if (!isDll)
+        {
+            return RunPatcher(patcherPath, isDll: false, args);
+        }
+
+        try
+        {
+            bool ok = inProcessPatch();
+            return new ProcessOutcome
+            {
+                Started = true,
+                ExitCode = ok ? 0 : 1,
+                StandardOutput = ok ? $"In-process patch complete: {targetName}" : $"In-process patch failed: {targetName}",
+                StandardError = ok ? "" : $"In-process patching returned false for {targetName}"
+            };
+        }
+        catch (Exception ex)
+        {
+            observer?.Log(LogLevel.Error, $"Cecil patching exception on {targetName}: {ex}");
+            return new ProcessOutcome
+            {
+                Started = true,
+                ExitCode = 1,
+                StandardOutput = "",
+                StandardError = $"Exception while patching {targetName}: {ex.Message}"
+            };
+        }
     }
 
     private ProcessOutcome RunPatcher(string patcherPath, bool isDll, IReadOnlyList<string> args)
