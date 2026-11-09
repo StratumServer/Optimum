@@ -1,0 +1,50 @@
+diff --git a/VSEssentials/Systems/Weather/WeatherSystemServer.cs b/VSEssentials/Systems/Weather/WeatherSystemServer.cs
+index 1bc1f30..41c331b 100644
+--- a/VSEssentials/Systems/Weather/WeatherSystemServer.cs
++++ b/VSEssentials/Systems/Weather/WeatherSystemServer.cs
+@@ -227,28 +227,31 @@ namespace Vintagestory.GameContent
+         }
+ 
+ 
+         private void OnSaveGameSaving()
+         {
+-            HashSet<long> toRemove = new HashSet<long>();
+-
+-            using API.Datastructures.FastMemoryStream ms = new();
+-            foreach (var val in weatherSimByMapRegion)
++            lock (GetWeatherSimLock())
+             {
+-                IMapRegion mapregion = sapi.WorldManager.GetMapRegion(val.Key);
+-                if (mapregion != null)
+-                {
+-                    mapregion.SetModdata("weatherState", val.Value.ToBytes(ms));
+-                } else
++                HashSet<long> toRemove = new HashSet<long>();
++
++                using API.Datastructures.FastMemoryStream ms = new();
++                foreach (var val in weatherSimByMapRegion)
+                 {
+-                    toRemove.Add(val.Key);
++                    IMapRegion mapregion = sapi.WorldManager.GetMapRegion(val.Key);
++                    if (mapregion != null)
++                    {
++                        mapregion.SetModdata("weatherState", val.Value.ToBytes(ms));
++                    } else
++                    {
++                        toRemove.Add(val.Key);
++                    }
+                 }
+-            }
+ 
+-            foreach (var key in toRemove)
+-            {
+-                weatherSimByMapRegion.Remove(key);
++                foreach (var key in toRemove)
++                {
++                    weatherSimByMapRegion.Remove(key);
++                }
+             }
+         }
+ 
+         public override void SpawnLightningFlash(Vec3d pos)
+         {
