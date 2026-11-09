@@ -1,0 +1,19 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/Asset.cs b/VintagestoryLib/Vintagestory.Common/Asset.cs
+index 964de5f..4685b5f 100644
+--- a/VintagestoryLib/Vintagestory.Common/Asset.cs
++++ b/VintagestoryLib/Vintagestory.Common/Asset.cs
+@@ -99,10 +99,14 @@ public class Asset : IAsset
+ 		return Location.GetHashCode();
+ 	}
+ 
+ 	public override bool Equals(object obj)
+ 	{
++		if (obj is IAsset asset)
++		{
++			return Location.Equals(asset.Location);
++		}
+ 		return Location.Equals(obj);
+ 	}
+ 
+ 	public static string BytesToString(byte[] data)
+ 	{
