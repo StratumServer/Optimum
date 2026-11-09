@@ -1310,6 +1310,61 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("if (!GlErrorChecking && !GlDebugMode)", patch);
     }
 
+    private static int staticSaveHandlerCallCount;
+    private static void StaticGameWorldSaveHandler()
+    {
+        staticSaveHandlerCallCount++;
+    }
+
+    [Fact]
+    public void ServerEventManager_TriggerGameWorldBeingSaved_HandlesStaticHandlersWhenProfilerEnabled()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs.patch");
+        Assert.Contains("action.Target?.ToString() ?? action.Method.DeclaringType?.FullName ?? action.Method.Name", patch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Server.ServerEventManager\", \"TriggerGameWorldBeingSaved\", 0)", programSource);
+
+        string repoRoot = System.IO.Path.GetDirectoryName(PatchReader.FindRepositoryFile("VintageStory.slnx"))!;
+        string vsLibDll = System.IO.Path.Combine(repoRoot, "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (File.Exists(vsLibDll))
+        {
+            var asm = Assembly.LoadFrom(vsLibDll);
+            var serverMainType = asm.GetType("Vintagestory.Server.ServerMain");
+            var eventManagerType = asm.GetType("Vintagestory.Server.ServerEventManager");
+            Assert.NotNull(serverMainType);
+            Assert.NotNull(eventManagerType);
+
+            var frameProfilerField = serverMainType.GetField("FrameProfiler", BindingFlags.Public | BindingFlags.Static);
+            Assert.NotNull(frameProfilerField);
+
+            object prevProfiler = frameProfilerField.GetValue(null);
+            try
+            {
+                var profiler = new FrameProfilerUtil("[test] ") { Enabled = true };
+                profiler.Begin();
+                frameProfilerField.SetValue(null, profiler);
+
+                object eventManager = Activator.CreateInstance(eventManagerType, new object[] { null });
+                var onSavedEvent = eventManagerType.GetEvent("OnGameWorldBeingSaved");
+                Assert.NotNull(onSavedEvent);
+
+                staticSaveHandlerCallCount = 0;
+                onSavedEvent.AddEventHandler(eventManager, (System.Action)StaticGameWorldSaveHandler);
+
+                var triggerMethod = eventManagerType.GetMethod("TriggerGameWorldBeingSaved");
+                Assert.NotNull(triggerMethod);
+                triggerMethod.Invoke(eventManager, null);
+
+                Assert.Equal(1, staticSaveHandlerCallCount);
+            }
+            finally
+            {
+                frameProfilerField.SetValue(null, prevProfiler);
+            }
+        }
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

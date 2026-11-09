@@ -57,6 +57,7 @@ patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
