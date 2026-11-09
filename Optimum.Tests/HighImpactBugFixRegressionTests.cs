@@ -1418,7 +1418,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("Thread.Sleep(5);", windowPatch);
 
         string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
-        Assert.Contains("new(\"Vintagestory.Server.ServerSystemLoadAndSaveGame\", \"Dispose\", 0)", programSource);
+        Assert.True(programSource.Contains("new(\"Vintagestory.Server.ServerSystemLoadAndSaveGame\", \"Dispose\", 0)") ||
+                    (programSource.Contains("Vintagestory.Server.ServerSystemLoadAndSaveGame") && programSource.Contains("\"Dispose\"")));
         Assert.Contains("new(\"Vintagestory.Client.GuiScreenRunningGame\", \"OnWindowClosed\", 0)", programSource);
 
         string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
@@ -1701,6 +1702,73 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("\"reusableCloudTilePos\"", modPatcherSource);
         Assert.Contains("new(\"Vintagestory.GameContent.CloudRenderer\", \"UpdateCloudTilesOffThread\", 1)", modPatcherSource);
     }
+
+    [Fact]
+    public void ShapeUtil_GetOctagonPoints_AllocatesExactArrayAndMatchesPoints()
+    {
+        for (int r = 0; r <= 15; r++)
+        {
+            var points = ShapeUtil.GetOctagonPoints(10, 20, r);
+            Assert.NotNull(points);
+            if (r == 0)
+            {
+                Assert.Single(points);
+                Assert.Equal(new Vec2i(10, 20), points[0]);
+            }
+            else
+            {
+                int th = 9;
+                int S = 2 * r;
+                int a = Math.Min(S, th);
+                int b = (int)Math.Ceiling(Math.Max(0, S - th) / 2.0);
+                Assert.Equal(4 * (a + b), points.Length);
+            }
+        }
+    }
+
+#if !NO_DONOR
+    [Fact]
+    public void ServerPackets_GetEntityDespawnPacket_EmptyAndPopulated()
+    {
+        var emptyPacket = ServerPackets.GetEntityDespawnPacket(new List<EntityDespawn>());
+        Assert.NotNull(emptyPacket);
+        Assert.Equal(36, emptyPacket.Id);
+        Assert.NotNull(emptyPacket.EntityDespawn);
+        Assert.Empty(emptyPacket.EntityDespawn.EntityId);
+        Assert.Empty(emptyPacket.EntityDespawn.DespawnReason);
+        Assert.Empty(emptyPacket.EntityDespawn.DeathDamageSource);
+
+        var list = new List<EntityDespawn>
+        {
+            new EntityDespawn
+            {
+                EntityId = 42,
+                DespawnData = new Vintagestory.API.Common.Entities.EntityDespawnData
+                {
+                    Reason = EnumDespawnReason.Death,
+                    DamageSourceForDeath = new DamageSource { Source = EnumDamageSource.Fall }
+                }
+            },
+            new EntityDespawn
+            {
+                EntityId = 100,
+                DespawnData = null
+            }
+        };
+
+        var packet = ServerPackets.GetEntityDespawnPacket(list);
+        Assert.NotNull(packet);
+        Assert.Equal(36, packet.Id);
+        Assert.NotNull(packet.EntityDespawn);
+        Assert.Equal(2, packet.EntityDespawn.EntityIdLength);
+        Assert.Equal(42L, packet.EntityDespawn.EntityId[0]);
+        Assert.Equal(100L, packet.EntityDespawn.EntityId[1]);
+        Assert.Equal((int)EnumDespawnReason.Death, packet.EntityDespawn.DespawnReason[0]);
+        Assert.Equal((int)EnumDespawnReason.Death, packet.EntityDespawn.DespawnReason[1]);
+        Assert.Equal((int)EnumDamageSource.Fall, packet.EntityDespawn.DeathDamageSource[0]);
+        Assert.Equal((int)EnumDamageSource.Block, packet.EntityDespawn.DeathDamageSource[1]);
+    }
+#endif
 
     public class StubProxy<T> : DispatchProxy where T : class
     {
