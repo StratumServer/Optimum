@@ -2053,6 +2053,28 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("-                || GetDescription(world, new DummySlot(this), false).CaseInsensitiveContains(searchText)", stackPatch);
     }
 
+    [Fact]
+    public void Issue504_RegistryObjectType_SpanWildCardMatching()
+    {
+        string patch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSEssentials/Loading/RegistryObjectType.cs.patch"));
+        Assert.Contains("+            if (wildCard.Domain != Code.Domain) return false;", patch);
+        Assert.Contains("+            return WildcardUtil.Match(wildCard.Path, Code.Path);", patch);
+        Assert.Contains("+            if (wildCard.Domain != blockCode.Domain) return false;", patch);
+        Assert.Contains("+            return WildcardUtil.Match(wildCard.Path, blockCode.Path);", patch);
+        Assert.Contains("-            string pattern = Regex.Escape(wildCard.Path).Replace(@\"\\*\", @\"(.*)\");", patch);
+        Assert.Contains("-            return Regex.IsMatch(blockCode.Path, @\"^\" + pattern + @\"$\", RegexOptions.IgnoreCase);", patch);
+
+        // Verification of boolean parity and strict domain checks
+        var wildCard = new AssetLocation("game", "ore-*");
+        Assert.True(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(wildCard, new AssetLocation("game", "ore-copper")));
+        Assert.False(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(wildCard, new AssetLocation("game", "wood-oak")));
+        Assert.False(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(wildCard, new AssetLocation("othermod", "ore-copper")));
+        Assert.False(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(wildCard, null));
+        Assert.False(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(null, new AssetLocation("game", "ore-copper")));
+        Assert.True(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(new AssetLocation("game", ""), new AssetLocation("game", "")));
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
