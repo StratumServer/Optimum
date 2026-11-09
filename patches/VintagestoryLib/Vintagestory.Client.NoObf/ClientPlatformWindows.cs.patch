@@ -2,7 +2,7 @@ diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs 
 index b1b2eea..0ad2c76 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs
-@@ -47,6 +47,126 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
+@@ -47,6 +47,127 @@ public sealed class ClientPlatformWindows : ClientPlatformAbstract
  
  	private Stopwatch frameStopWatch;
  
@@ -72,6 +72,7 @@ index b1b2eea..0ad2c76 100644
 +		_optimumSettingsInitialized = true;
 +		EnsureOptimumTimerResolution();
 +		Vintagestory.API.Config.OptimumConfig.SetDataPath(Vintagestory.API.Config.GamePaths.DataPath);
++		Vintagestory.API.Config.OptimumConfig.RefreshShaderCompatibilityIfStale(Vintagestory.API.Config.GamePaths.DataPath, AppContext.BaseDirectory);
 +		Vintagestory.API.Config.OptimumConfig.Load();
 +		ClientSettings.OptimumEntityShadowCull = Vintagestory.API.Config.OptimumConfig.EntityShadowCull;
 +		ClientSettings.OptimumShadowCullDistance = Vintagestory.API.Config.OptimumConfig.ShadowCullDistance;
