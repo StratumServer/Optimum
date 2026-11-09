@@ -99,6 +99,17 @@ public static class ApiPatcher
             method.Name == "RegistryObjectFirstCodePart" && method.Parameters.Count == 2);
         var registryObjectLastCodePart = bridge.Methods.Single(method =>
             method.Name == "RegistryObjectLastCodePart" && method.Parameters.Count == 2);
+        var registryObjectFillPlaceHolderAsset = bridge.Methods.Single(method =>
+            method.Name == "RegistryObjectFillPlaceHolder" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation");
+        var registryObjectFillPlaceHolderString = bridge.Methods.Single(method =>
+            method.Name == "RegistryObjectFillPlaceHolder" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String);
+        var registryObjectFillPlaceHolderSingle = bridge.Methods.Single(method =>
+            method.Name == "RegistryObjectFillPlaceHolder" &&
+            method.Parameters.Count == 3);
         var wildcardUtilMatchTwoArg = bridge.Methods.Single(method =>
             method.Name == "WildcardUtilMatch" && method.Parameters.Count == 2);
         var wildcardUtilMatchThreeArg = bridge.Methods.Single(method =>
@@ -141,6 +152,11 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(registryObjectFirstCodePart),
             vanilla.MainModule.ImportReference(registryObjectLastCodePart));
+        int registryObjectFillPlaceHolderMethods = PatchRegistryObjectFillPlaceHolder(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(registryObjectFillPlaceHolderAsset),
+            vanilla.MainModule.ImportReference(registryObjectFillPlaceHolderString),
+            vanilla.MainModule.ImportReference(registryObjectFillPlaceHolderSingle));
         int assetLocationMethods = PatchAssetLocation(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(assetLocationResolveToDomainAndPath));
@@ -228,6 +244,11 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 2 RegistryObject methods patched, applied {registryObjectMethods}.");
+        }
+        if (registryObjectFillPlaceHolderMethods != 3)
+        {
+            throw new InvalidOperationException(
+                $"Expected 3 RegistryObject.FillPlaceHolder methods patched, applied {registryObjectFillPlaceHolderMethods}.");
         }
         if (assetLocationMethods != 1)
         {
@@ -391,6 +412,50 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.FirstCodePart(int) + LastCodePart(int) -> OptimumApiBridge");
         return 2;
+    }
+
+    internal static int PatchRegistryObjectFillPlaceHolder(
+        ModuleDefinition module,
+        MethodReference fillPlaceHolderAssetBridge,
+        MethodReference fillPlaceHolderStringBridge,
+        MethodReference fillPlaceHolderSingleBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.RegistryObject";
+        var registryObject = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var fillAsset = registryObject.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "FillPlaceHolder" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.FullName == "Vintagestory.API.Common.AssetLocation" &&
+            method.ReturnType.FullName == "Vintagestory.API.Common.AssetLocation")
+            ?? throw new InvalidOperationException($"{typeName}.FillPlaceHolder(AssetLocation, OrderedDictionary<string, string>) is missing from the vanilla API.");
+
+        var fillString = registryObject.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "FillPlaceHolder" &&
+            method.Parameters.Count == 2 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{typeName}.FillPlaceHolder(string, OrderedDictionary<string, string>) is missing from the vanilla API.");
+
+        var fillSingle = registryObject.Methods.SingleOrDefault(method =>
+            method.IsStatic &&
+            method.Name == "FillPlaceHolder" &&
+            method.Parameters.Count == 3 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String &&
+            method.Parameters[1].ParameterType.MetadataType == MetadataType.String &&
+            method.Parameters[2].ParameterType.MetadataType == MetadataType.String &&
+            method.ReturnType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{typeName}.FillPlaceHolder(string, string, string) is missing from the vanilla API.");
+
+        RewriteTwoArgForwarder(fillAsset, fillPlaceHolderAssetBridge);
+        RewriteTwoArgForwarder(fillString, fillPlaceHolderStringBridge);
+        RewriteThreeArgForwarder(fillSingle, fillPlaceHolderSingleBridge);
+
+        Console.WriteLine($"  API PATCHED: {typeName}.FillPlaceHolder (3 overloads) -> OptimumApiBridge");
+        return 3;
     }
 
     internal static int PatchAssetLocation(

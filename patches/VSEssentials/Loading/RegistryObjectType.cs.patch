@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Loading/RegistryObjectType.cs b/VSEssentials/Loading/RegistryObjectType.cs
-index 7c78fc7..c9b5575 100644
+index 7c78fc7..f58e814 100644
 --- a/VSEssentials/Loading/RegistryObjectType.cs
 +++ b/VSEssentials/Loading/RegistryObjectType.cs
 @@ -73,7 +73,7 @@ namespace Vintagestory.ServerMods.NoObf
@@ -26,28 +26,14 @@ index 7c78fc7..c9b5575 100644
          {
              T resolvedType = new T()
              {
-@@ -278,15 +278,7 @@ namespace Vintagestory.ServerMods.NoObf
-                 Variant = variant
-             };
- 
--            try
--            {
--                solveByType(jobject, fullcode.Path, variant);
--            }
--            catch (Exception e)
--            {
--                api.Server.Logger.Error("Exception thrown while trying to resolve *byType properties of type {0}, variant {1}. Will ignore most of the attributes. Exception thrown:", this.Code, fullcode);
--                api.Server.Logger.Error(e);
--            }
-+            // Optimum: jobject is already resolved by RegistryObjectType.Resolve in GatherVariantsAndPopulate
- 
-             try
-             {
-@@ -303,7 +295,152 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -303,8 +303,185 @@ namespace Vintagestory.ServerMods.NoObf
              return resolvedType;
          }
  
 -        protected static void solveByType(JToken json, string codePath, API.Datastructures.OrderedDictionary<string, string> searchReplace)
++        [ThreadStatic]
++        internal static bool optimumAlreadyResolved;
++
 +        [ThreadStatic]
 +        private static HashSet<JToken> t_dynamicTokens;
 +
@@ -58,112 +44,134 @@ index 7c78fc7..c9b5575 100644
 +
 +        public static bool MarkDynamicTokens(JToken token, HashSet<JToken> dynamicTokens)
 +        {
++            return BuildDynamicSet(token, dynamicTokens);
++        }
++
++        public static bool BuildDynamicSet(JToken token, HashSet<JToken> dynamicNodes)
++        {
 +            if (token == null) return false;
-+
-+            bool isDynamic = false;
-+
 +            if (token is JObject obj)
 +            {
-+                foreach (var prop in obj.Properties())
++                bool isDynamic = false;
++                foreach (var entry in obj)
 +                {
-+                    if (prop.Name.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
++                    if (entry.Key.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
 +                    {
 +                        isDynamic = true;
 +                    }
-+                    if (MarkDynamicTokens(prop.Value, dynamicTokens))
++                    if (entry.Value != null && BuildDynamicSet(entry.Value, dynamicNodes))
 +                    {
 +                        isDynamic = true;
 +                    }
 +                }
++                if (isDynamic)
++                {
++                    dynamicNodes.Add(obj);
++                }
++                return isDynamic;
 +            }
 +            else if (token is JArray arr)
 +            {
-+                foreach (var item in arr)
++                bool isDynamic = false;
++                foreach (var child in arr)
 +                {
-+                    if (MarkDynamicTokens(item, dynamicTokens))
++                    if (child != null && BuildDynamicSet(child, dynamicNodes))
 +                    {
 +                        isDynamic = true;
 +                    }
 +                }
-+            }
-+            else if (token is JValue val && val.Type == JTokenType.String)
-+            {
-+                if (val.Value is string s && s.Contains('{'))
++                if (isDynamic)
 +                {
-+                    isDynamic = true;
++                    dynamicNodes.Add(arr);
++                }
++                return isDynamic;
++            }
++            else if (token.Type == JTokenType.String)
++            {
++                string value = (string)((JValue)token).Value;
++                if (value != null && value.Contains('{'))
++                {
++                    dynamicNodes.Add(token);
++                    return true;
 +                }
 +            }
-+
-+            if (isDynamic)
-+            {
-+                dynamicTokens.Add(token);
-+            }
-+
-+            return isDynamic;
++            return false;
 +        }
 +
-+        public static JToken Resolve(JToken token, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace, HashSet<JToken> dynamicTokens = null)
++        public static JToken Resolve(JToken token, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace, HashSet<JToken> dynamicNodes = null)
 +        {
-+            if (token == null) return null;
-+
-+            if (dynamicTokens != null && !dynamicTokens.Contains(token))
++            if (token == null || (dynamicNodes != null && !dynamicNodes.Contains(token)))
 +            {
 +                return token;
 +            }
 +
 +            if (token is JObject obj)
 +            {
-+                var newObj = new JObject();
 +                Dictionary<string, JToken> propertiesToAdd = null;
 +
-+                foreach (var prop in obj.Properties())
++                foreach (var entry in obj)
 +                {
-+                    var key = prop.Name;
-+                    if (key.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
++                    if (!entry.Key.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
 +                    {
-+                        string trueKey = key.Substring(0, key.Length - "byType".Length);
-+                        var byTypeObj = prop.Value as JObject;
-+                        if (byTypeObj != null)
-+                        {
-+                            JToken selected = null;
-+                            foreach (var byTypeProp in byTypeObj.Properties())
-+                            {
-+                                if (WildcardUtil.Match(byTypeProp.Name, codePath))
-+                                {
-+                                    selected = byTypeProp.Value;
-+                                    break;
-+                                }
-+                            }
++                        continue;
++                    }
 +
-+                            if (selected != null)
++                    string trueKey = entry.Key.Substring(0, entry.Key.Length - "byType".Length);
++                    if (entry.Value is not JObject byTypeObj)
++                    {
++                        throw new FormatException("Invalid value at key: " + entry.Key);
++                    }
++
++                    foreach (var byTypeProperty in byTypeObj)
++                    {
++                        if (WildcardUtil.Match(byTypeProperty.Key, codePath))
++                        {
++                            if (propertiesToAdd == null) propertiesToAdd = new Dictionary<string, JToken>();
++                            propertiesToAdd.Add(trueKey, byTypeProperty.Value);
++                            break;
++                        }
++                    }
++                }
++
++                var newObj = new JObject();
++                foreach (var entry in obj)
++                {
++                    if (entry.Key.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
++                    {
++                        continue;
++                    }
++
++                    if (propertiesToAdd != null && propertiesToAdd.Remove(entry.Key, out JToken selected))
++                    {
++                        if (entry.Value is JObject siblingObj)
++                        {
++                            if (selected is JObject)
 +                            {
-+                                propertiesToAdd ??= new Dictionary<string, JToken>();
-+                                propertiesToAdd[trueKey] = selected;
++                                JObject merged = (JObject)siblingObj.DeepClone();
++                                merged.Merge(selected);
++                                newObj[entry.Key] = Resolve(merged, codePath, searchReplace, null);
 +                            }
++                            else
++                            {
++                                newObj[entry.Key] = Resolve(siblingObj, codePath, searchReplace, dynamicNodes);
++                            }
++                        }
++                        else
++                        {
++                            newObj[entry.Key] = Resolve(selected, codePath, searchReplace, dynamicNodes);
 +                        }
 +                    }
 +                    else
 +                    {
-+                        newObj[key] = Resolve(prop.Value, codePath, searchReplace, dynamicTokens);
++                        newObj[entry.Key] = Resolve(entry.Value, codePath, searchReplace, dynamicNodes);
 +                    }
 +                }
 +
 +                if (propertiesToAdd != null)
 +                {
-+                    foreach (var add in propertiesToAdd)
++                    foreach (var kvp in propertiesToAdd)
 +                    {
-+                        string trueKey = add.Key;
-+                        JToken selected = add.Value;
-+                        if (obj[trueKey] is JObject sibling && selected is JObject)
-+                        {
-+                            var merged = (JObject)sibling.DeepClone();
-+                            merged.Merge(selected);
-+                            newObj[trueKey] = Resolve(merged, codePath, searchReplace, dynamicTokens);
-+                        }
-+                        else if (!(newObj[trueKey] is JObject))
-+                        {
-+                            newObj[trueKey] = Resolve(selected, codePath, searchReplace, dynamicTokens);
-+                        }
++                        newObj[kvp.Key] = Resolve(kvp.Value, codePath, searchReplace, dynamicNodes);
 +                    }
 +                }
 +
@@ -172,28 +180,36 @@ index 7c78fc7..c9b5575 100644
 +            else if (token is JArray arr)
 +            {
 +                var newArr = new JArray();
-+                foreach (var item in arr)
++                foreach (var child in arr)
 +                {
-+                    newArr.Add(Resolve(item, codePath, searchReplace, dynamicTokens));
++                    newArr.Add(Resolve(child, codePath, searchReplace, dynamicNodes));
 +                }
 +                return newArr;
 +            }
-+            else if (token is JValue val && val.Type == JTokenType.String)
++            else if (token.Type == JTokenType.String)
 +            {
-+                string str = (string)val.Value;
-+                if (str != null && str.Contains('{'))
++                string value = (string)((JValue)token).Value;
++                if (value != null && value.Contains('{'))
 +                {
-+                    return new JValue(RegistryObject.FillPlaceHolder(str, searchReplace));
++                    string replaced = RegistryObject.FillPlaceHolder(value, searchReplace);
++                    if (!ReferenceEquals(replaced, value))
++                    {
++                        return new JValue(replaced);
++                    }
 +                }
 +                return token;
 +            }
-+            else
-+            {
-+                return token;
-+            }
++
++            return token;
 +        }
 +
 +        protected static void solveByType(JToken json, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
          {
++            if (optimumAlreadyResolved)
++            {
++                return;
++            }
++
              if (json is JObject jsonObj)
              {
+                 List<string> propertiesToRemove = null;

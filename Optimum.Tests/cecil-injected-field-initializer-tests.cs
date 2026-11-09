@@ -139,6 +139,23 @@ public class CecilInjectedFieldInitializerTests
         Assert.Contains("workers != null ? workers.GetSlot(threadId) : 0;", patch);
     }
 
+    [Fact]
+    public void ModRegistryObjectTypeLoaderReusableDynamicNodesIsLazilyInitialized()
+    {
+        string patch = Read("patches/runtime/VSEssentials/Vintagestory/ServerMods/NoObf/ModRegistryObjectTypeLoader.cs.patch");
+
+        Assert.DoesNotMatch(
+            new Regex(@"reusableDynamicNodes\s*=\s*new\s+HashSet<JToken>"),
+            patch);
+        Assert.Contains("reusableDynamicNodes ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);", patch);
+
+        string typePatch = Read("patches/runtime/VSEssentials/Vintagestory/ServerMods/NoObf/RegistryObjectType.cs.patch");
+        Assert.DoesNotMatch(
+            new Regex(@"t_dynamicTokens\s*=\s*new\s+HashSet<JToken>"),
+            typePatch);
+        Assert.Contains("t_dynamicTokens ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);", typePatch);
+    }
+
     private static string Read(string relativePath)
     {
         return File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));

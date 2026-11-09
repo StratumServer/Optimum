@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Loading/RegistryObjectTypeLoader.cs b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
-index 07a34c5..7b5e465 100644
+index 07a34c5..2ea17dd 100644
 --- a/VSEssentials/Loading/RegistryObjectTypeLoader.cs
 +++ b/VSEssentials/Loading/RegistryObjectTypeLoader.cs
 @@ -26,7 +26,7 @@ namespace Vintagestory.ServerMods.NoObf
@@ -11,61 +11,75 @@ index 07a34c5..7b5e465 100644
  
          public AssetLocation Code;
  
-@@ -439,25 +439,39 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -415,6 +415,9 @@ namespace Vintagestory.ServerMods.NoObf
+         }
  
-             var deserializer = JsonUtil.CreateSerializerForDomain(baseType.Code.Domain);
  
--            // Single variant
--            if (variants == null || variants.Count == 0)
-+            var dynamicTokens = RegistryObjectType.GetOrCreateDynamicSet();
-+            dynamicTokens.Clear();
-+            try
++        [ThreadStatic]
++        private static HashSet<JToken> reusableDynamicNodes;
++
+         /// <summary>
+         /// This does the actual gathering and population, through GatherVariants calls - numerous calls if a base type has many variants
+         /// </summary>
+@@ -445,18 +448,50 @@ namespace Vintagestory.ServerMods.NoObf
+                 RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, baseType.Code.Clone(), baseType.jsonObject, deserializer, new ());
+                 typesResolved.Add(resolvedType);
+             }
++            else if (variants.Count == 1)
++            {
++                ResolvedVariant variant = variants[0];
++                RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, baseType.jsonObject, deserializer, variant.CodeParts);
++                typesResolved.Add(resolvedType);
++            }
+             else
              {
--                RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, baseType.Code.Clone(), baseType.jsonObject, deserializer, new ());
--                typesResolved.Add(resolvedType);
--            }
--            else
--            {
 -                // Multiple variants
 -                int count = 1;
 -                foreach (ResolvedVariant variant in variants)
-+                if (baseType.jsonObject != null)
++                // Multiple variants: precompute dynamic JToken set once and resolve only dynamic subtrees
++                HashSet<JToken> dynamicNodes = reusableDynamicNodes ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);
++                dynamicNodes.Clear();
++                try
                  {
 -                    JObject jobject = count++ == variants.Count ? baseType.jsonObject : baseType.jsonObject.DeepClone() as JObject;
 -                    // This DeepClone() is expensive, can we find a better way one day?
--
--                    RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, jobject, deserializer, variant.CodeParts);
-+                    RegistryObjectType.MarkDynamicTokens(baseType.jsonObject, dynamicTokens);
-+                }
++                    RegistryObjectType.BuildDynamicSet(baseType.jsonObject, dynamicNodes);
  
-+                // Single variant
-+                if (variants == null || variants.Count == 0)
-+                {
-+                    string codePath = baseType.Code.Path;
-+                    JObject resolvedJson = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, codePath, new (), dynamicTokens);
-+                    RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, baseType.Code.Clone(), resolvedJson, deserializer, new ());
-                     typesResolved.Add(resolvedType);
-                 }
-+                else
-+                {
-+                    // Multiple variants: Resolve lazily without full-tree DeepClone
+-                    RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, jobject, deserializer, variant.CodeParts);
 +                    foreach (ResolvedVariant variant in variants)
 +                    {
-+                        string codePath = variant.Code.Path;
-+                        JObject resolvedJson = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, codePath, variant.CodeParts, dynamicTokens);
-+                        RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, resolvedJson, deserializer, variant.CodeParts);
-+
-+                        typesResolved.Add(resolvedType);
++                        JObject jobject;
++                        try
++                        {
++                            jobject = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, variant.Code.Path, variant.CodeParts, dynamicNodes);
++                        }
++                        catch (Exception e)
++                        {
++                            api.Server.Logger.Error("Exception thrown while trying to resolve *byType properties of type {0}, variant {1}. Will ignore most of the attributes. Exception thrown:", baseType.Code, variant.Code);
++                            api.Server.Logger.Error(e);
++                            jobject = baseType.jsonObject;
++                        }
+ 
+-                    typesResolved.Add(resolvedType);
++                        RegistryObjectType.optimumAlreadyResolved = true;
++                        try
++                        {
++                            RegistryObjectType resolvedType = baseType.CreateAndPopulate(api, variant.Code, jobject, deserializer, variant.CodeParts);
++                            typesResolved.Add(resolvedType);
++                        }
++                        finally
++                        {
++                            RegistryObjectType.optimumAlreadyResolved = false;
++                        }
 +                    }
 +                }
-+            }
-+            finally
-+            {
-+                dynamicTokens.Clear();
++                finally
++                {
++                    dynamicNodes.Clear();
+                 }
              }
  
-             baseType.jsonObject = null;
-@@ -500,7 +514,7 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -500,7 +535,7 @@ namespace Vintagestory.ServerMods.NoObf
          {
              List<ResolvedVariant> variantsFinal = new List<ResolvedVariant>();
  
@@ -74,7 +88,7 @@ index 07a34c5..7b5e465 100644
  
  
              // 1. Collect all types
-@@ -617,7 +631,7 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -617,7 +652,7 @@ namespace Vintagestory.ServerMods.NoObf
              return variantsFinal;
          }
  
@@ -83,7 +97,7 @@ index 07a34c5..7b5e465 100644
          {
              if (variantGroup.Code == null)
              {
-@@ -700,12 +714,12 @@ namespace Vintagestory.ServerMods.NoObf
+@@ -700,12 +735,12 @@ namespace Vintagestory.ServerMods.NoObf
          }
  
  

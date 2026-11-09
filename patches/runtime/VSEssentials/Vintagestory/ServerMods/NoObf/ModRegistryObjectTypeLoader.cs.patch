@@ -1,0 +1,67 @@
+diff --git a/VSEssentials/Vintagestory/ServerMods/NoObf/ModRegistryObjectTypeLoader.cs b/VSEssentials/Vintagestory/ServerMods/NoObf/ModRegistryObjectTypeLoader.cs
+--- a/VSEssentials/Vintagestory/ServerMods/NoObf/ModRegistryObjectTypeLoader.cs
++++ b/VSEssentials/Vintagestory/ServerMods/NoObf/ModRegistryObjectTypeLoader.cs
+@@ -355,6 +355,9 @@ public class ModRegistryObjectTypeLoader : ModSystem
+ 		}
+ 	}
+ 
++	[ThreadStatic]
++	private static HashSet<JToken> reusableDynamicNodes;
++
+ 	private void GatherVariantsAndPopulate(RegistryObjectType baseType, List<RegistryObjectType> typesResolved)
+ 	{
+ 		List<ResolvedVariant> list = null;
+@@ -377,14 +380,48 @@ public class ModRegistryObjectTypeLoader : ModSystem
+ 			RegistryObjectType item = baseType.CreateAndPopulate(api, baseType.Code.Clone(), baseType.jsonObject, deserializer, new Vintagestory.API.Datastructures.OrderedDictionary<string, string>());
+ 			typesResolved.Add(item);
+ 		}
++		else if (list.Count == 1)
++		{
++			ResolvedVariant single = list[0];
++			RegistryObjectType item = baseType.CreateAndPopulate(api, single.Code, baseType.jsonObject, deserializer, single.CodeParts);
++			typesResolved.Add(item);
++		}
+ 		else
+ 		{
+-			int num = 1;
+-			foreach (ResolvedVariant item3 in list)
++			HashSet<JToken> dynamicNodes = reusableDynamicNodes ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);
++			dynamicNodes.Clear();
++			try
++			{
++				RegistryObjectType.BuildDynamicSet(baseType.jsonObject, dynamicNodes);
++				foreach (ResolvedVariant item3 in list)
++				{
++					JObject jobject;
++					try
++					{
++						jobject = (JObject)RegistryObjectType.Resolve(baseType.jsonObject, item3.Code.Path, item3.CodeParts, dynamicNodes);
++					}
++					catch (Exception e)
++					{
++						api.Server.Logger.Error("Exception thrown while trying to resolve *byType properties of type {0}, variant {1}. Will ignore most of the attributes. Exception thrown:", baseType.Code, item3.Code);
++						api.Server.Logger.Error(e);
++						jobject = baseType.jsonObject;
++					}
++
++					RegistryObjectType.optimumAlreadyResolved = true;
++					try
++					{
++						RegistryObjectType item2 = baseType.CreateAndPopulate(api, item3.Code, jobject, deserializer, item3.CodeParts);
++						typesResolved.Add(item2);
++					}
++					finally
++					{
++						RegistryObjectType.optimumAlreadyResolved = false;
++					}
++				}
++			}
++			finally
+ 			{
+-				JObject jobject = ((num++ == list.Count) ? baseType.jsonObject : (baseType.jsonObject.DeepClone() as JObject));
+-				RegistryObjectType item2 = baseType.CreateAndPopulate(api, item3.Code, jobject, deserializer, item3.CodeParts);
+-				typesResolved.Add(item2);
++				dynamicNodes.Clear();
+ 			}
+ 		}
+ 		baseType.jsonObject = null;
