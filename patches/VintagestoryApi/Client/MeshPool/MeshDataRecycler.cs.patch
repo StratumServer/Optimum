@@ -1,0 +1,73 @@
+diff --git a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
+index a96b9c9..db7c4b0 100644
+--- a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
++++ b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
+@@ -123,15 +123,14 @@ namespace Vintagestory.API.Client
+                 // Do the disposal action on the same thread which accesses these lists, to avoid any race-condition
+                 forRecycling.Clear();
+                 smallSizes.Clear();
+                 mediumSizes.Clear();
+                 largeSizes.Clear();
++                return;
+             }
+ 
+-            if (forRecycling.IsEmpty) return;
+-
+-            ControlSizeOfLists();   // Only control the size of the lists if we are going to add something to them - is this controlled often enough, will they get out of control? Let's see?
++            ControlSizeOfLists();
+ 
+             while (!forRecycling.IsEmpty && forRecycling.TryDequeue(out MeshData recycled))
+             {
+                 int entrySize = recycled.VerticesMax / Four;   // round up to multiple of 4; then divide by 4 to get the size for the purposes of our lists where the key is VerticesMax/4
+ 
+@@ -175,28 +174,35 @@ namespace Vintagestory.API.Client
+ 
+         private void RemoveOldest(SortedList<float, MeshData> list, int maxSize)
+         {
+             if (list.Count == 0) return;   // Nothing to do and logic fails on empty list
+ 
+-            int totalsize = 0;
+-            int indexOldest = 0;
+-            long timeOldest = list.GetValueAtIndex(0).RecyclingTime;
+-            int index = 0;
+-            foreach (var entry in list)
++            while (list.Count > 0)
+             {
+-                totalsize += (int)entry.Key;
+-                if (entry.Value.RecyclingTime < timeOldest)
++                int totalsize = 0;
++                int indexOldest = 0;
++                long timeOldest = list.GetValueAtIndex(0).RecyclingTime;
++                int index = 0;
++                foreach (var entry in list)
+                 {
+-                    indexOldest = index;
+-                    timeOldest = entry.Value.RecyclingTime;
++                    totalsize += (int)entry.Key;
++                    if (entry.Value.RecyclingTime < timeOldest)
++                    {
++                        indexOldest = index;
++                        timeOldest = entry.Value.RecyclingTime;
++                    }
++                    index++;
++                }
++                if (totalsize > maxSize || timeOldest < game.ElapsedMilliseconds - TTL)    // Always remove one if more than 45 seconds in queue unused
++                {
++                    list.GetValueAtIndex(indexOldest).DisposeBasicData();     // Help to release its memory to the GC
++                    list.RemoveAt(indexOldest);
++                }
++                else
++                {
++                    break;
+                 }
+-                index++;
+-            }
+-            if (totalsize > maxSize || timeOldest < game.ElapsedMilliseconds - TTL)    // Always remove one if more than 45 seconds in queue unused
+-            {
+-                list.GetValueAtIndex(indexOldest).DisposeBasicData();     // Help to release its memory to the GC
+-                list.RemoveAt(indexOldest);
+             }
+         }
+ 
+         private MeshData GetRecycled(int minimumCapacity)
+         {

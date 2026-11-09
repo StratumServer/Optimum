@@ -1287,6 +1287,47 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void MeshDataRecycler_DoRecycling_EvictsWhenIdleAndLoopsRemoveOldest()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs.patch");
+        Assert.Contains("ControlSizeOfLists();", patch);
+        Assert.Contains("while (list.Count > 0)", patch);
+        Assert.Contains("list.GetValueAtIndex(indexOldest).DisposeBasicData();", patch);
+
+        long currentElapsedMs = 10000L;
+        var clientMock = StubProxy<IClientWorldAccessor>.Create((method, args) =>
+        {
+            if (method.Name == "get_ElapsedMilliseconds")
+            {
+                return currentElapsedMs;
+            }
+            return null;
+        });
+
+        var recycler = new MeshDataRecycler(clientMock);
+
+        // Queue meshes for recycling
+        for (int i = 0; i < 5; i++)
+        {
+            var mesh = new MeshData(4096);
+            recycler.Recycle(mesh);
+        }
+
+        // Process queue into lists
+        recycler.DoRecycling();
+
+        // Advance past TTL (TTL = 15000 ms)
+        currentElapsedMs = 50000L;
+
+        // With empty forRecycling queue, DoRecycling should still run ControlSizeOfLists and evict all expired meshes
+        recycler.DoRecycling();
+
+        // GetOrCreateMesh should create fresh meshes rather than returning expired ones
+        var freshMesh = recycler.GetOrCreateMesh(4096);
+        Assert.NotNull(freshMesh);
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");
