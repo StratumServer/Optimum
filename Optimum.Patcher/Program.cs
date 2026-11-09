@@ -645,6 +645,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)
     new("Vintagestory.Client.RenderAPIBase", "RenderMultiTextureMesh", 3),
+    // Issue #480: bounds-check atlasNumber in TextureAtlasManager.RegenMipMaps
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "RegenMipMaps", 1),
     // Chunk tesselator worker pool: .ctor constructs the tesselators/uploadHandoff
     // worker-pool state (Option B - TerrainChunkTesselator stays a real field, assigned
     // from ClientMain::Start above), OnBlockTexturesLoaded/OnSeperateThreadGameTick/
@@ -782,7 +784,6 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerMain", "BroadcastArbitraryUdpPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityAttributesPacket", 2),
     new("Vintagestory.Server.ServerPackets", "GetBulkEntityDebugAttributesPacket", 1),
-    new("Vintagestory.Server.ServerEventManager", "TriggerGameWorldBeingSaved", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(

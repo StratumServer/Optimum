@@ -1303,6 +1303,17 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void TextureAtlasManager_RegenMipMaps_GuardsOutOfRangeAtlasIndex()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs.patch");
+        Assert.Contains("if (atlasNumber < 0 || atlasNumber >= AtlasTextures.Count)", patch);
+        Assert.Contains("Cannot regen mipmaps for atlas number {0}, out of range (count: {1})", patch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.TextureAtlasManager\", \"RegenMipMaps\", 1)", programSource);
+    }
+
+    [Fact]
     public void CheckGlErrorAlways_ThrottlesSynchronousGlGetErrorWhenDebuggingDisabled()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch");
