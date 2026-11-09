@@ -1427,6 +1427,28 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void ModLoader_DotPrefixedAndEmptyModInfoAndSidedMods()
+    {
+        string modLoaderPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch");
+        Assert.Contains("fsInfo.Name.StartsWith('.')", modLoaderPatch);
+        Assert.Contains("if (mod.Info != null && !mod.Info.Side.Is(side))", modLoaderPatch);
+        Assert.Contains("CompareModRequiresCompilation", modLoaderPatch);
+
+        string modContainerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch");
+        Assert.Contains("Failed to deserialize modinfo.json in", modContainerPatch);
+        Assert.Contains("if (base.Info?.BackgroundPaths != null)", modContainerPatch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Common.ModLoader\", \"CollectMods\", 0)", programSource);
+        Assert.Contains("new(\"Vintagestory.Common.ModLoader\", \"instantiateMods\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Common.ModContainer\", \"LoadModInfo\", 2)", programSource);
+
+        string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch", cecilList);
+        Assert.Contains("patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch", cecilList);
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");

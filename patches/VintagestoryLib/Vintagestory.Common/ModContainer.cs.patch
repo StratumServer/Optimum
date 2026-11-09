@@ -1,0 +1,76 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/ModContainer.cs b/VintagestoryLib/Vintagestory.Common/ModContainer.cs
+--- a/VintagestoryLib/Vintagestory.Common/ModContainer.cs
++++ b/VintagestoryLib/Vintagestory.Common/ModContainer.cs
+@@ -253,9 +253,17 @@
+ 					string path = Path.Combine(FolderPath, "modinfo.json");
+ 					if (File.Exists(path))
+ 					{
+-						string text = File.ReadAllText(path);
+-						base.Info = JsonConvert.DeserializeObject<ModInfo>(text);
+-						base.Info?.Init();
++						try
++						{
++							string text = File.ReadAllText(path);
++							base.Info = JsonConvert.DeserializeObject<ModInfo>(text);
++							base.Info?.Init();
++						}
++						catch (Exception ex)
++						{
++							base.Logger.Error("Failed to deserialize modinfo.json in '{0}': {1}", FolderPath, ex);
++							base.Info = null;
++						}
+ 					}
+ 					if (base.Info?.BackgroundPaths != null)
+ 					{
+@@ -265,15 +273,7 @@
+ 							string path2 = base.Info.BackgroundPaths[i];
+ 							if (RuntimeEnv.IsDevEnvironment)
+ 							{
+-								global::_003C_003Ey__InlineArray6<string> buffer = default(global::_003C_003Ey__InlineArray6<string>);
+-								buffer[0] = FolderPath;
+-								buffer[1] = "..";
+-								buffer[2] = "..";
+-								buffer[3] = "..";
+-								buffer[4] = "..";
+-								buffer[5] = path2;
+-								string p = Path.Combine(buffer);
+-								base.Info.Backgrounds[i] = () => new BitmapExternal(p);
++								base.Info.Backgrounds[i] = () => new BitmapExternal(Path.Combine(FolderPath, "..", "..", "..", "..", path2));
+ 							}
+ 							else
+ 							{
+@@ -326,12 +326,20 @@
+ 						ZipEntry entry = val.GetEntry("modinfo.json");
+ 						if (entry != null)
+ 						{
+-							using StreamReader streamReader = new StreamReader(val.GetInputStream(entry));
+-							string text4 = streamReader.ReadToEnd();
+-							base.Info = JsonConvert.DeserializeObject<ModInfo>(text4);
+-							base.Info?.Init();
++							try
++							{
++								using StreamReader streamReader = new StreamReader(val.GetInputStream(entry));
++								string text4 = streamReader.ReadToEnd();
++								base.Info = JsonConvert.DeserializeObject<ModInfo>(text4);
++								base.Info?.Init();
++							}
++							catch (Exception ex)
++							{
++								base.Logger.Error("Failed to deserialize modinfo.json in '{0}': {1}", base.SourcePath, ex);
++								base.Info = null;
++							}
+ 						}
+-						if (base.Info.BackgroundPaths != null)
++						if (base.Info?.BackgroundPaths != null)
+ 						{
+ 							base.Info.Backgrounds = new BitmapSupplierDelegate[base.Info.BackgroundPaths.Length];
+ 							for (int num = 0; num < base.Info.BackgroundPaths.Length; num++)
+@@ -393,7 +401,7 @@
+ 				}
+ 				if (base.Info == null)
+ 				{
+-					base.Logger.Error("Missing modinfo.json");
++					base.Logger.Error("Missing modinfo.json in '{0}'", FolderPath ?? base.SourcePath);
+ 					SetError(ModError.Loading);
+ 				}
+ 				if (base.WorldConfig != null)
