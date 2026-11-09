@@ -1272,6 +1272,21 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void PlayerDataManager_StreamedJsonSaveAndOrdinalIgnoreCaseEntryLookup()
+    {
+        string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch");
+        Assert.Contains("string.Equals(item.PlayerName, playername, StringComparison.OrdinalIgnoreCase)", patch);
+        Assert.Contains(".Serialize(textWriter, PlayerDataByUid.Values)", patch);
+        Assert.Contains(".Serialize(textWriter2, PlayerGroupsById.Values)", patch);
+        Assert.Contains("DateTime now = DateTime.Now;", patch);
+
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        Assert.Contains("new(\"Vintagestory.Server.PlayerDataManager\", \"OnCheckRequireSave\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.PlayerDataManager\", \"Load\", 0)", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.PlayerDataManager\", \"GetPlayerEntry\", 3)", programSource);
+    }
+
+    [Fact]
     public void Asset_Equals_UnwrapsIAssetWhenComparingAssets()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch");
