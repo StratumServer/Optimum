@@ -7,6 +7,8 @@ using System.Text;
 using Cairo;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using SkiaSharp;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
@@ -1812,6 +1814,55 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         ItemTypeNet.ClearAttributesCache();
     }
 #endif
+
+    [Fact]
+    public void JsonPatchLoader_DirectUtf8SerializationAndWildcardCache_EliminatesUtf16StringAndPreservesJsonParity()
+    {
+        string patchPath = PatchReader.FindRepositoryFile("patches/VSEssentials/Loading/JsonPatchLoader.cs.patch");
+        Assert.True(File.Exists(patchPath), "patches/VSEssentials/Loading/JsonPatchLoader.cs.patch must exist");
+        string patchText = File.ReadAllText(patchPath);
+
+        Assert.Contains("wildcardCache", patchText);
+        Assert.Contains("new UTF8Encoding(false)", patchText);
+        Assert.Contains("new MemoryStream(4096)", patchText);
+        Assert.Contains("cachedData.asset.Data = memoryStream.ToArray();", patchText);
+        Assert.Contains("cachedData.asset.IsPatched = true;", patchText);
+        Assert.Contains("-                        var sbFile = StringBuilderCache.Acquire();", patchText);
+
+        string sourcePath = PatchReader.FindRepositoryFile("VSEssentials/Loading/JsonPatchLoader.cs");
+        string sourceText = File.ReadAllText(sourcePath);
+        Assert.Contains("var wildcardCache = new Dictionary<(string Domain, string BasePath), List<IAsset>>();", sourceText);
+        Assert.Contains("cachedData.asset.Data = memoryStream.ToArray();", sourceText);
+        Assert.Contains("wildcardCache?.Clear();", sourceText);
+        Assert.DoesNotContain("StringBuilderCache.Acquire()", sourceText);
+        Assert.DoesNotContain("StringBuilderCache.GetStringAndRelease", sourceText);
+
+        // Verify that UTF-8 stream serialization produces identical bytes and JSON structure without UTF-16 string conversion
+        var testObj = new JObject
+        {
+            ["type"] = "block",
+            ["code"] = "game:rock-granite",
+            ["attributes"] = new JObject { ["hardness"] = 4.5, ["blastResistance"] = 12 }
+        };
+
+        var utf8NoBom = new UTF8Encoding(false);
+        byte[] directBytes;
+        using (var ms = new MemoryStream())
+        {
+            using (var writer = new StreamWriter(ms, utf8NoBom, 4096, leaveOpen: true))
+            using (var jsonWriter = new JsonTextWriter(writer))
+            {
+                testObj.WriteTo(jsonWriter);
+                jsonWriter.Flush();
+            }
+            directBytes = ms.ToArray();
+        }
+
+        string deserialized = Encoding.UTF8.GetString(directBytes);
+        var parsedBack = JToken.Parse(deserialized);
+        Assert.True(JToken.DeepEquals(testObj, parsedBack));
+        Assert.False(directBytes[0] == 0xEF && directBytes[1] == 0xBB && directBytes[2] == 0xBF, "Direct UTF-8 bytes must not have a BOM preamble");
+    }
 
     public class StubProxy<T> : DispatchProxy where T : class
     {

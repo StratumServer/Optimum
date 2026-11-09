@@ -1,0 +1,98 @@
+diff --git a/VSEssentials/Loading/JsonPatchLoader.cs b/VSEssentials/Loading/JsonPatchLoader.cs
+index 4ce7ff9..810eecd 100644
+--- a/VSEssentials/Loading/JsonPatchLoader.cs
++++ b/VSEssentials/Loading/JsonPatchLoader.cs
+@@ -306,10 +306,11 @@ namespace Vintagestory.ServerMods.NoObf
+             totalCount = validPatches.Count;
+ 
+             // Process patches in the order they appear in validPatches
+             var processedFiles = new HashSet<AssetLocation>();
+             var filesToSave = new List<AssetLocation>();
++            var wildcardCache = new Dictionary<(string Domain, string BasePath), List<IAsset>>();
+ 
+             // Iterate over all valid patches in order from the beginning
+             for (int i = 0; i < validPatches.Count; i++)
+             {
+                 var (patch, source, index) = validPatches[i];
+@@ -317,11 +318,16 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+                 // Handle wildcards
+                 if (targetFile.Path.EndsWith('*'))
+                 {
+                     string basePath = targetFile.Path.TrimEnd('*');
+-                    List<IAsset> assets = api.Assets.GetMany(basePath, targetFile.Domain, false);
++                    var wildcardKey = (targetFile.Domain, basePath);
++                    if (!wildcardCache.TryGetValue(wildcardKey, out var assets))
++                    {
++                        assets = api.Assets.GetMany(basePath, targetFile.Domain, false);
++                        wildcardCache[wildcardKey] = assets;
++                    }
+ 
+                     // Apply patch to all found files
+                     for (int j = 0; j < assets.Count; j++)
+                     {
+                         ProcessSinglePatch(assets[j].Location, patch, source, index,
+@@ -337,39 +343,44 @@ namespace Vintagestory.ServerMods.NoObf
+                         ref processedFiles, ref filesToSave);
+                 }
+             }
+ 
+             // Save all modified files
+-            foreach (var fileLoc in filesToSave)
++            var utf8NoBom = new UTF8Encoding(false);
++            using (var memoryStream = new MemoryStream(4096))
+             {
+-                // Get modified JSON document from cache
+-                if (jsonCache.TryGetValue(fileLoc, out var cachedData))
++                foreach (var fileLoc in filesToSave)
+                 {
+-                    try
++                    // Get modified JSON document from cache
++                    if (jsonCache.TryGetValue(fileLoc, out var cachedData))
+                     {
+-                        // Serialize JSON back to string
+-                        var sbFile = StringBuilderCache.Acquire();
+-                        using (var writer = new StringWriter(sbFile))
+-                        using (var jsonWriter = new JsonTextWriter(writer))
++                        try
+                         {
+-                            cachedData.token.WriteTo(jsonWriter);
++                            memoryStream.SetLength(0);
++                            using (var writer = new StreamWriter(memoryStream, utf8NoBom, 4096, leaveOpen: true))
++                            using (var jsonWriter = new JsonTextWriter(writer))
++                            {
++                                cachedData.token.WriteTo(jsonWriter);
++                                jsonWriter.Flush();
++                            }
++
++                            // Save back to bytes
++                            cachedData.asset.Data = memoryStream.ToArray();
++                            cachedData.asset.IsPatched = true;
++                        }
++                        catch (Exception e)
++                        {
++                            api.World.Logger.Error("Failed to serialize JSON file {0}:", fileLoc);
++                            api.World.Logger.Error(e);
++                            errorCount++;
+                         }
+-
+-                        // Save back to bytes
+-                        cachedData.asset.Data = Encoding.UTF8.GetBytes(StringBuilderCache.GetStringAndRelease(sbFile));
+-                        cachedData.asset.IsPatched = true;
+-                    }
+-                    catch (Exception e)
+-                    {
+-                        api.World.Logger.Error("Failed to serialize JSON file {0}:", fileLoc);
+-                        api.World.Logger.Error(e);
+-                        errorCount++;
+                     }
+                 }
+             }
+ 
+             // Clear caches after processing
++            wildcardCache?.Clear();
+             jsonCache?.Clear();
+             filesToSave?.Clear();
+             processedFiles?.Clear();
+             validPatches?.Clear();
+             entries?.Clear();
