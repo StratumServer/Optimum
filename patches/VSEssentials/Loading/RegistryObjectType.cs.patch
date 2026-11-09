@@ -1,10 +1,8 @@
 diff --git a/VSEssentials/Loading/RegistryObjectType.cs b/VSEssentials/Loading/RegistryObjectType.cs
-index 7c78fc7..fbaa92e 100644
+index 7c78fc7..c9b5575 100644
 --- a/VSEssentials/Loading/RegistryObjectType.cs
 +++ b/VSEssentials/Loading/RegistryObjectType.cs
-@@ -71,11 +71,11 @@ namespace Vintagestory.ServerMods.NoObf
-         public RegistryObjectVariantGroup[] VariantGroups;
- 
+@@ -73,7 +73,7 @@ namespace Vintagestory.ServerMods.NoObf
          /// <summary>
          /// Variant values as resolved from blocktype/itemtype or entitytype
          /// </summary>
@@ -13,11 +11,7 @@ index 7c78fc7..fbaa92e 100644
  
          /// <summary>
          /// (Currently unused) A set of potential world interactions for this object. Used to display what the object is used for - e.g. Shift + Right Click to Knap Stones.
-         /// </summary>
-         [JsonProperty]
-@@ -260,16 +260,16 @@ namespace Vintagestory.ServerMods.NoObf
-                 }
-             }
+@@ -262,12 +262,12 @@ namespace Vintagestory.ServerMods.NoObf
  
          }
  
@@ -32,18 +26,174 @@ index 7c78fc7..fbaa92e 100644
          {
              T resolvedType = new T()
              {
-                 Code = Code,
-                 VariantGroups = VariantGroups,
-@@ -301,11 +301,11 @@ namespace Vintagestory.ServerMods.NoObf
-             resolvedType.Code = fullcode;
-             resolvedType.jsonObject = null;
+@@ -278,15 +278,7 @@ namespace Vintagestory.ServerMods.NoObf
+                 Variant = variant
+             };
+ 
+-            try
+-            {
+-                solveByType(jobject, fullcode.Path, variant);
+-            }
+-            catch (Exception e)
+-            {
+-                api.Server.Logger.Error("Exception thrown while trying to resolve *byType properties of type {0}, variant {1}. Will ignore most of the attributes. Exception thrown:", this.Code, fullcode);
+-                api.Server.Logger.Error(e);
+-            }
++            // Optimum: jobject is already resolved by RegistryObjectType.Resolve in GatherVariantsAndPopulate
+ 
+             try
+             {
+@@ -303,7 +295,152 @@ namespace Vintagestory.ServerMods.NoObf
              return resolvedType;
          }
  
 -        protected static void solveByType(JToken json, string codePath, API.Datastructures.OrderedDictionary<string, string> searchReplace)
++        [ThreadStatic]
++        private static HashSet<JToken> t_dynamicTokens;
++
++        public static HashSet<JToken> GetOrCreateDynamicSet()
++        {
++            return t_dynamicTokens ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);
++        }
++
++        public static bool MarkDynamicTokens(JToken token, HashSet<JToken> dynamicTokens)
++        {
++            if (token == null) return false;
++
++            bool isDynamic = false;
++
++            if (token is JObject obj)
++            {
++                foreach (var prop in obj.Properties())
++                {
++                    if (prop.Name.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
++                    {
++                        isDynamic = true;
++                    }
++                    if (MarkDynamicTokens(prop.Value, dynamicTokens))
++                    {
++                        isDynamic = true;
++                    }
++                }
++            }
++            else if (token is JArray arr)
++            {
++                foreach (var item in arr)
++                {
++                    if (MarkDynamicTokens(item, dynamicTokens))
++                    {
++                        isDynamic = true;
++                    }
++                }
++            }
++            else if (token is JValue val && val.Type == JTokenType.String)
++            {
++                if (val.Value is string s && s.Contains('{'))
++                {
++                    isDynamic = true;
++                }
++            }
++
++            if (isDynamic)
++            {
++                dynamicTokens.Add(token);
++            }
++
++            return isDynamic;
++        }
++
++        public static JToken Resolve(JToken token, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace, HashSet<JToken> dynamicTokens = null)
++        {
++            if (token == null) return null;
++
++            if (dynamicTokens != null && !dynamicTokens.Contains(token))
++            {
++                return token;
++            }
++
++            if (token is JObject obj)
++            {
++                var newObj = new JObject();
++                Dictionary<string, JToken> propertiesToAdd = null;
++
++                foreach (var prop in obj.Properties())
++                {
++                    var key = prop.Name;
++                    if (key.EndsWith("byType", StringComparison.OrdinalIgnoreCase))
++                    {
++                        string trueKey = key.Substring(0, key.Length - "byType".Length);
++                        var byTypeObj = prop.Value as JObject;
++                        if (byTypeObj != null)
++                        {
++                            JToken selected = null;
++                            foreach (var byTypeProp in byTypeObj.Properties())
++                            {
++                                if (WildcardUtil.Match(byTypeProp.Name, codePath))
++                                {
++                                    selected = byTypeProp.Value;
++                                    break;
++                                }
++                            }
++
++                            if (selected != null)
++                            {
++                                propertiesToAdd ??= new Dictionary<string, JToken>();
++                                propertiesToAdd[trueKey] = selected;
++                            }
++                        }
++                    }
++                    else
++                    {
++                        newObj[key] = Resolve(prop.Value, codePath, searchReplace, dynamicTokens);
++                    }
++                }
++
++                if (propertiesToAdd != null)
++                {
++                    foreach (var add in propertiesToAdd)
++                    {
++                        string trueKey = add.Key;
++                        JToken selected = add.Value;
++                        if (obj[trueKey] is JObject sibling && selected is JObject)
++                        {
++                            var merged = (JObject)sibling.DeepClone();
++                            merged.Merge(selected);
++                            newObj[trueKey] = Resolve(merged, codePath, searchReplace, dynamicTokens);
++                        }
++                        else if (!(newObj[trueKey] is JObject))
++                        {
++                            newObj[trueKey] = Resolve(selected, codePath, searchReplace, dynamicTokens);
++                        }
++                    }
++                }
++
++                return newObj;
++            }
++            else if (token is JArray arr)
++            {
++                var newArr = new JArray();
++                foreach (var item in arr)
++                {
++                    newArr.Add(Resolve(item, codePath, searchReplace, dynamicTokens));
++                }
++                return newArr;
++            }
++            else if (token is JValue val && val.Type == JTokenType.String)
++            {
++                string str = (string)val.Value;
++                if (str != null && str.Contains('{'))
++                {
++                    return new JValue(RegistryObject.FillPlaceHolder(str, searchReplace));
++                }
++                return token;
++            }
++            else
++            {
++                return token;
++            }
++        }
++
 +        protected static void solveByType(JToken json, string codePath, Vintagestory.API.Datastructures.OrderedDictionary<string, string> searchReplace)
          {
              if (json is JObject jsonObj)
              {
-                 List<string> propertiesToRemove = null;
-                 Dictionary<string, JToken> propertiesToAdd = null;
