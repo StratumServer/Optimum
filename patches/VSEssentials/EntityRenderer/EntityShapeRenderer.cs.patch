@@ -1,0 +1,38 @@
+diff --git a/VSEssentials/EntityRenderer/EntityShapeRenderer.cs b/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
+index 83b9fc02..ab5ef351 100644
+--- a/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
++++ b/VSEssentials/EntityRenderer/EntityShapeRenderer.cs
+@@ -497,27 +497,29 @@ namespace Vintagestory.GameContent
+                     prog.Uniform("baseUvOrigin", texPos.x1, texPos.y1);
+                 }
+ 
+ 
+                 int temp = (int)stack.Collectible.GetTemperature(capi.World, stack);
+-                float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(temp);
++                float gr = (temp < 500) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 500) / 400f));
++                float gg = (temp < 900) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 900) / 200f));
++                float gb = (temp < 1100) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 1100) / 200f));
+                 var gi = GameMath.Clamp((temp - 500) / 3, 0, 255);
+ 
+                 var baked = (stack.Item?.FirstTexture ?? stack.Block?.FirstTextureInventory)?.Baked;
+                 if (baked == null)
+                 {
+                     prog.Uniform("averageColor", 1f, 1f, 1f, 1f);
+                 }
+                 else
+                 {
+-                    Vec4f vec = ColorUtil.ToRGBAVec4f(capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId));
+-                    prog.Uniform("averageColor", vec);
++                    int avgColor = capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId);
++                    prog.Uniform("averageColor", ((avgColor >> 16) & 0xff) / 255f, ((avgColor >> 8) & 0xff) / 255f, (avgColor & 0xff) / 255f, ((avgColor >> 24) & 0xff) / 255f);
+                 }
+                 prog.Uniform("extraGlow", (int)gi);
+                 prog.Uniform("rgbaAmbientIn", rapi.AmbientColor);
+                 prog.Uniform("rgbaLightIn", lightrgbs);
+-                prog.Uniform("rgbaGlowIn", glowColor[0], glowColor[1], glowColor[2], gi / 255f);
++                prog.Uniform("rgbaGlowIn", gr, gg, gb, gi / 255f);
+                 prog.Uniform("rgbaFogIn", rapi.FogColor);
+                 prog.Uniform("fogMinIn", rapi.FogMin);
+                 prog.Uniform("fogDensityIn", rapi.FogDensity);
+                 prog.Uniform("normalShaded", renderInfo.NormalShaded ? 1 : 0);
+ 
