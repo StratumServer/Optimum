@@ -1950,17 +1950,40 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string boxedPacketPatch = File.ReadAllText(boxedPacketPatchPath);
         Assert.Contains("internal byte[] compressedBuffer;", boxedPacketPatch);
         Assert.Contains("internal volatile bool isCompressedCached;", boxedPacketPatch);
+        Assert.Contains("internal void Invalidate()", boxedPacketPatch);
 
         string serverMainPatchPath = PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch");
         Assert.True(File.Exists(serverMainPatchPath), "ServerMain.cs.patch must exist");
         string serverMainPatch = File.ReadAllText(serverMainPatchPath);
         Assert.Contains("buildServerAssetsLock", serverMainPatch);
         Assert.Contains("serverAssetsPacketBuilt", serverMainPatch);
+        Assert.Contains("public void InvalidateServerAssets()", serverMainPatch);
+        Assert.Contains("OptimumAssetEvents.OnServerAssetsInvalidated", serverMainPatch);
 
         string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("new(\"Vintagestory.Server.Network.TcpNetConnection\", \"PreparePacketForSending\", 3)", programSource);
         Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"WaitOnBuildServerAssetsPacket\", 0)", programSource);
         Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"BuildServerAssetsPacket\", 0)", programSource);
+        Assert.Contains("\"InvalidateServerAssets\"", programSource);
+        Assert.Contains("\"Invalidate\"", programSource);
+    }
+
+    [Fact]
+    public void OptimumAssetEvents_InvalidateServerAssets_FiresSubscribers()
+    {
+        bool eventFired = false;
+        Action handler = () => eventFired = true;
+
+        try
+        {
+            Vintagestory.API.Config.OptimumAssetEvents.OnServerAssetsInvalidated += handler;
+            Vintagestory.API.Config.OptimumAssetEvents.InvalidateServerAssets();
+            Assert.True(eventFired, "OptimumAssetEvents.InvalidateServerAssets() must invoke subscribed handlers");
+        }
+        finally
+        {
+            Vintagestory.API.Config.OptimumAssetEvents.OnServerAssetsInvalidated -= handler;
+        }
     }
 
     private class TestRecipe : Vintagestory.API.Common.RecipeBase
