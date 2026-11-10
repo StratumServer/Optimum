@@ -1,8 +1,28 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..0bb5c0a 100644
+index f9128b4..74347ff 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-@@ -280,11 +280,15 @@ namespace Vintagestory.API.Client
+@@ -83,11 +83,18 @@ namespace Vintagestory.API.Client
+         /// <summary>
+         /// How many triangles are allocated.
+         /// </summary>
+         public int AllocatedTris;
+ 
+-
++        public float BoundMinX = float.MaxValue;
++        public float BoundMinY = float.MaxValue;
++        public float BoundMinZ = float.MaxValue;
++        public float BoundMaxX = float.MinValue;
++        public float BoundMaxY = float.MinValue;
++        public float BoundMaxZ = float.MinValue;
++        public bool BoundsValid = false;
++        private int allocatedIndices;
+         
+         private MeshDataPool(int verticesPoolSize, int indicesPoolSize, int maxPartsPerPool) {
+             this.MaxPartsPerPool = maxPartsPerPool;
+             this.IndicesPoolSize = indicesPoolSize;
+             this.VerticesPoolSize = verticesPoolSize;
+@@ -280,11 +287,15 @@ namespace Vintagestory.API.Client
              {
                  modeldata.CustomInts.BaseOffset = vertexPosition * modeldata.CustomInts.InterleaveStride;
              }
@@ -18,19 +38,167 @@ index f9128b4..0bb5c0a 100644
              // Assign a location to it
              ModelDataPoolLocation poolLocation = new ModelDataPoolLocation()
              {
-@@ -366,26 +370,104 @@ namespace Vintagestory.API.Client
+@@ -302,11 +313,41 @@ namespace Vintagestory.API.Client
+                 poolLocations.Insert(listPosition, poolLocation);
+             } else
+             {
+                 poolLocations.Add(poolLocation);
+             }
++
++            if (frustumCullSphere.radius > 0)
++            {
++                float minX = frustumCullSphere.x - frustumCullSphere.radius;
++                float maxX = frustumCullSphere.x + frustumCullSphere.radius;
++                float minY = frustumCullSphere.y - frustumCullSphere.radiusY;
++                float maxY = frustumCullSphere.y + frustumCullSphere.radiusY;
++                float minZ = frustumCullSphere.z - frustumCullSphere.radiusZ;
++                float maxZ = frustumCullSphere.z + frustumCullSphere.radiusZ;
++
++                if (!BoundsValid)
++                {
++                    BoundMinX = minX; BoundMaxX = maxX;
++                    BoundMinY = minY; BoundMaxY = maxY;
++                    BoundMinZ = minZ; BoundMaxZ = maxZ;
++                    BoundsValid = true;
++                }
++                else
++                {
++                    if (minX < BoundMinX) BoundMinX = minX;
++                    if (maxX > BoundMaxX) BoundMaxX = maxX;
++                    if (minY < BoundMinY) BoundMinY = minY;
++                    if (maxY > BoundMaxY) BoundMaxY = maxY;
++                    if (minZ < BoundMinZ) BoundMinZ = minZ;
++                    if (maxZ > BoundMaxZ) BoundMaxZ = maxZ;
++                }
++            }
+             
++            allocatedIndices += modeldata.IndicesCount;
++            AllocatedTris = allocatedIndices / 3;
++
+             CalcFragmentation();
+ 
+             return poolLocation;
+         }
+ 
+@@ -329,24 +370,68 @@ namespace Vintagestory.API.Client
+             // Last location?
+             if (poolLocations.Count == 0)
+             {
+                 indicesPosition = 0;
+                 verticesPosition = 0;
++                allocatedIndices = 0;
++                AllocatedTris = 0;
++                BoundsValid = false;
++                BoundMinX = BoundMinY = BoundMinZ = float.MaxValue;
++                BoundMaxX = BoundMaxY = BoundMaxZ = float.MinValue;
+             } else
+             {
+                 // Location at the end of the buffer?
+                 if (location.IndicesEnd == indicesPosition && location.VerticesEnd == verticesPosition)
+                 {
+                     indicesPosition = poolLocations[poolLocations.Count - 1].IndicesEnd;
+                     verticesPosition = poolLocations[poolLocations.Count - 1].VerticesEnd;
+                 }
++                allocatedIndices -= (location.IndicesEnd - location.IndicesStart);
++                AllocatedTris = allocatedIndices / 3;
++                RecomputeTightBounds();
+             }
+ 
+-
+             CalcFragmentation();
+         }
+ 
++        public void RecomputeTightBounds()
++        {
++            BoundsValid = false;
++            BoundMinX = BoundMinY = BoundMinZ = float.MaxValue;
++            BoundMaxX = BoundMaxY = BoundMaxZ = float.MinValue;
++
++            for (int i = 0; i < poolLocations.Count; i++)
++            {
++                Sphere sphere = poolLocations[i].FrustumCullSphere;
++                if (sphere.radius <= 0) continue;
++
++                float minX = sphere.x - sphere.radius;
++                float maxX = sphere.x + sphere.radius;
++                float minY = sphere.y - sphere.radiusY;
++                float maxY = sphere.y + sphere.radiusY;
++                float minZ = sphere.z - sphere.radiusZ;
++                float maxZ = sphere.z + sphere.radiusZ;
++
++                if (!BoundsValid)
++                {
++                    BoundMinX = minX; BoundMaxX = maxX;
++                    BoundMinY = minY; BoundMaxY = maxY;
++                    BoundMinZ = minZ; BoundMaxZ = maxZ;
++                    BoundsValid = true;
++                }
++                else
++                {
++                    if (minX < BoundMinX) BoundMinX = minX;
++                    if (maxX > BoundMaxX) BoundMaxX = maxX;
++                    if (minY < BoundMinY) BoundMinY = minY;
++                    if (maxY > BoundMaxY) BoundMaxY = maxY;
++                    if (minZ < BoundMinZ) BoundMinZ = minZ;
++                    if (maxZ > BoundMaxZ) BoundMaxZ = maxZ;
++                }
++            }
++        }
++
+         /// <summary>
+         /// Draw the model.
+         /// </summary>
+         /// <param name="capi">The core client API</param>
+         /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
+@@ -364,28 +449,132 @@ namespace Vintagestory.API.Client
+         /// <param name="frustumCullMode">The mode of the culling.</param>
+         public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
              indicesGroupsCount = 0;
              RenderedTriangles = 0;
-             AllocatedTris = 0;
+-            AllocatedTris = 0;
  
 -            for (int i = 0; i < poolLocations.Count; i++)
 +            int count = poolLocations.Count;
-+            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
-+
-+            switch (frustumCullMode)
++            if (count == 0)
              {
 -                ModelDataPoolLocation location = poolLocations[i];
++                AllocatedTris = 0;
++                return;
++            }
+ 
+-                int size = location.IndicesEnd - location.IndicesStart;
+-                if (location.IsVisible(frustumCullMode, frustumCuller))
++            AllocatedTris = allocatedIndices / 3;
++
++            if (BoundsValid && frustumCuller != null)
++            {
++                if (frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassNear || frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassFar)
++                {
++                    if (!frustumCuller.BoxInShadowPass(BoundMinX, BoundMinZ, BoundMaxX, BoundMaxZ))
++                    {
++                        return;
++                    }
++                }
++                else if (frustumCullMode == EnumFrustumCullMode.CullNormal || frustumCullMode == EnumFrustumCullMode.CullInstant)
+                 {
+-                    indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
+-                    indicesSizes[indicesGroupsCount] = size;
++                    if (!frustumCuller.BoxInRange(BoundMinX, BoundMinZ, BoundMaxX, BoundMaxZ)
++                     || !frustumCuller.BoxInFrustum5(BoundMinX, BoundMinY, BoundMinZ, BoundMaxX, BoundMaxY, BoundMaxZ))
++                    {
++                        return;
++                    }
++                }
++            }
+ 
+-                    RenderedTriangles += size / 3;
++            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
+ 
+-                    indicesGroupsCount++;
+-                }
++            switch (frustumCullMode)
++            {
 +                case EnumFrustumCullMode.CullNormal:
 +                    for (int i = 0; i < count; i++)
 +                    {
@@ -53,11 +221,7 @@ index f9128b4..0bb5c0a 100644
 +                    }
 +                    break;
  
--                int size = location.IndicesEnd - location.IndicesStart;
--                if (location.IsVisible(frustumCullMode, frustumCuller))
--                {
--                    indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
--                    indicesSizes[indicesGroupsCount] = size;
+-                AllocatedTris += size / 3;
 +                case EnumFrustumCullMode.CullInstant:
 +                    for (int i = 0; i < count; i++)
 +                    {
@@ -74,8 +238,7 @@ index f9128b4..0bb5c0a 100644
 +                        }
 +                    }
 +                    break;
- 
--                    RenderedTriangles += size / 3;
++
 +                case EnumFrustumCullMode.CullInstantShadowPassNear:
 +                    for (int i = 0; i < count; i++)
 +                    {
@@ -92,9 +255,7 @@ index f9128b4..0bb5c0a 100644
 +                        }
 +                    }
 +                    break;
- 
--                    indicesGroupsCount++;
--                }
++
 +                case EnumFrustumCullMode.CullInstantShadowPassFar:
 +                    for (int i = 0; i < count; i++)
 +                    {
@@ -111,8 +272,7 @@ index f9128b4..0bb5c0a 100644
 +                        }
 +                    }
 +                    break;
- 
--                AllocatedTris += size / 3;
++
 +                default:
 +                    for (int i = 0; i < count; i++)
 +                    {
@@ -134,7 +294,7 @@ index f9128b4..0bb5c0a 100644
  
          public void SetFullyVisible()
          {
-@@ -462,11 +544,15 @@ namespace Vintagestory.API.Client
+@@ -462,11 +651,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -150,7 +310,7 @@ index f9128b4..0bb5c0a 100644
  
  
      /// <summary>
-@@ -513,10 +599,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +706,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -163,7 +323,7 @@ index f9128b4..0bb5c0a 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +623,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +730,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);
