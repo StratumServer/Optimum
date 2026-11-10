@@ -1,8 +1,8 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
-index 5f759f1..629fd1b 100644
+index 5f759f1..fbdfdef 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
-@@ -36,12 +36,10 @@ namespace Vintagestory.ServerMods
+@@ -36,17 +36,17 @@ namespace Vintagestory.ServerMods
  
          NewNormalizedSimplexFractalNoise terrainNoise;
          SimplexNoise distort2dx;
@@ -15,7 +15,14 @@ index 5f759f1..629fd1b 100644
              public double[] LerpedAmplitudes;
              public double[] LerpedThresholds;
              public float[] landformWeights;
-@@ -57,14 +55,40 @@ namespace Vintagestory.ServerMods
++            public bool[] LocalLayerFullySolid;
++            public bool[] LocalLayerFullyEmpty;
+         }
+         ThreadLocal<ThreadLocalTempData> tempDataThreadLocal;
+ 
+         struct WeightedTaper
+         {
+@@ -57,14 +57,40 @@ namespace Vintagestory.ServerMods
          struct ColumnResult
          {
              public BitArray ColumnBlockSolidities;
@@ -60,11 +67,16 @@ index 5f759f1..629fd1b 100644
          {
              return side == EnumAppSide.Server;
          }
-@@ -138,21 +162,11 @@ namespace Vintagestory.ServerMods
+@@ -136,23 +162,15 @@ namespace Vintagestory.ServerMods
+ 
+             tempDataThreadLocal = new ThreadLocal<ThreadLocalTempData>(() => new ThreadLocalTempData
              {
                  LerpedAmplitudes = new double[terrainGenOctaves],
                  LerpedThresholds = new double[terrainGenOctaves],
-                 landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length]
+-                landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length]
++                landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
++                LocalLayerFullySolid = new bool[api.WorldManager.MapSizeY],
++                LocalLayerFullyEmpty = new bool[api.WorldManager.MapSizeY]
              });
 -            columnResults = new ColumnResult[chunksize * chunksize];
 -            layerFullyEmpty = new bool[api.WorldManager.MapSizeY];
@@ -83,7 +95,7 @@ index 5f759f1..629fd1b 100644
          }
  
          private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
-@@ -168,10 +182,13 @@ namespace Vintagestory.ServerMods
+@@ -168,10 +186,13 @@ namespace Vintagestory.ServerMods
  
  
  
@@ -97,7 +109,7 @@ index 5f759f1..629fd1b 100644
                  var neibHeightMaps = request.NeighbourTerrainHeight;
  
                  // Ignore diagonals if direct adjacent faces are available, otherwise the corners get weighted too strongly
-@@ -259,27 +276,37 @@ namespace Vintagestory.ServerMods
+@@ -259,27 +280,37 @@ namespace Vintagestory.ServerMods
                  }
              }
  
@@ -140,7 +152,239 @@ index 5f759f1..629fd1b 100644
  
              int upheavalMapUpLeft = 0;
              int upheavalMapUpRight = 0;
-@@ -566,20 +593,23 @@ namespace Vintagestory.ServerMods
+@@ -356,121 +387,145 @@ namespace Vintagestory.ServerMods
+             //int cblockId = api.World.GetBlock(new AssetLocation("creativeblock-35")).Id;
+ 
+             const float chunkBlockDelta = 1.0f / chunksize;
+             float chunkPixelBlockStep = chunkPixelSize * chunkBlockDelta;
+             double verticalNoiseRelativeFrequency = 0.5 / TerraGenConfig.terrainNoiseVerticalScale;
+-            for (int y = 0; y < layerFullySolid.Length; y++) layerFullySolid[y] = true;   // Fill with true; later if any block in the layer is non-solid we will set it to false
+-            for (int y = 0; y < layerFullyEmpty.Length; y++) layerFullyEmpty[y] = true;   // Fill with true; later if any block in the layer is non-solid we will set it to false
++            Array.Fill(layerFullySolid, true);
++            Array.Fill(layerFullyEmpty, true);
+             layerFullyEmpty[mapsizeY - 1] = false;  // The top block is always empty (air), leaving space for grass, snowlayer etc.
+ 
+-            Parallel.For(0, chunksize * chunksize, new ParallelOptions() { MaxDegreeOfParallelism = maxThreads }, chunkIndex2d => {
+-                int lX = chunkIndex2d % chunksize;
+-                int lZ = chunkIndex2d / chunksize;
+-                int worldX = chunkX * chunksize + lX;
+-                int worldZ = chunkZ * chunksize + lZ;
+-                BitArray columnBlockSolidities = columnResults[chunkIndex2d].ColumnBlockSolidities;
+-                columnBlockSolidities.SetAll(false);
+-                double[] lerpedAmps = tempDataThreadLocal.Value.LerpedAmplitudes;
+-                double[] lerpedTh = tempDataThreadLocal.Value.LerpedThresholds;
+-
+-                float[] columnLandformIndexedWeights = tempDataThreadLocal.Value.landformWeights;
+-                landLerpMap.WeightsAt(baseX + lX * chunkPixelBlockStep, baseZ + lZ * chunkPixelBlockStep, columnLandformIndexedWeights);
+-                for (int i = 0; i < lerpedAmps.Length; i++)
++            Parallel.For(0, chunksize * chunksize, new ParallelOptions() { MaxDegreeOfParallelism = maxThreads },
++                () =>
+                 {
+-                    lerpedAmps[i] = GameMath.BiLerp(octNoiseX0[i], octNoiseX1[i], octNoiseX2[i], octNoiseX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
+-                    lerpedTh[i] = GameMath.BiLerp(octThX0[i], octThX1[i], octThX2[i], octThX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
+-                }
+-
+-                // Create that directional compression effect.
+-                VectorXZ dist = NewDistortionNoise(worldX, worldZ);
+-                VectorXZ distTerrain = ApplyIsotropicDistortionThreshold(dist * terrainDistortionMultiplier, terrainDistortionThreshold,
+-                    terrainDistortionMultiplier * maxDistortionAmount);
+-
+-                // Get Y distortion from oceanicity and upheaval
+-                float upHeavalStrength = GameMath.BiLerp(upheavalMapUpLeft, upheavalMapUpRight, upheavalMapBotLeft, upheavalMapBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta);
+-                float oceanicity = GameMath.BiLerp(oceanUpLeft, oceanUpRight, oceanBotLeft, oceanBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta) * oceanicityFac;
+-                VectorXZ distGeo = ApplyIsotropicDistortionThreshold(dist * geoDistortionMultiplier, geoDistortionThreshold, geoDistortionMultiplier * maxDistortionAmount);
+-
+-                float distY = oceanicity + ComputeOceanAndUpheavalDistY(upHeavalStrength, worldX, worldZ, distGeo);
+-
+-                columnResults[chunkIndex2d].WaterBlockID = oceanicity > 1 ? gcfg.saltWaterBlockId : gcfg.waterBlockId;
+-
+-                // Prepare the noise for the entire column.
+-                NewNormalizedSimplexFractalNoise.ColumnNoise columnNoise = terrainNoise.ForColumn(verticalNoiseRelativeFrequency, lerpedAmps, lerpedTh, worldX + distTerrain.X, worldZ + distTerrain.Z);
+-                double noiseBoundMin = columnNoise.BoundMin;
+-                double noiseBoundMax = columnNoise.BoundMax;
+-
+-                WeightedTaper wtaper = taperMap[chunkIndex2d];
+-
+-                float distortedPosYSlide = distY - (int)Math.Floor(distY);    // This value will be unchanged throughout the posY loop
+-                for (int posY = 1; posY <= mapsizeYm2; posY++)
++                    var data = tempDataThreadLocal.Value;
++                    Array.Fill(data.LocalLayerFullySolid, true);
++                    Array.Fill(data.LocalLayerFullyEmpty, true);
++                    return data;
++                },
++                (chunkIndex2d, loopState, data) =>
+                 {
+-                    // Setup a lerp between threshold values, so that distortY can be applied continuously there.
+-                    StartSampleDisplacedYThreshold(posY + distY, mapsizeYm2, out int distortedPosYBase);
++                    int lX = chunkIndex2d % chunksize;
++                    int lZ = chunkIndex2d / chunksize;
++                    int worldX = chunkX * chunksize + lX;
++                    int worldZ = chunkZ * chunksize + lZ;
++                    BitArray columnBlockSolidities = columnResults[chunkIndex2d].ColumnBlockSolidities;
++                    columnBlockSolidities.SetAll(false);
++                    double[] lerpedAmps = tempDataThreadLocal.Value.LerpedAmplitudes;
++                    double[] lerpedTh = tempDataThreadLocal.Value.LerpedThresholds;
+ 
+-                    // Value starts as the landform Y threshold.
+-                    double threshold = 0;
+-                    for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
++                    float[] columnLandformIndexedWeights = tempDataThreadLocal.Value.landformWeights;
++                    landLerpMap.WeightsAt(baseX + lX * chunkPixelBlockStep, baseZ + lZ * chunkPixelBlockStep, columnLandformIndexedWeights);
++                    for (int i = 0; i < lerpedAmps.Length; i++)
+                     {
+-                        float weight = columnLandformIndexedWeights[i];
+-                        if (weight == 0) continue;
+-                        // Sample the two values to lerp between. The value of distortedPosYBase is clamped in such a way that this always works.
+-                        // Underflow and overflow of distortedPosY result in linear extrapolation.
+-                        threshold += weight * ContinueSampleDisplacedYThreshold(distortedPosYBase, distortedPosYSlide, terrainYThresholds[i]);
++                        lerpedAmps[i] = GameMath.BiLerp(octNoiseX0[i], octNoiseX1[i], octNoiseX2[i], octNoiseX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
++                        lerpedTh[i] = GameMath.BiLerp(octThX0[i], octThX1[i], octThX2[i], octThX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
+                     }
+ 
+-                    // Geo Upheaval modifier for threshold
+-                    ComputeGeoUpheavalTaper(posY, distY, taperThreshold, geoUpheavalAmplitude, mapsizeY, ref threshold);
++                    // Create that directional compression effect.
++                    VectorXZ dist = NewDistortionNoise(worldX, worldZ);
++                    VectorXZ distTerrain = ApplyIsotropicDistortionThreshold(dist * terrainDistortionMultiplier, terrainDistortionThreshold,
++                        terrainDistortionMultiplier * maxDistortionAmount);
+ 
+-                    if (requiresChunkBorderSmoothing)
++                    // Get Y distortion from oceanicity and upheaval
++                    float upHeavalStrength = GameMath.BiLerp(upheavalMapUpLeft, upheavalMapUpRight, upheavalMapBotLeft, upheavalMapBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta);
++                    float oceanicity = GameMath.BiLerp(oceanUpLeft, oceanUpRight, oceanBotLeft, oceanBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta) * oceanicityFac;
++                    VectorXZ distGeo = ApplyIsotropicDistortionThreshold(dist * geoDistortionMultiplier, geoDistortionThreshold, geoDistortionMultiplier * maxDistortionAmount);
++
++                    float distY = oceanicity + ComputeOceanAndUpheavalDistY(upHeavalStrength, worldX, worldZ, distGeo);
++
++                    columnResults[chunkIndex2d].WaterBlockID = oceanicity > 1 ? gcfg.saltWaterBlockId : gcfg.waterBlockId;
++
++                    // Prepare the noise for the entire column.
++                    NewNormalizedSimplexFractalNoise.ColumnNoise columnNoise = terrainNoise.ForColumn(verticalNoiseRelativeFrequency, lerpedAmps, lerpedTh, worldX + distTerrain.X, worldZ + distTerrain.Z);
++                    double noiseBoundMin = columnNoise.BoundMin;
++                    double noiseBoundMax = columnNoise.BoundMax;
++
++                    WeightedTaper wtaper = taperMap[chunkIndex2d];
++
++                    float distortedPosYSlide = distY - (int)Math.Floor(distY);    // This value will be unchanged throughout the posY loop
++                    for (int posY = 1; posY <= mapsizeYm2; posY++)
+                     {
+-                        double th = posY > wtaper.TerrainYPos ? 1 : -1;
++                        // Setup a lerp between threshold values, so that distortY can be applied continuously there.
++                        StartSampleDisplacedYThreshold(posY + distY, mapsizeYm2, out int distortedPosYBase);
+ 
+-                        var ydiff = Math.Abs(posY - wtaper.TerrainYPos);
+-                        var noise = ydiff > 10 ? 0 : distort2dx.Noise(-(chunkX * chunksize + lX) / 10.0, posY / 10.0, -(chunkZ * chunksize + lZ) / 10.0) / Math.Max(1, ydiff / 2.0);
++                        // Value starts as the landform Y threshold.
++                        double threshold = 0;
++                        for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
++                        {
++                            float weight = columnLandformIndexedWeights[i];
++                            if (weight == 0) continue;
++                            // Sample the two values to lerp between. The value of distortedPosYBase is clamped in such a way that this always works.
++                            // Underflow and overflow of distortedPosY result in linear extrapolation.
++                            threshold += weight * ContinueSampleDisplacedYThreshold(distortedPosYBase, distortedPosYSlide, terrainYThresholds[i]);
++                        }
+ 
+-                        noise *= GameMath.Clamp(2*(1 - wtaper.Weight), 0, 1) * 0.1;
++                        // Geo Upheaval modifier for threshold
++                        ComputeGeoUpheavalTaper(posY, distY, taperThreshold, geoUpheavalAmplitude, mapsizeY, ref threshold);
+ 
+-                        threshold = GameMath.Lerp(threshold, th + noise, wtaper.Weight);
+-                    }
++                        if (requiresChunkBorderSmoothing)
++                        {
++                            double th = posY > wtaper.TerrainYPos ? 1 : -1;
+ 
+-                    // Often we don't need to calculate the noise.
+-                    if (threshold <= noiseBoundMin)
+-                    {
+-                        columnBlockSolidities[posY] = true;    // Yes terrain block
+-                        layerFullyEmpty[posY] = false;          //   (thread safe even when this is parallel)
+-                    }
+-                    else if (!(threshold < noiseBoundMax))     // Second case also catches NaN if it were to ever happen.
+-                    {
+-                        layerFullySolid[posY] = false;  // No terrain block  (thread safe even when this is parallel)
++                            var ydiff = Math.Abs(posY - wtaper.TerrainYPos);
++                            var noise = ydiff > 10 ? 0 : distort2dx.Noise(-(chunkX * chunksize + lX) / 10.0, posY / 10.0, -(chunkZ * chunksize + lZ) / 10.0) / Math.Max(1, ydiff / 2.0);
+ 
+-                        //We can now exit the loop early, because empirical testing shows that once the threshold has exceeded the max noise bound, it never returns to a negative noise value at any higher y value in the same blocks column.  This represents air well above the "interesting" part of the terrain.  Tested for all world heights in the range 256-1536, tested with arches, overhangs etc.
+-                        for (int yAbove = posY + 1; yAbove <= mapsizeYm2; yAbove++) layerFullySolid[yAbove] = false;
+-                        break;
+-                    }
+-                    // But sometimes we do.
+-                    else
+-                    {
+-                        double noiseSign = -NormalizedSimplexNoise.NoiseValueCurveInverse(threshold);
+-                        noiseSign = columnNoise.NoiseSign(posY, noiseSign);
++                            noise *= GameMath.Clamp(2*(1 - wtaper.Weight), 0, 1) * 0.1;
+ 
+-                        // If it ever comes up to change the noise formula to one that's less trivial to layer-skip-optimize,
+-                        // Replace the above-two lines with the one below.
+-                        //noiseSign = columnNoise.Noise(posY) - threshold;
++                            threshold = GameMath.Lerp(threshold, th + noise, wtaper.Weight);
++                        }
+ 
+-                        if (noiseSign > 0)  // solid
++                        // Often we don't need to calculate the noise.
++                        if (threshold <= noiseBoundMin)
+                         {
+                             columnBlockSolidities[posY] = true;    // Yes terrain block
+-                            layerFullyEmpty[posY] = false;          //   (thread safe even when this is parallel)
++                            data.LocalLayerFullyEmpty[posY] = false;
+                         }
++                        else if (!(threshold < noiseBoundMax))     // Second case also catches NaN if it were to ever happen.
++                        {
++                            data.LocalLayerFullySolid[posY] = false;  // No terrain block
++
++                            //We can now exit the loop early, because empirical testing shows that once the threshold has exceeded the max noise bound, it never returns to a negative noise value at any higher y value in the same blocks column.  This represents air well above the "interesting" part of the terrain.  Tested for all world heights in the range 256-1536, tested with arches, overhangs etc.
++                            for (int yAbove = posY + 1; yAbove <= mapsizeYm2; yAbove++) data.LocalLayerFullySolid[yAbove] = false;
++                            break;
++                        }
++                        // But sometimes we do.
+                         else
+                         {
+-                            layerFullySolid[posY] = false;  // thread safe even when this is parallel
++                            double noiseSign = -NormalizedSimplexNoise.NoiseValueCurveInverse(threshold);
++                            noiseSign = columnNoise.NoiseSign(posY, noiseSign);
++
++                            // If it ever comes up to change the noise formula to one that's less trivial to layer-skip-optimize,
++                            // Replace the above-two lines with the one below.
++                            //noiseSign = columnNoise.Noise(posY) - threshold;
++
++                            if (noiseSign > 0)  // solid
++                            {
++                                columnBlockSolidities[posY] = true;    // Yes terrain block
++                                data.LocalLayerFullyEmpty[posY] = false;
++                            }
++                            else
++                            {
++                                data.LocalLayerFullySolid[posY] = false;
++                            }
+                         }
+                     }
++
++                    return data;
++                },
++                data =>
++                {
++                    bool[] solid = layerFullySolid;
++                    bool[] empty = layerFullyEmpty;
++                    bool[] localSolid = data.LocalLayerFullySolid;
++                    bool[] localEmpty = data.LocalLayerFullyEmpty;
++                    for (int i = 0; i < solid.Length; i++)
++                    {
++                        if (!localSolid[i]) solid[i] = false;
++                        if (!localEmpty[i]) empty[i] = false;
++                    }
+                 }
+-            });
++            );
+ 
+             IChunkBlocks chunkBlockData = chunks[0].Data;
+ 
+             // First set all the fully solid layers in bulk, as much as possible
+             chunkBlockData.SetBlockBulk(0, chunksize, chunksize, gcfg.mantleBlockId);
+@@ -566,20 +621,23 @@ namespace Vintagestory.ServerMods
          }
  
  
