@@ -1,0 +1,21 @@
+diff --git a/VSEssentials/EntityRenderer/EntityItemRenderer.cs b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+index 30357cd..0b475fa 100644
+--- a/VSEssentials/EntityRenderer/EntityItemRenderer.cs
++++ b/VSEssentials/EntityRenderer/EntityItemRenderer.cs
+@@ -181,15 +181,12 @@ namespace Vintagestory.GameContent
+ 
+ 
+                 BlockPos pos = entityitem.Pos.AsBlockPos;
+                 Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs(pos.X, pos.InternalY, pos.Z);
+                 int temp = (int)entityitem.Itemstack.Collectible.GetTemperature(capi.World, entityitem.Itemstack);
+-                float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(temp);
++                ColorUtil.GetIncandescenceColorFloats(temp, out glowRgb.X, out glowRgb.Y, out glowRgb.Z);
+                 int extraGlow = GameMath.Clamp((temp - 550) / 2, 0, 255);
+-                glowRgb.R = glowColor[0];
+-                glowRgb.G = glowColor[1];
+-                glowRgb.B = glowColor[2];
+                 glowRgb.A = extraGlow / 255f;
+ 
+                 prog.ExtraGlow = extraGlow;
+                 prog.RgbaAmbientIn = rapi.AmbientColor;
+                 prog.RgbaLightIn = lightrgbs;

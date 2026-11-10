@@ -2138,11 +2138,9 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     {
         string patch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VSEssentials/EntityRenderer/EntityShapeRenderer.cs.patch"));
-        Assert.Contains("+                float gr = (temp < 500) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 500) / 400f));", patch);
-        Assert.Contains("+                float gg = (temp < 900) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 900) / 200f));", patch);
-        Assert.Contains("+                float gb = (temp < 1100) ? 0f : Math.Max(0f, Math.Min(1f, (temp - 1100) / 200f));", patch);
-        Assert.Contains("+                    int avgColor = capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId);", patch);
-        Assert.Contains("+                    prog.Uniform(\"averageColor\", ((avgColor >> 16) & 0xff) / 255f", patch);
+        Assert.Contains("+                ColorUtil.GetIncandescenceColorFloats(temp, out float gr, out float gg, out float gb);", patch);
+        Assert.Contains("+                    ColorUtil.ToRGBAFloats(avgColor, out float ar, out float ag, out float ab, out float aa);", patch);
+        Assert.Contains("+                    prog.Uniform(\"averageColor\", ar, ag, ab, aa);", patch);
         Assert.Contains("+                prog.Uniform(\"rgbaGlowIn\", gr, gg, gb, gi / 255f);", patch);
         Assert.Contains("-                float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(temp);", patch);
         Assert.Contains("-                    Vec4f vec = ColorUtil.ToRGBAVec4f(capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId));", patch);

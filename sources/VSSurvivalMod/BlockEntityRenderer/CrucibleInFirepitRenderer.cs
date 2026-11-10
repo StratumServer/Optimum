@@ -18,6 +18,7 @@ namespace Vintagestory.GameContent
         BlockPos pos;
         float temp;
         Matrixf ModelMat = new Matrixf();
+        Vec4f glowRgb = new Vec4f();
 
         public CrucibleInFirepitRenderer(ICoreClientAPI capi, Block crucibleBlock, BlockPos pos)
         {
@@ -40,8 +41,12 @@ namespace Vintagestory.GameContent
 
             int itemp = (int)temp;
             Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
-            float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(itemp);
+            ColorUtil.GetIncandescenceColorFloats(itemp, out float gr, out float gg, out float gb);
+            glowRgb.R = gr;
+            glowRgb.G = gg;
+            glowRgb.B = gb;
             int extraGlow = GameMath.Clamp((itemp - 550) / 2, 0, 255);
+            glowRgb.A = extraGlow / 255f;
 
             IStandardShaderProgram prog = rpi.PreparedStandardShader(pos.X, pos.Y, pos.Z);
 
@@ -59,7 +64,7 @@ namespace Vintagestory.GameContent
             prog.OverlayOpacity = 0;
 
             prog.RgbaLightIn = lightrgbs;
-            prog.RgbaGlowIn = new Vec4f(glowColor[0], glowColor[1], glowColor[2], extraGlow / 255f);
+            prog.RgbaGlowIn = glowRgb;
             prog.ExtraGlow = extraGlow;
 
             prog.ModelMatrix = ModelMat

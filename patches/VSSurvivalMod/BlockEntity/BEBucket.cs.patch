@@ -1,0 +1,47 @@
+diff --git a/VSSurvivalMod/BlockEntity/BEBucket.cs b/VSSurvivalMod/BlockEntity/BEBucket.cs
+index 88afa64..566a5e8 100644
+--- a/VSSurvivalMod/BlockEntity/BEBucket.cs
++++ b/VSSurvivalMod/BlockEntity/BEBucket.cs
+@@ -13,10 +13,11 @@ namespace Vintagestory.GameContent
+     public class BlockEntityBucket : BlockEntityLiquidContainer, IRotatable
+     {
+         public override string InventoryClassName => "bucket";
+ 
+         MeshData currentMesh;
++        MeshData rotatedMesh;
+         BlockBucket ownBlock;
+ 
+         public float MeshAngle;
+ 
+         public BlockEntityBucket()
+@@ -75,19 +76,29 @@ namespace Vintagestory.GameContent
+             return mesh;
+         }
+ 
+         public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tesselator)
+         {
+-            if (currentMesh!=null) mesher.AddMeshData(currentMesh.Clone().Rotate(0, MeshAngle, 0));
++            if (currentMesh != null)
++            {
++                var mesh = rotatedMesh;
++                if (mesh == null)
++                {
++                    mesh = MeshAngle == 0 ? currentMesh : currentMesh.Clone().Rotate(0, MeshAngle, 0);
++                    rotatedMesh = mesh;
++                }
++                mesher.AddMeshData(mesh);
++            }
+             return true;
+         }
+ 
+         public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldForResolving)
+         {
+             base.FromTreeAttributes(tree, worldForResolving);
+ 
+             MeshAngle = tree.GetFloat("meshAngle", MeshAngle);
++            rotatedMesh = null;
+ 
+             if (Api?.Side == EnumAppSide.Client)
+             {
+                 currentMesh = GenMesh();
+                 MarkDirty(true);

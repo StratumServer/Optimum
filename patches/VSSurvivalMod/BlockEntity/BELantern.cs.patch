@@ -1,0 +1,48 @@
+diff --git a/VSSurvivalMod/BlockEntity/BELantern.cs b/VSSurvivalMod/BlockEntity/BELantern.cs
+index 4c38ce3..b4ecea2 100644
+--- a/VSSurvivalMod/BlockEntity/BELantern.cs
++++ b/VSSurvivalMod/BlockEntity/BELantern.cs
+@@ -17,10 +17,11 @@ namespace Vintagestory.GameContent
+         public string lining = "plain";
+         public string glass = "quartz";
+ 
+ 
+         public float MeshAngle;
++        MeshData rotatedMesh;
+ 
+         byte[] origlightHsv = new byte[] { 7, 4, 18 };
+         byte[] lightHsv = new byte[] { 7, 4, 18 };
+ 
+ 
+@@ -57,10 +58,11 @@ namespace Vintagestory.GameContent
+             lining = tree.GetString("lining", "plain");
+             glass = tree.GetString("glass", "quartz");
+             // The light color will be set in the Initialize() call which must follow FromTreeAttributes() for any BE in the world: for reliability, it needs to be called only after setting the origLightHsv and LightHsv values
+ 
+             MeshAngle = tree.GetFloat("meshAngle");
++            rotatedMesh = null;
+ 
+             if (Api != null && Api.Side == EnumAppSide.Client)
+             {
+                 MarkDirty(true);
+             }
+@@ -107,11 +109,18 @@ namespace Vintagestory.GameContent
+             if (mesh == null) return false;
+ 
+             string part = Block.LastCodePart();
+             if (part == "up" || part == "down")
+             {
+-                mesh = mesh.Clone().Rotate(0, MeshAngle, 0);
++                if (MeshAngle != 0)
++                {
++                    if (rotatedMesh == null)
++                    {
++                        rotatedMesh = mesh.Clone().Rotate(0, MeshAngle, 0);
++                    }
++                    mesh = rotatedMesh;
++                }
+             }
+ 
+             mesher.AddMeshData(mesh);
+ 
+             return true;
