@@ -157,7 +157,9 @@ namespace Vintagestory.API.Config
         {
             // Any native materialization invalidates zero-Cairo-fallback
             // certification, including Subpixel and font-parity paths.
-            if (OptimumConfig.GuiGpuCertificationPassed)
+            // When certification is waived without a locked certificate profile,
+            // single-surface Cairo fallbacks do not revoke GPU capability for the entire process.
+            if (OptimumConfig.GuiGpuCertificationPassed && !OptimumConfig.IsGuiGpuCertificationWaivedWithoutCertificate)
                 OptimumConfig.RevokeGuiGpuCertification();
             if (!Enabled) return;
             Interlocked.Increment(ref materializationAttemptCount);

@@ -500,10 +500,10 @@ public static class OptimumConfig
     /// Adaptive chunk generation radius: reduces the effective view radius
     /// under gen-queue pressure (player exploring fast) so fewer columns
     /// queue at once. Recovers to full radius when the queue drains.
-    /// Default ON in singleplayer. Multiplayer servers already have dedicated
-    /// gen threads and a capped MaxChunkRadius, so this mostly helps SP.
+    /// Default OFF. When enabled in singleplayer, reduces view radius under
+    /// gen pressure to ease chunk generation queue.
     /// </summary>
-    public static bool AdaptiveRadiusEnabled = true;
+    public static bool AdaptiveRadiusEnabled = false;
 
     /// <summary>
     /// Effective state used by the radius controller: the user's preference, minus any hold an
@@ -632,9 +632,22 @@ public static class OptimumConfig
         string normalized = NormalizeGuiRenderBackend(backend);
         GuiRenderBackend = normalized;
         GuiGpuRenderEnabled = string.Equals(normalized, GuiRenderBackendSkiaGpu, StringComparison.Ordinal);
+        if (GuiGpuRenderEnabled)
+        {
+            ResetGuiGpuRevocation();
+        }
         if (save)
         {
             Save();
+        }
+    }
+
+    public static void ResetGuiGpuRevocation()
+    {
+        System.Threading.Volatile.Write(ref guiGpuCertificationRevoked, 0);
+        if (GuiGpuCertificationWaived && guiGpuVendor == null)
+        {
+            System.Threading.Volatile.Write(ref guiGpuCertificationPassed, 1);
         }
     }
 
@@ -683,6 +696,7 @@ public static class OptimumConfig
 
     private static int guiGpuCertificationRevoked;
     public static bool GuiGpuCertificationWaived { get; set; } = true;
+    public static bool IsGuiGpuCertificationWaivedWithoutCertificate => GuiGpuCertificationWaived && guiGpuVendor == null;
 
     internal static bool GuiGpuCertificationPassed => System.Threading.Volatile.Read(ref guiGpuCertificationPassed) != 0;
 
@@ -1476,7 +1490,7 @@ internal sealed class OptimumConfigData
     public bool ChunkDeserializeParallel { get; set; } = true;
     public int ChunkDeserializeParallelMinY { get; set; } = 4;
     public bool ShaderPreprocessParallel { get; set; } = true;
-    public bool AdaptiveRadius { get; set; } = true;
+    public bool AdaptiveRadius { get; set; } = false;
     public int AdaptiveRadiusFloor { get; set; } = 4;
     public int AdaptiveRadiusHighThreshold { get; set; } = 60;
     public int AdaptiveRadiusLowThreshold { get; set; } = 20;

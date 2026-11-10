@@ -855,30 +855,34 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-    public void GuiCompositeSettings_RelocatesRenderScaleAndChiselLodToGraphicsTab()
+    public void GuiCompositeSettings_HousesRenderScaleAndChiselLodInOptimumTab()
     {
         string patch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
 
-        // Verify Chisel LOD and Render Scale controls are added to Graphics tab
+        // Verify Chisel LOD and Render Scale controls are in the Optimum tab
         Assert.Contains("\"optChiselLod\"", patch);
         Assert.Contains("\"optChiselLodDist\"", patch);
         Assert.Contains("\"optRenderScale\"", patch);
-        Assert.Contains("composer.GetDropDown(\"optRenderScale\")", patch);
+        Assert.Contains("\"optFsrSharpness\"", patch);
 
-        // Verify SetGfxValues initializes all three controls
-        Assert.Contains("composer.GetSwitch(\"optChiselLod\")?.SetValue(ClientSettings.OptimumChiselLod);", patch);
-        Assert.Contains("composer.GetSlider(\"optChiselLodDist\")?.SetValues(ClientSettings.OptimumChiselLodDistance", patch);
+        // Verify Optimum tab rows contain them
+        Assert.Contains("+		AddOptimumSwitchRow(\"optimum-chisellod\"", patch);
+        Assert.Contains("+		AddOptimumDropdownRow(\"optimum-renderscale\"", patch);
+        Assert.Contains("+		AddOptimumSliderRow(\"optimum-fsrsharpness\"", patch);
+        Assert.Contains("+		AddOptimumSliderRow(\"optimum-chiselloddist\"", patch);
 
-        // Verify removed from Optimum tab rows
-        Assert.DoesNotContain("+		AddOptimumSwitchRow(\"optimum-chisellod\"", patch);
-        Assert.DoesNotContain("+		AddOptimumDropdownRow(\"optimum-renderscale\"", patch);
+        // Verify Graphics tab does not contain them
+        Assert.DoesNotContain("guiComposerChisel", patch);
+        Assert.DoesNotContain("elementBoundsRenderScale", patch);
+    }
 
-        // Verify wired as Cecil transplant targets in Program.cs
-        string programSource = File.ReadAllText(
-            PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
-        Assert.Contains("new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"OnGraphicsOptions\", 1)", programSource);
-        Assert.Contains("new(\"Vintagestory.Client.NoObf.GuiCompositeSettings\", \"SetGfxValues\", 0)", programSource);
+    [Fact]
+    public void AdaptiveRadius_DefaultsToFalseForFirstTimeConfigCreation()
+    {
+        // Verify serialized config model defaults to false
+        var data = new Vintagestory.API.Config.OptimumConfigData();
+        Assert.False(data.AdaptiveRadius);
     }
 
     [Fact]
@@ -892,7 +896,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch"));
         Assert.Contains("\"optFsrSharpness\"", guiPatch);
         Assert.Contains("onOptimumFsrSharpnessChanged", guiPatch);
-        Assert.Contains("composer.GetSlider(\"optFsrSharpness\")?.SetValues", guiPatch);
+        Assert.Contains("((GuiElementSlider)optimumControls[\"optFsrSharpness\"]).SetValues", guiPatch);
 
         // 3. Verify ClientPlatformWindows patch caches sharpness and passes uniform to fsrRcas
         string platformPatch = File.ReadAllText(
