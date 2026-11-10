@@ -580,6 +580,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("for (int i = 0; i < renderedEntities.Count; i++)", patch);
         Assert.Contains("shadowRenderedEntities.Clear();", patch);
         Assert.Contains("shadowRenderedEntities.Add(entityRenderer.Value);", patch);
+        Assert.Contains("renderedEntities?.Clear();", patch);
+        Assert.Contains("shadowRenderedEntities?.Clear();", patch);
         Assert.Contains("for (int i = 0; i < shadowRenderedEntities.Count; i++)", patch);
         Assert.Contains("entity.Pos.Dimension != dimension", patch);
 
@@ -587,6 +589,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"renderedEntities\",", programSource);
         Assert.Contains("\"shadowRenderedEntities\",", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \".ctor\", 1)", programSource);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"OnRenderAfterOIT\", 1)", programSource);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"OnRenderFrame2D\", 1)", programSource);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \"Dispose\", 1)", programSource);
@@ -919,7 +922,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         // 2. Verify ParticleManager patch reuses reusableSpawnProps
         string managerPatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch"));
-        Assert.Contains("protected SimpleParticleProperties reusableSpawnProps = new SimpleParticleProperties();", managerPatch);
+        Assert.Contains("protected SimpleParticleProperties reusableSpawnProps;", managerPatch);
         Assert.Contains("+		SimpleParticleProperties props = reusableSpawnProps ??= new SimpleParticleProperties();", managerPatch);
         Assert.Contains("-		SimpleParticleProperties simpleParticleProperties = new SimpleParticleProperties(quantity, quantity", managerPatch);
 
@@ -1995,6 +1998,10 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     [Fact]
     public void OptimumAssetEvents_InvalidateServerAssets_FiresSubscribers()
     {
+        string contractsCsproj = File.ReadAllText(
+            PatchReader.FindRepositoryFile("optimum-api-contracts/optimum-api-contracts.csproj"));
+        Assert.Contains("OptimumAssetEvents.cs", contractsCsproj);
+
         bool eventFired = false;
         Action handler = () => eventFired = true;
 

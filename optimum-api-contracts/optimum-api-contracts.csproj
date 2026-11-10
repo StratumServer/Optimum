@@ -20,6 +20,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumGuiMetrics.cs" Link="Config\OptimumGuiMetrics.cs" />
     <Compile Include="..\sources\VintagestoryApi\Client\Model\Mesh\OptimumMeshPartPool.cs" Link="Client\Model\Mesh\OptimumMeshPartPool.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumGreedyMesher.cs" Link="Config\OptimumGreedyMesher.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumAssetEvents.cs" Link="Config\OptimumAssetEvents.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumVoxelIndexer.cs" Link="Config\OptimumVoxelIndexer.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumThreadGuard.cs" Link="Config\OptimumThreadGuard.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorkerInstances.cs" Link="Config\OptimumWorkerInstances.cs" />

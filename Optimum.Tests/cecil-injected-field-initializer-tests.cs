@@ -156,6 +156,28 @@ public class CecilInjectedFieldInitializerTests
         Assert.Contains("t_dynamicTokens ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);", typePatch);
     }
 
+    [Fact]
+    public void SystemRenderEntitiesConstructorIsTransplantedForInjectedLists()
+    {
+        string programSource = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \".ctor\", 1)", programSource);
+
+        string patch = Read("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch");
+        Assert.Contains("renderedEntities?.Clear();", patch);
+        Assert.Contains("shadowRenderedEntities?.Clear();", patch);
+    }
+
+    [Fact]
+    public void EventManagerAndGuiCompositeSettingsDoNotHaveUnexecutedInitializers()
+    {
+        string eventManagerPatch = Read("patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch");
+        Assert.DoesNotMatch(new Regex(@"optimumCachedClimateInvocations\s*=\s*Array\.Empty<Delegate>\(\);"), eventManagerPatch);
+        Assert.DoesNotMatch(new Regex(@"optimumCachedWindInvocations\s*=\s*Array\.Empty<Delegate>\(\);"), eventManagerPatch);
+
+        string guiSettingsPatch = Read("patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch");
+        Assert.DoesNotMatch(new Regex(@"private ElementBounds oButtonBounds\s*=\s*ElementBounds\.Fixed"), guiSettingsPatch);
+    }
+
     private static string Read(string relativePath)
     {
         return File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));

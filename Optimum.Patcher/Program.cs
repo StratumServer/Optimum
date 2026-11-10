@@ -521,6 +521,8 @@ var fieldsToRetype = new Dictionary<string, List<string>>
 var targets = new List<MethodTarget>
 {
     // Entity render distance cull + shadow cull (reads injected ClientSettings.Optimum* props)
+    // Issue #519: transplant constructor so injected renderedEntities and shadowRenderedEntities are initialized
+    new("Vintagestory.Client.NoObf.SystemRenderEntities", ".ctor", 1),
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnRenderOpaque3D", 1),
     new("Vintagestory.Client.NoObf.SystemRenderEntities", "OnBeforeRender", 1),
     // Entity shadow cull: the actual distance gate lives here, not OnBeforeRender.
