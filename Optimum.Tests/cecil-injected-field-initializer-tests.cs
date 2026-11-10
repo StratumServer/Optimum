@@ -156,6 +156,17 @@ public class CecilInjectedFieldInitializerTests
         Assert.Contains("t_dynamicTokens ??= new HashSet<JToken>(ReferenceEqualityComparer.Instance);", typePatch);
     }
 
+    [Fact]
+    public void SystemRenderEntitiesConstructorIsTransplantedForInjectedLists()
+    {
+        string programSource = Read("Optimum.Patcher/Program.cs");
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderEntities\", \".ctor\", 1)", programSource);
+
+        string patch = Read("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs.patch");
+        Assert.Contains("renderedEntities?.Clear();", patch);
+        Assert.Contains("shadowRenderedEntities?.Clear();", patch);
+    }
+
     private static string Read(string relativePath)
     {
         return File.ReadAllText(PatchReader.FindRepositoryFile(relativePath));

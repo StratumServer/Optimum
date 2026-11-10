@@ -462,8 +462,8 @@ index 374f827..3f8cb48 100644
  	{
 +		OptimumCircuitBreakerRegistry.Unregister("entity-light-batch");
 +		OptimumCircuitBreakerRegistry.Unregister("entity-shader-cache");
-+		renderedEntities.Clear();
-+		shadowRenderedEntities.Clear();
++		renderedEntities?.Clear();
++		shadowRenderedEntities?.Clear();
  		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
  		{
  			entityRenderer.Value.Dispose();

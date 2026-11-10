@@ -111,6 +111,10 @@ public static class ILPatcher
             ? 0
             : MemberInjector.InjectInterfaces(vanillaAsm, compiledAsm, interfacesToInject);
 
+        // Snapshot vanilla field names before any injection so the initializer
+        // verifier below can tell injected fields apart from vanilla ones.
+        var preInjectionFields = InjectedFieldInitializerVerifier.Snapshot(vanillaAsm.MainModule);
+
         // Phase 2a: Inject new types
         int injectedTypes = MemberInjector.InjectTypes(vanillaAsm, compiledAsm, typesToInject);
 
@@ -257,6 +261,16 @@ public static class ILPatcher
         {
             Console.Error.WriteLine($"\n  {pinvokeErrors.Count} PInvoke integrity error(s), output not written:");
             foreach (var err in pinvokeErrors)
+                Console.Error.WriteLine($"    {err}");
+            return -1;
+        }
+
+        var initializerErrors = InjectedFieldInitializerVerifier.Verify(
+            vanillaAsm.MainModule, compiledAsm.MainModule, preInjectionFields, transplantedMethodKeys);
+        if (initializerErrors.Count > 0)
+        {
+            Console.Error.WriteLine($"\n  {initializerErrors.Count} injected-field initializer error(s), output not written:");
+            foreach (var err in initializerErrors)
                 Console.Error.WriteLine($"    {err}");
             return -1;
         }
