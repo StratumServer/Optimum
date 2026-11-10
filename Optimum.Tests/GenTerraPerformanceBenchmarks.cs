@@ -193,26 +193,20 @@ public sealed class GenTerraPerformanceBenchmarks
         swVanilla.Stop();
         long vanillaMs = swVanilla.ElapsedMilliseconds;
 
-        // Phase 2: Compact landforms with pre-multiplied weights and FMA
-        float[] wA = new float[landformCount];
-        float[] wB = new float[landformCount];
+        // Phase 2: Compact K non-zero landforms preserving exact GameMath.Lerp (Bit-Exact Zero-Error)
+        float[] compactW = new float[landformCount];
         float[][] ths = new float[landformCount][];
 
         var swCompact = Stopwatch.StartNew();
         double compactSum = 0;
         for (int c = 0; c < columns; c++)
         {
-            int floorDistY = (int)Math.Floor(distY);
-            float slide = distY - floorDistY;
-            float invSlide = 1f - slide;
-
             int nzCount = 0;
             for (int i = 0; i < weights.Length; i++)
             {
                 float w = weights[i];
                 if (w == 0) continue;
-                wA[nzCount] = w * invSlide;
-                wB[nzCount] = w * slide;
+                compactW[nzCount] = w;
                 ths[nzCount] = terrainYThresholds[i];
                 nzCount++;
             }
@@ -224,7 +218,8 @@ public sealed class GenTerraPerformanceBenchmarks
                 for (int k = 0; k < nzCount; k++)
                 {
                     float[] t = ths[k];
-                    threshold += t[b] * wA[k] + t[b + 1] * wB[k];
+                    float lerp = GameMath.Lerp(t[b], t[b + 1], distortedPosYSlide);
+                    threshold += compactW[k] * lerp;
                 }
                 compactSum += threshold;
             }
@@ -232,16 +227,15 @@ public sealed class GenTerraPerformanceBenchmarks
         swCompact.Stop();
         long compactMs = swCompact.ElapsedMilliseconds;
 
-        // Parity Verification: relative delta within floating-point epsilon (1e-6)
-        double diff = Math.Abs(vanillaSum - compactSum);
-        double relDiff = diff / Math.Max(1.0, Math.Abs(vanillaSum));
-        Assert.True(relDiff < 1e-6, $"Relative diff {relDiff:E4} exceeded threshold");
+        // Parity Verification: Must produce bit-exact identical double sum down to the last bit (diff == 0.0)
+        Assert.Equal(vanillaSum, compactSum);
 
         double speedup = vanillaMs > 0 ? (double)vanillaMs / Math.Max(1, compactMs) : 1.0;
         output.WriteLine($"[Benchmark Phase 2] Columns: {columns:N0}, Evaluated Y-cells: {columns * mapsizeYm2:N0}");
         output.WriteLine($"  Baseline (Vanilla 24-landform scan + Lerp): {vanillaMs} ms");
-        output.WriteLine($"  Optimized (Compact K=3 Non-Zero + FMA): {compactMs} ms");
+        output.WriteLine($"  Optimized (Compact K=3 Non-Zero + Exact Lerp): {compactMs} ms");
         output.WriteLine($"  Speedup: {speedup:F2}x (-{((vanillaMs - compactMs) * 100.0 / Math.Max(1, vanillaMs)):F1}%)");
+        output.WriteLine($"  Parity Error: 0.0000000000000000 (100% Bit-Exact IEEE 754 Parity)");
     }
 
     [Fact]

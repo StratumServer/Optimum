@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
-index 5f759f1..092d098 100644
+index 5f759f1..8d62180 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
 @@ -1,9 +1,10 @@
@@ -13,7 +13,7 @@ index 5f759f1..092d098 100644
  using Vintagestory.API.Common;
  using Vintagestory.API.Config;
  using Vintagestory.API.Datastructures;
-@@ -36,17 +37,20 @@ namespace Vintagestory.ServerMods
+@@ -36,17 +37,19 @@ namespace Vintagestory.ServerMods
  
          NewNormalizedSimplexFractalNoise terrainNoise;
          SimplexNoise distort2dx;
@@ -28,15 +28,14 @@ index 5f759f1..092d098 100644
              public float[] landformWeights;
 +            public bool[] LocalLayerFullySolid;
 +            public bool[] LocalLayerFullyEmpty;
-+            public float[] CompactWeightsA;
-+            public float[] CompactWeightsB;
++            public float[] CompactWeights;
 +            public float[][] CompactThresholds;
          }
          ThreadLocal<ThreadLocalTempData> tempDataThreadLocal;
  
          struct WeightedTaper
          {
-@@ -54,17 +58,62 @@ namespace Vintagestory.ServerMods
+@@ -54,17 +57,62 @@ namespace Vintagestory.ServerMods
              public float Weight;
          }
  
@@ -104,7 +103,7 @@ index 5f759f1..092d098 100644
          {
              return side == EnumAppSide.Server;
          }
-@@ -136,23 +185,18 @@ namespace Vintagestory.ServerMods
+@@ -136,23 +184,17 @@ namespace Vintagestory.ServerMods
  
              tempDataThreadLocal = new ThreadLocal<ThreadLocalTempData>(() => new ThreadLocalTempData
              {
@@ -114,8 +113,7 @@ index 5f759f1..092d098 100644
 +                landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
 +                LocalLayerFullySolid = new bool[api.WorldManager.MapSizeY],
 +                LocalLayerFullyEmpty = new bool[api.WorldManager.MapSizeY],
-+                CompactWeightsA = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
-+                CompactWeightsB = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
++                CompactWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
 +                CompactThresholds = new float[NoiseLandforms.landforms.LandFormsByIndex.Length][]
              });
 -            columnResults = new ColumnResult[chunksize * chunksize];
@@ -135,7 +133,7 @@ index 5f759f1..092d098 100644
          }
  
          private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
-@@ -168,10 +212,13 @@ namespace Vintagestory.ServerMods
+@@ -168,10 +210,13 @@ namespace Vintagestory.ServerMods
  
  
  
@@ -149,7 +147,7 @@ index 5f759f1..092d098 100644
                  var neibHeightMaps = request.NeighbourTerrainHeight;
  
                  // Ignore diagonals if direct adjacent faces are available, otherwise the corners get weighted too strongly
-@@ -259,27 +306,37 @@ namespace Vintagestory.ServerMods
+@@ -259,27 +304,37 @@ namespace Vintagestory.ServerMods
                  }
              }
  
@@ -192,7 +190,7 @@ index 5f759f1..092d098 100644
  
              int upheavalMapUpLeft = 0;
              int upheavalMapUpRight = 0;
-@@ -356,121 +413,204 @@ namespace Vintagestory.ServerMods
+@@ -356,121 +411,201 @@ namespace Vintagestory.ServerMods
              //int cblockId = api.World.GetBlock(new AssetLocation("creativeblock-35")).Id;
  
              const float chunkBlockDelta = 1.0f / chunksize;
@@ -392,20 +390,16 @@ index 5f759f1..092d098 100644
 +
 +                    WeightedTaper wtaper = taperMap[chunkIndex2d];
 +
-+                    int floorDistY = (int)Math.Floor(distY);
-+                    float slide = distY - floorDistY;    // This value will be unchanged throughout the posY loop
-+                    float invSlide = 1f - slide;
++                    float distortedPosYSlide = distY - (int)Math.Floor(distY);    // This value will be unchanged throughout the posY loop
 +
-+                    float[] wA = data.CompactWeightsA;
-+                    float[] wB = data.CompactWeightsB;
++                    float[] compactW = data.CompactWeights;
 +                    float[][] ths = data.CompactThresholds;
 +                    int nzCount = 0;
 +                    for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
 +                    {
 +                        float w = columnLandformIndexedWeights[i];
 +                        if (w == 0) continue;
-+                        wA[nzCount] = w * invSlide;
-+                        wB[nzCount] = w * slide;
++                        compactW[nzCount] = w;
 +                        ths[nzCount] = terrainYThresholds[i];
 +                        nzCount++;
 +                    }
@@ -420,7 +414,8 @@ index 5f759f1..092d098 100644
 +                        for (int k = 0; k < nzCount; k++)
 +                        {
 +                            float[] t = ths[k];
-+                            threshold += t[distortedPosYBase] * wA[k] + t[distortedPosYBase + 1] * wB[k];
++                            float lerp = GameMath.Lerp(t[distortedPosYBase], t[distortedPosYBase + 1], distortedPosYSlide);
++                            threshold += compactW[k] * lerp;
 +                        }
 +
 +                        // Geo Upheaval modifier for threshold
@@ -495,7 +490,7 @@ index 5f759f1..092d098 100644
  
              // First set all the fully solid layers in bulk, as much as possible
              chunkBlockData.SetBlockBulk(0, chunksize, chunksize, gcfg.mantleBlockId);
-@@ -506,11 +646,11 @@ namespace Vintagestory.ServerMods
+@@ -506,11 +641,11 @@ namespace Vintagestory.ServerMods
                  {
                      ColumnResult columnResult = columnResults[mapIndex];
                      int waterID = columnResult.WaterBlockID;
@@ -508,7 +503,7 @@ index 5f759f1..092d098 100644
                          float distort = (float)distort2dx.Noise(chunkX * chunksize + lX, worldZ) / 20f;
                          float tempf = Climate.GetScaledAdjustedTemperatureFloat(temp, 0) + distort;
                          if (tempf < TerraGenConfig.WaterFreezingTempOnGen) surfaceWaterId = gcfg.lakeIceBlockId;
-@@ -522,11 +662,11 @@ namespace Vintagestory.ServerMods
+@@ -522,11 +657,11 @@ namespace Vintagestory.ServerMods
                      chunkBlockData = chunks[yBase / chunksize].Data;
                      for (int posY = yBase; posY < yTop; posY++)
                      {
@@ -521,7 +516,7 @@ index 5f759f1..092d098 100644
                              rainheightmap[mapIndex] = (ushort)posY;
                              chunkBlockData[ChunkIndex3d(lX, lY, lZ)] = rockID;
                          }
-@@ -566,20 +706,23 @@ namespace Vintagestory.ServerMods
+@@ -566,20 +701,23 @@ namespace Vintagestory.ServerMods
          }
  
  
