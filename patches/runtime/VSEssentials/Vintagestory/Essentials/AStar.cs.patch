@@ -2,7 +2,7 @@ diff --git a/VSEssentials/Vintagestory/Essentials/AStar.cs b/VSEssentials/Vintag
 index 08b3868..f177bbf 100644
 --- a/VSEssentials/Vintagestory/Essentials/AStar.cs
 +++ b/VSEssentials/Vintagestory/Essentials/AStar.cs
-@@ -7,6 +7,16 @@ using Vintagestory.API.Server;
+@@ -7,6 +7,16 @@
  
  namespace Vintagestory.Essentials;
  
@@ -19,13 +19,13 @@ index 08b3868..f177bbf 100644
  public class AStar
  {
  	protected ICoreServerAPI api;
-@@ -33,6 +43,15 @@ public class AStar
+@@ -33,6 +43,15 @@
  
  	protected Cuboidd tmpCub = new Cuboidd();
  
 +	protected PathNode scratchNode;
 +
-+	protected readonly Dictionary<long, OptimumColumnProbeResult> columnProbeCache = new Dictionary<long, OptimumColumnProbeResult>();
++	protected Dictionary<long, OptimumColumnProbeResult> columnProbeCache;
 +
 +	private static long GetColumnProbeKey(int x, int y, int z)
 +	{
@@ -35,7 +35,7 @@ index 08b3868..f177bbf 100644
  	public AStar(ICoreServerAPI api)
  	{
  		this.api = api;
-@@ -69,9 +88,11 @@ public class AStar
+@@ -69,9 +88,11 @@
  		NodesChecked = 0;
  		PathNode pathNode = new PathNode(start);
  		PathNode pathNode2 = new PathNode(endOrAvoidPos);
@@ -43,11 +43,11 @@ index 08b3868..f177bbf 100644
  		float num = modeMinFleeDistance * modeMinFleeDistance;
  		openSet.Clear();
  		closedSet.Clear();
-+		columnProbeCache.Clear();
++		(columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>()).Clear();
  		openSet.Add(pathNode);
  		while (openSet.Count > 0)
  		{
-@@ -95,19 +116,28 @@ public class AStar
+@@ -95,19 +116,28 @@
  			for (int i = 0; i < Cardinal.ALL.Length; i++)
  			{
  				Cardinal cardinal = Cardinal.ALL[i];
@@ -81,7 +81,7 @@ index 08b3868..f177bbf 100644
  					UpdateNode(pathNode3, pathNode4, extraCost);
  					pathNode4.hCost = ((modeMinFleeDistance > 0f) ? (1f + modeMinFleeDistance - pathNode4.distanceTo(pathNode2)) : pathNode4.distanceTo(pathNode2));
  					openSet.Add(pathNode4);
-@@ -126,19 +156,105 @@ public class AStar
+@@ -126,19 +156,106 @@
  
  	protected bool traversable(PathNode node, float stepHeight, int maxFallHeight, Cuboidf entityCollBox, Cardinal fromDir, ref float extraCost)
  	{
@@ -91,10 +91,11 @@ index 08b3868..f177bbf 100644
 +		int startZ = node.Z;
 +		long probeKey = GetColumnProbeKey(startX, startY, startZ);
 +
-+		if (!columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe))
++		var probeCache = columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>();
++		if (!probeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe))
 +		{
 +			probe = ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);
-+			columnProbeCache[probeKey] = probe;
++			probeCache[probeKey] = probe;
 +		}
 +
 +		if (!probe.Traversable)
@@ -193,7 +194,7 @@ index 08b3868..f177bbf 100644
  				}
  				Block block2 = blockAccess.GetBlock(tmpPos, 2);
  				if (block2.IsLiquid())
-@@ -146,9 +262,9 @@ public class AStar
+@@ -146,9 +263,9 @@
  					float traversalCost = block2.GetTraversalCost(tmpPos, creatureType);
  					if (traversalCost > 10000f)
  					{
@@ -205,7 +206,7 @@ index 08b3868..f177bbf 100644
  					break;
  				}
  				if (block2.BlockMaterial == EnumBlockMaterial.Ice)
-@@ -161,109 +277,89 @@ public class AStar
+@@ -161,109 +278,95 @@
  					float traversalCost2 = block.GetTraversalCost(tmpPos, creatureType);
  					if (traversalCost2 > 10000f)
  					{
@@ -271,6 +272,10 @@ index 08b3868..f177bbf 100644
 -				}
 -			}
 -			return true;
+-		}
+-		tmpPos.Set(node.X, node.Y, node.Z);
+-		block = blockAccess.GetBlock(tmpPos, 4);
+-		if (!block.CanStep)
 +				Traversable = true,
 +				IsStepUp = false,
 +				HasCollisionBoxes = false,
@@ -278,10 +283,7 @@ index 08b3868..f177bbf 100644
 +				BaseExtraCost = baseExtraCost,
 +				SteponHeightAdjust = 0f
 +			};
- 		}
--		tmpPos.Set(node.X, node.Y, node.Z);
--		block = blockAccess.GetBlock(tmpPos, 4);
--		if (!block.CanStep)
++		}
 +
 +		tmpPos.Set(startX, startY, startZ);
 +		Block block4 = blockAccess.GetBlock(tmpPos, 4);
@@ -322,7 +324,14 @@ index 08b3868..f177bbf 100644
 +		bool hasCollBoxes = collisionBoxes2 != null && collisionBoxes2.Length != 0;
 +		if (hasCollBoxes)
  		{
- 			num2 += collisionBoxes2.Max((Cuboidf cuboid) => cuboid.Y2);
+-			num2 += collisionBoxes2.Max((Cuboidf cuboid) => cuboid.Y2);
++			float maxCollY = float.MinValue;
++			for (int j = 0; j < collisionBoxes2.Length; j++)
++			{
++				float y2 = collisionBoxes2[j].Y2;
++				if (y2 > maxCollY) maxCollY = y2;
++			}
++			num2 += maxCollY;
  		}
 -		tmpVec.Set((double)node.X + centerOffsetX, (float)node.Y + stepHeight + num2, (double)node.Z + centerOffsetZ);
 +		tmpVec.Set((double)startX + centerOffsetX, (float)startY + stepHeight + num2, (double)startZ + centerOffsetZ);

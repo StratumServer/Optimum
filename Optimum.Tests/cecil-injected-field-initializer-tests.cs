@@ -108,6 +108,18 @@ public class CecilInjectedFieldInitializerTests
     }
 
     [Fact]
+    public void AStarColumnProbeCacheIsLazilyInitializedAndHasNoLambdas()
+    {
+        string patch = Read("patches/runtime/VSEssentials/Vintagestory/Essentials/AStar.cs.patch");
+
+        Assert.DoesNotMatch(
+            new Regex(@"columnProbeCache\s*=\s*new Dictionary<long, OptimumColumnProbeResult>\(\);"),
+            patch);
+        Assert.Contains("columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>()", patch);
+        Assert.DoesNotMatch(new Regex(@"^\+.*=>", RegexOptions.Multiline), patch);
+    }
+
+    [Fact]
     public void TreeGenScratchFieldsHaveNoInitializer()
     {
         string patch = Read("patches/runtime/VSEssentials/Vintagestory/ServerMods/TreeGen.cs.patch");

@@ -628,16 +628,16 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string runtimeAStar = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/Essentials/AStar.cs.patch"));
         Assert.Contains("public struct OptimumColumnProbeResult", runtimeAStar);
-        Assert.Contains("columnProbeCache.Clear();", runtimeAStar);
-        Assert.Contains("columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", runtimeAStar);
+        Assert.Contains("(columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>()).Clear();", runtimeAStar);
+        Assert.Contains("probeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", runtimeAStar);
         Assert.Contains("ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);", runtimeAStar);
         Assert.Contains("fromDir.IsDiagonal", runtimeAStar);
 
         string sourceAStar = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Pathfinding/Astar/AStar.cs.patch"));
         Assert.Contains("public struct OptimumColumnProbeResult", sourceAStar);
-        Assert.Contains("columnProbeCache.Clear();", sourceAStar);
-        Assert.Contains("columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", sourceAStar);
+        Assert.Contains("(columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>()).Clear();", sourceAStar);
+        Assert.Contains("probeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe)", sourceAStar);
         Assert.Contains("ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);", sourceAStar);
 
         var manifestMethod = typeof(Optimum.Patcher.ModPatcher)

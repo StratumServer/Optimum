@@ -1,10 +1,8 @@
 diff --git a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
-index c3fe425..5b69bd8 100644
+index 276c703..5fc6dae 100644
 --- a/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
 +++ b/VSEssentials/Entity/Pathfinding/Astar/AStar.cs
-@@ -7,10 +7,19 @@ using Vintagestory.API.Server;
- 
- #nullable disable
+@@ -9,6 +9,15 @@
  
  namespace Vintagestory.Essentials
  {
@@ -20,11 +18,7 @@ index c3fe425..5b69bd8 100644
  
      public class AStar
      {
-         protected ICoreServerAPI api;
-         protected ICachingBlockAccessor blockAccess;
-@@ -75,15 +84,17 @@ namespace Vintagestory.Essentials
- 
-             NodesChecked = 0;
+@@ -77,11 +86,13 @@
  
              PathNode startNode = new PathNode(start);
              PathNode targetNode = new PathNode(endOrAvoidPos);
@@ -34,15 +28,11 @@ index c3fe425..5b69bd8 100644
  
              openSet.Clear();
              closedSet.Clear();
-+            columnProbeCache.Clear();
++            (columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>()).Clear();
  
              openSet.Add(startNode);
  
-             while (openSet.Count > 0)
-             {
-@@ -112,30 +123,39 @@ namespace Vintagestory.Essentials
- 
-                 for (int i = 0; i < Cardinal.ALL.Length; i++)
+@@ -114,26 +125,35 @@
                  {
                      Cardinal card = Cardinal.ALL[i];
  
@@ -84,16 +74,12 @@ index c3fe425..5b69bd8 100644
                              UpdateNode(nearestNode, neighbourNode, extraCost);
                              
                              neighbourNode.hCost = modeMinFleeDistance > 0 ? 1 + modeMinFleeDistance - neighbourNode.distanceTo(targetNode) : neighbourNode.distanceTo(targetNode);
-                             openSet.Add(neighbourNode);
-                         }
-@@ -161,172 +181,212 @@ namespace Vintagestory.Essentials
- 
- 
+@@ -163,51 +183,134 @@
          protected readonly Vec3d tmpVec = new Vec3d();
          protected readonly BlockPos tmpPos = new BlockPos(API.Config.Dimensions.WillSetLater);
          protected Cuboidd tmpCub = new Cuboidd();
 +        protected PathNode scratchNode;
-+        protected readonly Dictionary<long, OptimumColumnProbeResult> columnProbeCache = new Dictionary<long, OptimumColumnProbeResult>();
++        protected Dictionary<long, OptimumColumnProbeResult> columnProbeCache;
 +
 +        private static long GetColumnProbeKey(int x, int y, int z)
 +        {
@@ -108,10 +94,11 @@ index c3fe425..5b69bd8 100644
 +            int startZ = node.Z;
 +            long probeKey = GetColumnProbeKey(startX, startY, startZ);
 +
-+            if (!columnProbeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe))
++            var probeCache = columnProbeCache ??= new Dictionary<long, OptimumColumnProbeResult>();
++            if (!probeCache.TryGetValue(probeKey, out OptimumColumnProbeResult probe))
 +            {
 +                probe = ResolveColumnProbe(node, stepHeight, maxFallHeight, entityCollBox);
-+                columnProbeCache[probeKey] = probe;
++                probeCache[probeKey] = probe;
 +            }
 +
 +            if (!probe.Traversable)
@@ -242,8 +229,7 @@ index c3fe425..5b69bd8 100644
                          break;
                      }
  
-                     // Only reduce the tmpVec if we are actually falling down 1 block
-                     tmpVec.Y--;
+@@ -216,115 +319,79 @@
                      if (collTester.IsColliding(blockAccess, entityCollBox, tmpVec, false))
                      {
                          // Can't wall walk
@@ -352,7 +338,14 @@ index c3fe425..5b69bd8 100644
 +            bool hasCollBoxes = collboxes != null && collboxes.Length > 0;
 +            if (hasCollBoxes)
              {
-                 steponHeightAdjust += collboxes.Max((cuboid) => cuboid.Y2);
+-                steponHeightAdjust += collboxes.Max((cuboid) => cuboid.Y2);
++                float maxCollY = float.MinValue;
++                for (int j = 0; j < collboxes.Length; j++)
++                {
++                    float y2 = collboxes[j].Y2;
++                    if (y2 > maxCollY) maxCollY = y2;
++                }
++                steponHeightAdjust += maxCollY;
              }
 -            
 -            tmpVec.Set(node.X + centerOffsetX, node.Y + stepHeight + steponHeightAdjust, node.Z + centerOffsetZ);
@@ -396,5 +389,3 @@ index c3fe425..5b69bd8 100644
          }
  
  
-         protected List<PathNode> retracePath(PathNode startNode, PathNode endNode)
-         {
