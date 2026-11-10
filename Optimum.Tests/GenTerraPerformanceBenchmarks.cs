@@ -243,4 +243,79 @@ public sealed class GenTerraPerformanceBenchmarks
         output.WriteLine($"  Optimized (Compact K=3 Non-Zero + FMA): {compactMs} ms");
         output.WriteLine($"  Speedup: {speedup:F2}x (-{((vanillaMs - compactMs) * 100.0 / Math.Max(1, vanillaMs)):F1}%)");
     }
+
+    [Fact]
+    public void Phase3_BitPackedUlong_ZeroAllocation_Benchmark()
+    {
+        const int mapHeight = 256;
+        const int columnsPerChunk = 1024;
+        const int chunks = 1000;
+        int words = (mapHeight + 63) / 64;
+
+        // Baseline: Managed BitArray
+        long startAllocManaged = GC.GetAllocatedBytesForCurrentThread();
+        var swManaged = Stopwatch.StartNew();
+        BitArray[] managedColumns = new BitArray[columnsPerChunk];
+        for (int i = 0; i < columnsPerChunk; i++)
+        {
+            managedColumns[i] = new BitArray(mapHeight);
+        }
+        for (int c = 0; c < chunks; c++)
+        {
+            for (int col = 0; col < columnsPerChunk; col++)
+            {
+                BitArray b = managedColumns[col];
+                b.SetAll(false);
+                for (int y = 0; y < 120; y++)
+                {
+                    b[y] = true;
+                }
+            }
+        }
+        swManaged.Stop();
+        long endAllocManaged = GC.GetAllocatedBytesForCurrentThread();
+        long managedMs = swManaged.ElapsedMilliseconds;
+
+        // Phase 3: Bit-packed ulong[]
+        long startAllocBitPacked = GC.GetAllocatedBytesForCurrentThread();
+        var swBitPacked = Stopwatch.StartNew();
+        ulong[][] bitPackedColumns = new ulong[columnsPerChunk][];
+        for (int i = 0; i < columnsPerChunk; i++)
+        {
+            bitPackedColumns[i] = new ulong[words];
+        }
+        for (int c = 0; c < chunks; c++)
+        {
+            for (int col = 0; col < columnsPerChunk; col++)
+            {
+                ulong[] w = bitPackedColumns[col];
+                Array.Clear(w, 0, w.Length);
+                for (int y = 0; y < 120; y++)
+                {
+                    w[y >> 6] |= 1UL << (y & 63);
+                }
+            }
+        }
+        swBitPacked.Stop();
+        long endAllocBitPacked = GC.GetAllocatedBytesForCurrentThread();
+        long bitPackedMs = swBitPacked.ElapsedMilliseconds;
+
+        // Parity Verification: every single bit must match across all 1024 columns and 256 posY
+        for (int col = 0; col < columnsPerChunk; col++)
+        {
+            BitArray b = managedColumns[col];
+            ulong[] w = bitPackedColumns[col];
+            for (int y = 0; y < mapHeight; y++)
+            {
+                bool managedBit = b[y];
+                bool bitPackedBit = (w[y >> 6] & (1UL << (y & 63))) != 0;
+                Assert.Equal(managedBit, bitPackedBit);
+            }
+        }
+
+        output.WriteLine($"[Benchmark Phase 3] Chunks: {chunks:N0} ({chunks * columnsPerChunk:N0} columns)");
+        output.WriteLine($"  Baseline (Managed BitArray): {managedMs} ms, Init Allocations: {(endAllocManaged - startAllocManaged) / 1024} KB");
+        output.WriteLine($"  Optimized (Bit-Packed ulong[]): {bitPackedMs} ms, Init Allocations: {(endAllocBitPacked - startAllocBitPacked) / 1024} KB");
+        output.WriteLine($"  Throughput Speedup: {((double)managedMs / Math.Max(1, bitPackedMs)):F2}x (-{((managedMs - bitPackedMs) * 100.0 / Math.Max(1, managedMs)):F1}%)");
+    }
 }
