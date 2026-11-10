@@ -499,4 +499,56 @@ public class MapPageCacheTests
             pq.Dequeue();
             Assert.Equal(0, pq.Count);
         }
+
+        [Fact]
+        public void TextureArray_IsSupported_WithInsufficientLayers_ReturnsFalse()
+        {
+            var oldProvider = OptimumMapTextureArray.MaxSupportedLayersProvider;
+            try
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = () => 64;
+                Assert.False(OptimumMapTextureArray.IsSupported(128));
+                Assert.True(OptimumMapTextureArray.IsSupported(64));
+                Assert.True(OptimumMapTextureArray.IsSupported(32));
+            }
+            finally
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = oldProvider;
+            }
+        }
+
+        [Fact]
+        public void TextureArray_IsSupported_ZeroOrNegative_ReturnsFalse()
+        {
+            var oldProvider = OptimumMapTextureArray.MaxSupportedLayersProvider;
+            try
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = () => 2048;
+                Assert.False(OptimumMapTextureArray.IsSupported(0));
+                Assert.False(OptimumMapTextureArray.IsSupported(-1));
+                Assert.True(OptimumMapTextureArray.IsSupported(128));
+            }
+            finally
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = oldProvider;
+            }
+        }
+
+        [Fact]
+        public void TextureArray_IsSupported_WhenProviderThrowsOrReturnsZero_ReturnsFalse()
+        {
+            var oldProvider = OptimumMapTextureArray.MaxSupportedLayersProvider;
+            try
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = () => throw new InvalidOperationException("No GL context");
+                Assert.False(OptimumMapTextureArray.IsSupported(128));
+
+                OptimumMapTextureArray.MaxSupportedLayersProvider = () => 0;
+                Assert.False(OptimumMapTextureArray.IsSupported(128));
+            }
+            finally
+            {
+                OptimumMapTextureArray.MaxSupportedLayersProvider = oldProvider;
+            }
+        }
     }
