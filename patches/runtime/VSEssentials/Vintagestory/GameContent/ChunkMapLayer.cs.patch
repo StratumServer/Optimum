@@ -59,7 +59,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X - 1, chunkCoord.Z));
  					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X, chunkCoord.Z + 1));
  					chunksToGen.Enqueue(new FastVec2i(chunkCoord.X + 1, chunkCoord.Z + 1));
-@@ -284,19 +309,28 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -284,19 +309,35 @@ public class ChunkMapLayer : RGBMapLayer
  	}
  
  	public override void OnMapOpenedClient()
@@ -67,8 +67,15 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  		colorAccurate = api.World.Config.GetAsBool("colorAccurateWorldmap") || capi.World.Player.Privileges.IndexOf("colorAccurateWorldmap") != -1;
 +		if (OptimumConfig.EffectiveMapPageCache && pageTextureArray == null)
 +		{
-+			pageTextureArray = new OptimumMapTextureArray(OptimumConfig.MapPageCacheMaxLayers);
-+			pageRenderer = new OptimumMapPageRenderer(capi, pageTextureArray);
++			if (OptimumMapTextureArray.IsSupported(OptimumConfig.MapPageCacheMaxLayers))
++			{
++				pageTextureArray = new OptimumMapTextureArray(OptimumConfig.MapPageCacheMaxLayers);
++				pageRenderer = new OptimumMapPageRenderer(capi, pageTextureArray);
++			}
++			else
++			{
++				OptimumConfig.MapPageCacheEnabled = false;
++			}
 +		}
  	}
  
@@ -88,7 +95,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  	public override void Dispose()
  	{
  		if (loadedMapData != null)
-@@ -311,10 +345,11 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -311,10 +352,11 @@ public class ChunkMapLayer : RGBMapLayer
  	}
  
  	public override void OnShutDown()
@@ -100,7 +107,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  
  	public override void OnOffThreadTick(float dt)
  	{
-@@ -346,14 +381,24 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -346,14 +388,24 @@ public class ChunkMapLayer : RGBMapLayer
  			IMapChunk mapChunk = api.World.BlockAccessor.GetMapChunk(fastVec2i.X, fastVec2i.Y);
  			if (mapChunk == null)
  			{
@@ -125,7 +132,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  				catch (ProtoException)
  				{
  					api.Logger.Warning("Failed loading map db section {0}/{1}, a protobuf exception was thrown. Will ignore.", fastVec2i.X, fastVec2i.Y);
-@@ -377,10 +422,11 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -377,10 +429,11 @@ public class ChunkMapLayer : RGBMapLayer
  				toSaveList[fastVec2i.Copy()] = new MapPieceDB
  				{
  					Pixels = array
@@ -137,7 +144,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  		if (toSaveList.Count > 100 || diskSaveAccum > 4f)
  		{
  			diskSaveAccum = 0f;
-@@ -389,10 +435,51 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -389,10 +442,51 @@ public class ChunkMapLayer : RGBMapLayer
  		}
  	}
  
@@ -189,7 +196,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  			int num = Math.Min(readyMapPieces.Count, 200);
  			List<MultiChunkMapComponent> list = new List<MultiChunkMapComponent>();
  			while (num-- > 0)
-@@ -401,10 +488,11 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -401,10 +495,11 @@ public class ChunkMapLayer : RGBMapLayer
  				{
  					FastVec2i key = new FastVec2i(result.Cord.X / 3, result.Cord.Y / 3);
  					FastVec2i baseCord = new FastVec2i(key.X * 3, key.Y * 3);
@@ -201,7 +208,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  			}
  			foreach (MultiChunkMapComponent item in list)
  			{
-@@ -440,22 +528,71 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -440,22 +535,71 @@ public class ChunkMapLayer : RGBMapLayer
  			loadedMapData.TryRemove(item2, out var _);
  		}
  		mtThread1secAccum = 0f;
@@ -273,7 +280,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs b/VSEssentia
  		if (!base.Active)
  		{
  			return;
-@@ -495,19 +632,56 @@ public class ChunkMapLayer : RGBMapLayer
+@@ -495,19 +639,56 @@ public class ChunkMapLayer : RGBMapLayer
  		}
  		foreach (FastVec2i item2 in nowHidden)
  		{

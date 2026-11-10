@@ -18,6 +18,7 @@ namespace Vintagestory.GameContent;
 public sealed class OptimumMapTextureArray : IDisposable
 {
     public const int PageSize = OptimumMapPageCache.PagePixelSize; // 256
+    public const int GL_MAX_ARRAY_TEXTURE_LAYERS = 35071; // 0x88FF
     private const int GL_TEXTURE_2D_ARRAY = 35866;
     private const int GL_RGBA8 = 32856;
     private const int GL_RGBA = 6408;
@@ -29,6 +30,39 @@ public sealed class OptimumMapTextureArray : IDisposable
     private const int GL_TEXTURE_MAG_FILTER = 10240;
     private const int GL_TEXTURE_WRAP_S = 10242;
     private const int GL_TEXTURE_WRAP_T = 10243;
+
+    public static Func<int>? MaxSupportedLayersProvider;
+
+    /// <summary>
+    /// Query the maximum number of layers supported for GL_TEXTURE_2D_ARRAY.
+    /// Returns 0 if texture arrays or GL context are unavailable.
+    /// </summary>
+    public static int GetMaxSupportedLayers()
+    {
+        try
+        {
+            if (MaxSupportedLayersProvider != null)
+            {
+                return MaxSupportedLayersProvider();
+            }
+
+            GL.GetInteger((GetPName)GL_MAX_ARRAY_TEXTURE_LAYERS, out int maxLayers);
+            return maxLayers;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    /// <summary>
+    /// Checks if the OpenGL implementation supports texture arrays with at least requiredLayers.
+    /// </summary>
+    public static bool IsSupported(int requiredLayers)
+    {
+        if (requiredLayers <= 0) return false;
+        return GetMaxSupportedLayers() >= requiredLayers;
+    }
 
     public int TextureId { get; private set; }
     public int MaxLayers { get; }
