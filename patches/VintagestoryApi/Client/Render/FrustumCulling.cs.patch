@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/Render/FrustumCulling.cs b/VintagestoryApi/Client/Render/FrustumCulling.cs
-index f9dfad8..35c6b6e 100644
+index f9dfad8..8e47b4b 100644
 --- a/VintagestoryApi/Client/Render/FrustumCulling.cs
 +++ b/VintagestoryApi/Client/Render/FrustumCulling.cs
 @@ -11,10 +11,11 @@
@@ -33,7 +33,7 @@ index f9dfad8..35c6b6e 100644
  
      public class FrustumCulling
      {
-@@ -135,41 +144,122 @@ namespace Vintagestory.API.Client
+@@ -135,41 +144,157 @@ namespace Vintagestory.API.Client
              if (frustum[4].AABBisOutside(sphere)) return false;
              if (frustum[5].AABBisOutside(sphere)) return false;
              return true;// && lodLevel == 1) || (distx < shadowRangeX * lodBias + 24 && distz < shadowRangeZ * lodBias + 24);
@@ -63,11 +63,11 @@ index f9dfad8..35c6b6e 100644
 +            double relMinX = minX - px;
 +            double relMaxX = maxX - px;
 +            if (relMinX >= shadowRangeX || relMaxX <= -shadowRangeX) return false;
- 
++
 +            double relMinZ = minZ - pz;
 +            double relMaxZ = maxZ - pz;
 +            if (relMinZ >= shadowRangeZ || relMaxZ <= -shadowRangeZ) return false;
- 
++
 +            return true;
 +        }
 +
@@ -105,7 +105,42 @@ index f9dfad8..35c6b6e 100644
 +                    return true;
 +            }
 +        }
+ 
+ 
++        public bool InRangeAndLod(Sphere sphere, int lodLevel = 0, bool optimumUseChiselLodDistance = false)
++        {
++            double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
 +
++            if (optimumUseChiselLodDistance && OptimumConfig.ChiselLodEnabled && (lodLevel == 2 || lodLevel == 3))
++            {
++                double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
++                switch (lodLevel)
++                {
++                    case 2:
++                        return distance <= chiselDistanceSq && distance < ViewDistanceSq;
++                    case 3:
++                        return distance > chiselDistanceSq && distance < ViewDistanceSq;
++                    default:
++                        return false;
++                }
++            }
++            else
++            {
++                switch (lodLevel)
++                {
++                    case 0:
++                        return lod0BiasSq > 0 && distance < lod0BiasSq + 32 * 32;
++                    case 1:
++                        return distance < ViewDistanceSq;
++                    case 2:
++                        return distance <= lod2BiasSq;
++                    case 3:
++                        return distance > lod2BiasSq && distance < ViewDistanceSq;
++                    default:
++                        return false;
++                }
++            }
++        }
 +
 +        public bool InFrustumAndRange(Sphere sphere, bool nowVisible, int lodLevel = 0, bool optimumUseChiselLodDistance = false)
 +        {
@@ -139,7 +174,7 @@ index f9dfad8..35c6b6e 100644
 +                        if (distance <= chiselDistanceSq || distance >= ViewDistanceSq) return false;
 +                        break;
 +                }
-+            }
+             }
 +            else
 +            {
 +                switch (lodLevel)
@@ -159,7 +194,7 @@ index f9dfad8..35c6b6e 100644
 +                    default:
 +                        return false;
 +                }
-             }
++            }
 +
 +            if (frustum[0].AABBisOutside(sphere)) return false;
 +            if (frustum[1].AABBisOutside(sphere)) return false;
