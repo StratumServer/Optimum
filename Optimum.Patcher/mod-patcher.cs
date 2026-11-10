@@ -164,6 +164,11 @@ public static class ModPatcher
                     "reusableTileOffset",
                     "reusableCloudTilePos",
                 ],
+                ["FluffyClouds.CloudRendererMap"] =
+                [
+                    "reusableTileOffset",
+                    "reusableCloudTilePos",
+                ],
                 ["Vintagestory.GameContent.WeatherSystemBase"] =
                 [
                     "GetWeatherSimLock",
@@ -209,6 +214,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.WeatherSystemBase", "Start", 1),
                 new("Vintagestory.GameContent.WeatherSystemServer", "OnSaveGameSaving", 0),
                 new("Vintagestory.GameContent.CloudRenderer", "UpdateCloudTilesOffThread", 1),
+                new("FluffyClouds.CloudRendererMap", "UpdateCloudTilesOffThread", 1),
                 new("Vintagestory.GameContent.ChunkMapLayer", ".ctor", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "Event_OnChunkDirty", 3),
                 new("Vintagestory.GameContent.ChunkMapLayer", "OnMapOpenedClient", 0),

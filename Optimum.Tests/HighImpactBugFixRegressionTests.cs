@@ -1779,6 +1779,36 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void CloudRendererMap_UpdateCloudTilesOffThread_ReusesTileOffsetAndCloudTilePosVectors()
+    {
+        string patch = PatchReader.ReadPatch("patches/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs.patch");
+        Assert.Contains("private Vec3i reusableTileOffset;", patch);
+        Assert.Contains("private Vec3d reusableCloudTilePos;", patch);
+        Assert.Contains("(reusableTileOffset ??= new Vec3i()).Set(", patch);
+        Assert.Contains("(reusableCloudTilePos ??= new Vec3d()).Set(", patch);
+        Assert.Contains("int regSize = capi.World.BlockAccessor.RegionSize;", patch);
+        Assert.Contains("int seaLevel = capi.World.SeaLevel;", patch);
+        Assert.Contains("int cloudTileX = tileXPos;", patch);
+        Assert.Contains("int cloudTileZ = tileZPos;", patch);
+
+        string runtimePatch = PatchReader.ReadPatch("patches/runtime/VSEssentials/FluffyClouds/CloudRendererMap.cs.patch");
+        Assert.Contains("private Vec3i reusableTileOffset;", runtimePatch);
+        Assert.Contains("private Vec3d reusableCloudTilePos;", runtimePatch);
+        Assert.Contains("(reusableTileOffset ??= new Vec3i()).Set(", runtimePatch);
+        Assert.Contains("(reusableCloudTilePos ??= new Vec3d()).Set(", runtimePatch);
+        Assert.Contains("int regionSize = capi.World.BlockAccessor.RegionSize;", runtimePatch);
+        Assert.Contains("int seaLevel = capi.World.SeaLevel;", runtimePatch);
+        Assert.Contains("int cloudTileX = num4;", runtimePatch);
+        Assert.Contains("int cloudTileZ = num5;", runtimePatch);
+
+        string modPatcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
+        Assert.Contains("[\"FluffyClouds.CloudRendererMap\"]", modPatcherSource);
+        Assert.Contains("\"reusableTileOffset\"", modPatcherSource);
+        Assert.Contains("\"reusableCloudTilePos\"", modPatcherSource);
+        Assert.Contains("new(\"FluffyClouds.CloudRendererMap\", \"UpdateCloudTilesOffThread\", 1)", modPatcherSource);
+    }
+
+    [Fact]
     public void ShapeUtil_GetOctagonPoints_AllocatesExactArrayAndMatchesPoints()
     {
         for (int r = 0; r <= 15; r++)
