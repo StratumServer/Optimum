@@ -332,6 +332,64 @@ public class GreedyMesherTests
         Assert.NotEqual(quantA, quantB); // Prevents stepped banding!
     }
 
+    [Theory]
+    [InlineData(0, 0, 16.0, 16.0, 2, 0)] // Center of chunk (dist = 0 <= 32) -> clamped to 0
+    [InlineData(0, 0, 40.0, 16.0, 2, 0)] // dist = 24 <= 32 -> clamped to 0
+    [InlineData(0, 0, 48.0, 16.0, 2, 0)] // dist = 32 (distSq = 1024 <= 1024) -> clamped to 0
+    [InlineData(0, 0, 49.0, 16.0, 2, 2)] // dist = 33 > 32, under far (192) -> returns base (2)
+    [InlineData(3, 0, 16.0, 16.0, 2, 2)] // chunk 3 (dist = 96), under far (192) -> returns base (2)
+    [InlineData(10, 0, 16.0, 16.0, 2, 4)] // chunk 10 (dist = 320 > 192) -> expands to far tolerance (4)
+    public void ComputeEffectiveTolerance_RespectsDistanceBands(
+        int chunkX,
+        int chunkZ,
+        double playerX,
+        double playerZ,
+        int baseTolerance,
+        int expectedTolerance)
+    {
+        int farDistance = 192;
+        int farDistanceSq = farDistance * farDistance;
+        int result = OptimumGreedyMesher.ComputeEffectiveTolerance(
+            chunkX,
+            chunkZ,
+            playerX,
+            playerZ,
+            baseTolerance,
+            farDistance,
+            farDistanceSq);
+
+        Assert.Equal(expectedTolerance, result);
+    }
+
+    [Fact]
+    public void ComputeEffectiveTolerance_OptimumConfigOverload_MatchesConfiguredThresholds()
+    {
+        int origTol = OptimumConfig.GreedyMeshLightTolerance;
+        int origFar = OptimumConfig.GreedyMeshFarDistance;
+        double origFarSq = OptimumConfig.GreedyMeshFarDistanceSq;
+        try
+        {
+            OptimumConfig.GreedyMeshLightTolerance = 2;
+            OptimumConfig.GreedyMeshFarDistance = 128;
+            OptimumConfig.GreedyMeshFarDistanceSq = 128 * 128;
+
+            // Player standing at (16, 16), chunk (0, 0) center is (16, 16): dist 0 -> 0 tolerance
+            Assert.Equal(0, OptimumGreedyMesher.ComputeEffectiveTolerance(0, 0, 16.0, 16.0));
+
+            // Chunk (2, 0) center is (80, 16): dist 64 > 32 and < 128 -> base tolerance 2
+            Assert.Equal(2, OptimumGreedyMesher.ComputeEffectiveTolerance(2, 0, 16.0, 16.0));
+
+            // Chunk (6, 0) center is (208, 16): dist 192 > 128 -> far tolerance 4
+            Assert.Equal(4, OptimumGreedyMesher.ComputeEffectiveTolerance(6, 0, 16.0, 16.0));
+        }
+        finally
+        {
+            OptimumConfig.GreedyMeshLightTolerance = origTol;
+            OptimumConfig.GreedyMeshFarDistance = origFar;
+            OptimumConfig.GreedyMeshFarDistanceSq = origFarSq;
+        }
+    }
+
     [Fact]
     public void MergeSlice_ProducesIdenticalQuadsToFullVolumeMergePass()
     {
