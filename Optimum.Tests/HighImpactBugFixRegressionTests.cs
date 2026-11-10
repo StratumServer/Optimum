@@ -1475,7 +1475,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     public void ModLoader_DotPrefixedAndEmptyModInfoAndSidedMods()
     {
         string modLoaderPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch");
-        Assert.Contains("fsInfo.Name.StartsWith('.')", modLoaderPatch);
+        Assert.Contains("IsIgnoredDevDirectory(fsInfo.Name)", modLoaderPatch);
+        Assert.Contains("IsIgnoredDevDirectory", modLoaderPatch);
         Assert.Contains("if (mod.Info != null && !mod.Info.Side.Is(side))", modLoaderPatch);
         Assert.Contains("CompareModRequiresCompilation", modLoaderPatch);
 
@@ -1491,6 +1492,29 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch", cecilList);
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch", cecilList);
+    }
+
+    [Theory]
+    [InlineData(".git", true)]
+    [InlineData(".vs", true)]
+    [InlineData(".idea", true)]
+    [InlineData(".vscode", true)]
+    [InlineData(".github", true)]
+    [InlineData(".fleet", true)]
+    [InlineData(".obsidian", true)]
+    [InlineData(".cache", true)]
+    [InlineData(".custommod", false)]
+    [InlineData(".assets", false)]
+    [InlineData("assets", false)]
+    [InlineData("modinfo.json", false)]
+    public void ModLoader_IsIgnoredDevDirectory_DistinguishesDevFoldersFromModPaths(string name, bool expectedIgnored)
+    {
+        string modLoaderPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch");
+        Assert.Contains("IsIgnoredDevDirectory", modLoaderPatch);
+
+        bool isIgnored = name == ".git" || name == ".vs" || name == ".idea" || name == ".vscode" ||
+                         name == ".github" || name == ".fleet" || name == ".obsidian" || name == ".cache";
+        Assert.Equal(expectedIgnored, isIgnored);
     }
 
     [Fact]

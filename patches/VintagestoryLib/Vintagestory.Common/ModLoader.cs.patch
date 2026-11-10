@@ -1,10 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/ModLoader.cs b/VintagestoryLib/Vintagestory.Common/ModLoader.cs
-index 101dbeb..37481cc 100644
+index 101dbeb..9aa5be4 100644
 --- a/VintagestoryLib/Vintagestory.Common/ModLoader.cs
 +++ b/VintagestoryLib/Vintagestory.Common/ModLoader.cs
-@@ -200,30 +200,59 @@ public class ModLoader : IModLoader
- 	{
- 		CheckDuplicateModIDMods(mods);
+@@ -202,16 +202,42 @@ public class ModLoader : IModLoader
  		return CheckAndSortDependencies(mods);
  	}
  
@@ -21,6 +19,12 @@ index 101dbeb..37481cc 100644
 +	private static int CompareModSystemExecuteOrder(ModSystem a, ModSystem b)
 +	{
 +		return a.ExecuteOrder().CompareTo(b.ExecuteOrder());
++	}
++
++	private static bool IsIgnoredDevDirectory(string name)
++	{
++		return name == ".git" || name == ".vs" || name == ".idea" || name == ".vscode" ||
++		       name == ".github" || name == ".fleet" || name == ".obsidian" || name == ".cache";
 +	}
 +
  	private List<ModSystem> instantiateMods(List<ModContainer> mods)
@@ -42,9 +46,7 @@ index 101dbeb..37481cc 100644
  					mod.LoadAssembly(compilationContext, loader);
  					if (mod.Status == ModStatus.Errored && mod.Error == ModError.ChangedVersion && api is ICoreServerAPI coreServerAPI && !coreServerAPI.Server.IsDedicated)
  					{
- 						throw new RestartGameException(Lang.Get("modwarning-assemblyloaded", mod.Info.ModID));
- 					}
- 				}
+@@ -221,7 +247,16 @@ public class ModLoader : IModLoader
  			}
  		}
  		logger.VerboseDebug("{0} assemblies loaded", mods.Count);
@@ -62,11 +64,7 @@ index 101dbeb..37481cc 100644
  		{
  			logger.Warning("One or more source code mods failed to compile. Info to modders: In case you cannot find the problem, be aware that the game engine currently can only compile C# code until version 5.0. Any language features from C#6.0 or above will result in compile errors.");
  		}
- 		foreach (ModContainer mod2 in mods)
- 		{
-@@ -234,12 +263,16 @@ public class ModLoader : IModLoader
- 			}
- 		}
+@@ -236,8 +271,12 @@ public class ModLoader : IModLoader
  		contentAssetOrigins = new Vintagestory.API.Datastructures.OrderedDictionary<string, IAssetOrigin>();
  		themeAssetOrigins = new Vintagestory.API.Datastructures.OrderedDictionary<string, IAssetOrigin>();
  		Vintagestory.API.Datastructures.OrderedDictionary<string, int> orderedDictionary = new Vintagestory.API.Datastructures.OrderedDictionary<string, int>();
@@ -80,11 +78,7 @@ index 101dbeb..37481cc 100644
  			loadedMods.Add(item.Info.ModID, item);
  			list.AddRange(item.Systems);
  			if (item.FolderPath != null && Directory.Exists(Path.Combine(item.FolderPath, "assets")))
- 			{
- 				bool num = item.Info.Type == EnumModType.Theme;
-@@ -251,11 +284,11 @@ public class ModLoader : IModLoader
- 		}
- 		if (orderedDictionary.Count > 0)
+@@ -253,7 +292,7 @@ public class ModLoader : IModLoader
  		{
  			TextureSize = orderedDictionary.Values.Last();
  		}
@@ -93,11 +87,7 @@ index 101dbeb..37481cc 100644
  		logger.Notification("Instantiated {0} mod systems from {1} enabled mods", list.Count, Mods.Count());
  		return list;
  	}
- 
- 	private void ClearCacheFolder(IEnumerable<ModContainer> mods)
-@@ -292,14 +325,20 @@ public class ModLoader : IModLoader
- 		}
- 	}
+@@ -294,10 +333,16 @@ public class ModLoader : IModLoader
  
  	private List<ModContainer> CollectMods()
  	{
@@ -118,11 +108,7 @@ index 101dbeb..37481cc 100644
  		logger.Notification("Will search the following paths for mods:");
  		foreach (DirectoryInfo item in list)
  		{
- 			if (item.Exists)
- 			{
-@@ -308,13 +347,31 @@ public class ModLoader : IModLoader
- 			else
- 			{
+@@ -310,9 +355,27 @@ public class ModLoader : IModLoader
  				logger.Notification("    {0} (Not found?)", GamePaths.RemoveUsername(item.FullName));
  			}
  		}
@@ -138,7 +124,7 @@ index 101dbeb..37481cc 100644
 +			}
 +			foreach (FileSystemInfo fsInfo in dirInfo.GetFileSystemInfos())
 +			{
-+				if (fsInfo.Name.StartsWith('.'))
++				if (IsIgnoredDevDirectory(fsInfo.Name))
 +				{
 +					continue;
 +				}
@@ -153,5 +139,3 @@ index 101dbeb..37481cc 100644
  	}
  
  	private int DisableMods(IEnumerable<ModContainer> mods, IEnumerable<string> disabledModsByIdAndVersion)
- 	{
- 		if (disabledModsByIdAndVersion == null)
