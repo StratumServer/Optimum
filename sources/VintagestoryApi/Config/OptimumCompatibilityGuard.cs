@@ -51,17 +51,119 @@ public static class OptimumCompatibilityGuard
     private static FieldInfo? _kometInflowEnabledField;
     private static bool _kometInflowFieldLookupComplete;
 
+    public static void ResetDetection()
+    {
+        OptimumConfig.KometDetected = false;
+        OptimumConfig.OptiTimeDetected = false;
+        OptimumConfig.TungstenDetected = false;
+        OptimumConfig.SynergyDetected = false;
+        KometDetectedVersion = null;
+        KometDetectionSource = null;
+        OptiTimeDetectedVersion = null;
+        TungstenDetectedVersion = null;
+        SynergyDetectedVersion = null;
+        KometAdvisoryLogged = false;
+        OptiTimeAdvisoryLogged = false;
+        WorldJoinAdvisorySent = false;
+        _kometInflowEnabledField = null;
+        _kometInflowFieldLookupComplete = false;
+    }
+
+    private static HashSet<string> BuildDisabledModsSet(IEnumerable<string>? disabledMods)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (disabledMods != null)
+        {
+            foreach (var mod in disabledMods)
+            {
+                if (!string.IsNullOrWhiteSpace(mod))
+                    set.Add(mod.Trim());
+            }
+        }
+        else
+        {
+            try
+            {
+                string? dataPath = GamePaths.DataPath;
+                if (!string.IsNullOrWhiteSpace(dataPath))
+                {
+                    string settingsPath = System.IO.Path.Combine(dataPath, "clientsettings.json");
+                    if (System.IO.File.Exists(settingsPath))
+                    {
+                        string json = System.IO.File.ReadAllText(settingsPath);
+                        using var doc = System.Text.Json.JsonDocument.Parse(json);
+                        if (doc.RootElement.TryGetProperty("disabledMods", out var disabledProp) &&
+                            disabledProp.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            foreach (var elem in disabledProp.EnumerateArray())
+                            {
+                                string? s = elem.GetString();
+                                if (!string.IsNullOrWhiteSpace(s))
+                                    set.Add(s.Trim());
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // Defensive
+            }
+        }
+        return set;
+    }
+
+    private static bool IsModDisabled(string? modId, string? version, string? name, HashSet<string> disabledSet)
+    {
+        if (disabledSet.Count == 0) return false;
+
+        if (!string.IsNullOrEmpty(modId) && !string.IsNullOrEmpty(version))
+        {
+            if (disabledSet.Contains($"{modId}@{version}")) return true;
+        }
+
+        if (!string.IsNullOrEmpty(modId))
+        {
+            if (disabledSet.Contains(modId)) return true;
+            foreach (string entry in disabledSet)
+            {
+                int atIdx = entry.IndexOf('@');
+                string entryId = atIdx >= 0 ? entry.Substring(0, atIdx) : entry;
+                if (string.Equals(entryId, modId, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(name))
+        {
+            if (disabledSet.Contains(name)) return true;
+            if (!string.IsNullOrEmpty(version) && disabledSet.Contains($"{name}@{version}")) return true;
+            foreach (string entry in disabledSet)
+            {
+                int atIdx = entry.IndexOf('@');
+                string entryName = atIdx >= 0 ? entry.Substring(0, atIdx) : entry;
+                if (string.Equals(entryName, name, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Detects all 4 performance mods via ModLoader.
     /// </summary>
     public static void DetectFromModLoader(IModLoader? modLoader, Action<string>? logger = null)
+        => DetectFromModLoader(modLoader, logger, null);
+
+    public static void DetectFromModLoader(IModLoader? modLoader, Action<string>? logger, IEnumerable<string>? disabledMods)
     {
         if (modLoader == null) return;
 
         try
         {
+            var disabledSet = BuildDisabledModsSet(disabledMods);
+
             // 1. Komet
-            if (modLoader.IsModEnabled(KometModId))
+            if (modLoader.IsModEnabled(KometModId) && !IsModDisabled(KometModId, null, null, disabledSet))
             {
                 OptimumConfig.KometDetected = true;
                 KometDetectionSource = "ModLoader";
@@ -70,7 +172,7 @@ public static class OptimumCompatibilityGuard
             }
 
             // 2. OptiTime
-            if (modLoader.IsModEnabled(OptiTimeModId))
+            if (modLoader.IsModEnabled(OptiTimeModId) && !IsModDisabled(OptiTimeModId, null, null, disabledSet))
             {
                 OptimumConfig.OptiTimeDetected = true;
                 var mod = modLoader.GetMod(OptiTimeModId);
@@ -79,7 +181,7 @@ public static class OptimumCompatibilityGuard
             }
 
             // 3. Tungsten
-            if (modLoader.IsModEnabled(TungstenModId))
+            if (modLoader.IsModEnabled(TungstenModId) && !IsModDisabled(TungstenModId, null, null, disabledSet))
             {
                 OptimumConfig.TungstenDetected = true;
                 var mod = modLoader.GetMod(TungstenModId);
@@ -87,7 +189,7 @@ public static class OptimumCompatibilityGuard
             }
 
             // 4. Synergy
-            if (modLoader.IsModEnabled(SynergyModId))
+            if (modLoader.IsModEnabled(SynergyModId) && !IsModDisabled(SynergyModId, null, null, disabledSet))
             {
                 OptimumConfig.SynergyDetected = true;
                 var mod = modLoader.GetMod(SynergyModId);
@@ -102,6 +204,10 @@ public static class OptimumCompatibilityGuard
                     if (mod?.Info == null) continue;
                     string modId = mod.Info.ModID ?? "";
                     string name = mod.Info.Name ?? "";
+                    string version = mod.Info.Version ?? "";
+
+                    if (IsModDisabled(modId, version, name, disabledSet)) continue;
+                    if (!modLoader.IsModEnabled(modId)) continue;
 
                     if (!OptimumConfig.KometDetected && (string.Equals(modId, KometModId, StringComparison.OrdinalIgnoreCase) ||
                         name.IndexOf("komet", StringComparison.OrdinalIgnoreCase) >= 0))
@@ -145,15 +251,20 @@ public static class OptimumCompatibilityGuard
     /// Scans loaded assemblies in the AppDomain as a fallback detector.
     /// </summary>
     public static void DetectFromAssemblies(Action<string>? logger = null)
+        => DetectFromAssemblies(logger, null);
+
+    public static void DetectFromAssemblies(Action<string>? logger, IEnumerable<string>? disabledMods)
     {
         try
         {
+            var disabledSet = BuildDisabledModsSet(disabledMods);
+
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 string? name = asm.GetName().Name;
                 if (name == null) continue;
 
-                if (!OptimumConfig.KometDetected &&
+                if (!OptimumConfig.KometDetected && !IsModDisabled(KometModId, null, name, disabledSet) &&
                     (string.Equals(name, KometModId, StringComparison.OrdinalIgnoreCase) || asm.GetType("Komet.KometModSystem") != null))
                 {
                     OptimumConfig.KometDetected = true;
@@ -161,7 +272,7 @@ public static class OptimumCompatibilityGuard
                     KometDetectedVersion = asm.GetName().Version?.ToString() ?? "unknown";
                 }
 
-                if (!OptimumConfig.OptiTimeDetected &&
+                if (!OptimumConfig.OptiTimeDetected && !IsModDisabled(OptiTimeModId, null, name, disabledSet) &&
                     string.Equals(name, OptiTimeModId, StringComparison.OrdinalIgnoreCase))
                 {
                     OptimumConfig.OptiTimeDetected = true;
@@ -169,14 +280,14 @@ public static class OptimumCompatibilityGuard
                     LogOptiTimeAdvisoryOnce(logger);
                 }
 
-                if (!OptimumConfig.TungstenDetected &&
+                if (!OptimumConfig.TungstenDetected && !IsModDisabled(TungstenModId, null, name, disabledSet) &&
                     string.Equals(name, TungstenModId, StringComparison.OrdinalIgnoreCase))
                 {
                     OptimumConfig.TungstenDetected = true;
                     TungstenDetectedVersion = asm.GetName().Version?.ToString() ?? "unknown";
                 }
 
-                if (!OptimumConfig.SynergyDetected &&
+                if (!OptimumConfig.SynergyDetected && !IsModDisabled(SynergyModId, null, name, disabledSet) &&
                     string.Equals(name, SynergyModId, StringComparison.OrdinalIgnoreCase))
                 {
                     OptimumConfig.SynergyDetected = true;
@@ -275,10 +386,10 @@ public static class OptimumCompatibilityGuard
         RunDetection(api?.ModLoader, logger);
     }
 
-    internal static void RunDetection(IModLoader? modLoader, Action<string>? logger)
+    public static void RunDetection(IModLoader? modLoader, Action<string>? logger = null, IEnumerable<string>? disabledMods = null)
     {
-        DetectFromModLoader(modLoader, logger);
-        DetectFromAssemblies(logger);
+        DetectFromModLoader(modLoader, logger, disabledMods);
+        DetectFromAssemblies(logger, disabledMods);
         LogKometAdvisoryIfUncoordinated(logger);
     }
 
@@ -370,22 +481,9 @@ public static class OptimumCompatibilityGuard
 
     public static void ResetForTests()
     {
-        OptimumConfig.KometDetected = false;
+        ResetDetection();
         OptimumConfig.KometGuardEnabled = true;
-        OptimumConfig.OptiTimeDetected = false;
-        OptimumConfig.TungstenDetected = false;
-        OptimumConfig.SynergyDetected = false;
-        KometDetectedVersion = null;
-        KometDetectionSource = null;
-        OptiTimeDetectedVersion = null;
-        TungstenDetectedVersion = null;
-        SynergyDetectedVersion = null;
-        KometAdvisoryLogged = false;
-        OptiTimeAdvisoryLogged = false;
-        WorldJoinAdvisorySent = false;
         OptimumConfig.KometAdaptiveChunkInflowEnabled = false;
-        _kometInflowEnabledField = null;
-        _kometInflowFieldLookupComplete = false;
     }
 
     private static void LogKometAdvisoryOnce(Action<string>? logger)

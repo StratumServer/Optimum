@@ -208,6 +208,47 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
         Assert.Contains("ShaderPreprocessParallel", report.DisabledFeatures);
     }
 
+    [Fact]
+    public void DisabledModIsExcludedFromReportAndDoesNotDisableFeatures()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "IntrusiveMod.dll"), Encoding.UTF8.GetBytes(
+            "Harmony ShaderRegistry LoadShader"));
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test",
+            new[] { "IntrusiveMod" });
+
+        Assert.DoesNotContain(report.Sources, source => source.Name == "IntrusiveMod");
+        Assert.DoesNotContain("EntityLightBatch", report.DisabledFeatures);
+        Assert.DoesNotContain("Oit", report.DisabledFeatures);
+    }
+
+    [Fact]
+    public void DisabledModInClientSettingsIsExcludedFromReport()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "IntrusiveMod.dll"), Encoding.UTF8.GetBytes(
+            "Harmony ShaderRegistry LoadShader"));
+
+        File.WriteAllText(Path.Combine(dataPath, "clientsettings.json"),
+            "{\"disabledMods\": [\"IntrusiveMod\"]}");
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.DoesNotContain(report.Sources, source => source.Name == "IntrusiveMod");
+        Assert.DoesNotContain("EntityLightBatch", report.DisabledFeatures);
+    }
+
     private static void WriteHookAssembly(string path)
     {
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(

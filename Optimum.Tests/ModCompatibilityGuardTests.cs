@@ -208,6 +208,33 @@ public sealed class ModCompatibilityGuardTests : IDisposable
         }
     }
 
+    [Fact]
+    public void DetectFromModLoader_IgnoresDisabledMods()
+    {
+        var logs = new List<string>();
+        var loader = new MultiModLoader(("komet", "Komet", "2.0.0"), ("optitime", "OptiTime", "1.0.0"));
+
+        OptimumCompatibilityGuard.DetectFromModLoader(loader, logs.Add, new[] { "komet", "optitime@1.0.0" });
+
+        Assert.False(OptimumConfig.KometDetected);
+        Assert.False(OptimumConfig.OptiTimeDetected);
+        Assert.Empty(logs);
+    }
+
+    [Fact]
+    public void RefreshCompatibilityAfterModReload_ResetsAndRescansWithDisabledMods()
+    {
+        var logs = new List<string>();
+        var loader = new MultiModLoader(("komet", "Komet", "2.0.0"));
+
+        OptimumCompatibilityGuard.DetectFromModLoader(loader, logs.Add);
+        Assert.True(OptimumConfig.KometDetected);
+
+        OptimumConfig.RefreshCompatibilityAfterModReload(new[] { "komet@2.0.0" }, loader);
+
+        Assert.False(OptimumConfig.KometDetected);
+    }
+
     private sealed class MultiModLoader : IModLoader
     {
         private readonly List<Mod> _mods = new();

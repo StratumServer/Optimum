@@ -661,6 +661,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.GuiManager", "OnMouseMove", 1),
     // Issue #477: await singleplayer server shutdown on window close
     new("Vintagestory.Client.GuiScreenRunningGame", "OnWindowClosed", 0),
+    // Refresh mod compatibility state when mods are reloaded
+    new("Vintagestory.Client.GuiScreenMods", "OnReloadMods", 0),
     // R3: scale the occlusion-culling engagement threshold by view distance
     new("Vintagestory.Client.NoObf.ChunkCuller", "CullInvisibleChunks", 0),
     // Issue #72: BFS visibility flood fill + its helpers, transplanted alongside
