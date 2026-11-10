@@ -15,6 +15,7 @@ using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Vintagestory.Essentials;
+using Vintagestory.GameContent;
 using Xunit;
 #if !NO_DONOR
 using Vintagestory.Client.NoObf;
@@ -391,6 +392,47 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("partitionUtil.WalkEntities(tmp, 1.5", runtimePatch);
         Assert.Contains("EnumEntitySearchType.Inanimate", runtimePatch);
         Assert.DoesNotContain("waitTicks = 2;", runtimePatch);
+    }
+
+    [Fact]
+    public void ParticleWhitelist_SurvivalCriticalEmitters_AreIdentified()
+    {
+        var charcoalPit = new Block { Code = new AssetLocation("game", "charcoalpit-burning") };
+        var forge = new Block { Code = new AssetLocation("game", "forge-lit") };
+        var bloomery = new Block { Code = new AssetLocation("game", "bloomerychimney") };
+        var firepit = new Block { Code = new AssetLocation("game", "firepit-lit") };
+        var chimney = new Block { Code = new AssetLocation("game", "chimney-stone") };
+        var bubbles = new Block { Code = new AssetLocation("game", "water-bubble") };
+        var decorativeTorch = new Block { Code = new AssetLocation("game", "torch-wall-lit") };
+        var soil = new Block { Code = new AssetLocation("game", "soil-fertile") };
+
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(charcoalPit));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(forge));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(bloomery));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(firepit));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(chimney));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(bubbles));
+
+        Assert.False(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(decorativeTorch));
+        Assert.False(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(soil));
+        Assert.False(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(null));
+        Assert.False(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(new Block()));
+    }
+
+    [Fact]
+    public void ParticleWhitelist_EntityClassMatch_WorksCorrectly()
+    {
+        var pitByClass = new Block { EntityClass = "CharcoalPit" };
+        var forgeByClass = new Block { EntityClass = "Forge" };
+        var bloomeryByClass = new Block { EntityClass = "Bloomery" };
+        var firepitByClass = new Block { EntityClass = "Firepit" };
+        var genericByClass = new Block { EntityClass = "Sign" };
+
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(pitByClass));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(forgeByClass));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(bloomeryByClass));
+        Assert.True(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(firepitByClass));
+        Assert.False(OptimumParticleWhitelist.IsCriticalSurvivalEmitter(genericByClass));
     }
 
     [Fact]

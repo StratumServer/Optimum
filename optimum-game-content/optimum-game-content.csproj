@@ -10,6 +10,7 @@
     <DebugSymbols>true</DebugSymbols>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\sources\VSEssentials\Systems\OptimumParticleWhitelist.cs" Link="OptimumParticleWhitelist.cs" />
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumBc7Support.cs" Link="OptimumBc7Support.cs" />
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapLodGenerator.cs" Link="OptimumMapLodGenerator.cs" />
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapPageCache.cs" Link="OptimumMapPageCache.cs" />
