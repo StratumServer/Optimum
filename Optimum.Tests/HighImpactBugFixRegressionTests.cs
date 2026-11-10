@@ -2171,6 +2171,36 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.True(Vintagestory.ServerMods.NoObf.RegistryObjectType.WildCardMatch(new AssetLocation("game", ""), new AssetLocation("game", "")));
     }
 
+    [Fact]
+    public void BlockEntityFirepitAndPotInFirepitRenderer_RuntimeDonorPatchesExistAndTargetManifest()
+    {
+        string firepitPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs.patch"));
+        Assert.Contains("GetPotStaticMesh(ITesselatorAPI tesselator, ItemStack contentStack)", firepitPatch);
+        Assert.Contains("shouldRedraw = true;", firepitPatch);
+        Assert.Contains("bool isColdPot = isPot && furnaceTemperature < 50f && InputStackTemp < 50f;", firepitPatch);
+        Assert.DoesNotMatch(new System.Text.RegularExpressions.Regex(@"^\+.*=>", System.Text.RegularExpressions.RegexOptions.Multiline), firepitPatch);
+
+        string rendererPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs.patch"));
+        Assert.Contains("SphereInFrustum(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5, 0.75)", rendererPatch);
+        Assert.Contains("SquareDistanceTo(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5)", rendererPatch);
+
+        var manifestMethod = typeof(Optimum.Patcher.ModPatcher)
+            .GetMethod("SurvivalManifest", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object manifest = manifestMethod.Invoke(null, null)!;
+
+        var members = (Dictionary<string, List<string>>)manifest.GetType().GetProperty("Members")!.GetValue(manifest)!;
+        Assert.True(members.ContainsKey("Vintagestory.GameContent.BlockEntityFirepit"));
+        Assert.Contains("GetPotStaticMesh", members["Vintagestory.GameContent.BlockEntityFirepit"]);
+
+        var methods = (IEnumerable<Optimum.Patcher.MethodTarget>)manifest.GetType().GetProperty("Methods")!.GetValue(manifest)!;
+        Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.BlockEntityFirepit" && m.MethodName == "UpdateRenderer");
+        Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.BlockEntityFirepit" && m.MethodName == "FromTreeAttributes");
+        Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.BlockEntityFirepit" && m.MethodName == "getContentMesh");
+        Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.PotInFirepitRenderer" && m.MethodName == "OnRenderFrame");
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
