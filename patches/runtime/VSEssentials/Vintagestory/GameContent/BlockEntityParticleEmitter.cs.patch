@@ -12,7 +12,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
  
  public class BlockEntityParticleEmitter : BlockEntity
  {
-@@ -25,18 +28,53 @@ public class BlockEntityParticleEmitter : BlockEntity
+@@ -25,18 +28,54 @@ public class BlockEntityParticleEmitter : BlockEntity
  		Api.World.UnregisterGameTickListener(listenerId);
  	}
  
@@ -38,7 +38,8 @@ diff --git a/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
 +		{
 +			return;
 +		}
-+		bool gateEnabled = OptimumConfig.ParticleDistanceGateEnabled;
++		bool isCritical = OptimumParticleWhitelist.IsCriticalSurvivalEmitter(block);
++		bool gateEnabled = OptimumConfig.ParticleDistanceGateEnabled && !isCritical;
 +		bool anySpawned = false;
 +		for (int i = 0; i < block.ParticleProperties.Length; i++)
 +		{
@@ -60,7 +61,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/BlockEntityParticleEmitter.cs
 +			advancedParticleProperties.basePos.Z = (float)Pos.Z + block.TopMiddlePos.Z;
 +			Api.World.SpawnParticles(advancedParticleProperties);
 +		}
-+		if (gateEnabled)
++		if (OptimumConfig.ParticleDistanceGateEnabled)
 +		{
 +			if (anySpawned)
 +			{
