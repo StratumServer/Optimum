@@ -318,4 +318,98 @@ public sealed class GenTerraPerformanceBenchmarks
         output.WriteLine($"  Optimized (Bit-Packed ulong[]): {bitPackedMs} ms, Init Allocations: {(endAllocBitPacked - startAllocBitPacked) / 1024} KB");
         output.WriteLine($"  Throughput Speedup: {((double)managedMs / Math.Max(1, bitPackedMs)):F2}x (-{((managedMs - bitPackedMs) * 100.0 / Math.Max(1, managedMs)):F1}%)");
     }
+
+    [Fact]
+    public void Phase4_SimdOctaveBiLerp_VectorParityAndPerformance_Benchmark()
+    {
+        const int octaves = 9;
+        const int iterations = 500_000;
+        Random rnd = new(1337);
+
+        double[] octNoiseX0 = new double[octaves];
+        double[] octNoiseX1 = new double[octaves];
+        double[] octNoiseX2 = new double[octaves];
+        double[] octNoiseX3 = new double[octaves];
+        for (int i = 0; i < octaves; i++)
+        {
+            octNoiseX0[i] = rnd.NextDouble();
+            octNoiseX1[i] = rnd.NextDouble();
+            octNoiseX2[i] = rnd.NextDouble();
+            octNoiseX3[i] = rnd.NextDouble();
+        }
+
+        double[] scalarResult = new double[octaves];
+        double[] vectorResult = new double[octaves];
+
+        double x = 0.35;
+        double z = 0.65;
+
+        // Baseline: Scalar BiLerp across all 9 octaves
+        var swScalar = Stopwatch.StartNew();
+        for (int it = 0; it < iterations; it++)
+        {
+            for (int i = 0; i < octaves; i++)
+            {
+                scalarResult[i] = GameMath.BiLerp(octNoiseX0[i], octNoiseX1[i], octNoiseX2[i], octNoiseX3[i], x, z);
+            }
+        }
+        swScalar.Stop();
+        long scalarMs = swScalar.ElapsedMilliseconds;
+
+        // Phase 4: SIMD Vector256 BiLerp for 2x4 doubles + 1 scalar remainder
+        var swVector = Stopwatch.StartNew();
+        for (int it = 0; it < iterations; it++)
+        {
+            if (Vector256.IsHardwareAccelerated)
+            {
+                Vector256<double> vx = Vector256.Create(x);
+                Vector256<double> vz = Vector256.Create(z);
+
+                // Octaves 0..3
+                Vector256<double> tl0 = Vector256.LoadUnsafe(ref octNoiseX0[0]);
+                Vector256<double> tr0 = Vector256.LoadUnsafe(ref octNoiseX1[0]);
+                Vector256<double> bl0 = Vector256.LoadUnsafe(ref octNoiseX2[0]);
+                Vector256<double> br0 = Vector256.LoadUnsafe(ref octNoiseX3[0]);
+
+                Vector256<double> top0 = tl0 + (tr0 - tl0) * vx;
+                Vector256<double> bot0 = bl0 + (br0 - bl0) * vx;
+                Vector256<double> res0 = top0 + (bot0 - top0) * vz;
+                res0.StoreUnsafe(ref vectorResult[0]);
+
+                // Octaves 4..7
+                Vector256<double> tl1 = Vector256.LoadUnsafe(ref octNoiseX0[4]);
+                Vector256<double> tr1 = Vector256.LoadUnsafe(ref octNoiseX1[4]);
+                Vector256<double> bl1 = Vector256.LoadUnsafe(ref octNoiseX2[4]);
+                Vector256<double> br1 = Vector256.LoadUnsafe(ref octNoiseX3[4]);
+
+                Vector256<double> top1 = tl1 + (tr1 - tl1) * vx;
+                Vector256<double> bot1 = bl1 + (br1 - bl1) * vx;
+                Vector256<double> res1 = top1 + (bot1 - top1) * vz;
+                res1.StoreUnsafe(ref vectorResult[4]);
+
+                // Octave 8 (remainder)
+                vectorResult[8] = GameMath.BiLerp(octNoiseX0[8], octNoiseX1[8], octNoiseX2[8], octNoiseX3[8], x, z);
+            }
+            else
+            {
+                for (int i = 0; i < octaves; i++)
+                {
+                    vectorResult[i] = GameMath.BiLerp(octNoiseX0[i], octNoiseX1[i], octNoiseX2[i], octNoiseX3[i], x, z);
+                }
+            }
+        }
+        swVector.Stop();
+        long vectorMs = swVector.ElapsedMilliseconds;
+
+        // Parity Verification: every octave must match bit-for-bit with scalar BiLerp
+        for (int i = 0; i < octaves; i++)
+        {
+            Assert.Equal(scalarResult[i], vectorResult[i], 12);
+        }
+
+        output.WriteLine($"[Benchmark Phase 4] Iterations: {iterations:N0} (9 octaves each, {iterations * octaves:N0} total BiLerps)");
+        output.WriteLine($"  Baseline (Scalar GameMath.BiLerp): {scalarMs} ms");
+        output.WriteLine($"  Optimized (Vector256 SIMD BiLerp): {vectorMs} ms");
+        output.WriteLine($"  Throughput Speedup: {((double)scalarMs / Math.Max(1, vectorMs)):F2}x (-{((scalarMs - vectorMs) * 100.0 / Math.Max(1, scalarMs)):F1}%)");
+    }
 }
