@@ -1,8 +1,8 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
-index 5f759f1..fbdfdef 100644
+index 5f759f1..9ca0625 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs
-@@ -36,17 +36,17 @@ namespace Vintagestory.ServerMods
+@@ -36,17 +36,20 @@ namespace Vintagestory.ServerMods
  
          NewNormalizedSimplexFractalNoise terrainNoise;
          SimplexNoise distort2dx;
@@ -17,12 +17,15 @@ index 5f759f1..fbdfdef 100644
              public float[] landformWeights;
 +            public bool[] LocalLayerFullySolid;
 +            public bool[] LocalLayerFullyEmpty;
++            public float[] CompactWeightsA;
++            public float[] CompactWeightsB;
++            public float[][] CompactThresholds;
          }
          ThreadLocal<ThreadLocalTempData> tempDataThreadLocal;
  
          struct WeightedTaper
          {
-@@ -57,14 +57,40 @@ namespace Vintagestory.ServerMods
+@@ -57,14 +60,40 @@ namespace Vintagestory.ServerMods
          struct ColumnResult
          {
              public BitArray ColumnBlockSolidities;
@@ -67,7 +70,7 @@ index 5f759f1..fbdfdef 100644
          {
              return side == EnumAppSide.Server;
          }
-@@ -136,23 +162,15 @@ namespace Vintagestory.ServerMods
+@@ -136,23 +165,18 @@ namespace Vintagestory.ServerMods
  
              tempDataThreadLocal = new ThreadLocal<ThreadLocalTempData>(() => new ThreadLocalTempData
              {
@@ -76,7 +79,10 @@ index 5f759f1..fbdfdef 100644
 -                landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length]
 +                landformWeights = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
 +                LocalLayerFullySolid = new bool[api.WorldManager.MapSizeY],
-+                LocalLayerFullyEmpty = new bool[api.WorldManager.MapSizeY]
++                LocalLayerFullyEmpty = new bool[api.WorldManager.MapSizeY],
++                CompactWeightsA = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
++                CompactWeightsB = new float[NoiseLandforms.landforms.LandFormsByIndex.Length],
++                CompactThresholds = new float[NoiseLandforms.landforms.LandFormsByIndex.Length][]
              });
 -            columnResults = new ColumnResult[chunksize * chunksize];
 -            layerFullyEmpty = new bool[api.WorldManager.MapSizeY];
@@ -95,7 +101,7 @@ index 5f759f1..fbdfdef 100644
          }
  
          private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
-@@ -168,10 +186,13 @@ namespace Vintagestory.ServerMods
+@@ -168,10 +192,13 @@ namespace Vintagestory.ServerMods
  
  
  
@@ -109,7 +115,7 @@ index 5f759f1..fbdfdef 100644
                  var neibHeightMaps = request.NeighbourTerrainHeight;
  
                  // Ignore diagonals if direct adjacent faces are available, otherwise the corners get weighted too strongly
-@@ -259,27 +280,37 @@ namespace Vintagestory.ServerMods
+@@ -259,27 +286,37 @@ namespace Vintagestory.ServerMods
                  }
              }
  
@@ -152,7 +158,7 @@ index 5f759f1..fbdfdef 100644
  
              int upheavalMapUpLeft = 0;
              int upheavalMapUpRight = 0;
-@@ -356,121 +387,145 @@ namespace Vintagestory.ServerMods
+@@ -356,121 +393,159 @@ namespace Vintagestory.ServerMods
              //int cblockId = api.World.GetBlock(new AssetLocation("creativeblock-35")).Id;
  
              const float chunkBlockDelta = 1.0f / chunksize;
@@ -227,28 +233,19 @@ index 5f759f1..fbdfdef 100644
  
 -                    // Value starts as the landform Y threshold.
 -                    double threshold = 0;
--                    for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
 +                    float[] columnLandformIndexedWeights = tempDataThreadLocal.Value.landformWeights;
 +                    landLerpMap.WeightsAt(baseX + lX * chunkPixelBlockStep, baseZ + lZ * chunkPixelBlockStep, columnLandformIndexedWeights);
 +                    for (int i = 0; i < lerpedAmps.Length; i++)
-                     {
--                        float weight = columnLandformIndexedWeights[i];
--                        if (weight == 0) continue;
--                        // Sample the two values to lerp between. The value of distortedPosYBase is clamped in such a way that this always works.
--                        // Underflow and overflow of distortedPosY result in linear extrapolation.
--                        threshold += weight * ContinueSampleDisplacedYThreshold(distortedPosYBase, distortedPosYSlide, terrainYThresholds[i]);
++                    {
 +                        lerpedAmps[i] = GameMath.BiLerp(octNoiseX0[i], octNoiseX1[i], octNoiseX2[i], octNoiseX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
 +                        lerpedTh[i] = GameMath.BiLerp(octThX0[i], octThX1[i], octThX2[i], octThX3[i], lX * chunkBlockDelta, lZ * chunkBlockDelta);
-                     }
- 
--                    // Geo Upheaval modifier for threshold
--                    ComputeGeoUpheavalTaper(posY, distY, taperThreshold, geoUpheavalAmplitude, mapsizeY, ref threshold);
++                    }
++
 +                    // Create that directional compression effect.
 +                    VectorXZ dist = NewDistortionNoise(worldX, worldZ);
 +                    VectorXZ distTerrain = ApplyIsotropicDistortionThreshold(dist * terrainDistortionMultiplier, terrainDistortionThreshold,
 +                        terrainDistortionMultiplier * maxDistortionAmount);
- 
--                    if (requiresChunkBorderSmoothing)
++
 +                    // Get Y distortion from oceanicity and upheaval
 +                    float upHeavalStrength = GameMath.BiLerp(upheavalMapUpLeft, upheavalMapUpRight, upheavalMapBotLeft, upheavalMapBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta);
 +                    float oceanicity = GameMath.BiLerp(oceanUpLeft, oceanUpRight, oceanBotLeft, oceanBotRight, lX * chunkBlockDelta, lZ * chunkBlockDelta) * oceanicityFac;
@@ -265,7 +262,33 @@ index 5f759f1..fbdfdef 100644
 +
 +                    WeightedTaper wtaper = taperMap[chunkIndex2d];
 +
-+                    float distortedPosYSlide = distY - (int)Math.Floor(distY);    // This value will be unchanged throughout the posY loop
++                    int floorDistY = (int)Math.Floor(distY);
++                    float slide = distY - floorDistY;    // This value will be unchanged throughout the posY loop
++                    float invSlide = 1f - slide;
++
++                    float[] wA = data.CompactWeightsA;
++                    float[] wB = data.CompactWeightsB;
++                    float[][] ths = data.CompactThresholds;
++                    int nzCount = 0;
+                     for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
+                     {
+-                        float weight = columnLandformIndexedWeights[i];
+-                        if (weight == 0) continue;
+-                        // Sample the two values to lerp between. The value of distortedPosYBase is clamped in such a way that this always works.
+-                        // Underflow and overflow of distortedPosY result in linear extrapolation.
+-                        threshold += weight * ContinueSampleDisplacedYThreshold(distortedPosYBase, distortedPosYSlide, terrainYThresholds[i]);
++                        float w = columnLandformIndexedWeights[i];
++                        if (w == 0) continue;
++                        wA[nzCount] = w * invSlide;
++                        wB[nzCount] = w * slide;
++                        ths[nzCount] = terrainYThresholds[i];
++                        nzCount++;
+                     }
+ 
+-                    // Geo Upheaval modifier for threshold
+-                    ComputeGeoUpheavalTaper(posY, distY, taperThreshold, geoUpheavalAmplitude, mapsizeY, ref threshold);
+-
+-                    if (requiresChunkBorderSmoothing)
 +                    for (int posY = 1; posY <= mapsizeYm2; posY++)
                      {
 -                        double th = posY > wtaper.TerrainYPos ? 1 : -1;
@@ -276,13 +299,10 @@ index 5f759f1..fbdfdef 100644
 -                        var noise = ydiff > 10 ? 0 : distort2dx.Noise(-(chunkX * chunksize + lX) / 10.0, posY / 10.0, -(chunkZ * chunksize + lZ) / 10.0) / Math.Max(1, ydiff / 2.0);
 +                        // Value starts as the landform Y threshold.
 +                        double threshold = 0;
-+                        for (int i = 0; i < columnLandformIndexedWeights.Length; i++)
++                        for (int k = 0; k < nzCount; k++)
 +                        {
-+                            float weight = columnLandformIndexedWeights[i];
-+                            if (weight == 0) continue;
-+                            // Sample the two values to lerp between. The value of distortedPosYBase is clamped in such a way that this always works.
-+                            // Underflow and overflow of distortedPosY result in linear extrapolation.
-+                            threshold += weight * ContinueSampleDisplacedYThreshold(distortedPosYBase, distortedPosYSlide, terrainYThresholds[i]);
++                            float[] t = ths[k];
++                            threshold += t[distortedPosYBase] * wA[k] + t[distortedPosYBase + 1] * wB[k];
 +                        }
  
 -                        noise *= GameMath.Clamp(2*(1 - wtaper.Weight), 0, 1) * 0.1;
@@ -384,7 +404,7 @@ index 5f759f1..fbdfdef 100644
  
              // First set all the fully solid layers in bulk, as much as possible
              chunkBlockData.SetBlockBulk(0, chunksize, chunksize, gcfg.mantleBlockId);
-@@ -566,20 +621,23 @@ namespace Vintagestory.ServerMods
+@@ -566,20 +641,23 @@ namespace Vintagestory.ServerMods
          }
  
  
