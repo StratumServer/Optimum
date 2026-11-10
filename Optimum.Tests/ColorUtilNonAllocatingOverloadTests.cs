@@ -1,3 +1,4 @@
+using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Xunit;
 
@@ -5,6 +6,24 @@ namespace Optimum.Tests;
 
 public class ColorUtilNonAllocatingOverloadTests
 {
+    [Fact]
+    public void OptimumApiBridge_IncandescenceAndColorFloats_MatchExpectedValues()
+    {
+        OptimumApiBridge.GetIncandescenceColorFloats(800, out float r, out float g, out float b);
+        Assert.True(r > 0f);
+        Assert.Equal(0f, g);
+        Assert.Equal(0f, b);
+
+        OptimumApiBridge.GetIncandescenceColorFloats(800, out float r4, out float g4, out float b4, out float a4);
+        Assert.Equal(r, r4);
+        Assert.True(a4 > 0f);
+
+        OptimumApiBridge.ToRGBAFloats(unchecked((int)0xFF112233), out float cr, out float cg, out float cb, out float ca);
+        Assert.Equal(0x11 / 255f, cr, 4);
+        Assert.Equal(0x22 / 255f, cg, 4);
+        Assert.Equal(0x33 / 255f, cb, 4);
+        Assert.Equal(1f, ca, 4);
+    }
     [Theory]
     [InlineData(0, 0, 0)]
     [InlineData(255, 255, 255)]
