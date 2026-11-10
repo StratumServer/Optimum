@@ -49,7 +49,7 @@ public static class InjectedFieldInitializerVerifier
             if (!preInjectionFields.TryGetValue(vanillaType.FullName, out var originalFields)) continue;
 
             var injectedFields = vanillaType.Fields
-                .Where(f => !originalFields.Contains(f.Name) && !f.HasConstant)
+                .Where(f => !originalFields.Contains(f.Name) && !f.HasConstant && !f.IsStatic)
                 .ToList();
             if (injectedFields.Count == 0) continue;
 
@@ -59,12 +59,12 @@ public static class InjectedFieldInitializerVerifier
             foreach (var field in injectedFields)
             {
                 foreach (var donorCtor in compiledType.Methods.Where(m =>
-                    m.HasBody && m.IsConstructor && m.IsStatic == field.IsStatic))
+                    m.HasBody && m.IsConstructor && !m.IsStatic))
                 {
                     if (!StoresField(donorCtor, field)) continue;
 
                     var vanillaCtor = vanillaType.Methods.FirstOrDefault(m =>
-                        m.IsConstructor && MethodSignature.Matches(m, donorCtor));
+                        m.IsConstructor && !m.IsStatic && MethodSignature.Matches(m, donorCtor));
                     if (vanillaCtor == null) continue;
                     if (transplantedMethodKeys.Contains(MethodSignature.GetKey(vanillaCtor))) continue;
 

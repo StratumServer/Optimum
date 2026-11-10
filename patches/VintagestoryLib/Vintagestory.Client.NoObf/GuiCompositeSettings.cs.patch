@@ -8,7 +8,7 @@ index 4d08f84..0693ac0 100644
  
  	private ElementBounds dButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
  
-+	private ElementBounds oButtonBounds = ElementBounds.Fixed(0.0, 0.0, 0.0, 40.0).WithFixedPadding(0.0, 3.0);
++	private ElementBounds oButtonBounds;
 +
 +	private ElementBounds optimumContentBounds;
 +	private double optimumRowY;

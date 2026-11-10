@@ -922,7 +922,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         // 2. Verify ParticleManager patch reuses reusableSpawnProps
         string managerPatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch"));
-        Assert.Contains("protected SimpleParticleProperties reusableSpawnProps = new SimpleParticleProperties();", managerPatch);
+        Assert.Contains("protected SimpleParticleProperties reusableSpawnProps;", managerPatch);
         Assert.Contains("+		SimpleParticleProperties props = reusableSpawnProps ??= new SimpleParticleProperties();", managerPatch);
         Assert.Contains("-		SimpleParticleProperties simpleParticleProperties = new SimpleParticleProperties(quantity, quantity", managerPatch);
 

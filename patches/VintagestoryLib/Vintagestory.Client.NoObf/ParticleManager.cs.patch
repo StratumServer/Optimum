@@ -8,7 +8,7 @@ index 5ba5406..7f775f8 100644
  
  	protected BlockBreakingParticleProps blockBreakingProps;
  
-+	protected SimpleParticleProperties reusableSpawnProps = new SimpleParticleProperties();
++	protected SimpleParticleProperties reusableSpawnProps;
 +
  	protected object asyncParticleQueueLock = new object();
  

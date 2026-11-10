@@ -20,9 +20,9 @@ index 1e91e34..ead904e 100644
 +	// Optimum: cache GetInvocationList results. Multicast delegates are immutable:
 +	// comparing the delegate reference detects handler add/remove.
 +	private OnGetClimateDelegate optimumCachedClimateDelegate;
-+	private Delegate[] optimumCachedClimateInvocations = Array.Empty<Delegate>();
++	private Delegate[] optimumCachedClimateInvocations;
 +	private OnGetWindSpeedDelegate optimumCachedWindDelegate;
-+	private Delegate[] optimumCachedWindInvocations = Array.Empty<Delegate>();
++	private Delegate[] optimumCachedWindInvocations;
 +
  	public abstract ILogger Logger { get; }
  
