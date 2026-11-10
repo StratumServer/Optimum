@@ -45,6 +45,7 @@
     <Compile Remove="Loading\BlockLoader\ItemType.cs" />
     <Compile Remove="Loading\EntityTypeLoader.cs" />
     <Compile Remove="Loading\ItemAndBlockLoader.cs" />
+    <Compile Remove="Systems\OptimumParticleWhitelist.cs" />
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumBc7Support.cs" />
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapLodGenerator.cs" />
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapPageCache.cs" />
