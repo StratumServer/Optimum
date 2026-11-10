@@ -296,6 +296,7 @@ namespace Vintagestory.Client.NoObf
 					if (Volatile.Read(ref attempted) == 0) TryRunOnce(expectedContextThreadId);
 					if (!OptimumGuiGpuProbe.GuiRenderingEnabled)
 					{
+						ScreenManager.Platform?.Logger?.Warning("[Optimum] GUI GPU rendering not eligible. Downgrading to Skia CPU.");
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
 							"gpu-probe-not-passed", out candidateTexture, out failureReason);
@@ -516,6 +517,7 @@ namespace Vintagestory.Client.NoObf
 					// CPU backend, then upload those pixels into the candidate GL texture.
 					if (!rendered && renderResetReason == null && failureReason != null)
 					{
+						ScreenManager.Platform?.Logger?.Warning("[Optimum] GUI GPU render candidate failed: {0}. Downgrading to Skia CPU.", failureReason);
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
 						string gpuFailure = failureReason;
 						try
