@@ -1,0 +1,23 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/AnvilWorkItemRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/AnvilWorkItemRenderer.cs
+index b1cf7b8..56680e0 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/AnvilWorkItemRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/AnvilWorkItemRenderer.cs
+@@ -65,14 +65,14 @@ namespace Vintagestory.GameContent
+             Vec3d camPos = worldAccess.Player.Entity.CameraPos;
+             int temp = (int)ingot.Collectible.GetTemperature(api.World, ingot);
+ 
+             Vec4f lightrgbs = worldAccess.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
+             int extraGlow = GameMath.Clamp((temp - 550) / 2, 0, 255);
+-            float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(temp);
+-            glowRgb.R = glowColor[0];
+-            glowRgb.G = glowColor[1];
+-            glowRgb.B = glowColor[2];
++            ColorUtil.GetIncandescenceColorFloats(temp, out float gr, out float gg, out float gb);
++            glowRgb.R = gr;
++            glowRgb.G = gg;
++            glowRgb.B = gb;
+             glowRgb.A = extraGlow / 255f;
+ 
+             rpi.GlDisableCullFace();
+ 
+             IShaderProgram prog = coreMod.smithingWorkItemShader;

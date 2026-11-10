@@ -1,8 +1,10 @@
 diff --git a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
-index 93ab467..73c1425 100644
+index 93ab467..84945e3 100644
 --- a/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
 +++ b/VSEssentials/Systems/Weather/WeatherSimulationParticles.cs
-@@ -67,6 +67,38 @@ namespace Vintagestory.GameContent
+@@ -65,10 +65,42 @@ namespace Vintagestory.GameContent
+         ICoreClientAPI capi;
+         Random rand;
          static int[,] lowResRainHeightMap = new int[16, 16];
          static BlockPos centerPos = new BlockPos(API.Config.Dimensions.NormalWorld);
  
@@ -41,7 +43,11 @@ index 93ab467..73c1425 100644
          #region Particle
  
          public static int waterColor = ColorUtil.ToRgba(230, 128, 178, 255);
-@@ -242,6 +274,9 @@ namespace Vintagestory.GameContent
+         public static int lowStabColor = ColorUtil.ToRgba(230, 207, 53, 10);
+ 
+@@ -240,10 +272,13 @@ namespace Vintagestory.GameContent
+             capi.Ambient.CurrentModifiers["desertstorm"] = desertStormAmbient;
+         }
  
          public void Initialize()
          {
@@ -51,7 +57,11 @@ index 93ab467..73c1425 100644
              lblock = capi.World.GetBlock(new AssetLocation("water-still-7"));
  
              if (lblock != null)
-@@ -370,14 +405,19 @@ namespace Vintagestory.GameContent
+             {
+                 capi.Event.RegisterAsyncParticleSpawner(asyncParticleSpawn);
+@@ -368,18 +403,23 @@ namespace Vintagestory.GameContent
+             int onwaterSplashParticleColor = capi.World.ApplyColorMapOnRgba(lblock.ClimateColorMapResolved, lblock.SeasonColorMapResolved, ColorUtil.WhiteArgb, (int)particlePos.X, (int)particlePos.Y, (int)particlePos.Z, false);
+             byte[] col = ColorUtil.ToBGRABytes(onwaterSplashParticleColor);
              onwaterSplashParticleColor = ColorUtil.ToRgba(94, col[0], col[1], col[2]);
  
              centerPos.Set((int)particlePos.X, 0, (int)particlePos.Z);
@@ -76,3 +86,20 @@ index 93ab467..73c1425 100644
                  }
              }
  
+ 
+             windSpeed = capi.World.BlockAccessor.GetWindSpeedAt(plrPos.XYZ).ToVec3f();
+@@ -584,12 +624,12 @@ namespace Vintagestory.GameContent
+             rainParticle.AddVelocity.Set(0.05f + 8 * windSpeed.X, 0.05f, 0.05f + 8 * windSpeed.Z);
+ 
+             manager.Spawn(rainParticle);
+ 
+ 
+-            splashParticles.MinVelocity = new Vec3f(-1f, 3, -1f);
+-            splashParticles.AddVelocity = new Vec3f(2, 0, 2);
++            splashParticles.MinVelocity.Set(-1f, 3f, -1f);
++            splashParticles.AddVelocity.Set(2f, 0f, 2f);
+             splashParticles.LifeLength = 0.1f;
+             splashParticles.MinSize = 0.07f * (0.5f + 0.65f * conds.Rainfall);// weatherData.PrecParticleSize;
+             splashParticles.MaxSize = 0.2f * (0.5f + 0.65f * conds.Rainfall); // weatherData.PrecParticleSize;
+             splashParticles.ShouldSwimOnLiquid = true;
+             splashParticles.Color = rainParticleColor;

@@ -1,0 +1,57 @@
+diff --git a/VSSurvivalMod/BlockEntity/BEAnvil.cs b/VSSurvivalMod/BlockEntity/BEAnvil.cs
+index 93b712c..91b462f 100644
+--- a/VSSurvivalMod/BlockEntity/BEAnvil.cs
++++ b/VSSurvivalMod/BlockEntity/BEAnvil.cs
+@@ -106,10 +106,11 @@ namespace Vintagestory.GameContent
+         public int OwnMetalTier => (Block as BlockAnvil)?.MetalTier ?? 0;
+         AnvilWorkItemRenderer workitemRenderer;
+         public int rotation = 0;
+         public float MeshAngle;
+         MeshData currentMesh;
++        MeshData rotatedMesh;
+ 
+         GuiDialog dlg;
+         ItemStack returnOnCancelStack;
+ 
+ 
+@@ -1009,10 +1010,11 @@ namespace Vintagestory.GameContent
+             }
+ 
+             RegenMeshAndSelectionBoxes();
+ 
+             MeshAngle = tree.GetFloat("meshAngle", MeshAngle);
++            rotatedMesh = null;
+ 
+             if (Api?.Side == EnumAppSide.Client)
+             {
+                 ((ICoreClientAPI)Api).Tesselator.TesselateBlock(Block, out MeshData newMesh);
+ 
+@@ -1290,20 +1292,27 @@ namespace Vintagestory.GameContent
+             if (Api is ICoreClientAPI capi) capi.Event.ColorsPresetChanged -= RegenMeshAndSelectionBoxes;
+         }
+ 
+         public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tesselator)
+         {
+-            mesher.AddMeshData(currentMesh.Clone().Rotate(0, MeshAngle, 0));
++            var mesh = rotatedMesh;
++            if (mesh == null)
++            {
++                mesh = MeshAngle == 0 ? currentMesh : currentMesh.Clone().Rotate(0, MeshAngle, 0);
++                rotatedMesh = mesh;
++            }
++            mesher.AddMeshData(mesh);
+             return true;
+         }
+ 
+         public void OnTransformed(IWorldAccessor worldAccessor, ITreeAttribute tree, int degreeRotation,
+             Dictionary<int, AssetLocation> oldBlockIdMapping, Dictionary<int, AssetLocation> oldItemIdMapping, EnumAxis? flipAxis)
+         {
+             MeshAngle = tree.GetFloat("meshAngle");
+             MeshAngle -= degreeRotation * GameMath.DEG2RAD;
+             tree.SetFloat("meshAngle", MeshAngle);
++            rotatedMesh = null;
+         }
+ 
+         public void CoolNow(float amountRel, OnStackToCool onStackToCoolCallback)
+         {
+             if (workItemStack == null) return;

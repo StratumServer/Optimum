@@ -1,0 +1,23 @@
+diff --git a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
+index e2f1f8f..a37f884 100644
+--- a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
++++ b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
+@@ -135,14 +135,14 @@ namespace Vintagestory.GameContent
+             prog.AlphaTest = 0.05f;
+             prog.OverlayOpacity = 0;
+ 
+             int temp = (int)ContentStack.Collectible.GetTemperature(api.World, ContentStack);
+             Vec4f lightrgbs = api.World.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
+-            float[] glowColor = ColorUtil.GetIncandescenceColorAsColor4f(temp);
+-            lightrgbs[0] += glowColor[0];
+-            lightrgbs[1] += glowColor[1];
+-            lightrgbs[2] += glowColor[2];
++            ColorUtil.GetIncandescenceColorFloats(temp, out float gr, out float gg, out float gb);
++            lightrgbs[0] += gr;
++            lightrgbs[1] += gg;
++            lightrgbs[2] += gb;
+ 
+             prog.RgbaLightIn = lightrgbs;
+             
+             prog.ExtraGlow = (int)GameMath.Clamp((temp - 500) / 4, 0, 255);
+             

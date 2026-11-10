@@ -1,8 +1,27 @@
 diff --git a/VintagestoryApi/Math/ColorUtil.cs b/VintagestoryApi/Math/ColorUtil.cs
-index c316d04..30cf0e4 100644
+index c316d04..fb5fe30 100644
 --- a/VintagestoryApi/Math/ColorUtil.cs
 +++ b/VintagestoryApi/Math/ColorUtil.cs
-@@ -733,10 +733,21 @@ namespace Vintagestory.API.MathTools
+@@ -213,10 +213,18 @@ namespace Vintagestory.API.MathTools
+                 ((color >> 0) & 0xff) / 255f,
+                 ((color >> 24) & 0xff) / 255f
+             );
+         }
+ 
++        public static void ToRGBAFloats(int color, out float r, out float g, out float b, out float a)
++        {
++            r = ((color >> 16) & 0xff) / 255f;
++            g = ((color >> 8) & 0xff) / 255f;
++            b = (color & 0xff) / 255f;
++            a = ((color >> 24) & 0xff) / 255f;
++        }
++
+ 
+         public static int ColorFromRgba(byte[] channels)
+         {
+             return channels[0] | (channels[1] << 8) | (channels[2] << 16) | (channels[3] << 24);
+         }
+@@ -733,10 +741,21 @@ namespace Vintagestory.API.MathTools
          /// <param name="r"></param>
          /// <param name="g"></param>
          /// <param name="b"></param>
@@ -24,7 +43,7 @@ index c316d04..30cf0e4 100644
  
              if (g < b)
              {
-@@ -749,15 +760,13 @@ namespace Vintagestory.API.MathTools
+@@ -749,15 +768,13 @@ namespace Vintagestory.API.MathTools
                  int tmp = r; r = g; g = tmp;
                  K = -2f / 6f - K;
              }
@@ -43,7 +62,7 @@ index c316d04..30cf0e4 100644
  
          /// <summary>
          /// Converts given HSV value into it's respective RGB Representation (all values in range of 0-255)
-@@ -921,17 +930,29 @@ namespace Vintagestory.API.MathTools
+@@ -921,17 +938,29 @@ namespace Vintagestory.API.MathTools
          /// <param name="h"></param>
          /// <param name="s"></param>
          /// <param name="v"></param>
@@ -74,7 +93,7 @@ index c316d04..30cf0e4 100644
              region = h / 43;
              remainder = (h - (region * 43)) * 6;
  
-@@ -940,21 +961,21 @@ namespace Vintagestory.API.MathTools
+@@ -940,21 +969,21 @@ namespace Vintagestory.API.MathTools
              t = (v * (255 - ((s * (255 - remainder)) >> 8))) >> 8;
  
              switch (region)
@@ -102,3 +121,53 @@ index c316d04..30cf0e4 100644
  
          /// <summary>
          /// Converts given HSVA values into its respective RGBA Representation (all values in range of 0-255)
+@@ -1015,20 +1044,41 @@ namespace Vintagestory.API.MathTools
+                 Math.Max(0, Math.Min(255, ((temperature - 1100) * 255) / 200)),
+                 Math.Max(0, Math.Min(255, (temperature - 525) / 2))
+             };
+         }
+ 
+-        public static float[] GetIncandescenceColorAsColor4f(int temperature)
++        public static void GetIncandescenceColorFloats(int temperature, out float r, out float g, out float b)
+         {
+-            if (temperature < 500) return new float[] { 0f, 0f, 0f, 0f };
++            if (temperature < 500)
++            {
++                r = g = b = 0f;
++                return;
++            }
+ 
+-            return new float[]{
+-                Math.Max(0f, Math.Min(1, (temperature - 500) / 400f)),
+-                Math.Max(0f, Math.Min(1, (temperature - 900) / 200f)),
+-                Math.Max(0f, Math.Min(1, (temperature - 1100)/ 200f)),
+-                Math.Max(0f, Math.Min(1, (temperature - 525) / 2f))
+-            };
++            r = Math.Max(0f, Math.Min(1f, (temperature - 500) / 400f));
++            g = Math.Max(0f, Math.Min(1f, (temperature - 900) / 200f));
++            b = Math.Max(0f, Math.Min(1f, (temperature - 1100) / 200f));
++        }
++
++        public static void GetIncandescenceColorFloats(int temperature, out float r, out float g, out float b, out float a)
++        {
++            if (temperature < 500)
++            {
++                r = g = b = a = 0f;
++                return;
++            }
++
++            r = Math.Max(0f, Math.Min(1f, (temperature - 500) / 400f));
++            g = Math.Max(0f, Math.Min(1f, (temperature - 900) / 200f));
++            b = Math.Max(0f, Math.Min(1f, (temperature - 1100) / 200f));
++            a = Math.Max(0f, Math.Min(1f, (temperature - 525) / 2f));
++        }
++
++        public static float[] GetIncandescenceColorAsColor4f(int temperature)
++        {
++            GetIncandescenceColorFloats(temperature, out float r, out float g, out float b, out float a);
++            return new float[] { r, g, b, a };
+         }
+ 
+         /// <summary>
+         /// Converts HSV (extracted from light and lightSat) to RGBA
+         /// </summary>
