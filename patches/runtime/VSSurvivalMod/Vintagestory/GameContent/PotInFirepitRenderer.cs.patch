@@ -1,0 +1,15 @@
+--- a/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/PotInFirepitRenderer.cs
+@@ -60,6 +60,12 @@
+ 	{
+ 		IRenderAPI render = capi.Render;
+ 		Vec3d cameraPos = capi.World.Player.Entity.CameraPos;
++		double distSq = cameraPos.SquareDistanceTo(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5);
++		if (distSq > RenderRange * RenderRange) return;
++
++		var culler = capi.Render?.DefaultFrustumCuller;
++		if (culler != null && !culler.SphereInFrustum(pos.X + 0.5, pos.InternalY + 0.5, pos.Z + 0.5, 0.75)) return;
++
+ 		render.GlDisableCullFace();
+ 		render.GlToggleBlend(blend: true);
+ 		IStandardShaderProgram standardShaderProgram = render.PreparedStandardShader(pos.X, pos.Y, pos.Z);
