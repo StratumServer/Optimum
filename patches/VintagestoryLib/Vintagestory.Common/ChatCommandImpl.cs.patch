@@ -1,0 +1,13 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs b/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs
+index 767d794..9e98791 100644
+--- a/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs
++++ b/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs
+@@ -503,7 +503,7 @@ public class ChatCommandImpl : IChatCommand
+ 	{
+ 		if (string.IsNullOrEmpty(description))
+ 		{
+-			throw new Exception("Command " + CallSyntax + ": Description not set");
++			description = name ?? string.Empty;
+ 		}
+ 		if (string.IsNullOrEmpty(name))
+ 		{
