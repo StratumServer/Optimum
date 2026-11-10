@@ -1,0 +1,46 @@
+diff --git a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
+--- a/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
++++ b/VSEssentials/Systems/Weather/Newclouds/CloudRendererMap.cs
+@@ -476,6 +476,8 @@
+         }
+ 
+         int accum = 20;
++        private Vec3i reusableTileOffset;
++        private Vec3d reusableCloudTilePos;
+         
+         public void UpdateCloudTilesOffThread(int changeSpeed)
+         {
+@@ -493,8 +495,10 @@
+            
+             int prevTopLeftRegX = -9999;
+             int prevTopLeftRegZ = -9999;
+-            Vec3i tileOffset = new Vec3i(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
++            Vec3i tileOffset = (reusableTileOffset ??= new Vec3i()).Set(offThreadState.TileOffsetX - offThreadState.WindTileOffsetX, 0, offThreadState.TileOffsetZ - offThreadState.WindTileOffsetZ);
+             Vec3i tileCenterPos = offThreadState.CenterTilePos;
++            int regSize = capi.World.BlockAccessor.RegionSize;
++            int seaLevel = capi.World.SeaLevel;
+ 
+             for (int i = 0; i < cnt; i++)
+             {
+@@ -506,9 +510,8 @@
+                 cloudTile.brightnessRand.InitPositionSeed(tileXPos - offThreadState.WindTileOffsetX, tileZPos - offThreadState.WindTileOffsetZ);
+ 
+                 // This is a block position
+-                Vec3d cloudTilePos = new Vec3d(tileXPos * CloudTileSize, capi.World.SeaLevel, tileZPos * CloudTileSize);
++                Vec3d cloudTilePos = (reusableCloudTilePos ??= new Vec3d()).Set(tileXPos * CloudTileSize, seaLevel, tileZPos * CloudTileSize);
+ 
+-                int regSize = capi.World.BlockAccessor.RegionSize;
+                 int topLeftRegX = (int)Math.Round(cloudTilePos.X / regSize) - 1;
+                 int topLeftRegZ = (int)Math.Round(cloudTilePos.Z / regSize) - 1;
+ 
+@@ -534,8 +537,8 @@
+                 }
+ 
+                 // This is the tile position relative to the current regions origin point
+-                int cloudTileX = (int)cloudTilePos.X / CloudTileSize;
+-                int cloudTileZ = (int)cloudTilePos.Z / CloudTileSize;
++                int cloudTileX = tileXPos;
++                int cloudTileZ = tileZPos;
+ 
+                 // Here we need the cloud tile position relative to cloud tile pos 0/0 of the current region
+                 double density = GameMath.Clamp(wreaderpreload.GetBlendedCloudThicknessAt(cloudTileX, cloudTileZ), 0, 1);
