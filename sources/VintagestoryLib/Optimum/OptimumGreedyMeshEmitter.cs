@@ -232,23 +232,14 @@ public static class OptimumGreedyMeshEmitter
         int[][] subidsByBlockAndFace = game.FastBlockTextureSubidsByBlockAndFace;
         int[] moveIndex = TileSideEnum.MoveIndex;
 
-        // Effective light tolerance for this chunk: the configured base,
-        // or FarLightTolerance beyond the far-distance band (horizontal,
-        // chunk center vs. player). A torn/stale player position read at
-        // worst mis-tiers one chunk for one tesselation - harmless.
+        // Effective light tolerance for this chunk: clamped to 0 for near chunks
+        // (<= 32 blocks from camera) to preserve exact vanilla ambient occlusion,
+        // configured base for mid-range, or FarLightTolerance beyond far-distance band.
         int tolerance = Math.Clamp(OptimumConfig.GreedyMeshLightTolerance, 0, 4);
-        if (OptimumConfig.GreedyMeshFarDistance > 0)
+        var plr = game.EntityPlayer;
+        if (plr != null)
         {
-            var plr = game.EntityPlayer;
-            if (plr != null)
-            {
-                double dx = chunkX * 32 + 16 - plr.Pos.X;
-                double dz = chunkZ * 32 + 16 - plr.Pos.Z;
-                if (dx * dx + dz * dz > OptimumConfig.GreedyMeshFarDistanceSq)
-                {
-                    tolerance = FarLightTolerance;
-                }
-            }
+            tolerance = OptimumGreedyMesher.ComputeEffectiveTolerance(chunkX, chunkZ, plr.Pos.X, plr.Pos.Z);
         }
 
         long[] sliceMergeKeys = _sliceMergeKeys ??= new long[Size2];

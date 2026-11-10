@@ -311,6 +311,69 @@ public static class OptimumGreedyMesher
         return (lightRgba & 0x00FFFFFF) != 0;
     }
 
+    /// <summary>
+    /// Default near distance threshold squared (32 blocks squared = 1024) within which
+    /// greedy meshing light tolerance is clamped to 0 to preserve pixel-perfect ambient
+    /// occlusion and vertex shading fidelity identical to vanilla.
+    /// </summary>
+    public const double NearDistanceSq = 32.0 * 32.0;
+
+    /// <summary>
+    /// Default far light tolerance for chunks beyond the far distance threshold.
+    /// </summary>
+    public const int DefaultFarLightTolerance = 4;
+
+    /// <summary>
+    /// Computes effective light tolerance for a chunk at (chunkX, chunkZ) given the player's position.
+    /// At close range (distSq &lt;= nearDistanceSq), returns 0 to eliminate any ambient
+    /// occlusion stretching across block boundaries. Beyond farDistance, returns farLightTolerance.
+    /// Otherwise returns configured base light tolerance clamped to [0, 4].
+    /// </summary>
+    public static int ComputeEffectiveTolerance(
+        int chunkX,
+        int chunkZ,
+        double playerX,
+        double playerZ,
+        int baseTolerance,
+        int farDistance,
+        double farDistanceSq,
+        int farLightTolerance = DefaultFarLightTolerance,
+        double nearDistanceSq = NearDistanceSq)
+    {
+        double dx = chunkX * 32 + 16 - playerX;
+        double dz = chunkZ * 32 + 16 - playerZ;
+        double distSq = dx * dx + dz * dz;
+
+        if (distSq <= nearDistanceSq)
+        {
+            return 0;
+        }
+
+        if (farDistance > 0 && distSq > farDistanceSq)
+        {
+            return farLightTolerance;
+        }
+
+        return Math.Clamp(baseTolerance, 0, 4);
+    }
+
+    /// <summary>
+    /// Computes effective light tolerance for a chunk at (chunkX, chunkZ) using current OptimumConfig values.
+    /// </summary>
+    public static int ComputeEffectiveTolerance(int chunkX, int chunkZ, double playerX, double playerZ)
+    {
+        return ComputeEffectiveTolerance(
+            chunkX,
+            chunkZ,
+            playerX,
+            playerZ,
+            OptimumConfig.GreedyMeshLightTolerance,
+            OptimumConfig.GreedyMeshFarDistance,
+            OptimumConfig.GreedyMeshFarDistanceSq,
+            DefaultFarLightTolerance,
+            NearDistanceSq);
+    }
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int ToIndex(int x, int y, int z) => (y << 10) | (z << 5) | x;
 
