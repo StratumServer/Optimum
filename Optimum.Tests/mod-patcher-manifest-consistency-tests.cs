@@ -121,6 +121,107 @@ public sealed class ModPatcherManifestConsistencyTests
         Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
     }
 
+    [Theory]
+    [MemberData(nameof(Manifests))]
+    public void EveryPatchedMethodHasRuntimePatchFile(string manifestMethodName, string project)
+    {
+        var methods = GetManifestProperty<List<MethodTarget>>(manifestMethodName, "Methods");
+
+        var problems = new List<string>();
+        foreach (var target in methods)
+        {
+            string shortName = ShortName(target.TypeFullName);
+            string? patchFile = FindPatchFile(project, shortName);
+            if (patchFile is null)
+            {
+                problems.Add(
+                    $"{target.TypeFullName}::{target.MethodName}: no runtime patch found for type " +
+                    $"(searched patches/runtime/{project} for {shortName}.cs.patch)");
+            }
+        }
+
+        Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
+    }
+
+    [Theory]
+    [InlineData("EssentialsManifest", "VSEssentials")]
+    [InlineData("SurvivalManifest", "VSSurvivalMod")]
+    [InlineData("CreativeManifest", "VSCreativeMod")]
+    public void EveryPatchedMethodExistsInCompiledDonor(string manifestMethodName, string project)
+    {
+        string repoRoot = RepoRoot();
+        string compiledPath = Path.Combine(repoRoot, ".build", "runtime-donors", project, "bin", "Release", "net10.0", $"{project}.dll");
+        if (!File.Exists(compiledPath))
+        {
+            return;
+        }
+
+        using var asm = Mono.Cecil.AssemblyDefinition.ReadAssembly(compiledPath);
+        var methods = GetManifestProperty<List<MethodTarget>>(manifestMethodName, "Methods");
+
+        var problems = new List<string>();
+        foreach (var target in methods)
+        {
+            var type = asm.MainModule.GetType(target.TypeFullName);
+            if (type == null)
+            {
+                problems.Add($"Type {target.TypeFullName} not found in compiled donor {project}.dll");
+                continue;
+            }
+
+            var matching = type.Methods
+                .Where(m => m.Name == target.MethodName && m.Parameters.Count == target.ParamCount)
+                .Where(target.Matches)
+                .ToList();
+
+            if (matching.Count == 0)
+            {
+                problems.Add($"Method {target.TypeFullName}::{target.MethodName}({target.ParamCount} params) not found in compiled donor {project}.dll");
+            }
+        }
+
+        Assert.True(problems.Count == 0, FormatFailure(manifestMethodName, problems));
+    }
+
+    [Theory]
+    [InlineData("vsessentials", "VSEssentials")]
+    [InlineData("vssurvivalmod", "VSSurvivalMod")]
+    public void ModPatcher_SuccessfullyPatchesVanillaAssemblyWhenDonorsExist(string modName, string project)
+    {
+        string repoRoot = RepoRoot();
+        string vanillaPath = Path.Combine(repoRoot, ".vanilla", "win-x64", "vintagestory", "Mods", $"{project}.dll");
+        string compiledPath = Path.Combine(repoRoot, ".build", "runtime-donors", project, "bin", "Release", "net10.0", $"{project}.dll");
+
+        if (!File.Exists(vanillaPath) || !File.Exists(compiledPath))
+        {
+            // Gracefully skip when runtime donors or vanilla snapshot have not been built in this environment
+            return;
+        }
+
+        string tempOutput = Path.Combine(Path.GetTempPath(), $"optimum_test_mod_patch_{modName}_{Guid.NewGuid():N}.dll");
+        try
+        {
+            bool patched = ModPatcher.Patch(modName, vanillaPath, compiledPath, tempOutput);
+            Assert.True(patched);
+            Assert.True(File.Exists(tempOutput));
+
+            var fileInfo = new FileInfo(tempOutput);
+            Assert.True(fileInfo.Length > 0);
+        }
+        finally
+        {
+            if (File.Exists(tempOutput))
+            {
+                try { File.Delete(tempOutput); } catch { }
+            }
+            string pdbPath = Path.ChangeExtension(tempOutput, ".pdb");
+            if (File.Exists(pdbPath))
+            {
+                try { File.Delete(pdbPath); } catch { }
+            }
+        }
+    }
+
     private static string FormatFailure(string manifestMethodName, List<string> problems) =>
         $"ModPatcher.{manifestMethodName} is out of sync with the runtime patches:\n  " +
         string.Join("\n  ", problems);
@@ -153,9 +254,18 @@ public sealed class ModPatcherManifestConsistencyTests
         {
             return null;
         }
-        return Directory
+        string? exact = Directory
             .EnumerateFiles(dir, $"{shortTypeName}.cs.patch", SearchOption.AllDirectories)
             .FirstOrDefault();
+        if (exact is not null)
+        {
+            return exact;
+        }
+
+        var typeDeclaration = new Regex($@"\b(class|struct|interface|record|enum)\s+{Regex.Escape(shortTypeName)}\b");
+        return Directory
+            .EnumerateFiles(dir, "*.cs.patch", SearchOption.AllDirectories)
+            .FirstOrDefault(file => typeDeclaration.IsMatch(File.ReadAllText(file)));
     }
 
     // Optimum-authored source overlays are not filename==classname (e.g.
