@@ -1,0 +1,95 @@
+diff --git a/VSSurvivalMod/Lore/Village/ModSystemVillagerDebug.cs b/VSSurvivalMod/Lore/Village/ModSystemVillagerDebug.cs
+index 1bd9bdb..8c49cd6 100644
+--- a/VSSurvivalMod/Lore/Village/ModSystemVillagerDebug.cs
++++ b/VSSurvivalMod/Lore/Village/ModSystemVillagerDebug.cs
+@@ -28,8 +28,8 @@ namespace Vintagestory.GameContent
+             this.capi = api;
+             var parsers = api.ChatCommands.Parsers;
+             api.ChatCommands.GetOrCreate("dev")
+-
+                 .BeginSub("talk")
++                    .WithDesc("Make conversable entity talk")
+                     .WithArgs(parsers.Entities("entity"), parsers.OptionalWord("talk type"))
+                     .HandleWith((args) => CmdUtil.EntityEach(args, (e) =>
+                     {
+@@ -58,8 +58,10 @@ namespace Vintagestory.GameContent
+                     }))
+                 .EndSub()
+                 .BeginSub("pro")
++                    .WithDesc("Villager profile commands")
+                     .WithArgs(parsers.Entities("entity"))
+                     .BeginSub("reload")
++                        .WithDesc("Reload villager outfit configurations")
+                         .HandleWith(proReload)
+                     .EndSub()
+                 .EndSub();
+@@ -85,6 +87,7 @@ namespace Vintagestory.GameContent
+             api.ChatCommands
+                 .GetOrCreate("dev")
+                 .BeginSub("astardebug")
++                    .WithDesc("Toggle A* pathfinding debug for entity")
+                     .WithArgs(api.ChatCommands.Parsers.Entities("entity"))
+                     .HandleWith((args) => CmdUtil.EntityEach(args, (e) =>
+                     {
+@@ -100,50 +103,61 @@ namespace Vintagestory.GameContent
+                     }))
+                 .EndSub()
+                 .BeginSub("pro")
++                    .WithDesc("Villager profile commands")
+                     .WithArgs(parsers.Entities("entity"))
+ 
+                     .BeginSub("freeze")
++                        .WithDesc("Freeze villager activity")
+                         .WithArgs(parsers.OptionalBool("on"))
+                         .HandleWith(cmdFreeze)
+                     .EndSub()
+                     .BeginSub("unfreeze")
++                        .WithDesc("Unfreeze villager activity")
+                         .WithArgs(parsers.OptionalBool("on"))
+                         .HandleWith(cmdUnFreeze)
+                     .EndSub()
+ 
+                     .BeginSub("set")
++                        .WithDesc("Set villager outfit slot code")
+                         .WithArgs(parsers.Word("slot"), parsers.All("codes"))
+                         .HandleWith(proSet)
+                     .EndSub()
+ 
+                     .BeginSub("naked")
++                        .WithDesc("Remove all clothing from villager")
+                         .HandleWith(proNaked)
+                     .EndSub()
+ 
+                     .BeginSub("clear")
++                        .WithDesc("Clear villager outfit slot")
+                         .WithArgs(parsers.Word("slot"))
+                         .HandleWith(proClear)
+                     .EndSub()
+ 
+                     .BeginSub("add")
++                        .WithDesc("Add clothing code to villager slot")
+                         .WithArgs(parsers.Word("slot"), parsers.Word("code"))
+                         .HandleWith(proAdd)
+                     .EndSub()
+ 
+                     .BeginSub("remove")
++                        .WithDesc("Remove clothing code from villager slot")
+                         .HandleWith(proRemove)
+                     .EndSub()
+ 
+                     .BeginSub("export")
++                        .WithDesc("Export villager outfit")
+                         .HandleWith(proExport)
+                     .EndSub()
+ 
+                     .BeginSub("test")
++                        .WithDesc("Test villager outfit")
+                         .HandleWith(proTest)
+                     .EndSub()
+                 .EndSub()
+ 
+                 .BeginSub("dress")
++                    .WithDesc("Show current villager outfit slots")
+                     .WithArgs(api.ChatCommands.Parsers.Entities("entity"))
+                     .HandleWith((args) => CmdUtil.EntityEach(args, (e) =>
+                     {

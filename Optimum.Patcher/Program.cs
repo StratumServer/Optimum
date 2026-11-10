@@ -768,6 +768,8 @@ var targets = new List<MethodTarget>
     // Issue #469: deduplicate consecutive JToken.Parse calls via DeepClone fast path
     new("Vintagestory.Common.BlockTypeNet", "ReadBlockTypePacket", 3),
     new("Vintagestory.Common.ItemTypeNet", "ReadItemTypePacket", 3),
+    // Issue #529: fallback to command name on missing description to prevent mod initialization crashes
+    new("Vintagestory.Common.ChatCommandImpl", "ValidateRecursive", 0),
     // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset
     // data when a mod holds a stale IAsset ref after texture unload.
     new("Vintagestory.Client.NoObf.SvgLoader", "DrawSvg", 7),

@@ -1,0 +1,19 @@
+diff --git a/VSEssentials/CollectibleBehavior/CollectibleBehaviorBuffable.cs b/VSEssentials/CollectibleBehavior/CollectibleBehaviorBuffable.cs
+index 8255856..94be332 100644
+--- a/VSEssentials/CollectibleBehavior/CollectibleBehaviorBuffable.cs
++++ b/VSEssentials/CollectibleBehavior/CollectibleBehaviorBuffable.cs
+@@ -20,11 +20,14 @@ namespace Vintagestory.GameContent
+             api.ChatCommands
+                 .GetOrCreate("debug")
+                 .BeginSub("cbuff")
++                    .WithDesc("Collectible buff commands")
+                     .BeginSub("add")
++                        .WithDesc("Add buff to collectible")
+                         .WithArgs(parsers.Word("code"), parsers.Word("statcode"), parsers.Float("multiplier"), parsers.OptionalFloat("flatchange"))
+                         .HandleWith(cmdAddBuff)
+                     .EndSub()
+                     .BeginSub("clear")
++                        .WithDesc("Clear buffs from collectible")
+                         .HandleWith(cmdClearBuffs)
+                     .EndSub()
+                 .EndSub()
