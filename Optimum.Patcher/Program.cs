@@ -481,6 +481,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumShouldSkipClient",
         "buildServerAssetsLock",
         "serverAssetsPacketBuilt",
+        "InvalidateServerAssets",
     },
     // Issue #466: cache compressed BoxedPacket_ServerAssets payload
     ["Vintagestory.Server.BoxedPacket_ServerAssets"] = new()
@@ -489,6 +490,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "compressedLengthSent",
         "compressionLock",
         "isCompressedCached",
+        "Invalidate",
     },
 };
 
@@ -836,6 +838,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.PlayerDataManager", "GetPlayerEntry", 3),
     // Issue #466: cache compressed BoxedPacket_ServerAssets payload and remove BuildServerAssetsPacket sleeps
     new("Vintagestory.Server.Network.TcpNetConnection", "PreparePacketForSending", 3),
+    new("Vintagestory.Server.ServerMain", "StartBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "WaitOnBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "BuildServerAssetsPacket", 0),
 };

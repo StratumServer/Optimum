@@ -1,10 +1,13 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
-index 7a2bf10..e9cd5c3 100644
+index 7a2bf10..23a6aeb 100644
 --- a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
 +++ b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
-@@ -3,6 +3,10 @@ using Vintagestory.Common;
- namespace Vintagestory.Server;
+@@ -1,3 +1,4 @@
++using System.Threading;
+ using Vintagestory.Common;
  
+ namespace Vintagestory.Server;
+@@ -5,4 +6,26 @@ namespace Vintagestory.Server;
  internal class BoxedPacket_ServerAssets : BoxedPacket
  {
  	internal Packet_Server packet;
@@ -12,4 +15,22 @@ index 7a2bf10..e9cd5c3 100644
 +	internal int compressedLengthSent;
 +	internal object compressionLock;
 +	internal volatile bool isCompressedCached;
++
++	internal void Invalidate()
++	{
++		if (compressionLock == null)
++		{
++			Interlocked.CompareExchange(ref compressionLock, new object(), null);
++		}
++		lock (compressionLock)
++		{
++			isCompressedCached = false;
++			compressedBuffer = null;
++			compressedLengthSent = 0;
++			packet = null;
++			buffer = null;
++			Length = 0;
++			LengthSent = 0;
++		}
++	}
  }
