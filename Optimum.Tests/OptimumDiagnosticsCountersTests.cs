@@ -5,8 +5,8 @@ using Xunit;
 namespace Optimum.Tests;
 
 // [Collection("TessellationDiagnostics")]: shares OptimumDiagnostics' static
-// tessellation counters with OptimumBoundedHandoffTests - both must be serialized
-// relative to each other, or ResetTessellation() calls interleave with assertions
+// tessellation counters with the other tessellation diagnostics tests, which must
+// be serialized, or ResetTessellation() calls interleave with assertions
 // under xUnit's default cross-class parallelism.
 [Collection("TessellationDiagnostics")]
 public class OptimumDiagnosticsCountersTests

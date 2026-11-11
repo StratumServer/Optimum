@@ -421,9 +421,44 @@ public static class OptimumConfig
     public static volatile int TesselationWorkerCap = int.MaxValue;
 
     /// <summary>
-    /// Maximum number of completed meshes waiting for render-thread upload.
+    /// Explicit capacity of completed meshes waiting for render-thread upload. Zero, the
+    /// default, derives it from the view distance with <see cref="GetTesselationUploadCapacity"/>.
     /// </summary>
-    public static int TesselationUploadQueueCapacity = 128;
+    public static int TesselationUploadQueueCapacity = 0;
+
+    private const int DefaultChunkMapSizeY = 8;
+    private const int MinTesselationUploadCapacity = 64;
+    private const int MaxTesselationUploadCapacity = 2048;
+
+    /// <summary>
+    /// Meshes the tessellation worker may leave waiting for upload before it pauses. One strip of
+    /// new terrain is exposed each time the player crosses a chunk boundary, which is
+    /// (2 * radius + 1) columns of <paramref name="chunkMapSizeY"/> chunks, so the queue holds one
+    /// strip at the current view distance. <paramref name="chunkMapSizeY"/> is zero until the level
+    /// is initialised, and then the usual eight chunks per column is assumed.
+    /// </summary>
+    public static int GetTesselationUploadCapacity(int viewDistanceBlocks, int chunkMapSizeY)
+    {
+        if (TesselationUploadQueueCapacity > 0)
+        {
+            return TesselationUploadQueueCapacity;
+        }
+
+        int radiusChunks = Math.Max(1, (viewDistanceBlocks + 31) / 32);
+        int columns = 2 * radiusChunks + 1;
+        int sizeY = chunkMapSizeY > 0 ? chunkMapSizeY : DefaultChunkMapSizeY;
+        return Math.Clamp(columns * sizeY, MinTesselationUploadCapacity, MaxTesselationUploadCapacity);
+    }
+
+    /// <summary>
+    /// Radius in chunk columns the server may send to a client: the smaller of the configured
+    /// maximum, the adaptive controller's effective radius and the radius the client's own view
+    /// distance asks for. Nothing in this path can raise the radius above the view distance.
+    /// </summary>
+    public static int EffectiveSendRadius(int maxChunkRadius, int adaptiveEffectiveRadius, int viewDistanceRadius)
+    {
+        return Math.Max(0, Math.Min(Math.Min(maxChunkRadius, adaptiveEffectiveRadius), viewDistanceRadius));
+    }
 
     /// <summary>
     /// Allows parallel worldgen with assemblies outside the audited set.
@@ -2967,13 +3002,13 @@ public static class OptimumDiagnostics
         Interlocked.Increment(ref _tessBackpressureCount);
     }
 
-    /// <summary>Called once from OptimumBoundedHandoff's constructor with its actual capacity.</summary>
+    /// <summary>Records the upload queue capacity in effect.</summary>
     public static void RecordTessHandoffCapacity(int capacity)
     {
         Interlocked.Exchange(ref _tessHandoffCapacity, capacity);
     }
 
-    /// <summary>Called on each successful OptimumBoundedHandoff.TryReserve with the new reserved count.</summary>
+    /// <summary>Records the number of meshes waiting for upload, keeping the peak.</summary>
     public static void RecordTessHandoffReserved(int reserved)
     {
         long current = Interlocked.Read(ref _tessHandoffPeak);

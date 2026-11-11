@@ -288,10 +288,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "_lastSortYaw",
         "queueNeedsSort",
         "tesselators",
-        "uploadHandoff",
+        "uploadSpaceSignal",
+        "uploadCapacity",
         "PrimaryTesselator",
         "_optimumRecalcPriority",
         "OptimumRecalcPriority",
+        "OptimumFrameUploadDone",
     },
     // ChunkTesselator: chisel LOD pool routing helpers and fields
     ["Vintagestory.Client.NoObf.ChunkTesselator"] = new()
@@ -692,11 +694,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.RenderAPIBase", "RenderMultiTextureMesh", 3),
     // Issue #480: bounds-check atlasNumber in TextureAtlasManager.RegenMipMaps
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RegenMipMaps", 1),
-    // Chunk tesselator worker pool: .ctor constructs the tesselators/uploadHandoff
-    // worker-pool state (Option B - TerrainChunkTesselator stays a real field, assigned
+    // Chunk tesselator worker pool: .ctor constructs the tesselators and the upload space
+    // signal (Option B - TerrainChunkTesselator stays a real field, assigned
     // from ClientMain::Start above), OnBlockTexturesLoaded/OnSeperateThreadGameTick/
     // TesselateChunk are the pool's three other vanilla-reader sites, and OnBeforeFrame
-    // (C1: skip RecalcPriority+Sort when the player hasn't moved) reads uploadHandoff.Reserved,
+    // (C1: skip RecalcPriority+Sort when the player hasn't moved) signals uploadSpaceSignal,
     // now safe because the constructor that assigns it is transplanted here too.
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", ".ctor", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBlockTexturesLoaded", 0),

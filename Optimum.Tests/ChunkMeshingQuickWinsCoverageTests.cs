@@ -128,27 +128,19 @@ public class ChunkMeshingQuickWinsCoverageTests
         Assert.Contains("\"Vintagestory.Client.NoObf.TesselatedChunk\", \"AddEdgeToPools\", 5", programSource);
     }
 
-    // Regression guard for the worker-pool wiring plan's Step 1: slotOwned must be
-    // cleared at each enqueue branch, not only once at the end of the try block.
-    // Otherwise a throw between an enqueue and the trailing assignment makes the
-    // catch double-release the upload handoff slot, which OptimumBoundedHandoff.Release()
-    // throws on (InvalidOperationException on an empty handoff), on the render thread.
+    // The upload queue length is the only occupancy. A separate reservation counter drifted from the
+    // real queue once it saturated, so TesselateChunk must enqueue every finished mesh and leave
+    // bounding to the worker gate that reads the queue itself.
     [Theory]
     [InlineData("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch")]
-    public void TesselateChunkClearsSlotOwnedAtEachEnqueueBranch(string relativePath)
+    public void TesselateChunkKeepsEveryFinishedMeshWithoutAReservationCounter(string relativePath)
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
-        int occurrences = 0;
-        int index = 0;
-        while ((index = source.IndexOf("slotOwned = false;", index, StringComparison.Ordinal)) >= 0)
-        {
-            occurrences++;
-            index += "slotOwned = false;".Length;
-        }
-
-        Assert.Equal(2, occurrences);
-        Assert.DoesNotContain("slotOwned = !queued;", source);
+        Assert.DoesNotContain("uploadHandoff", source);
+        Assert.DoesNotContain("TryReserve", source);
+        Assert.DoesNotContain("slotOwned", source);
+        Assert.Contains("uploadSpaceSignal", source);
     }
 
     private static string FindRepositoryFile(string relativePath)
