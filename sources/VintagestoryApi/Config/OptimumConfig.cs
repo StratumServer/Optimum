@@ -282,6 +282,12 @@ public static class OptimumConfig
     public static bool SimdCullingEnabled = true;
 
     /// <summary>
+    /// Upload finished chunk meshes against a time budget derived from the frame, instead of the
+    /// vanilla per-frame vertex cap and the fixed 3, 5 or 8 ms limit. See <see cref="OptimumUploadBudget"/>.
+    /// </summary>
+    public static bool DeadlineUploadBudgetEnabled = true;
+
+    /// <summary>
     /// True when the CPU supports 128-bit or 256-bit vector operations.
     /// </summary>
     public static bool SimdCullingSupported => Vector128.IsHardwareAccelerated;
@@ -1289,6 +1295,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
         (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
         (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
+        (nameof(OptimumConfigData.DeadlineUploadBudget), DeadlineUploadBudgetEnabled.ToString()),
         (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
     };
 
@@ -1406,6 +1413,7 @@ public static class OptimumConfig
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
             IndirectDrawEnabled = data.IndirectDraw;
             SimdCullingEnabled = data.SimdCulling;
+            DeadlineUploadBudgetEnabled = data.DeadlineUploadBudget;
             KometGuardEnabled = data.KometGuard;
         }
         catch (Exception)
@@ -1487,6 +1495,7 @@ public static class OptimumConfig
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
             IndirectDraw = IndirectDrawEnabled,
             SimdCulling = SimdCullingEnabled,
+            DeadlineUploadBudget = DeadlineUploadBudgetEnabled,
             KometGuard = KometGuardEnabled,
         };
 
@@ -1592,6 +1601,7 @@ internal sealed class OptimumConfigData
     public string WorldgenWorkerPolicy { get; set; } = "auto";
     public bool IndirectDraw { get; set; } = false;
     public bool SimdCulling { get; set; } = true;
+    public bool DeadlineUploadBudget { get; set; } = true;
     public bool KometGuard { get; set; } = true;
 }
 

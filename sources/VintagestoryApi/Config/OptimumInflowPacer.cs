@@ -138,6 +138,7 @@ public sealed class OptimumInflowPacer
 
     public void Reset()
     {
+        OptimumUploadBudget.Shared.Reset();
         lastStepTicks = 0;
         budget = 0;
         tokens = 0.0;

@@ -337,6 +337,7 @@ public static class OptimumChunkStreamStats
             .Append(", tessellated=").Append(tessellated)
             .Append(", tessPerSent=").Append(ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
             .Append(", poolAllocs=").Append(PoolAllocations)
+            .Append(", uploadBudgetMs=").Append(OptimumUploadBudget.Shared.LastBudgetMs.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))
             .Append(", pacerBudget=").Append(OptimumInflowPacer.Shared.Budget)
             .Append(", pacerPhase=").Append(OptimumInflowPacer.Shared.Phase)
             .Append(", pacerCuts=").Append(OptimumInflowPacer.Shared.Decreases)
@@ -364,6 +365,7 @@ public static class OptimumChunkStreamStats
         values["stream.chunksSent.count"] = ChunksSent;
         values["stream.chunksUploaded.count"] = UploadedChunks;
         values["stream.poolAllocations.count"] = PoolAllocations;
+        values["stream.uploadBudget.micros"] = OptimumUploadBudget.Shared.LastBudgetMs * 1000.0;
         values["stream.pacer.budget.count"] = OptimumInflowPacer.Shared.Budget;
         values["stream.pacer.decreases.count"] = OptimumInflowPacer.Shared.Decreases;
         values["stream.pacer.increases.count"] = OptimumInflowPacer.Shared.Increases;

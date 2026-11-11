@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..1d0816f 100644
+index 5714490..01c0fa6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 @@ -1,22 +1,48 @@
@@ -94,7 +94,7 @@ index 5714490..1d0816f 100644
  
  	public override void Dispose(ClientMain game)
  	{
-@@ -50,93 +96,167 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -50,91 +96,175 @@ public class ChunkTesselatorManager : ClientSystem
  		lock (tessChunksQueuePriorityLock)
  		{
  			tessChunksQueuePriority?.Clear();
@@ -121,8 +121,10 @@ index 5714490..1d0816f 100644
 +		long optimumStreamStart = OptimumChunkStreamStats.Now();
 +		int optimumUploaded = 0;
 +		int queueBacklog = (tessChunksQueuePriority != null ? tessChunksQueuePriority.Count : 0) + (tessChunksQueue != null ? tessChunksQueue.Count : 0);
-+		long maxUploadMs = queueBacklog > 16 ? 8L : (queueBacklog > 4 ? 5L : 3L);
-+		long maxUploadTicks = (System.Diagnostics.Stopwatch.Frequency * maxUploadMs) / 1000L;
++		bool optimumDeadline = OptimumConfig.DeadlineUploadBudgetEnabled;
++		long maxUploadTicks = optimumDeadline
++			? OptimumUploadBudget.Shared.BeginFrame(dt * 1000f, queueBacklog, Volatile.Read(ref uploadCapacity))
++			: (System.Diagnostics.Stopwatch.Frequency * (queueBacklog > 16 ? 8L : (queueBacklog > 4 ? 5L : 3L))) / 1000L;
  		RuntimeStats.chunksAwaitingTesselation = game.dirtyChunksPriority.Count + game.dirtyChunks.Count + game.dirtyChunksLast.Count;
 -		RuntimeStats.chunksAwaitingPooling = tessChunksQueuePriority.Count + tessChunksQueue.Count;
 +		Volatile.Write(ref uploadCapacity, OptimumConfig.GetTesselationUploadCapacity(ClientSettings.ViewDistance, game.WorldMap.ChunkMapSizeY));
@@ -136,7 +138,7 @@ index 5714490..1d0816f 100644
 +				bool uploadedAny = false;
  				while (tessChunksQueuePriority.Count > 0)
  				{
-+					if (uploadedAny && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)
++					if (uploadedAny && !OptimumUploadBudget.Shared.AllowsUpload(optimumDeadline, System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks, maxUploadTicks, tessChunksQueuePriority.Peek().VerticesCount, optimumUploaded > 0))
 +					{
 +						break;
 +					}
@@ -148,7 +150,9 @@ index 5714490..1d0816f 100644
  					{
 +						OptimumDiagnostics.RecordTessUpload(System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp);
 +						long optimumChunkStart = OptimumChunkStreamStats.Now();
++						long optimumCostStart = System.Diagnostics.Stopwatch.GetTimestamp();
  						game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos);
++						OptimumUploadBudget.Shared.RecordChunk(tesselatedChunk.VerticesCount, System.Diagnostics.Stopwatch.GetTimestamp() - optimumCostStart);
 +						OptimumChunkStreamStats.RecordUploadChunk(optimumChunkStart);
 +						optimumUploaded++;
  						singleUploadDelayCounter = 10;
@@ -165,16 +169,17 @@ index 5714490..1d0816f 100644
 +			}
 +			if (processPrioQueue || (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)
 +			{
-+				OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
++				OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt, uploadStartTicks);
 +				return;
  			}
 -			processPrioQueue = false;
  		}
  		int count = tessChunksQueue.Count;
- 		int num3 = num * (3 + count / (1 << ClientSettings.ChunkVerticesUploadRateLimiter));
+-		int num3 = num * (3 + count / (1 << ClientSettings.ChunkVerticesUploadRateLimiter));
++		int num3 = optimumDeadline ? int.MaxValue : num * (3 + count / (1 << ClientSettings.ChunkVerticesUploadRateLimiter));
  		if (num2 >= num3 || (count < 2 && (count == 0 || singleUploadDelayCounter++ < 10)))
  		{
-+			OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
++			OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt, uploadStartTicks);
  			return;
  		}
  		singleUploadDelayCounter = 0;
@@ -187,7 +192,11 @@ index 5714490..1d0816f 100644
 +					|| plr.Pos.SquareDistanceTo(_lastSortPlayerPos) >= SortMoveThresholdSq
 +					|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, plr.Pos.Yaw)) >= SortYawThreshold);
 +			if (moved || (plr != null && queueNeedsSort))
-+			{
+ 			{
+-				eachTC.RecalcPriority(game.player);
+-			});
+-			tessChunksQueue.Sort();
+-			while (tessChunksQueue.Count > 0 && num2 < num3)
 +				queueNeedsSort = false;
 +				tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);
 +				tessChunksQueue.Sort();
@@ -196,14 +205,10 @@ index 5714490..1d0816f 100644
 +				OptimumDiagnostics.ChunkUploadSort.Hit();
 +			}
 +			else
- 			{
--				eachTC.RecalcPriority(game.player);
--			});
--			tessChunksQueue.Sort();
--			while (tessChunksQueue.Count > 0 && num2 < num3)
++			{
 +				OptimumDiagnostics.ChunkUploadSort.Skip();
 +			}
-+			while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)
++			while (tessChunksQueue.Count > 0 && num2 < num3 && OptimumUploadBudget.Shared.AllowsUpload(optimumDeadline, System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks, maxUploadTicks, OptimumUploadBudget.Shared.AverageVertices, optimumUploaded > 0))
  			{
  				TesselatedChunk tesselatedChunk = tessChunksQueue.Dequeue();
  				tesselatedChunk.chunk.queuedForUpload = false;
@@ -212,7 +217,9 @@ index 5714490..1d0816f 100644
  				{
 +					OptimumDiagnostics.RecordTessUpload(System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp);
 +					long optimumChunkStart = OptimumChunkStreamStats.Now();
++					long optimumCostStart = System.Diagnostics.Stopwatch.GetTimestamp();
  					game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos2);
++					OptimumUploadBudget.Shared.RecordChunk(tesselatedChunk.VerticesCount, System.Diagnostics.Stopwatch.GetTimestamp() - optimumCostStart);
 +					OptimumChunkStreamStats.RecordUploadChunk(optimumChunkStart);
 +					optimumUploaded++;
  					num2 += tesselatedChunk.VerticesCount;
@@ -225,7 +232,7 @@ index 5714490..1d0816f 100644
  				}
  			}
  		}
-+		OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
++		OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt, uploadStartTicks);
 +	}
 +
 +	private void OptimumRecalcPriority(TesselatedChunk chunk)
@@ -236,8 +243,12 @@ index 5714490..1d0816f 100644
 +	// Occupancy is the real queue length, so it cannot drift from what is waiting for upload.
 +	// The counts are read without the queue locks: each is a single int and the worker only needs
 +	// an approximate answer, rechecked after the signal is reset.
-+	private void OptimumFrameUploadDone(long streamStart, int uploaded, float dt)
++	private void OptimumFrameUploadDone(long streamStart, int uploaded, float dt, long uploadStartTicks)
 +	{
++		if (uploaded > 0)
++		{
++			OptimumUploadBudget.Shared.RecordFrameUpload(System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks);
++		}
 +		OptimumChunkStreamStats.RecordUploadFrame(streamStart, uploaded);
 +		int occupancy = (tessChunksQueuePriority?.Count ?? 0) + (tessChunksQueue?.Count ?? 0);
 +		OptimumDiagnostics.RecordTessHandoffReserved(occupancy);
@@ -252,26 +263,24 @@ index 5714490..1d0816f 100644
  	{
 -		if (!game.TerrainChunkTesselator.started)
 +		if (!PrimaryTesselator.started)
- 		{
- 			return;
- 		}
++		{
++			return;
++		}
 +		int uploadLimit = Volatile.Read(ref uploadCapacity);
 +		if ((tessChunksQueuePriority?.Count ?? 0) + (tessChunksQueue?.Count ?? 0) >= uploadLimit)
-+		{
+ 		{
 +			uploadSpaceSignal.Reset();
 +			if ((tessChunksQueuePriority?.Count ?? 0) + (tessChunksQueue?.Count ?? 0) >= uploadLimit)
 +			{
 +				OptimumDiagnostics.RecordTessBackpressure();
 +				uploadSpaceSignal.Wait(20);
 +			}
-+			return;
-+		}
+ 			return;
+ 		}
  		MeshDataRecycler recycler = MeshData.Recycler;
  		if (!game.ShouldTesselateTerrain)
  		{
- 			recycler?.DoRecycling();
- 			return;
-@@ -176,10 +296,14 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -176,10 +306,14 @@ public class ChunkTesselatorManager : ClientSystem
  		int num4 = (game.frustumCuller.ViewDistanceSq + 16800) * 3 / 2;
  		int num5 = 0;
  		num2 = game.dirtyChunks.Count;
@@ -286,7 +295,7 @@ index 5714490..1d0816f 100644
  				return;
  			}
  			lock (game.dirtyChunksLock)
-@@ -244,21 +368,22 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -244,21 +378,22 @@ public class ChunkTesselatorManager : ClientSystem
  	}
  
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
@@ -310,7 +319,7 @@ index 5714490..1d0816f 100644
  			if (!clientChunk.loadedFromServer)
  			{
  				requeue = true;
-@@ -308,13 +433,27 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -308,13 +443,27 @@ public class ChunkTesselatorManager : ClientSystem
  			num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
  		}
  		catch (RetryTesselationException)
@@ -338,7 +347,7 @@ index 5714490..1d0816f 100644
  			lock (tessChunksQueuePriorityLock)
  			{
  				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
-@@ -323,11 +462,15 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -323,11 +472,15 @@ public class ChunkTesselatorManager : ClientSystem
  		}
  		else
  		{

@@ -26,6 +26,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorkerInstances.cs" Link="Config\OptimumWorkerInstances.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkStreamStats.cs" Link="Config\OptimumChunkStreamStats.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumInflowPacer.cs" Link="Config\OptimumInflowPacer.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumUploadBudget.cs" Link="Config\OptimumUploadBudget.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumDispatchClaim.cs" Link="Config\OptimumDispatchClaim.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumTesselationWorkerRegistry.cs" Link="Config\OptimumTesselationWorkerRegistry.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumTesselationSafetyGate.cs" Link="Config\OptimumTesselationSafetyGate.cs" />
