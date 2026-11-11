@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..756eac6 100644
+index 5714490..1d0816f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 @@ -1,22 +1,48 @@
@@ -94,7 +94,7 @@ index 5714490..756eac6 100644
  
  	public override void Dispose(ClientMain game)
  	{
-@@ -50,93 +96,166 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -50,93 +96,167 @@ public class ChunkTesselatorManager : ClientSystem
  		lock (tessChunksQueuePriorityLock)
  		{
  			tessChunksQueuePriority?.Clear();
@@ -165,7 +165,7 @@ index 5714490..756eac6 100644
 +			}
 +			if (processPrioQueue || (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)
 +			{
-+				OptimumFrameUploadDone(optimumStreamStart, optimumUploaded);
++				OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
 +				return;
  			}
 -			processPrioQueue = false;
@@ -174,7 +174,7 @@ index 5714490..756eac6 100644
  		int num3 = num * (3 + count / (1 << ClientSettings.ChunkVerticesUploadRateLimiter));
  		if (num2 >= num3 || (count < 2 && (count == 0 || singleUploadDelayCounter++ < 10)))
  		{
-+			OptimumFrameUploadDone(optimumStreamStart, optimumUploaded);
++			OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
  			return;
  		}
  		singleUploadDelayCounter = 0;
@@ -225,7 +225,7 @@ index 5714490..756eac6 100644
  				}
  			}
  		}
-+		OptimumFrameUploadDone(optimumStreamStart, optimumUploaded);
++		OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
 +	}
 +
 +	private void OptimumRecalcPriority(TesselatedChunk chunk)
@@ -236,11 +236,12 @@ index 5714490..756eac6 100644
 +	// Occupancy is the real queue length, so it cannot drift from what is waiting for upload.
 +	// The counts are read without the queue locks: each is a single int and the worker only needs
 +	// an approximate answer, rechecked after the signal is reset.
-+	private void OptimumFrameUploadDone(long streamStart, int uploaded)
++	private void OptimumFrameUploadDone(long streamStart, int uploaded, float dt)
 +	{
 +		OptimumChunkStreamStats.RecordUploadFrame(streamStart, uploaded);
 +		int occupancy = (tessChunksQueuePriority?.Count ?? 0) + (tessChunksQueue?.Count ?? 0);
 +		OptimumDiagnostics.RecordTessHandoffReserved(occupancy);
++		OptimumInflowPacer.Shared.PublishClientSample(occupancy, Volatile.Read(ref uploadCapacity), dt * 1000f);
 +		if (occupancy < Volatile.Read(ref uploadCapacity) && !uploadSpaceSignal.IsSet)
 +		{
 +			uploadSpaceSignal.Set();
@@ -270,7 +271,7 @@ index 5714490..756eac6 100644
  		{
  			recycler?.DoRecycling();
  			return;
-@@ -176,10 +295,14 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -176,10 +296,14 @@ public class ChunkTesselatorManager : ClientSystem
  		int num4 = (game.frustumCuller.ViewDistanceSq + 16800) * 3 / 2;
  		int num5 = 0;
  		num2 = game.dirtyChunks.Count;
@@ -285,7 +286,7 @@ index 5714490..756eac6 100644
  				return;
  			}
  			lock (game.dirtyChunksLock)
-@@ -244,21 +367,22 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -244,21 +368,22 @@ public class ChunkTesselatorManager : ClientSystem
  	}
  
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
@@ -309,7 +310,7 @@ index 5714490..756eac6 100644
  			if (!clientChunk.loadedFromServer)
  			{
  				requeue = true;
-@@ -308,13 +432,27 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -308,13 +433,27 @@ public class ChunkTesselatorManager : ClientSystem
  			num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
  		}
  		catch (RetryTesselationException)
@@ -337,7 +338,7 @@ index 5714490..756eac6 100644
  			lock (tessChunksQueuePriorityLock)
  			{
  				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
-@@ -323,11 +461,15 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -323,11 +462,15 @@ public class ChunkTesselatorManager : ClientSystem
  		}
  		else
  		{

@@ -2976,6 +2976,7 @@ public static class OptimumDiagnostics
         Interlocked.Increment(ref _tessReadyToUploadCount);
         Interlocked.Add(ref _tessReadyToUploadTicks, readyToUploadTicks);
         OptimumChunkStreamStats.RecordQueueAge(readyToUploadTicks);
+        OptimumInflowPacer.Shared.RecordUploadAge(readyToUploadTicks);
     }
 
     /// <summary>Chunks tessellated since the last reset, for the tessellations-per-sent-chunk ratio.</summary>

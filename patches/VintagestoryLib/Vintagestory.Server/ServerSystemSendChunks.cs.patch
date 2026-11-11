@@ -1,15 +1,16 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-index 277d286..1cc485b 100644
+index 277d286..27aafb7 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -80,37 +80,37 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -80,37 +80,42 @@ internal class ServerSystemSendChunks : ServerSystem
  	}
  
  	private void sendAndEnqueueChunks(ConnectedClient client)
  	{
  		int val = (int)Math.Ceiling((float)client.WorldData.Viewdistance / (float)MagicNum.ServerChunkSize);
 -		int num = Math.Min(server.Config.MaxChunkRadius, val);
-+		int num = OptimumConfig.EffectiveSendRadius(server.Config.MaxChunkRadius, OptimumConfig.AdaptiveRadiusEffective, val);
++		bool optimumPaced = client.IsLocalConnection && OptimumConfig.EffectiveAdaptiveRadiusEnabled;
++		int num = OptimumConfig.EffectiveSendRadius(server.Config.MaxChunkRadius, optimumPaced ? int.MaxValue : OptimumConfig.AdaptiveRadiusEffective, val);
  		if (client.CurrentChunkSentRadius > num && client.forceSendChunks.Count == 0 && client.forceSendMapChunks.Count == 0)
  		{
  			return;
@@ -21,11 +22,15 @@ index 277d286..1cc485b 100644
  		int num2 = MagicNum.ChunksToSendPerTick * ((!client.IsLocalConnection) ? 1 : 8);
 -		List<long> list = new List<long>(1);
 -		foreach (long forceSendMapChunk in client.forceSendMapChunks)
-+		if (client.forceSendMapChunks.Count > 0)
++		if (optimumPaced)
  		{
 -			Vec2i vec2i = server.WorldMap.MapChunkPosFromChunkIndex2D(forceSendMapChunk);
 -			server.loadedMapChunks.TryGetValue(forceSendMapChunk, out var value);
 -			if (value != null)
++			num2 = OptimumInflowPacer.Shared.AcquireSendBudget(Stopwatch.GetTimestamp(), num2);
++		}
++		if (client.forceSendMapChunks.Count > 0)
++		{
 +			foreach (long forceSendMapChunk in client.forceSendMapChunks)
  			{
 -				server.SendPacketFast(client.Id, value.ToPacket(vec2i.X, vec2i.Y));
@@ -54,13 +59,17 @@ index 277d286..1cc485b 100644
  		{
  			ServerChunk loadedChunk = server.GetLoadedChunk(forceSendChunk);
  			if (loadedChunk != null)
-@@ -203,10 +203,11 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -203,10 +208,15 @@ internal class ServerSystemSendChunks : ServerSystem
  				server.SendPacketFast(client.Id, value3.ToPacket(vec3i.X, vec3i.Z));
  				client.SetMapRegionSent(forceSendMapRegion);
  			}
  		}
  		client.forceSendMapRegions.Clear();
 +		OptimumChunkStreamStats.RecordSend(optimumSendStart, chunksToSend.Count);
++		if (optimumPaced)
++		{
++			OptimumInflowPacer.Shared.Consume(chunksToSend.Count);
++		}
  	}
  
  	private int loadSendableChunksAtCurrentRadius(ConnectedClient client, int countChunks, int dimension)
