@@ -562,10 +562,48 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         string patch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch"));
         Assert.Contains("long uploadStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();", patch);
-        Assert.Contains("long maxUploadTicks = (System.Diagnostics.Stopwatch.Frequency * 3L) / 1000L;", patch);
+        Assert.Contains("long maxUploadTicks = (System.Diagnostics.Stopwatch.Frequency * maxUploadMs) / 1000L;", patch);
         Assert.Contains("if (uploadedAny && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) >= maxUploadTicks)", patch);
         Assert.Contains("processPrioQueue = tessChunksQueuePriority.Count > 0;", patch);
         Assert.Contains("while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)", patch);
+        Assert.DoesNotContain("tesselatedChunk.UnusedDispose();\n+\t\t\trequeue = true;", patch);
+    }
+
+    [Fact]
+    public void ChunkReadPool_HardwareAwareWorkerScaling()
+    {
+        bool originalEnabled = Vintagestory.API.Config.OptimumConfig.ChunkReadPoolEnabled;
+        int originalWorkers = Vintagestory.API.Config.OptimumConfig.ChunkReadPoolWorkers;
+        try
+        {
+            Vintagestory.API.Config.OptimumConfig.ChunkReadPoolEnabled = true;
+            Vintagestory.API.Config.OptimumConfig.ChunkReadPoolWorkers = 4;
+
+            // Singleplayer scaling
+            Assert.Equal(1, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(4, isDedicatedServer: false));
+            Assert.Equal(2, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(6, isDedicatedServer: false));
+            Assert.Equal(3, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(8, isDedicatedServer: false));
+            Assert.Equal(4, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(16, isDedicatedServer: false));
+
+            // Dedicated server scaling
+            Assert.Equal(2, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(4, isDedicatedServer: true));
+            Assert.Equal(3, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(6, isDedicatedServer: true));
+            Assert.Equal(4, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(16, isDedicatedServer: true));
+
+            // Disabled config
+            Vintagestory.API.Config.OptimumConfig.ChunkReadPoolEnabled = false;
+            Assert.Equal(0, Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(6, isDedicatedServer: false));
+        }
+        finally
+        {
+            Vintagestory.API.Config.OptimumConfig.ChunkReadPoolEnabled = originalEnabled;
+            Vintagestory.API.Config.OptimumConfig.ChunkReadPoolWorkers = originalWorkers;
+        }
+
+        string supplyPatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch"));
+        Assert.Contains("if (!server.IsDedicatedServer && Environment.ProcessorCount <= 6)", supplyPatch);
+        Assert.Contains("maxDop = Math.Min(2, maxDop);", supplyPatch);
     }
 
     [Fact]

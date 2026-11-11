@@ -498,6 +498,28 @@ public static class OptimumConfig
     public static int ChunkReadPoolWorkers = 4;
 
     /// <summary>
+    /// Computes the effective number of read workers based on logical processor count
+    /// and whether this is a dedicated server or integrated singleplayer client.
+    /// In singleplayer, dedicating too many threads to DB I/O and deserialization starves
+    /// the client render and tesselator threads on CPUs with 8 or fewer cores (e.g. 6-core/6-thread).
+    /// </summary>
+    public static int GetEffectiveChunkReadPoolWorkers(int logicalProcessors, bool isDedicatedServer)
+    {
+        if (!ChunkReadPoolEnabled) return 0;
+        if (!isDedicatedServer)
+        {
+            return logicalProcessors switch
+            {
+                <= 4 => 1,
+                <= 6 => 2,
+                <= 8 => 3,
+                _ => Math.Min(ChunkReadPoolWorkers, Math.Min(6, logicalProcessors / 3))
+            };
+        }
+        return Math.Min(ChunkReadPoolWorkers, Math.Min(8, Math.Max(2, logicalProcessors / 2)));
+    }
+
+    /// <summary>
     /// Adaptive chunk generation radius: reduces the effective view radius
     /// under gen-queue pressure (player exploring fast) so fewer columns
     /// queue at once. Recovers to full radius when the queue drains.

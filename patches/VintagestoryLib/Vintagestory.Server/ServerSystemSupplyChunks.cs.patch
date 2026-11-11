@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
-index 3b0cba64..69b2d8cf 100644
+index 3b0cba6..9d32394 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs
 @@ -1,9 +1,13 @@
@@ -581,7 +581,7 @@ index 3b0cba64..69b2d8cf 100644
  	public bool CanGenerateChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		if (chunkRequest.CurrentIncompletePass_AsInt >= chunkRequest.untilPass || !ensurePrettyNeighbourhood(chunkRequest))
-@@ -931,32 +1319,112 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -931,32 +1319,116 @@ internal class ServerSystemSupplyChunks : ServerSystem
  	internal ServerChunk[] TryLoadChunkColumn(ChunkColumnLoadRequest chunkRequest)
  	{
  		int chunkMapSizeY = server.WorldMap.ChunkMapSizeY;
@@ -599,6 +599,10 @@ index 3b0cba64..69b2d8cf 100644
 +		{
 +			byte[][] rawChunks = new byte[chunkMapSizeY][];
 +			int maxDop = Math.Min(pool.WorkerCount, chunkMapSizeY);
++			if (!server.IsDedicatedServer && Environment.ProcessorCount <= 6)
++			{
++				maxDop = Math.Min(2, maxDop);
++			}
 +			int cx = chunkRequest.chunkX;
 +			int cz = chunkRequest.chunkZ;
 +			int dim = chunkRequest.dimension;
@@ -710,7 +714,7 @@ index 3b0cba64..69b2d8cf 100644
  		if (requiresSetEmptyFlag)
  		{
  			foreach (ServerChunk serverChunk in array)
-@@ -1038,10 +1506,11 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1038,10 +1510,11 @@ internal class ServerSystemSupplyChunks : ServerSystem
  	}
  
  	public void InitWorldgenAndSpawnChunks()
@@ -722,7 +726,7 @@ index 3b0cba64..69b2d8cf 100644
  		{
  			storyChunkSpawnEvents = new string[15]
  			{
-@@ -1278,10 +1747,15 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1278,10 +1751,15 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		}
  		long num3 = Environment.TickCount + 12000;
  		ServerMain.Logger.VerboseDebug("Starting area loading/generation: columns " + blockingRequestsRemaining + ", total queue length " + chunkthread.requestedChunkColumns.Count);
@@ -738,7 +742,7 @@ index 3b0cba64..69b2d8cf 100644
  			{
  				break;
  			}
-@@ -1299,34 +1773,57 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1299,34 +1777,57 @@ internal class ServerSystemSupplyChunks : ServerSystem
  					ServerMain.Logger.StoryEvent("...");
  				}
  				storyEventPrints++;
@@ -798,7 +802,7 @@ index 3b0cba64..69b2d8cf 100644
  				ServerMain.Logger.Error("Attempting to force generate chunk columns from " + chunkX1 + "," + chunkZ1 + " to " + chunkX2 + "," + chunkZ2);
  				ServerMain.Logger.Error(chunkthread.additionalWorldGenThreadsCount + " additional worldgen threads active, number of 'undone' chunks is " + blockingRequestsRemaining);
  				foreach (ChunkColumnLoadRequest requestedChunkColumn3 in chunkthread.requestedChunkColumns)
-@@ -1340,12 +1837,16 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1340,12 +1841,16 @@ internal class ServerSystemSupplyChunks : ServerSystem
  				throw new Exception("Somehow worldgen has become stuck in an endless loop, please report this as a bug!  Additional data in the server-main log");
  			}
  		}
@@ -816,7 +820,7 @@ index 3b0cba64..69b2d8cf 100644
  		try
  		{
  			if (server.Config.SkipEveryChunkRow > 0 && chunkRequest.chunkX % (server.Config.SkipEveryChunkRow + server.Config.SkipEveryChunkRowWidth) < server.Config.SkipEveryChunkRowWidth)
-@@ -1375,29 +1876,80 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1375,29 +1880,80 @@ internal class ServerSystemSupplyChunks : ServerSystem
  			chunkRequest.MapChunk.DirtyForSaving = true;
  		}
  		finally
@@ -899,7 +903,7 @@ index 3b0cba64..69b2d8cf 100644
  					break;
  				}
  			}
-@@ -1507,43 +2059,95 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1507,43 +2063,95 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		ServerMain.Logger.VerboseDebug("Incomplete chunks stored and wiped.");
  	}
  
@@ -999,7 +1003,7 @@ index 3b0cba64..69b2d8cf 100644
  			Thread.Sleep(1);
  		}
  		BlockAccessorWorldGen.ThreadDispose();
-@@ -1554,13 +2158,23 @@ internal class ServerSystemSupplyChunks : ServerSystem
+@@ -1554,13 +2162,23 @@ internal class ServerSystemSupplyChunks : ServerSystem
  		BlockAccessorWorldGen.ThreadDispose();
  	}
  
