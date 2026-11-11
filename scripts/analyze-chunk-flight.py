@@ -5,9 +5,13 @@ Usage: analyze-chunk-flight.py OUTPUT_DIR
        analyze-chunk-flight.py --self-test
 
 OUTPUT_DIR holds runs/<arm>-<NN>/ directories written by benchmark-chunk-flight.sh. Each run has
-markers.env (ARM, FLIGHT_START_EPOCH, FLIGHT_END_EPOCH, RENDERER), client-main.log and an
-optional mangohud/*.csv. Frame times come from the in-client chunk stream windows when the build
-logs them, and from the MangoHud CSV otherwise. Arms are compared with Welch's t-test on the
+markers.env (ARM, FLIGHT_START_EPOCH, FLIGHT_END_EPOCH, RENDERER, MIN_BLOCKS), client-main.log and
+an optional mangohud/*.csv. Frame times have three possible sources: MangoHud, the ChunkFlightMeter
+mod (present in every arm) and the in-client Optimum chunk stream windows. Arms are only compared on
+a source that every run has. The meter also logs the player position, the loaded terrain ahead and
+the chunks received per window, which give the blocks flown, the distance-normalised hitch metrics
+and the validity of a run: a run that flew fewer than MIN_BLOCKS blocks, or has no positions at all,
+is listed as INVALID and left out of the statistics. Arms are compared with Welch's t-test on the
 per-run values; differences inside the noise are reported as noise.
 """
 import csv
@@ -28,7 +32,8 @@ WINDOW_SECONDS = 5
 
 LINE_TIME = re.compile(r"^(\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2})")
 HIST = re.compile(r"(\w+)=n(\d+)/p50 (\d+)/p95 (\d+)/p99 (\d+)/max (\d+)")
-PAIR = re.compile(r"(?:^|[ ,])(over33ms|over50ms|over100ms|sent|uploaded|tessellated|poolAllocs|gcPauseMs|allocMB|tessPerSent|frameMeanUs)=([0-9.]+)")
+PAIR = re.compile(r"(?:^|[ ,])(over33ms|over50ms|over100ms|sent|uploaded|tessellated|poolAllocs|gcPauseMs|allocMB|tessPerSent|frameMeanUs|hitchMs|load1|cpuMhz|ahead|chunks|cols)=([0-9.]+)")
+POSITION = re.compile(r"pos=(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)")
 
 
 def bucket_upper_bound(index):
@@ -68,8 +73,12 @@ def parse_markers(path):
     return markers
 
 
-def stream_windows(log_path, start, end, marker="Optimum chunk stream:"):
-    """Windows logged under the marker that lie inside the flight, as dicts."""
+def stream_windows(log_path, start, end, marker="Optimum chunk stream:", previous=None):
+    """Windows logged under the marker that lie inside the flight, as dicts.
+
+    When previous is a list, the last window that ended before the first flight window is appended
+    to it: its position is where the first flight window started.
+    """
     windows = []
     with open(log_path, encoding="utf-8", errors="replace") as handle:
         for line in handle:
@@ -79,9 +88,12 @@ def stream_windows(log_path, start, end, marker="Optimum chunk stream:"):
             if not match:
                 continue
             stamp = parse_epoch(match.group(1))
-            if stamp - WINDOW_SECONDS < start - 1 or stamp > end + 1:
+            if stamp > end + 1:
                 continue
             window = {"epoch": stamp, "hist": {}, "values": {}, "frameBuckets": {}}
+            position = POSITION.search(line)
+            if position:
+                window["pos"] = tuple(float(v) for v in position.groups())
             for name, n, p50, p95, p99, mx in HIST.findall(line):
                 window["hist"][name] = tuple(int(x) for x in (n, p50, p95, p99, mx))
             for name, value in PAIR.findall(line):
@@ -91,8 +103,47 @@ def stream_windows(log_path, start, end, marker="Optimum chunk stream:"):
                 for pair in buckets.group(1).split(","):
                     index, count = pair.split(":")
                     window["frameBuckets"][int(index)] = int(count)
+            if stamp - WINDOW_SECONDS < start - 1:
+                if previous is not None:
+                    previous[:] = [window]
+                continue
             windows.append(window)
     return windows
+
+
+def flight_path(windows, before, duration, min_blocks):
+    """Distance, speed, altitude and streaming figures of one run from the meter windows."""
+    path = {}
+    positions = [w["pos"] for w in before + windows if "pos" in w]
+    if windows and len(positions) >= 2 and "pos" in windows[-1]:
+        first, last = positions[0], positions[-1]
+        seconds = (len(positions) - 1) * WINDOW_SECONDS
+        distance = math.hypot(last[0] - first[0], last[2] - first[2])
+        path["distance_blocks"] = distance
+        path["speed_blocks_per_s"] = distance / seconds
+        # The windows cover a little less than the flight; the speed scales it to the full flight time.
+        path["flight_blocks"] = path["speed_blocks_per_s"] * duration
+        path["start_pos"] = "%.1f,%.1f,%.1f" % first
+        path["mean_altitude"] = sum(p[1] for p in positions) / len(positions)
+        path["altitude_min"] = min(p[1] for p in positions)
+        path["altitude_max"] = max(p[1] for p in positions)
+        if distance > 0:
+            ux, uz = (last[0] - first[0]) / distance, (last[2] - first[2]) / distance
+            path["max_lateral_blocks"] = max(abs((p[0] - first[0]) * uz - (p[2] - first[2]) * ux) for p in positions)
+    if windows and "ahead" in windows[0]["values"]:
+        ahead = [w["values"].get("ahead", 0.0) for w in windows]
+        path["ahead_min_blocks"] = min(ahead)
+        path["ahead_mean_blocks"] = sum(ahead) / len(ahead)
+    if windows and "chunks" in windows[0]["values"]:
+        path["chunks_received"] = sum(w["values"].get("chunks", 0.0) for w in windows)
+        path["columns_generated"] = sum(w["values"].get("cols", 0.0) for w in windows)
+        path["windows_without_chunks"] = sum(1 for w in windows if w["values"].get("chunks", 0.0) == 0)
+    if min_blocks > 0:
+        if "flight_blocks" not in path:
+            path["invalid"] = "no player positions in the log, the flight cannot be verified"
+        elif path["flight_blocks"] < min_blocks:
+            path["invalid"] = f"flew {path['flight_blocks']:.0f} blocks, below the {min_blocks:.0f} block minimum"
+    return path
 
 
 def mangohud_frames(csv_path, start, end):
@@ -158,7 +209,8 @@ def summarise_run(run_dir):
         client["pool_allocs"] = sum(w["values"].get("poolAllocs", 0) for w in windows)
         client["gc_pause_ms_total"] = windows[-1]["values"].get("gcPauseMs", 0.0) - (windows[0]["values"].get("gcPauseMs", 0.0) if len(windows) > 1 else 0.0)
         client["windows"] = len(windows)
-    meter = stream_windows(log_path, start, end, "ChunkFlightMeter:") if os.path.exists(log_path) else []
+    before = []
+    meter = stream_windows(log_path, start, end, "ChunkFlightMeter: frameUs=", before) if os.path.exists(log_path) else []
     meter_buckets = {}
     for window in meter:
         for index, count in window["frameBuckets"].items():
@@ -174,7 +226,19 @@ def summarise_run(run_dir):
             "frame_p99_ms": percentile_from_buckets(meter_buckets, 0.99) / 1000.0,
             "frame_max_ms": max((w["hist"].get("frameUs", (0, 0, 0, 0, 0))[4] for w in meter), default=0) / 1000.0,
             "stutters": sum(w["values"].get("over50ms", 0) for w in meter),
+            "hitch_ms": sum(w["values"].get("hitchMs", 0) for w in meter),
         }
+    result["min_blocks"] = float(markers.get("MIN_BLOCKS", 0))
+    result["path"] = flight_path(meter, before, duration, result["min_blocks"])
+    if meter:
+        result["mean_cpu_mhz"] = sum(w["values"].get("cpuMhz", 0) for w in meter) / len(meter)
+        result["mean_load1"] = sum(w["values"].get("load1", 0) for w in meter) / len(meter)
+    distance = result["path"].get("distance_blocks", 0.0)
+    if distance > 0 and "meter" in result["sources"]:
+        # Per 100 blocks flown, so runs that covered different distances stay comparable.
+        result["path"]["stutters_per_100_blocks"] = result["sources"]["meter"]["stutters"] * 100.0 / distance
+        result["path"]["hitch_ms_per_100_blocks"] = result["sources"]["meter"]["hitch_ms"] * 100.0 / distance
+        result["path"]["chunks_per_100_blocks"] = result["path"].get("chunks_received", 0.0) * 100.0 / distance
     csvs = sorted(glob.glob(os.path.join(run_dir, "mangohud", "*.csv")))
     frames = mangohud_frames(csvs[0], start, end) if csvs else []
     if frames:
@@ -207,6 +271,10 @@ def flatten(runs, source):
         item = {"arm": run["arm"], "run": run["run"], "renderer": run["renderer"], "source": source or "none"}
         if source:
             item.update(run["sources"][source])
+        for key in ("mean_cpu_mhz", "mean_load1"):
+            if key in run:
+                item[key] = run[key]
+        item.update(run.get("path", {}))
         if "client" in run["sources"]:
             for key in ("upload_frame_p99_ms_worst_window", "queue_age_p99_ms_worst_window", "chunks_sent", "tess_per_sent", "pool_allocs", "gc_pause_ms_total", "windows"):
                 item["detail_" + key] = run["sources"]["client"][key]
@@ -274,10 +342,20 @@ METRICS = [
     ("frame_p99_ms", "frame p99 ms", "lower"),
     ("frame_max_ms", "frame max ms", "lower"),
     ("stutters", "frames over 50 ms", "lower"),
+    ("hitch_ms", "hitch ms (sum of frames over 50 ms)", "lower"),
+    ("stutters_per_100_blocks", "frames over 50 ms per 100 blocks", "lower"),
+    ("hitch_ms_per_100_blocks", "hitch ms per 100 blocks", "lower"),
+    ("flight_blocks", "blocks flown", "higher"),
+    ("ahead_mean_blocks", "loaded terrain ahead, mean blocks", "higher"),
+    ("ahead_min_blocks", "loaded terrain ahead, min blocks", "higher"),
+    ("chunks_received", "chunks received", "higher"),
+    ("mean_cpu_mhz", "mean CPU MHz", "higher"),
 ]
 
 
-def render(runs):
+def render(all_runs):
+    invalid = [run for run in all_runs if run.get("invalid")]
+    runs = [run for run in all_runs if not run.get("invalid")]
     arms = {}
     for run in runs:
         arms.setdefault(run["arm"], []).append(run)
@@ -314,12 +392,31 @@ def render(runs):
     for run in runs:
         if "detail_windows" in run:
             extras.append(f"- {run['run']}: upload p99 worst window {run['detail_upload_frame_p99_ms_worst_window']:.2f} ms, queue age p99 worst window {run['detail_queue_age_p99_ms_worst_window']:.2f} ms, chunks sent {run['detail_chunks_sent']:.0f}, tessellations per sent chunk {run['detail_tess_per_sent']:.2f}, pool allocations {run['detail_pool_allocs']:.0f}, GC pause {run['detail_gc_pause_ms_total']:.0f} ms")
+    flights, warnings = [], []
+    for run in all_runs:
+        if "flight_blocks" not in run:
+            continue
+        flights.append(
+            f"- {run['run']}: measured from {run['start_pos']}, {run['flight_blocks']:.0f} blocks at {run['speed_blocks_per_s']:.1f} blocks/s, "
+            f"altitude {run['altitude_min']:.1f} to {run['altitude_max']:.1f}, off the line by at most {run.get('max_lateral_blocks', 0.0):.1f} blocks"
+            + (f", terrain loaded ahead {run['ahead_min_blocks']:.0f} to mean {run['ahead_mean_blocks']:.0f} blocks" if "ahead_min_blocks" in run else "")
+            + (f", {run['chunks_received']:.0f} chunks received, {run['columns_generated']:.0f} columns loaded by the server, {run['windows_without_chunks']} windows without a chunk" if "chunks_received" in run else ""))
+        if run.get("ahead_min_blocks", 1.0) <= 0:
+            warnings.append(f"- {run['run']}: the player outran chunk loading (no loaded terrain ahead in at least one window), so part of the flight rendered the void")
+        if run.get("windows_without_chunks", 0) > 0:
+            warnings.append(f"- {run['run']}: {run['windows_without_chunks']} flight windows received no chunk, the flight was not streaming all the time")
     text = ["## Chunk flight benchmark", "", *lines, ""]
+    if flights:
+        text += ["### Flights (meter positions)", "", *flights, ""]
+    if warnings:
+        text += ["### Warnings", "", *warnings, ""]
     if comparisons:
         text += ["### Welch t-test per metric", "", *comparisons, ""]
     if extras:
         text += ["### Streaming detail (Optimum builds)", "", *extras, ""]
-    renderers = sorted({run["renderer"] for run in runs if run["renderer"]})
+    if invalid:
+        text += ["### INVALID runs, excluded from the statistics", "", *[f"- {run['run']}: INVALID, {run['invalid']}" for run in invalid], ""]
+    renderers = sorted({run["renderer"] for run in all_runs if run["renderer"]})
     text += ["Renderer: " + (", ".join(renderers) if renderers else "unknown")]
     return "\n".join(text) + "\n"
 
@@ -344,9 +441,16 @@ def analyze(output_dir):
     return 0
 
 
-def synthetic_log(path, start, frame_us_by_window):
-    """Write a client log with one chunk stream window per entry."""
+def synthetic_log(path, start, frame_us_by_window, blocks_per_window=None, ahead=512):
+    """Write a client log with one chunk stream window per entry, and one meter window when a speed is given."""
     with open(path, "w", encoding="utf-8") as handle:
+        if blocks_per_window is not None:
+            # Warm-up windows before the flight: the player stands at the start.
+            for i in (-1, 0):
+                stamp = datetime.datetime.fromtimestamp(start + WINDOW_SECONDS * i).strftime("%d.%m.%Y %H:%M:%S")
+                handle.write(f"{stamp} [Notification] ChunkFlightMeter: frameUs=n1/p50 9000/p95 9000/p99 9000/max 9000, over33ms=0, over50ms=0, over100ms=0, "
+                             f"hitchMs=0, pos=512000.0,160.0,512000.0, ahead=512, chunks=0, cols=0, load1=1.00, cpuMhz=3000, frameMeanUs=9000, frameBuckets=52:1\n")
+            handle.write("11.11.2026 09:59:00 [Notification] ChunkFlightMeter: setup complete pos=512000.0,160.0,512000.0 yawDeg=0.0\n")
         for i, samples in enumerate(frame_us_by_window):
             stamp = datetime.datetime.fromtimestamp(start + WINDOW_SECONDS * (i + 1)).strftime("%d.%m.%Y %H:%M:%S")
             buckets = {}
@@ -361,6 +465,12 @@ def synthetic_log(path, start, frame_us_by_window):
                 f"over33ms=0, over50ms={over50}, over100ms=0, uploadFrameUs=n3/p50 100/p95 200/p99 300/max 300, "
                 f"queueAgeUs=n3/p50 100/p95 200/p99 400/max 400, sent=10, uploaded=10, tessellated=15, tessPerSent=1.50, poolAllocs=1, "
                 f"gc0/1/2=1/0/0, gcPauseMs={i}.5, allocMB=10, frameMeanUs={sum(samples) // len(samples)}, frameBuckets={bucket_text}\n")
+            if blocks_per_window is not None:
+                hitch = sum(v for v in samples if v > 50000) // 1000
+                handle.write(
+                    f"{stamp} [Notification] ChunkFlightMeter: frameUs=n{len(samples)}/p50 1/p95 1/p99 1/max {max(samples)}, over33ms=0, over50ms={over50}, over100ms=0, "
+                    f"hitchMs={hitch}, pos=512000.0,160.0,{512000.0 + blocks_per_window * (i + 1):.1f}, ahead={ahead}, chunks={80 if blocks_per_window else 0}, cols=10, "
+                    f"load1=1.50, cpuMhz=3000, frameMeanUs={sum(samples) // len(samples)}, frameBuckets={bucket_text}\n")
 
 
 def self_test():
@@ -398,6 +508,45 @@ def self_test():
         text = render(flat)
         assert "second is better" not in text and "first is better" in text, text
         assert "| fast | 3 | client |" in text
+        assert "INVALID" not in text, text
+
+    # Flights with the meter: distance, normalised metrics, INVALID runs and the outrun warning.
+    with tempfile.TemporaryDirectory() as root:
+        start = datetime.datetime(2026, 11, 11, 10, 0, 0).timestamp()
+        cases = (("vanilla-01", "vanilla", 130.0, 512), ("vanilla-02", "vanilla", 131.0, 512), ("optimum-01", "optimum", 130.0, 512),
+                 ("optimum-02", "optimum", 132.0, 0), ("optimum-03", "optimum", 5.0, 512), ("optimum-04", "optimum", None, 512))
+        for name, arm, blocks, ahead in cases:
+            run = os.path.join(root, "runs", name)
+            os.makedirs(run)
+            with open(os.path.join(run, "markers.env"), "w", encoding="utf-8") as handle:
+                handle.write(f"ARM={arm}\nFLIGHT_START_EPOCH={start}\nFLIGHT_END_EPOCH={start + 20}\nRENDERER=test gpu\nMIN_BLOCKS=400\n")
+            windows = [[10000 + k for k in range(100)] + [60000, 70000] for _ in range(4)]
+            synthetic_log(os.path.join(run, "client-main.log"), start, windows, blocks, ahead)
+        runs = [summarise_run(d) for d in sorted(glob.glob(os.path.join(root, "runs", "*")))]
+        metered = [r for r in runs if r["run"] != "optimum-04"]
+        unmetered = [r for r in runs if r["run"] == "optimum-04"][0]
+        source, warning = choose_source(metered)
+        assert source == "meter" and not warning, (source, warning)
+        # The run without meter lines still has the client source, so the meter is no common ruler for all six.
+        assert choose_source(runs)[0] == "client"
+        flat = {r["run"]: r for r in flatten(metered, source)}
+        good = flat["vanilla-01"]
+        assert abs(good["distance_blocks"] - 520.0) < 0.01 and abs(good["speed_blocks_per_s"] - 26.0) < 0.01, good
+        assert abs(good["flight_blocks"] - 520.0) < 0.01 and good["start_pos"] == "512000.0,160.0,512000.0", good
+        assert good["altitude_min"] == 160.0 and good["max_lateral_blocks"] == 0.0, good
+        assert good["stutters"] == 8 and good["hitch_ms"] == 520, good
+        assert abs(good["stutters_per_100_blocks"] - 8 * 100 / 520.0) < 1e-9, good
+        assert abs(good["hitch_ms_per_100_blocks"] - 100.0) < 1e-9, good
+        assert good["chunks_received"] == 320 and good["windows_without_chunks"] == 0 and good["ahead_min_blocks"] == 512, good
+        assert "invalid" not in good and "invalid" not in flat["optimum-02"]
+        assert "below the 400 block minimum" in flat["optimum-03"]["invalid"], flat["optimum-03"]
+        missing = flatten([unmetered], "client")[0]
+        assert "no player positions" in missing["invalid"], missing
+        text = render(list(flat.values()) + [missing])
+        assert "optimum-03: INVALID, flew 20 blocks" in text and "optimum-04: INVALID, no player positions" in text, text
+        assert "| optimum | 2 | meter |" in text and "| vanilla | 2 | meter |" in text, text
+        assert "optimum-02: the player outran chunk loading" in text, text
+        assert "frames over 50 ms per 100 blocks" in text and "vanilla-01: measured from 512000.0,160.0,512000.0, 520 blocks at 26.0 blocks/s" in text, text
     print("self-test ok")
     return 0
 

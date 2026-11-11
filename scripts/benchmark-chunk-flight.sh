@@ -1,12 +1,42 @@
 #!/usr/bin/env bash
-# Chunk flight benchmark: a fresh seeded world per run, a scripted sprint flight, and per frame
-# data from the client (OPTIMUM_CHUNK_STREAM_LOG) and from MangoHud. Arms are compared run by run.
+# Chunk flight benchmark: a fresh seeded world per run, a scripted creative flight in a straight line
+# over normal terrain, and per frame data from the ChunkFlightMeter mod (every arm), from the client
+# (OPTIMUM_CHUNK_STREAM_LOG, Optimum builds) and optionally from MangoHud. Arms are compared run by run.
+#
+# How a run works, identically for a vanilla and an Optimum client, with no human input:
+#   1. --rndWorld creates a new world from --seed with the playstyle given by -p. -p takes the playstyle
+#      langCode, not its code: "preset-exploration" is the standard hilly worldgen with passive creatures
+#      and no temporal storms. An unknown code silently leaves the client in the main menu ("surviving"
+#      did that), and "creativebuilding" is superflat. Every run generates its chunks from scratch in a
+#      throwaway data directory that is removed afterwards, so nothing carries over.
+#   2. The ChunkFlightMeter mod (tools/ChunkFlightMeter, pass its build directory with --mod-path) prepares
+#      the session from CHUNKFLIGHT_SETUP: it closes the character dialog a new survival world opens and
+#      unpauses the game, then runs /gamemode creative, .freemove 1, .noclip 1, .movespeed N, /time set 12:00,
+#      /time stop, /weather acp 0, /weather setprecip -1 and an absolute /tp, and holds the heading. It logs
+#      every server reply and one "setup complete" line, which this script checks against --setup.
+#   3. Warm-up: at least --warmup seconds, then until --settle-windows consecutive five second meter
+#      windows saw no chunk column loaded by the server and no chunk received by the client, and the frame
+#      count of the last two windows differs by at most 10 percent (the client finished building the area).
+#   4. Flight: xdotool holds Control_L (sprint) and w. After a --ramp the measured window lasts --duration.
+#      /movespeed 3 flies about 26.7 blocks per second, about 1600 blocks in 60 s, which both clients can
+#      still stream at a 512 block view distance; /movespeed 5 (44 blocks/s) outruns chunk loading.
+#   5. scripts/analyze-chunk-flight.py reads the logged positions: a run below --min-blocks is INVALID.
+# A failed run stops the client, removes the data directory, keeps the logs and prints where they are.
 #
 # Usage: bash scripts/benchmark-chunk-flight.sh [options]
-#   --arm NAME=DIR          client directory to measure, repeatable (default: optimum=.vanilla/linux-x64/vintagestory)
-#   --duration SECONDS      flight length (default 60)
+#   --arm NAME=DIR[@CONF]   client directory to measure, repeatable, with an optional optimum.json for that arm
+#                           (default: optimum=.vanilla/linux-x64/vintagestory)
+#   --duration SECONDS      measured flight length (default 60)
 #   --runs N                runs per arm (default 5), arms rotate so none always goes first
 #   --seed N                world seed (default 20261111)
+#   --playstyle LANGCODE    world playstyle langCode (default preset-exploration, normal terrain)
+#   --setup X,Y,Z,YAW[,SPEED]  absolute start block position, heading in degrees (0 flies towards +Z, south)
+#                           and /movespeed (default 512000,200,512000,0,3)
+#   --warmup SECONDS        minimum idle time after setup (default 30)
+#   --warmup-max SECONDS    give up when the start area has not settled by then (default 300)
+#   --settle-windows N      quiet meter windows that end the warm-up (default 3)
+#   --ramp SECONDS          flight time before the measured window (default 5)
+#   --min-blocks N          a run that flies fewer blocks is reported INVALID (default 22 per second of --duration)
 #   --view-distance N       view distance in blocks (default 512)
 #   --optimum-config FILE   optimum.json copied into every run
 #   --gpu-wrapper CMD       command that puts the client on the GPU (default: vglrun -d egl0 -c proxy)
@@ -21,6 +51,14 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DURATION="${DURATION:-60}"
 RUNS="${RUNS:-5}"
 SEED="${SEED:-20261111}"
+PLAYSTYLE="${PLAYSTYLE:-preset-exploration}"
+SETUP="${SETUP:-512000,200,512000,0,3}"
+WARMUP="${WARMUP:-30}"
+WARMUP_MAX="${WARMUP_MAX:-300}"
+SETTLE_WINDOWS="${SETTLE_WINDOWS:-3}"
+RAMP="${RAMP:-5}"
+LOAD_TIMEOUT="${LOAD_TIMEOUT:-240}"
+MIN_BLOCKS="${MIN_BLOCKS:-}"
 VIEW_DISTANCE="${VIEW_DISTANCE:-512}"
 DISPLAY_NUM="${DISPLAY_NUM:-:99}"
 RESOLUTION="${RESOLUTION:-1920x1080}"
@@ -39,6 +77,13 @@ while [[ $# -gt 0 ]]; do
         --duration) DURATION="$2"; shift 2 ;;
         --runs) RUNS="$2"; shift 2 ;;
         --seed) SEED="$2"; shift 2 ;;
+        --playstyle) PLAYSTYLE="$2"; shift 2 ;;
+        --setup) SETUP="$2"; shift 2 ;;
+        --warmup) WARMUP="$2"; shift 2 ;;
+        --warmup-max) WARMUP_MAX="$2"; shift 2 ;;
+        --settle-windows) SETTLE_WINDOWS="$2"; shift 2 ;;
+        --ramp) RAMP="$2"; shift 2 ;;
+        --min-blocks) MIN_BLOCKS="$2"; shift 2 ;;
         --view-distance) VIEW_DISTANCE="$2"; shift 2 ;;
         --optimum-config) OPTIMUM_CONFIG="$2"; shift 2 ;;
         --gpu-wrapper) GPU_WRAPPER="$2"; shift 2 ;;
@@ -47,10 +92,13 @@ while [[ $# -gt 0 ]]; do
         --no-mangohud) USE_MANGOHUD=0; shift ;;
         --allow-software-gl) ALLOW_SOFTWARE_GL=1; shift ;;
         --output) OUTPUT_DIR="$2"; shift 2 ;;
-        -h|--help) sed -n '2,19p' "${BASH_SOURCE[0]}"; exit 0 ;;
+        -h|--help) sed -n '2,/^# Environment:/p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "ERROR: unknown option $1" >&2; exit 2 ;;
     esac
 done
+
+# About 82 percent of the calibrated 26.7 blocks per second.
+[[ -n "$MIN_BLOCKS" ]] || MIN_BLOCKS=$((DURATION * 22))
 
 if [[ ${#ARM_SPECS[@]} -eq 0 ]]; then
     ARM_SPECS=("optimum=$REPO_ROOT/.vanilla/linux-x64/vintagestory")
@@ -82,11 +130,31 @@ if ! xdpyinfo -display "$DISPLAY_NUM" >/dev/null 2>&1; then
 fi
 
 CURRENT_GROUP=""
+CURRENT_RUN_DIR=""
+# Stops the client of the current run, keeps its logs and drops the throwaway data directory, which
+# holds a copy of the cached session and the generated world. Runs after every run and from the exit
+# trap, so a failed run cleans up too.
+end_run() {
+    if [[ -n "$CURRENT_GROUP" ]]; then
+        kill -TERM -- "-$CURRENT_GROUP" 2>/dev/null || true
+        for _ in $(seq 1 15); do kill -0 "$CURRENT_GROUP" 2>/dev/null || break; sleep 1; done
+        kill -KILL -- "-$CURRENT_GROUP" 2>/dev/null || true
+        # The client often dies with a segfault on SIGTERM, after the measurement: keep bash quiet about it.
+        { wait "$CURRENT_GROUP"; } 2>/dev/null || true
+        CURRENT_GROUP=""
+    fi
+    if [[ -n "$CURRENT_RUN_DIR" && -d "$CURRENT_RUN_DIR/data" ]]; then
+        cp "$CURRENT_RUN_DIR/data/Logs/"client-main.log "$CURRENT_RUN_DIR/data/Logs/"client-chat.log "$CURRENT_RUN_DIR/data/Logs/"server-main.log "$CURRENT_RUN_DIR/" 2>/dev/null || true
+        rm -rf -- "$CURRENT_RUN_DIR/data"
+    fi
+    CURRENT_RUN_DIR=""
+}
 cleanup() {
-    [[ -n "$CURRENT_GROUP" ]] && kill -KILL -- "-$CURRENT_GROUP" 2>/dev/null || true
+    end_run
     [[ -n "$XVFB_PID" ]] && kill "$XVFB_PID" 2>/dev/null || true
 }
 trap cleanup EXIT
+trap 'exit 130' INT TERM
 
 RENDERER="$(DISPLAY="$DISPLAY_NUM" "${WRAP[@]}" glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p' | head -n 1)"
 echo "GL renderer: ${RENDERER:-unknown}"
@@ -102,9 +170,9 @@ fi
     echo "renderer=$RENDERER"
     echo "gpu_wrapper=${WRAP[*]:-none}"
     echo "kernel=$(uname -sr)"
-    echo "cpu=$(lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1)"
+    echo "cpu=$(LC_ALL=C lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1)"
     echo "dotnet=$(dotnet --version 2>/dev/null || echo unknown)"
-    echo "duration=$DURATION runs=$RUNS seed=$SEED viewDistance=$VIEW_DISTANCE resolution=$RESOLUTION mangohud=$USE_MANGOHUD"
+    echo "duration=$DURATION runs=$RUNS seed=$SEED playstyle=$PLAYSTYLE setup=$SETUP warmup=$WARMUP settleWindows=$SETTLE_WINDOWS ramp=$RAMP minBlocks=$MIN_BLOCKS viewDistance=$VIEW_DISTANCE resolution=$RESOLUTION mangohud=$USE_MANGOHUD"
     printf 'arm=%s\n' "${ARM_SPECS[@]}"
 } > "$OUTPUT_DIR/manifest.txt"
 
@@ -117,6 +185,8 @@ with open(source, encoding="utf-8") as handle:
 ints = settings.setdefault("intSettings", {})
 ints["viewDistance"] = int(view)
 ints["vsyncMode"] = 0
+for key in ("musicLevel", "soundLevel", "entitySoundLevel", "ambientSoundLevel", "weatherSoundLevel", "masterSoundLevel"):
+    ints[key] = 0
 ints["screenWidth"] = int(width)
 ints["screenHeight"] = int(height)
 with open(target, "w", encoding="utf-8") as handle:
@@ -128,17 +198,44 @@ last_pause_state() {
     grep -o "Client pause state is now \(on\|off\)" "$1" 2>/dev/null | tail -n 1 | awk '{print $NF}'
 }
 
+# Prints the failure with the log to read, keeps a screenshot, and fails the whole benchmark. The
+# exit trap then stops the client and removes the data directory; the logs stay in the run directory.
+fail_run() {
+    DISPLAY="$DISPLAY_NUM" scrot "$CURRENT_RUN_DIR/failure.png" 2>/dev/null || true
+    echo "ERROR: $1" >&2
+    echo "       logs: $CURRENT_RUN_DIR/client-main.log (and stdout.log, server-main.log, failure.png)" >&2
+    exit 1
+}
+
+# Value of key= in the last ChunkFlightMeter window line of a log, or nothing.
+last_window_value() {
+    grep "ChunkFlightMeter: frameUs=" "$1" 2>/dev/null | tail -n 1 | grep -o "[ ,]$2=[-0-9.,]*" | head -n 1 | cut -d= -f2 | sed 's/,$//' || true
+}
+
 run_one() {
     local arm="$1" dir="$2" index="$3"
     local run_dir="$OUTPUT_DIR/runs/$arm-$(printf '%02d' "$index")"
     local data="$run_dir/data"
     local log="$data/Logs/client-main.log"
+    [[ -f "$dir/Vintagestory.dll" ]] || { echo "ERROR: $dir has no Vintagestory.dll" >&2; exit 1; }
+    rm -rf -- "$run_dir"
     mkdir -p "$data/Logs" "$run_dir/mangohud"
+    CURRENT_RUN_DIR="$run_dir"
     write_settings "$data/clientsettings.json"
-    if [[ -n "$OPTIMUM_CONFIG" ]]; then
-        mkdir -p "$data/ModConfig"
-        cp "$OPTIMUM_CONFIG" "$data/ModConfig/optimum.json"
-    fi
+    local config="${4:-$OPTIMUM_CONFIG}"
+    mkdir -p "$data/ModConfig"
+    python3 - "$config" "$data/ModConfig/optimum.json" <<'PY'
+import json, os, sys
+source, target = sys.argv[1:3]
+settings = {}
+if source and os.path.exists(source):
+    with open(source, encoding="utf-8") as handle:
+        settings = json.load(handle)
+# An unfocused Xvfb window would otherwise drop Optimum to its background frame limit.
+settings["BackgroundFpsLimit"] = False
+with open(target, "w", encoding="utf-8") as handle:
+    json.dump(settings, handle)
+PY
 
     echo "[$arm #$index] launching $dir"
     local mango=() mods=()
@@ -146,24 +243,48 @@ run_one() {
     for mod_path in "${MOD_PATHS[@]}"; do mods+=(--addModPath "$mod_path"); done
     (
         cd "$dir"
-        export DISPLAY="$DISPLAY_NUM" OPTIMUM_CHUNK_STREAM_LOG=1
+        export DISPLAY="$DISPLAY_NUM" OPTIMUM_CHUNK_STREAM_LOG=1 CHUNKFLIGHT_SETUP="$SETUP"
         if [[ "$USE_MANGOHUD" == "1" ]]; then
             export MANGOHUD=1 MANGOHUD_CONFIG="output_folder=$run_dir/mangohud,autostart_log=1,log_interval=0,no_display"
         fi
-        exec setsid "${WRAP[@]}" "${mango[@]}" dotnet Vintagestory.dll --dataPath "$data" --logPath "$data/Logs" --rndWorld --seed "$SEED" -p creativebuilding "${mods[@]}"
+        exec setsid "${WRAP[@]}" "${mango[@]}" dotnet Vintagestory.dll --dataPath "$data" --logPath "$data/Logs" --rndWorld --seed "$SEED" -p "$PLAYSTYLE" "${mods[@]}"
     ) > "$run_dir/stdout.log" 2>&1 &
     local pid=$!
     CURRENT_GROUP="$pid"
 
     local ready=0
-    for _ in $(seq 1 240); do
-        if ! kill -0 "$pid" 2>/dev/null; then echo "ERROR: the client exited early, see $run_dir/stdout.log" >&2; return 1; fi
+    for _ in $(seq 1 "$LOAD_TIMEOUT"); do
+        kill -0 "$pid" 2>/dev/null || fail_run "the client exited before the world loaded"
         if grep -q "Received level finalize" "$log" 2>/dev/null; then ready=1; break; fi
         sleep 1
     done
-    [[ "$ready" == 1 ]] || { echo "ERROR: timed out waiting for the world to load" >&2; return 1; }
+    [[ "$ready" == 1 ]] || fail_run "the world did not load within ${LOAD_TIMEOUT}s. --playstyle must be a playstyle langCode (preset-exploration, preset-surviveandbuild, creativebuilding, ...); an unknown code leaves the client in the main menu"
 
-    sleep 3
+    # The meter mod closes the character dialog, switches to creative free flight, freezes time and
+    # weather, teleports and sets the heading, then logs one line with what it reached.
+    local setup_line=""
+    for _ in $(seq 1 90); do
+        kill -0 "$pid" 2>/dev/null || fail_run "the client exited during the session setup"
+        setup_line="$(grep -m 1 "ChunkFlightMeter: setup complete" "$log" 2>/dev/null || true)"
+        [[ -n "$setup_line" ]] && break
+        sleep 1
+    done
+    [[ -n "$setup_line" ]] || fail_run "the meter mod never finished the session setup (is --mod-path pointing at the built ChunkFlightMeter?)"
+    python3 - "$SETUP" "$setup_line" <<'PY' || fail_run "the session setup did not reach the requested state: ${setup_line#*ChunkFlightMeter: }"
+import math, re, sys
+want = [float(v) for v in sys.argv[1].split(",")]
+line = sys.argv[2]
+pos = [float(v) for v in re.search(r"pos=(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)", line).groups()]
+yaw = float(re.search(r"yawDeg=(-?[0-9.]+)", line).group(1))
+ok = all(abs(a - b) <= 2.0 for a, b in zip(pos, want[:3]))
+ok = ok and abs((yaw - want[3] + 180.0) % 360.0 - 180.0) <= 1.0
+ok = ok and "mode=Creative" in line and "freeMove=True" in line and "paused=False" in line
+if len(want) > 4:
+    ok = ok and abs(float(re.search(r"moveSpeed=([0-9.]+)", line).group(1)) - want[4]) < 0.01
+sys.exit(0 if ok else 1)
+PY
+    echo "[$arm #$index] ${setup_line#*ChunkFlightMeter: }"
+
     local window
     window="$(DISPLAY="$DISPLAY_NUM" xdotool search --onlyvisible --name "Vintage Story" 2>/dev/null | head -n 1 || true)"
     [[ -n "$window" ]] && DISPLAY="$DISPLAY_NUM" xdotool windowfocus "$window" 2>/dev/null || true
@@ -172,30 +293,47 @@ run_one() {
         DISPLAY="$DISPLAY_NUM" xdotool key Escape
         sleep 2
     done
-    sleep 5
+
+    # Warm-up: at least --warmup seconds, then until the area around the start is complete, which is
+    # --settle-windows consecutive five second meter windows in which the server loaded no chunk column
+    # and the client received no chunk. Both counters come from the meter mod, so they exist in every arm.
+    local waited=0 quiet=0 seen=0 lines settled=0 frames=0 previous_frames=0 steady=0
+    while (( waited < WARMUP_MAX )); do
+        kill -0 "$pid" 2>/dev/null || fail_run "the client exited during the warm-up"
+        lines="$(grep -c "ChunkFlightMeter: frameUs=" "$log" 2>/dev/null || true)"
+        if (( lines > seen )); then
+            seen="$lines"
+            previous_frames="$frames"
+            frames="$(grep "ChunkFlightMeter: frameUs=" "$log" | tail -n 1 | sed -n 's/.*frameUs=n\([0-9]*\).*/\1/p')"
+            frames="${frames:-0}"
+            # Steady when the frame count moved by at most 10 percent against the window before.
+            if (( previous_frames > 0 && (frames - previous_frames) * 10 <= previous_frames && (previous_frames - frames) * 10 <= previous_frames )); then steady=1; else steady=0; fi
+            if [[ "$(last_window_value "$log" cols)" == "0" && "$(last_window_value "$log" chunks)" == "0" ]]; then quiet=$((quiet + 1)); else quiet=0; fi
+        fi
+        if (( waited >= WARMUP && quiet >= SETTLE_WINDOWS && steady == 1 )); then settled=1; break; fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    [[ "$settled" == 1 ]] || fail_run "the start area had not settled (no chunks arriving and a steady frame rate) after ${WARMUP_MAX}s of warm-up"
+    echo "[$arm #$index] warm-up settled after ${waited}s, start pos=$(last_window_value "$log" pos)"
     DISPLAY="$DISPLAY_NUM" scrot "$run_dir/1_before_flight.png" 2>/dev/null || true
 
+    # Sprint is Control, forward is w. Free movement and the speed were set by the meter mod.
     local start end
+    DISPLAY="$DISPLAY_NUM" xdotool keydown Control_L keydown w
+    sleep "$RAMP"
     start="$(date +%s)"
-    DISPLAY="$DISPLAY_NUM" xdotool key space
-    sleep 0.2
-    DISPLAY="$DISPLAY_NUM" xdotool key space
-    sleep 0.5
-    DISPLAY="$DISPLAY_NUM" xdotool keydown Shift_L keydown w
-    sleep "$DURATION"
-    DISPLAY="$DISPLAY_NUM" xdotool keyup w keyup Shift_L
+    sleep $((DURATION / 2))
+    DISPLAY="$DISPLAY_NUM" scrot "$run_dir/2_mid_flight.png" 2>/dev/null || true
+    kill -0 "$pid" 2>/dev/null || fail_run "the client exited during the flight"
+    sleep $((DURATION - DURATION / 2))
     end="$(date +%s)"
-    DISPLAY="$DISPLAY_NUM" scrot "$run_dir/2_after_flight.png" 2>/dev/null || true
+    DISPLAY="$DISPLAY_NUM" scrot "$run_dir/3_after_flight.png" 2>/dev/null || true
+    DISPLAY="$DISPLAY_NUM" xdotool keyup w keyup Control_L
+    # One more window so the last flight window is in the log.
     sleep 6
+    echo "[$arm #$index] flight done, end pos=$(last_window_value "$log" pos)"
 
-    kill -TERM -- "-$pid" 2>/dev/null || true
-    for _ in $(seq 1 15); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
-    kill -KILL -- "-$pid" 2>/dev/null || true
-    wait "$pid" 2>/dev/null || true
-    CURRENT_GROUP=""
-
-    cp "$data/Logs/"client-*.log "$run_dir/" 2>/dev/null || true
-    cp "$data/Logs/"server-main.log "$run_dir/" 2>/dev/null || true
     {
         echo "ARM=$arm"
         echo "DIR=$dir"
@@ -203,18 +341,26 @@ run_one() {
         echo "FLIGHT_END_EPOCH=$end"
         echo "RENDERER=$RENDERER"
         echo "SEED=$SEED"
+        echo "PLAYSTYLE=$PLAYSTYLE"
+        echo "SETUP=$SETUP"
+        echo "WARMUP_SECONDS=$waited"
+        echo "MIN_BLOCKS=$MIN_BLOCKS"
     } > "$run_dir/markers.env"
-    # The data directory holds the cached session and the generated world: drop it.
-    rm -rf "$data"
+    end_run
 }
 
-NAMES=(); DIRS=()
-for spec in "${ARM_SPECS[@]}"; do NAMES+=("${spec%%=*}"); DIRS+=("${spec#*=}"); done
+NAMES=(); DIRS=(); CONFS=()
+for spec in "${ARM_SPECS[@]}"; do
+    rest="${spec#*=}"
+    NAMES+=("${spec%%=*}")
+    DIRS+=("${rest%%@*}")
+    if [[ "$rest" == *@* ]]; then CONFS+=("${rest#*@}"); else CONFS+=(""); fi
+done
 COUNT=${#NAMES[@]}
 for ((run = 1; run <= RUNS; run++)); do
     for ((slot = 0; slot < COUNT; slot++)); do
         arm=$(( (slot + run - 1) % COUNT ))
-        run_one "${NAMES[$arm]}" "${DIRS[$arm]}" "$run"
+        run_one "${NAMES[$arm]}" "${DIRS[$arm]}" "$run" "${CONFS[$arm]}"
     done
 done
 
