@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Xunit;
@@ -86,5 +87,20 @@ public class ClientProgramStartupDialogTests
 
         Assert.NotEmpty(dialogAdds);
         Assert.DoesNotContain(dialogAdds, l => l.Contains("=>") || l.Contains("delegate"));
+    }
+
+    [Fact]
+    public void StartDisablesMacRetinaFramebufferBeforeOpeningWindow()
+    {
+        string[] lines = PatchedLines();
+        int settings = Array.FindIndex(lines, line => line.Contains("NativeWindowSettings val2 = new NativeWindowSettings"));
+        int macGuard = Array.FindIndex(lines, line => line.Trim() == "if (RuntimeEnv.OS == OS.Mac)");
+        int hint = Array.FindIndex(lines, line => line.Contains("GLFW.WindowHint(WindowHintBool.ScaleFramebuffer, false);"));
+        int flags = Array.FindIndex(lines, line => line.Contains("val2.Flags = (ContextFlags)2;"));
+        int window = Array.FindIndex(lines, line => line.Contains("AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3)"));
+
+        Assert.True(settings >= 0 && settings < macGuard, "The Retina hint must be set after window settings are initialized.");
+        Assert.True(macGuard >= 0 && macGuard < hint, "The Retina hint must be guarded by the macOS branch.");
+        Assert.True(hint >= 0 && hint < flags && flags < window, "The Retina hint must precede the first window creation.");
     }
 }
