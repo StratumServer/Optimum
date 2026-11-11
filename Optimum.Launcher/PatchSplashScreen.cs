@@ -6,6 +6,7 @@ using OpenTK.Graphics.OpenGL;
 using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
+using OpenTK.Windowing.GraphicsLibraryFramework;
 using SkiaSharp;
 
 namespace Optimum.Launcher;
@@ -102,6 +103,11 @@ internal sealed class PatchSplashScreen : IDisposable
             APIVersion = new Version(3, 3),
             NumberOfSamples = 0,
         };
+
+        if (OperatingSystem.IsMacOS())
+        {
+            GLFW.WindowHint(WindowHintBool.ScaleFramebuffer, false);
+        }
 
         _window = new GameWindow(GameWindowSettings.Default, settings);
         _window.CenterWindow();

@@ -45,6 +45,20 @@ public class SplashScreenPackagingTests
     }
 
     [Fact]
+    public void MacSplashDisablesRetinaFramebufferBeforeCreatingWindow()
+    {
+        string source = Read("Optimum.Launcher/PatchSplashScreen.cs");
+        int settings = source.IndexOf("var settings = new NativeWindowSettings", StringComparison.Ordinal);
+        int macGuard = source.IndexOf("if (OperatingSystem.IsMacOS())", StringComparison.Ordinal);
+        int hint = source.IndexOf("GLFW.WindowHint(WindowHintBool.ScaleFramebuffer, false);", StringComparison.Ordinal);
+        int window = source.IndexOf("_window = new GameWindow(GameWindowSettings.Default, settings);", StringComparison.Ordinal);
+
+        Assert.True(settings >= 0 && settings < macGuard, "The Retina hint must be set after window settings are initialized.");
+        Assert.True(macGuard >= 0 && macGuard < hint, "The Retina hint must be guarded by the macOS branch.");
+        Assert.True(hint >= 0 && hint < window, "The Retina hint must precede splash window creation.");
+    }
+
+    [Fact]
     public void PatchProgressTextWrapsWithinTheSplashWindowWithoutLosingCharacters()
     {
         const string text = "Applying Optimum patches: .optimum/vanilla/Mods/VSSurvivalMod.dll";

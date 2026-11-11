@@ -126,3 +126,22 @@ index 4536b4c..05a9bba 100644
  		}
  		Signals[0] = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnExit);
  		Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);
+@@ -286,17 +364,18 @@ public class ClientProgram
+ 		GameWindowSettings gameWindowSettings = GameWindowSettings.Default;
+ 		NativeWindowSettings val2 = new NativeWindowSettings
+ 		{
+ 			Title = "Vintage Story",
+ 			APIVersion = new Version(num3, num4),
+ 			ClientSize = new Vector2i(ClientSettings.ScreenWidth, ClientSettings.ScreenHeight),
+ 			Flags = (ContextFlags)0,
+ 			Vsync = ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off,
+ 			WindowState = val,
+ 			WindowBorder = (WindowBorder)ClientSettings.WindowBorder
+ 		};
+ 		if (RuntimeEnv.OS == OS.Mac)
+ 		{
++			GLFW.WindowHint(WindowHintBool.ScaleFramebuffer, false);
+ 			val2.Flags = (ContextFlags)2;
+ 		}
+ 		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
+ 		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
