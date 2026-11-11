@@ -87,3 +87,15 @@ patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
 # preserves unique server entity IDs without changing their representation,
 # serialization, packet layout, or recipient selection.
 patches/VintagestoryLib/Vintagestory.Server/BlockAccessorWorldGen.cs.patch
+
+# TriggerGameWorldBeingSaved profile marker safely handles static delegates (null Target).
+# Diagnostic profiling only, no packet or state changes.
+patches/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs.patch
+
+# Internal compressed packet buffer invalidation on dynamic asset reload.
+# Server asset distribution logic unchanged; no wire protocol modification.
+patches/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs.patch
+
+# Direct streaming JSON serialization and StringComparison.OrdinalIgnoreCase in player data persistence.
+# Disk save path and internal lookups only; no network format changes.
+patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch
