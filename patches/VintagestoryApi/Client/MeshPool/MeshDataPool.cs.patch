@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..4e07767 100644
+index f9128b4..9786c31 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -1,7 +1,8 @@
@@ -39,7 +39,19 @@ index f9128b4..4e07767 100644
          /// <summary>
          /// Allocates a new pool for mesh data.
          /// </summary>
-@@ -280,11 +291,15 @@ namespace Vintagestory.API.Client
+@@ -106,10 +117,11 @@ namespace Vintagestory.API.Client
+         /// <param name="customInts">The custom ints of the pool.</param>
+         /// <returns>The resulting mesh data pool.</returns>
+         public static MeshDataPool AllocateNewPool(ICoreClientAPI capi, int verticesPoolSize, int indicesPoolSize, int maxPartsPerPool, CustomMeshDataPartFloat customFloats = null, CustomMeshDataPartShort customShorts = null, CustomMeshDataPartByte customBytes = null, CustomMeshDataPartInt customInts = null)
+         {
+             MeshDataPool pool = new MeshDataPool(verticesPoolSize, indicesPoolSize, maxPartsPerPool);
++            Vintagestory.API.Config.OptimumChunkStreamStats.RecordPoolAllocation();
+ 
+             // 64 bit builds require 64 bit memory addresses (should be long[] really, but GL.MultiDrawElements only accepts int[])
+             // 
+             pool.indicesStartsByte = new int[maxPartsPerPool * 2];
+             
+@@ -280,11 +292,15 @@ namespace Vintagestory.API.Client
              {
                  modeldata.CustomInts.BaseOffset = vertexPosition * modeldata.CustomInts.InterleaveStride;
              }
@@ -55,7 +67,7 @@ index f9128b4..4e07767 100644
              // Assign a location to it
              ModelDataPoolLocation poolLocation = new ModelDataPoolLocation()
              {
-@@ -295,18 +310,54 @@ namespace Vintagestory.API.Client
+@@ -295,18 +311,54 @@ namespace Vintagestory.API.Client
                  PoolId = poolId,
                  FrustumCullSphere = frustumCullSphere
              };
@@ -110,7 +122,7 @@ index f9128b4..4e07767 100644
              return poolLocation;
          }
  
-@@ -319,34 +370,86 @@ namespace Vintagestory.API.Client
+@@ -319,34 +371,86 @@ namespace Vintagestory.API.Client
              if (location.PoolId != poolId)
              {
                  throw new Exception("invalid call");
@@ -199,7 +211,7 @@ index f9128b4..4e07767 100644
          /// </summary>
          /// <param name="capi">The core client API</param>
          /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
-@@ -364,38 +467,282 @@ namespace Vintagestory.API.Client
+@@ -364,38 +468,282 @@ namespace Vintagestory.API.Client
          /// <param name="frustumCullMode">The mode of the culling.</param>
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
@@ -492,7 +504,7 @@ index f9128b4..4e07767 100644
                  ModelDataPoolLocation location = poolLocations[i];
  
                  int size = location.IndicesEnd - location.IndicesStart;
-@@ -462,11 +809,15 @@ namespace Vintagestory.API.Client
+@@ -462,11 +810,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -508,7 +520,7 @@ index f9128b4..4e07767 100644
  
  
      /// <summary>
-@@ -513,10 +864,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +865,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -521,7 +533,7 @@ index f9128b4..4e07767 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +888,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +889,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);

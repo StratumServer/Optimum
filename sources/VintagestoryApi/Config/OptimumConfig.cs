@@ -1566,7 +1566,7 @@ public static class OptimumDiagnostics
     /// Version of the stable, numeric benchmark metrics contract. Bump when
     /// metric keys or their meanings change.
     /// </summary>
-    public const int BenchmarkMetricsSchemaVersion = 3;
+    public const int BenchmarkMetricsSchemaVersion = 4;
 
     // Garbage collection pause instrumentation
     private static long _gcPauseHitchCount;
@@ -2164,6 +2164,8 @@ public static class OptimumDiagnostics
             values[prefix + "columns.count"] = Interlocked.Read(ref _worldgenPassColumns[pass]);
             values[prefix + "elapsed.stopwatchTicks"] = Interlocked.Read(ref _worldgenPassTicks[pass]);
         }
+
+        OptimumChunkStreamStats.AddMetrics(values);
 
         return new ReadOnlyDictionary<string, double>(values);
     }
@@ -2938,7 +2940,11 @@ public static class OptimumDiagnostics
     {
         Interlocked.Increment(ref _tessReadyToUploadCount);
         Interlocked.Add(ref _tessReadyToUploadTicks, readyToUploadTicks);
+        OptimumChunkStreamStats.RecordQueueAge(readyToUploadTicks);
     }
+
+    /// <summary>Chunks tessellated since the last reset, for the tessellations-per-sent-chunk ratio.</summary>
+    public static long TessChunksProcessed => Interlocked.Read(ref _tessChunksProcessed);
 
     /// <summary>Called on each RetryTesselationException requeue.</summary>
     public static void RecordTessRetry(int perChunkRetryCount)

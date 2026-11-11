@@ -116,7 +116,7 @@ public class OptimumDiagnosticsCountersTests
     [Fact]
     public void BenchmarkMetricsAreVersionedStableAndNumeric()
     {
-        Assert.Equal(3, OptimumDiagnostics.BenchmarkMetricsSchemaVersion);
+        Assert.Equal(4, OptimumDiagnostics.BenchmarkMetricsSchemaVersion);
 
         var first = OptimumDiagnostics.CaptureBenchmarkMetrics();
         var second = OptimumDiagnostics.CaptureBenchmarkMetrics();

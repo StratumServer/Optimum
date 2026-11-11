@@ -40,7 +40,7 @@ endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-patch-syntax check-compat check-shaders test-runtimeconfig bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-overlay package-linux package-appimage package-macos package-win bench-scaling bench-flight worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        package package-overlay package-linux package-appimage package-macos package-win bench-scaling bench-flight bench-flight-test worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
 help: ## Show available targets
@@ -188,8 +188,15 @@ bench-scaling: build ## Run the four scaling benchmarks as a regression guard
 		-f '*AnimBlockLOD*' '*DynamicLightCache*' '*EntityRenderDistCull*' '*ChiselLodRouting*' \
 		-e json
 
-bench-flight: deploy ## Run automated headless chunk streaming flight benchmark via Xvfb + MangoHud
-	bash scripts/benchmark-chunk-flight.sh
+FLIGHT_ARMS ?= /tmp/optimum-flight-arms
+FLIGHT_ARGS ?=
+
+bench-flight: ## Chunk streaming flight benchmark, vanilla vs this build, on a fresh seeded world (GPU, MangoHud)
+	bash scripts/prepare-flight-arms.sh "$(FLIGHT_ARMS)"
+	bash scripts/benchmark-chunk-flight.sh --arm vanilla="$(FLIGHT_ARMS)/vanilla" --arm optimum="$(FLIGHT_ARMS)/optimum" --mod-path "$(FLIGHT_ARMS)/mods" $(FLIGHT_ARGS)
+
+bench-flight-test: ## Validate the chunk flight benchmark scripts without launching a client
+	bash scripts/tests/chunk-flight-benchmark-test.sh
 
 worldgen-benchmark-test: ## Validate precise worldgen benchmark fixtures and statistics
 	bash scripts/tests/worldgen-benchmark-integrity-test.sh
