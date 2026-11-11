@@ -20,7 +20,12 @@ public class InstallerReleaseCoverageTests
 
         Assert.False(string.IsNullOrWhiteSpace(version), "VERSION file is empty");
         Assert.Equal(version, Match(config, "public const string Version = \"([^\"]+)\""));
-        Assert.Contains($"Optimum-v{version}-linux-x64.AppImage", readme);
+
+        // VERSION is the development version and the README names the latest release, so the README
+        // may lag behind it but must never be ahead of it.
+        string released = Match(readme, @"Optimum-v(\d+\.\d+\.\d+)-linux-x64\.AppImage");
+        Assert.True(System.Version.Parse(released) <= System.Version.Parse(version),
+            $"README names release {released}, which is newer than VERSION {version}");
     }
 
     [Fact]
