@@ -41,6 +41,24 @@ public class OptimumStatusModSystem : ModSystem
             };
         }
 
+        // Chunk streaming statistics: OPTIMUM_CHUNK_STREAM_LOG=1 records upload, queue age and
+        // send distributions and logs one window every five seconds for the flight benchmark.
+        if (System.Environment.GetEnvironmentVariable("OPTIMUM_CHUNK_STREAM_LOG") == "1")
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            api.Event.RegisterGameTickListener(_ =>
+            {
+                api.Logger.Notification("[Optimum] " + OptimumChunkStreamStats.GetSummary());
+                OptimumChunkStreamStats.Reset();
+            }, 5000);
+            api.Event.LeaveWorld += () =>
+            {
+                api.Logger.Notification("[Optimum] Final " + OptimumChunkStreamStats.GetSummary());
+            };
+        }
+
+        api.Event.LeaveWorld += OptimumAdaptiveRadiusController.ReleaseActive;
+
         // Issue #73 mesh-construction profiler hook: OPTIMUM_MESH_PROFILE=1 makes
         // ChunkTesselator.NowProcessChunk record per-chunk tess/finalize timing
         // and thread-allocated bytes, logging a summary every MeshProfileLogEvery

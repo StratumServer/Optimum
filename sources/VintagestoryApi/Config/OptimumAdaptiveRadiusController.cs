@@ -43,11 +43,37 @@ public sealed class OptimumAdaptiveRadiusController
     private AdaptiveRadiusPhase _currentPhase = AdaptiveRadiusPhase.Cold;
     private long _lastKometProbeTicks;
     private bool _hasKometProbe;
+    private AdaptiveRadiusPhase _lastLoggedPhase = AdaptiveRadiusPhase.Cold;
+    private int _phaseChangesSinceLog;
+    private long _lastTransitionLogTicks;
+    private string? _pendingTransitionLog;
 
     /// <summary>
     /// Currently active controller instance for cross-subsystem diagnostics.
     /// </summary>
     public static OptimumAdaptiveRadiusController? ActiveInstance { get; internal set; }
+
+    /// <summary>
+    /// Drops the active instance and restores the unthrottled radius when the world is left, so
+    /// a later world or a status readout never sees a controller that no longer runs.
+    /// </summary>
+    public static void ReleaseActive()
+    {
+        ActiveInstance = null;
+        OptimumConfig.AdaptiveRadiusEffective = int.MaxValue;
+    }
+
+    /// <summary>
+    /// Returns the pending phase transition line, if any, and clears it. The caller owns the
+    /// server logger, so the controller only formats the text. Lines are produced at most once
+    /// per second and only while chunk stream statistics are enabled.
+    /// </summary>
+    public string? TakeTransitionLog()
+    {
+        string? line = _pendingTransitionLog;
+        _pendingTransitionLog = null;
+        return line;
+    }
 
     /// <summary>Current effective radius in chunk columns. Thread-safe read.</summary>
     public int EffectiveRadius => Volatile.Read(ref _effectiveRadius);
@@ -172,10 +198,36 @@ public sealed class OptimumAdaptiveRadiusController
         }
 
         Volatile.Write(ref _effectiveRadius, Math.Clamp(next, floor, _configuredMax));
+        RecordPhaseTransition(Volatile.Read(ref _effectiveRadius), serverTickTimeMs);
 
         // Publish to the static volatile for cross-system access
         // (ServerSystemSendChunks reads this without holding a reference to the controller).
         OptimumConfig.AdaptiveRadiusEffective = Volatile.Read(ref _effectiveRadius);
+    }
+
+    private void RecordPhaseTransition(int effective, float serverTickTimeMs)
+    {
+        if (_currentPhase != _lastLoggedPhase)
+        {
+            _lastLoggedPhase = _currentPhase;
+            _phaseChangesSinceLog++;
+        }
+
+        if (!OptimumChunkStreamStats.Enabled || _phaseChangesSinceLog == 0)
+        {
+            return;
+        }
+
+        long now = Stopwatch.GetTimestamp();
+        if (now - _lastTransitionLogTicks < Stopwatch.Frequency)
+        {
+            return;
+        }
+
+        _lastTransitionLogTicks = now;
+        _pendingTransitionLog = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+            $"[Optimum] adaptive radius phase={PhaseName} effective={effective}/{_configuredMax} queue={_smoothedQueueDepth:0.#} tickMs={serverTickTimeMs:0.#} phaseChanges={_phaseChangesSinceLog}");
+        _phaseChangesSinceLog = 0;
     }
 
     private void RefreshKometAdaptiveChunkInflowState()
@@ -224,6 +276,10 @@ public sealed class OptimumAdaptiveRadiusController
         _currentPhase = AdaptiveRadiusPhase.Cold;
         _lastKometProbeTicks = 0;
         _hasKometProbe = false;
+        _lastLoggedPhase = AdaptiveRadiusPhase.Cold;
+        _phaseChangesSinceLog = 0;
+        _lastTransitionLogTicks = 0;
+        _pendingTransitionLog = null;
         VsModInterop.Release(VsModInterop.FeatureAdaptiveRadius, VsModInterop.RequesterLegacyKometFallback);
     }
 }

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-index 277d286..2513d08 100644
+index 277d286..2e8c325 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -80,37 +80,36 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -80,37 +80,37 @@ internal class ServerSystemSendChunks : ServerSystem
  	}
  
  	private void sendAndEnqueueChunks(ConnectedClient client)
@@ -14,6 +14,7 @@ index 277d286..2513d08 100644
  		{
  			return;
  		}
++		long optimumSendStart = OptimumChunkStreamStats.Now();
  		chunksToSend.Clear();
  		mapChunksToSend.Clear();
  		toRemove.Clear();
@@ -53,3 +54,15 @@ index 277d286..2513d08 100644
  		{
  			ServerChunk loadedChunk = server.GetLoadedChunk(forceSendChunk);
  			if (loadedChunk != null)
+@@ -203,10 +203,11 @@ internal class ServerSystemSendChunks : ServerSystem
+ 				server.SendPacketFast(client.Id, value3.ToPacket(vec3i.X, vec3i.Z));
+ 				client.SetMapRegionSent(forceSendMapRegion);
+ 			}
+ 		}
+ 		client.forceSendMapRegions.Clear();
++		OptimumChunkStreamStats.RecordSend(optimumSendStart, chunksToSend.Count);
+ 	}
+ 
+ 	private int loadSendableChunksAtCurrentRadius(ConnectedClient client, int countChunks, int dimension)
+ 	{
+ 		int num = MagicNum.ChunksColumnsToRequestPerTick * ((!client.IsLocalConnection) ? 1 : 4);

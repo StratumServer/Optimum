@@ -1,0 +1,11 @@
+{
+  "type": "code",
+  "modid": "chunkflightmeter",
+  "name": "Chunk Flight Meter",
+  "authors": [ "Optimum" ],
+  "description": "Logs frame time distributions every five seconds so a benchmark can compare clients with the same instrument.",
+  "version": "1.0.0",
+  "side": "Client",
+  "requiredOnClient": false,
+  "requiredOnServer": false
+}
