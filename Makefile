@@ -40,7 +40,7 @@ endif
 BOOTSTRAP_ARGS := --version $(VERSION)
 
 .PHONY: help check check-patches check-patch-syntax check-compat check-shaders test-runtimeconfig bootstrap bootstrap-git-test build clean refresh patches patch-il deploy run run-creative run-connect \
-        package package-overlay package-linux package-appimage package-macos package-win bench-scaling worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
+        package package-overlay package-linux package-appimage package-macos package-win bench-scaling bench-flight worldgen-benchmark-test worldgen-benchmark-smoke worldgen-benchmark \
         coverage mutate-launcher server-smoke
 
 help: ## Show available targets
@@ -187,6 +187,9 @@ bench-scaling: build ## Run the four scaling benchmarks as a regression guard
 	dotnet run --project Optimum.Benchmarks -c Release -- \
 		-f '*AnimBlockLOD*' '*DynamicLightCache*' '*EntityRenderDistCull*' '*ChiselLodRouting*' \
 		-e json
+
+bench-flight: deploy ## Run automated headless chunk streaming flight benchmark via Xvfb + MangoHud
+	bash scripts/benchmark-chunk-flight.sh
 
 worldgen-benchmark-test: ## Validate precise worldgen benchmark fixtures and statistics
 	bash scripts/tests/worldgen-benchmark-integrity-test.sh
