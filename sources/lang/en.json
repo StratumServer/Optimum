@@ -5,7 +5,7 @@
 	"optimum-bgfps": "Limit Background FPS",
 	"optimum-bgfps-tooltip": "Cap to 30 FPS when the game window loses focus.",
 	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
-	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
+	"optimum-smoothchunkstreaming-tooltip": "Paces how fast the integrated server sends chunks to the game while you fly fast and the client falls behind. Every chunk inside your view distance still loads, only later.",
 	"optimum-framepacing": "Smooth Frame Pacing",
 	"optimum-framepacing-tooltip": "Precise sleep/spin timing to reduce micro-stutter.",
 	"optimum-shadowcull": "Skip Distant Shadows",

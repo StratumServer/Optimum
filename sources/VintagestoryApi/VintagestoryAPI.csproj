@@ -48,6 +48,7 @@
     <Compile Remove="Config\OptimumThreadGuard.cs" />
     <Compile Remove="Config\OptimumWorkerInstances.cs" />
     <Compile Remove="Config\OptimumChunkStreamStats.cs" />
+    <Compile Remove="Config\OptimumInflowPacer.cs" />
     <Compile Remove="Config\OptimumDispatchClaim.cs" />
     <Compile Remove="Config\OptimumTesselationWorkerRegistry.cs" />
     <Compile Remove="Config\OptimumTesselationSafetyGate.cs" />

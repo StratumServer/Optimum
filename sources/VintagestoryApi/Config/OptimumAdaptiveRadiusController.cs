@@ -61,6 +61,7 @@ public sealed class OptimumAdaptiveRadiusController
     {
         ActiveInstance = null;
         OptimumConfig.AdaptiveRadiusEffective = int.MaxValue;
+        OptimumInflowPacer.Shared.Reset();
     }
 
     /// <summary>
