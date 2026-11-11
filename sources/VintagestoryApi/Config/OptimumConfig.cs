@@ -10,6 +10,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using Vintagestory.API.Common;
 
 [assembly: InternalsVisibleTo("Optimum.Tests")]
 
@@ -497,6 +498,28 @@ public static class OptimumConfig
     public static int ChunkReadPoolWorkers = 4;
 
     /// <summary>
+    /// Computes the effective number of read workers based on logical processor count
+    /// and whether this is a dedicated server or integrated singleplayer client.
+    /// In singleplayer, dedicating too many threads to DB I/O and deserialization starves
+    /// the client render and tesselator threads on CPUs with 8 or fewer cores (e.g. 6-core/6-thread).
+    /// </summary>
+    public static int GetEffectiveChunkReadPoolWorkers(int logicalProcessors, bool isDedicatedServer)
+    {
+        if (!ChunkReadPoolEnabled) return 0;
+        if (!isDedicatedServer)
+        {
+            return logicalProcessors switch
+            {
+                <= 4 => 1,
+                <= 6 => 2,
+                <= 8 => 3,
+                _ => Math.Min(ChunkReadPoolWorkers, Math.Min(6, logicalProcessors / 3))
+            };
+        }
+        return Math.Min(ChunkReadPoolWorkers, Math.Min(8, Math.Max(2, logicalProcessors / 2)));
+    }
+
+    /// <summary>
     /// Adaptive chunk generation radius: reduces the effective view radius
     /// under gen-queue pressure (player exploring fast) so fewer columns
     /// queue at once. Recovers to full radius when the queue drains.
@@ -971,6 +994,9 @@ public static class OptimumConfig
     }
 
     public static bool RefreshShaderCompatibilityIfStale(string? dataPath, string? gameDir)
+        => RefreshShaderCompatibilityIfStale(dataPath, gameDir, null);
+
+    public static bool RefreshShaderCompatibilityIfStale(string? dataPath, string? gameDir, IEnumerable<string>? disabledMods)
     {
         if (string.IsNullOrWhiteSpace(dataPath)) return false;
         string reportPath = Path.Combine(dataPath, ".optimum", "shader-compatibility.json");
@@ -1022,7 +1048,7 @@ public static class OptimumConfig
             try
             {
                 string targetGameDir = !string.IsNullOrWhiteSpace(gameDir) ? gameDir : AppContext.BaseDirectory;
-                var freshReport = Optimum.Launcher.ShaderCompatibilityScanner.Scan(dataPath, targetGameDir, Version);
+                var freshReport = Optimum.Launcher.ShaderCompatibilityScanner.Scan(dataPath, targetGameDir, Version, disabledMods);
                 Optimum.Launcher.ShaderCompatibilityScanner.SaveReport(dataPath, freshReport);
                 SetDataPath(dataPath);
                 return true;
@@ -1034,6 +1060,38 @@ public static class OptimumConfig
         }
 
         return false;
+    }
+
+    public static void RefreshShaderCompatibility(string? dataPath = null, string? gameDir = null, IEnumerable<string>? disabledMods = null)
+    {
+        string? targetDataPath = !string.IsNullOrWhiteSpace(dataPath) ? dataPath : (_dataPath ?? GamePaths.DataPath);
+        if (string.IsNullOrWhiteSpace(targetDataPath)) return;
+        string targetGameDir = !string.IsNullOrWhiteSpace(gameDir) ? gameDir : AppContext.BaseDirectory;
+
+        try
+        {
+            var freshReport = Optimum.Launcher.ShaderCompatibilityScanner.Scan(targetDataPath, targetGameDir, Version, disabledMods);
+            Optimum.Launcher.ShaderCompatibilityScanner.SaveReport(targetDataPath, freshReport);
+            SetDataPath(targetDataPath);
+        }
+        catch
+        {
+            // Defensive: rescan failure should not crash game
+        }
+    }
+
+    public static void RefreshCompatibilityAfterModReload(IEnumerable<string>? disabledMods = null, IModLoader? modLoader = null)
+    {
+        try
+        {
+            RefreshShaderCompatibility(null, null, disabledMods);
+            OptimumCompatibilityGuard.ResetDetection();
+            OptimumCompatibilityGuard.RunDetection(modLoader, null, disabledMods);
+        }
+        catch
+        {
+            // Defensive
+        }
     }
 
     private static string? _configPath;

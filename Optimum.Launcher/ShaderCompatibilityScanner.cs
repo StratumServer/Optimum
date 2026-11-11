@@ -56,6 +56,9 @@ public static class ShaderCompatibilityScanner
     };
 
     public static ShaderCompatibilityReport Scan(string dataPath, string gameDir, string optimumVersion)
+        => Scan(dataPath, gameDir, optimumVersion, null);
+
+    public static ShaderCompatibilityReport Scan(string dataPath, string gameDir, string optimumVersion, IEnumerable<string>? disabledMods)
     {
         var report = new ShaderCompatibilityReport
         {
@@ -63,6 +66,20 @@ public static class ShaderCompatibilityScanner
             OptimumVersion = optimumVersion ?? "dev",
             GameVersionPath = SafeRelativePath(dataPath, gameDir)
         };
+
+        HashSet<string> disabledSet = new(StringComparer.OrdinalIgnoreCase);
+        if (disabledMods != null)
+        {
+            foreach (string entry in disabledMods)
+            {
+                if (!string.IsNullOrWhiteSpace(entry))
+                    disabledSet.Add(entry.Trim());
+            }
+        }
+        else
+        {
+            LoadDisabledModsFromSettings(dataPath, disabledSet);
+        }
 
         try
         {
@@ -76,7 +93,7 @@ public static class ShaderCompatibilityScanner
                 {
                     try
                     {
-                        ScanSource(entry, dataPath, gameDir, report);
+                        ScanSource(entry, dataPath, gameDir, report, disabledSet);
                     }
                     catch (Exception ex) when (IsRecoverable(ex))
                     {
@@ -138,7 +155,87 @@ public static class ShaderCompatibilityScanner
         return report;
     }
 
-    private static void ScanSource(string sourcePath, string dataPath, string gameDir, ShaderCompatibilityReport report)
+    private static void LoadDisabledModsFromSettings(string dataPath, HashSet<string> disabledSet)
+    {
+        if (string.IsNullOrWhiteSpace(dataPath)) return;
+        try
+        {
+            string settingsFile = Path.Combine(dataPath, "clientsettings.json");
+            if (!File.Exists(settingsFile)) return;
+
+            string json = File.ReadAllText(settingsFile);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("disabledMods", out var disabledProp) &&
+                disabledProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var elem in disabledProp.EnumerateArray())
+                {
+                    string? s = elem.GetString();
+                    if (!string.IsNullOrWhiteSpace(s))
+                        disabledSet.Add(s.Trim());
+                }
+            }
+        }
+        catch
+        {
+            // Ignore settings read errors
+        }
+    }
+
+    private static bool IsSourceDisabled(ShaderModSource source, string sourcePath, HashSet<string> disabledSet)
+    {
+        if (disabledSet.Count == 0) return false;
+
+        string? modId = source.ModId;
+        string? version = source.Version;
+        string? name = source.Name;
+        string fileName = Path.GetFileName(sourcePath);
+        string fileStem = Path.GetFileNameWithoutExtension(sourcePath);
+
+        if (!string.IsNullOrEmpty(modId) && !string.IsNullOrEmpty(version))
+        {
+            if (disabledSet.Contains($"{modId}@{version}")) return true;
+        }
+
+        if (!string.IsNullOrEmpty(modId))
+        {
+            if (disabledSet.Contains(modId)) return true;
+            foreach (string entry in disabledSet)
+            {
+                int atIdx = entry.IndexOf('@');
+                string entryId = atIdx >= 0 ? entry.Substring(0, atIdx) : entry;
+                if (string.Equals(entryId, modId, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(name))
+        {
+            if (disabledSet.Contains(name)) return true;
+            if (!string.IsNullOrEmpty(version) && disabledSet.Contains($"{name}@{version}")) return true;
+            foreach (string entry in disabledSet)
+            {
+                int atIdx = entry.IndexOf('@');
+                string entryName = atIdx >= 0 ? entry.Substring(0, atIdx) : entry;
+                if (string.Equals(entryName, name, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(fileName) && disabledSet.Contains(fileName)) return true;
+        if (!string.IsNullOrEmpty(fileStem))
+        {
+            if (disabledSet.Contains(fileStem)) return true;
+            foreach (string entry in disabledSet)
+            {
+                int atIdx = entry.IndexOf('@');
+                string entryStem = atIdx >= 0 ? entry.Substring(0, atIdx) : entry;
+                if (string.Equals(entryStem, fileStem, StringComparison.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static void ScanSource(string sourcePath, string dataPath, string gameDir, ShaderCompatibilityReport report, HashSet<string> disabledSet)
     {
         if (IsOptimumSource(sourcePath, gameDir)) return;
 
@@ -177,6 +274,8 @@ public static class ShaderCompatibilityScanner
 
         if (source.ModId?.Equals("optimum", StringComparison.OrdinalIgnoreCase) == true ||
             source.Name.Equals("Optimum", StringComparison.OrdinalIgnoreCase)) return;
+
+        if (IsSourceDisabled(source, sourcePath, disabledSet)) return;
 
         if (shaderFiles.Count == 0 && indicators.Count == 0 && source.ModId == null && source.Name == Path.GetFileNameWithoutExtension(sourcePath))
             return;

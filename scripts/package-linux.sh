@@ -217,6 +217,7 @@ if [[ ! -d "$VANILLA_DIR" ]]; then
 fi
 if [[ "$EXTRACTED_FRESH" == "1" ]]; then
     cp -f "$VANILLA_DIR/VintagestoryLib.dll" "$VANILLA_DIR/VintagestoryLib.vanilla.dll"
+    cp -f "$VANILLA_DIR/VintagestoryAPI.dll" "$VANILLA_DIR/VintagestoryAPI.vanilla.dll"
 fi
 VANILLA_LIB="$VANILLA_DIR/VintagestoryLib.vanilla.dll"
 if [[ ! -f "$VANILLA_LIB" ]]; then
@@ -226,7 +227,10 @@ fi
 dotnet run --project "$REPO_ROOT/Optimum.Patcher" -c Release -- "$VANILLA_LIB" "$LIB_OUT/VintagestoryLib.dll" "$PATCHED_LIB"
 
 # 2b. Patch VintagestoryAPI.dll (adds version label, chisel LOD hooks, etc.)
-VANILLA_API="$VANILLA_DIR/VintagestoryAPI.dll"
+if [[ ! -f "$VANILLA_DIR/VintagestoryAPI.vanilla.dll" ]]; then
+    cp -f "$VANILLA_DIR/VintagestoryAPI.dll" "$VANILLA_DIR/VintagestoryAPI.vanilla.dll"
+fi
+VANILLA_API="$VANILLA_DIR/VintagestoryAPI.vanilla.dll"
 PATCHED_API="$LIB_OUT/VintagestoryAPI-patched.dll"
 if [[ ! -f "$VANILLA_API" ]]; then
     echo "Error: vanilla VintagestoryAPI.dll not found in $VANILLA_DIR." >&2

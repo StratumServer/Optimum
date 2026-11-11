@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
-index 3d487c5..86a85d0 100644
+index 3d487c5..59e27cc 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs
 @@ -28,10 +28,17 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
@@ -160,7 +160,8 @@ index 3d487c5..86a85d0 100644
 -				item.Value.DirtyForSaving = false;
 -				ChunkPos position = server.WorldMap.ChunkPosFromChunkIndex3D(item.Key);
 -				list.Add(new DbChunk
--				{
++				if (item.Value.DirtyForSaving)
+ 				{
 -					Position = position,
 -					Data = item.Value.ToBytes(ms)
 -				});
@@ -171,8 +172,7 @@ index 3d487c5..86a85d0 100644
 -					list.Clear();
 -				}
 -				if (num > 0 && num % 300 == 0)
-+				if (item.Value.DirtyForSaving)
- 				{
+-				{
 -					ServerMain.Logger.Event("Saved {0} chunks...", num);
 +					item.Value.DirtyForSaving = false;
 +					ChunkPos position = server.WorldMap.ChunkPosFromChunkIndex3D(item.Key);
@@ -225,7 +225,7 @@ index 3d487c5..86a85d0 100644
  			{
  				if (item.Chunks == null || item.Disposed || item.CurrentIncompletePass <= EnumWorldGenPass.Terrain)
  				{
-@@ -718,6 +761,45 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
+@@ -718,6 +761,50 @@ internal class ServerSystemLoadAndSaveGame : ServerSystem, IChunkProviderThread
  			list.Clear();
  		}
  		ServerMain.Logger.Notification($"Block restore: Total of {dictionary.Count} chunks and {num} block have been restored from the build log. {num2} Blocks already had a new Block at their position.");
@@ -241,10 +241,15 @@ index 3d487c5..86a85d0 100644
 +				ServerMain.Logger.Notification("[Optimum] Chunk read pool disabled by config.");
 +				return;
 +			}
++			int workers = Vintagestory.API.Config.OptimumConfig.GetEffectiveChunkReadPoolWorkers(Environment.ProcessorCount, server.IsDedicatedServer);
++			if (workers <= 0)
++			{
++				ServerMain.Logger.Notification("[Optimum] Chunk read pool disabled for current core count / topology.");
++				return;
++			}
 +			string dbFile = server.GetSaveFilepath();
 +			if (!System.IO.File.Exists(dbFile)) return;
 +
-+			int workers = Vintagestory.API.Config.OptimumConfig.ChunkReadPoolWorkers;
 +			chunkthread.optimumReadPool = new OptimumChunkReadPool(dbFile, workers, server.Config.CorruptionProtection);
 +			ServerMain.Logger.Notification("[Optimum] Chunk read pool: {0} read-only connections @ {1}",
 +				chunkthread.optimumReadPool.WorkerCount, System.IO.Path.GetFileName(dbFile));

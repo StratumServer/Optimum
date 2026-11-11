@@ -122,6 +122,14 @@ public static class ApiPatcher
             method.Name == "ClientAnimatorInitMatrices" && method.Parameters.Count == 2);
         var assetLocationResolveToDomainAndPath = bridge.Methods.Single(method =>
             method.Name == "AssetLocationResolveToDomainAndPath" && method.Parameters.Count == 3);
+        var colorUtilGetIncandescence3 = bridge.Methods.Single(method =>
+            method.Name == "GetIncandescenceColorFloats" && method.Parameters.Count == 4);
+        var colorUtilGetIncandescence4 = bridge.Methods.Single(method =>
+            method.Name == "GetIncandescenceColorFloats" && method.Parameters.Count == 5);
+        var colorUtilToRgba = bridge.Methods.Single(method =>
+            method.Name == "ToRGBAFloats" && method.Parameters.Count == 5);
+        var colorUtilGetIncandescenceLegacy = bridge.Methods.Single(method =>
+            method.Name == "GetIncandescenceColorAsColor4f" && method.Parameters.Count == 1);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -171,6 +179,12 @@ public static class ApiPatcher
         int clientAnimatorPatched = PatchClientAnimator(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(clientAnimatorInitMatrices));
+        int colorUtilMethods = PatchColorUtil(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(colorUtilGetIncandescence3),
+            vanilla.MainModule.ImportReference(colorUtilGetIncandescence4),
+            vanilla.MainModule.ImportReference(colorUtilToRgba),
+            vanilla.MainModule.ImportReference(colorUtilGetIncandescenceLegacy));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
@@ -270,6 +284,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 4 ClientAnimator patches (1 initMatrices + 3 clamps), applied {clientAnimatorPatched}.");
         }
+        if (colorUtilMethods != 4)
+        {
+            throw new InvalidOperationException(
+                $"Expected 4 ColorUtil methods patched, applied {colorUtilMethods}.");
+        }
         if (guiCompositionMetrics != 1)
         {
             throw new InvalidOperationException(
@@ -328,10 +347,123 @@ public static class ApiPatcher
                 $"{assetLocationMethods} AssetLocation resolve method, " +
                 $"{wildcardUtilMethods} WildcardUtil methods, " +
                 $"{evolvingNatFloatOperators} EvolvingNatFloat equality operators, " +
+                $"{colorUtilMethods} ColorUtil scalar incandescence + RGBA methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
+    }
+
+    internal static int PatchColorUtil(
+        ModuleDefinition module,
+        MethodReference getIncandescence3Bridge,
+        MethodReference getIncandescence4Bridge,
+        MethodReference toRgbaBridge,
+        MethodReference getIncandescenceLegacyBridge)
+    {
+        const string typeName = "Vintagestory.API.MathTools.ColorUtil";
+        var colorUtil = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        int patched = 0;
+
+        // 1. GetIncandescenceColorFloats(int, out float, out float, out float)
+        var mGetInc3 = colorUtil.Methods.FirstOrDefault(m =>
+            m.IsStatic &&
+            m.Name == "GetIncandescenceColorFloats" &&
+            m.Parameters.Count == 4 &&
+            m.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+            m.Parameters[1].ParameterType is ByReferenceType &&
+            m.Parameters[2].ParameterType is ByReferenceType &&
+            m.Parameters[3].ParameterType is ByReferenceType);
+
+        if (mGetInc3 == null)
+        {
+            mGetInc3 = new MethodDefinition(
+                "GetIncandescenceColorFloats",
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+                module.TypeSystem.Void);
+            mGetInc3.Parameters.Add(new ParameterDefinition("temperature", ParameterAttributes.None, module.TypeSystem.Int32));
+            mGetInc3.Parameters.Add(new ParameterDefinition("r", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mGetInc3.Parameters.Add(new ParameterDefinition("g", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mGetInc3.Parameters.Add(new ParameterDefinition("b", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            colorUtil.Methods.Add(mGetInc3);
+        }
+        if (mGetInc3.Body == null) mGetInc3.Body = new MethodBody(mGetInc3) { InitLocals = false };
+        RewriteFourArgForwarder(mGetInc3, getIncandescence3Bridge);
+        patched++;
+
+        // 2. GetIncandescenceColorFloats(int, out float, out float, out float, out float)
+        var mGetInc4 = colorUtil.Methods.FirstOrDefault(m =>
+            m.IsStatic &&
+            m.Name == "GetIncandescenceColorFloats" &&
+            m.Parameters.Count == 5 &&
+            m.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+            m.Parameters[1].ParameterType is ByReferenceType &&
+            m.Parameters[2].ParameterType is ByReferenceType &&
+            m.Parameters[3].ParameterType is ByReferenceType &&
+            m.Parameters[4].ParameterType is ByReferenceType);
+
+        if (mGetInc4 == null)
+        {
+            mGetInc4 = new MethodDefinition(
+                "GetIncandescenceColorFloats",
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+                module.TypeSystem.Void);
+            mGetInc4.Parameters.Add(new ParameterDefinition("temperature", ParameterAttributes.None, module.TypeSystem.Int32));
+            mGetInc4.Parameters.Add(new ParameterDefinition("r", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mGetInc4.Parameters.Add(new ParameterDefinition("g", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mGetInc4.Parameters.Add(new ParameterDefinition("b", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mGetInc4.Parameters.Add(new ParameterDefinition("a", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            colorUtil.Methods.Add(mGetInc4);
+        }
+        if (mGetInc4.Body == null) mGetInc4.Body = new MethodBody(mGetInc4) { InitLocals = false };
+        RewriteFiveArgForwarder(mGetInc4, getIncandescence4Bridge);
+        patched++;
+
+        // 3. ToRGBAFloats(int, out float, out float, out float, out float)
+        var mToRgba = colorUtil.Methods.FirstOrDefault(m =>
+            m.IsStatic &&
+            m.Name == "ToRGBAFloats" &&
+            m.Parameters.Count == 5 &&
+            m.Parameters[0].ParameterType.MetadataType == MetadataType.Int32 &&
+            m.Parameters[1].ParameterType is ByReferenceType &&
+            m.Parameters[2].ParameterType is ByReferenceType &&
+            m.Parameters[3].ParameterType is ByReferenceType &&
+            m.Parameters[4].ParameterType is ByReferenceType);
+
+        if (mToRgba == null)
+        {
+            mToRgba = new MethodDefinition(
+                "ToRGBAFloats",
+                MethodAttributes.Public | MethodAttributes.Static | MethodAttributes.HideBySig,
+                module.TypeSystem.Void);
+            mToRgba.Parameters.Add(new ParameterDefinition("color", ParameterAttributes.None, module.TypeSystem.Int32));
+            mToRgba.Parameters.Add(new ParameterDefinition("r", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mToRgba.Parameters.Add(new ParameterDefinition("g", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mToRgba.Parameters.Add(new ParameterDefinition("b", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            mToRgba.Parameters.Add(new ParameterDefinition("a", ParameterAttributes.Out, new ByReferenceType(module.TypeSystem.Single)));
+            colorUtil.Methods.Add(mToRgba);
+        }
+        if (mToRgba.Body == null) mToRgba.Body = new MethodBody(mToRgba) { InitLocals = false };
+        RewriteFiveArgForwarder(mToRgba, toRgbaBridge);
+        patched++;
+
+        // 4. GetIncandescenceColorAsColor4f(int)
+        var mLegacy = colorUtil.Methods.FirstOrDefault(m =>
+            m.IsStatic &&
+            m.Name == "GetIncandescenceColorAsColor4f" &&
+            m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.MetadataType == MetadataType.Int32);
+
+        if (mLegacy != null)
+        {
+            RewriteSingleArgForwarder(mLegacy, getIncandescenceLegacyBridge);
+            patched++;
+        }
+
+        Console.WriteLine($"  API PATCHED: {typeName} scalar incandescence + RGBA methods -> OptimumApiBridge");
+        return patched;
     }
 
     internal static int PatchAscii85(ModuleDefinition module, MethodReference encodeBridge, MethodReference decodeBridge)

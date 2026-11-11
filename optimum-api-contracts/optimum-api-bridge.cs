@@ -1120,4 +1120,49 @@ public static class OptimumApiBridge
 
         return string.Intern(span.ToString().ToLowerInvariant());
     }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void GetIncandescenceColorFloats(int temperature, out float r, out float g, out float b)
+    {
+        if (temperature < 500)
+        {
+            r = g = b = 0f;
+            return;
+        }
+
+        r = Math.Max(0f, Math.Min(1f, (temperature - 500) / 400f));
+        g = Math.Max(0f, Math.Min(1f, (temperature - 900) / 200f));
+        b = Math.Max(0f, Math.Min(1f, (temperature - 1100) / 200f));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void GetIncandescenceColorFloats(int temperature, out float r, out float g, out float b, out float a)
+    {
+        if (temperature < 500)
+        {
+            r = g = b = a = 0f;
+            return;
+        }
+
+        r = Math.Max(0f, Math.Min(1f, (temperature - 500) / 400f));
+        g = Math.Max(0f, Math.Min(1f, (temperature - 900) / 200f));
+        b = Math.Max(0f, Math.Min(1f, (temperature - 1100) / 200f));
+        a = Math.Max(0f, Math.Min(1f, (temperature - 525) / 2f));
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void ToRGBAFloats(int color, out float r, out float g, out float b, out float a)
+    {
+        r = ((color >> 16) & 0xff) / 255f;
+        g = ((color >> 8) & 0xff) / 255f;
+        b = (color & 0xff) / 255f;
+        a = ((color >> 24) & 0xff) / 255f;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float[] GetIncandescenceColorAsColor4f(int temperature)
+    {
+        GetIncandescenceColorFloats(temperature, out float r, out float g, out float b, out float a);
+        return new float[] { r, g, b, a };
+    }
 }

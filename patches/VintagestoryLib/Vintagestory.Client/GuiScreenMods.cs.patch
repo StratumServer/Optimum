@@ -1,0 +1,16 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenMods.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenMods.cs
+index f2ede1a..98056ae 100644
+--- a/VintagestoryLib/Vintagestory.Client/GuiScreenMods.cs
++++ b/VintagestoryLib/Vintagestory.Client/GuiScreenMods.cs
+@@ -181,10 +181,11 @@ public class GuiScreenMods : GuiScreen
+ 	}
+ 
+ 	private bool OnReloadMods()
+ 	{
+ 		ScreenManager.loadMods();
++		Vintagestory.API.Config.OptimumConfig.RefreshCompatibilityAfterModReload(ClientSettings.DisabledMods, ScreenManager.modloader);
+ 		OnScreenLoaded();
+ 		return true;
+ 	}
+ 
+ 	private bool OnOpenModsFolder()

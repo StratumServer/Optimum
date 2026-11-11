@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Seleciona o backend da interface: Skia GPU (acelerado por hardware com fallback automático por elemento), Skia CPU ou Cairo clássico.",
 	"optimum-bgfps": "Limitar FPS em segundo plano",
 	"optimum-bgfps-tooltip": "Limita a 30 FPS quando a janela do jogo perde o foco.",
+	"optimum-smoothchunkstreaming": "Suavizar Voo e Exploração",
+	"optimum-smoothchunkstreaming-tooltip": "Reduz temporariamente o raio de chunks quando a CPU estiver sobrecarregada durante voo rápido, evitando travamentos e quedas bruscas de FPS.",
 	"optimum-framepacing": "Cadência de quadros suave",
 	"optimum-framepacing-tooltip": "Temporização precisa para reduzir micro-travamentos.",
 	"optimum-shadowcull": "Ignorar sombras distantes",

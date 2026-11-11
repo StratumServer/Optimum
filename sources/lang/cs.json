@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Omezit FPS na pozadí",
 	"optimum-bgfps-tooltip": "Omezí na 30 FPS, když okno hry ztratí zaměření.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Plynulé časování snímků",
 	"optimum-framepacing-tooltip": "Přesné časování pro snížení mikro-záseků.",
 	"optimum-shadowcull": "Přeskočit vzdálené stíny",

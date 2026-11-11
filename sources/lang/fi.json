@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Rajoita taustan FPS",
 	"optimum-bgfps-tooltip": "Rajoittaa 30 FPS:ään kun peli-ikkuna menettää kohdistuksen.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Tasainen kuvatahti",
 	"optimum-framepacing-tooltip": "Tarkka ajoitus mikro-nykimisen vähentämiseksi.",
 	"optimum-shadowcull": "Ohita kaukaiset varjot",

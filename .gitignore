@@ -18,6 +18,7 @@ build/
 *.zip
 *.tar.gz
 *.dmg
+*.AppImage
 pkg-log.txt
 Optimum-v*-win-x64/
 Optimum-v*-linux-x64/

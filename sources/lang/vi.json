@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Giới hạn FPS nền",
 	"optimum-bgfps-tooltip": "Giới hạn 30 FPS khi cửa sổ game mất tiêu điểm.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Nhịp khung hình mượt",
 	"optimum-framepacing-tooltip": "Đồng bộ chính xác để giảm giật nhỏ.",
 	"optimum-shadowcull": "Bỏ qua bóng xa",
