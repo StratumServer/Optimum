@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Riboti foninį FPS",
 	"optimum-bgfps-tooltip": "Riboja iki 30 FPS, kai žaidimo langas praranda fokusą.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Sklandus kadrų tempas",
 	"optimum-framepacing-tooltip": "Tikslus sinchronizavimas mikro-trūkčiojimams mažinti.",
 	"optimum-shadowcull": "Praleisti tolimus šešėlius",

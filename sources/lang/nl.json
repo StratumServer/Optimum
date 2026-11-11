@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Achtergrond-FPS beperken",
 	"optimum-bgfps-tooltip": "Beperkt tot 30 FPS wanneer het spelvenster de focus verliest.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Vloeiende framepacing",
 	"optimum-framepacing-tooltip": "Nauwkeurige timing om micro-haperingen te verminderen.",
 	"optimum-shadowcull": "Verre schaduwen overslaan",

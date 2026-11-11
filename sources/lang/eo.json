@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Limigi fonan FPS",
 	"optimum-bgfps-tooltip": "Limigas al 30 FPS kiam la ludfenestro perdas fokuson.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Glata kadro-paŝado",
 	"optimum-framepacing-tooltip": "Preciza tempigo por redukti mikro-haltojn.",
 	"optimum-shadowcull": "Preterpasi malproksimajn ombrojn",

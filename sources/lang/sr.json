@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Ограничи позадински FPS",
 	"optimum-bgfps-tooltip": "Ограничава на 30 FPS када прозор игре изгуби фокус.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Глатко кадрирање",
 	"optimum-framepacing-tooltip": "Прецизно тајмирање за смањење микро-застоја.",
 	"optimum-shadowcull": "Прескочи удаљене сенке",

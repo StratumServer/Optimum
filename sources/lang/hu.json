@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "Háttér FPS korlátozása",
 	"optimum-bgfps-tooltip": "30 FPS-re korlátoz, amikor a játékablak elveszíti a fókuszt.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "Egyenletes képkocka-ütemezés",
 	"optimum-framepacing-tooltip": "Precíz időzítés a mikro-akadások csökkentéséhez.",
 	"optimum-shadowcull": "Távoli árnyékok kihagyása",

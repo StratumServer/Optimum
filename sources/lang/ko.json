@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "백그라운드 FPS 제한",
 	"optimum-bgfps-tooltip": "게임 창이 포커스를 잃으면 30FPS로 제한합니다.",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "부드러운 프레임 페이싱",
 	"optimum-framepacing-tooltip": "미세 끊김을 줄이기 위한 정밀 타이밍.",
 	"optimum-shadowcull": "먼 그림자 건너뛰기",

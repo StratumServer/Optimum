@@ -205,6 +205,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "OnOptimumOptions",
         "_AddOptimumTab",
         "onOptimumBackgroundFpsChanged",
+        "onOptimumSmoothChunkStreamingChanged",
         "onOptimumFramePacingChanged",
         "onOptimumShadowCullChanged",
         "onOptimumShadowDistChanged",

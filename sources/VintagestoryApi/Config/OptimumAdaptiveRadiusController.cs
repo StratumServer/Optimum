@@ -107,6 +107,18 @@ public sealed class OptimumAdaptiveRadiusController
     /// <param name="maxRadius">Current Config.MaxChunkRadius (may change in SP)</param>
     public void Tick(int queueDepth, int maxRadius)
     {
+        Tick(queueDepth, maxRadius, -1f);
+    }
+
+    /// <summary>
+    /// Called once per server tick with tick duration in milliseconds.
+    /// When serverTickTimeMs exceeds 35ms (or queue depth is high), throttles radius.
+    /// </summary>
+    /// <param name="queueDepth">Current requestedChunkColumns.Count</param>
+    /// <param name="maxRadius">Current Config.MaxChunkRadius (may change in SP)</param>
+    /// <param name="serverTickTimeMs">Measured duration of the server tick in milliseconds (-1 if unmeasured)</param>
+    public void Tick(int queueDepth, int maxRadius, float serverTickTimeMs)
+    {
         RefreshKometAdaptiveChunkInflowState();
 
         // Track dynamic MaxChunkRadius changes (singleplayer view distance)
@@ -140,13 +152,16 @@ public sealed class OptimumAdaptiveRadiusController
         int highThreshold = OptimumConfig.AdaptiveRadiusHighThreshold;
         int lowThreshold = OptimumConfig.AdaptiveRadiusLowThreshold;
 
+        bool tickOverloaded = serverTickTimeMs > 35f && _smoothedQueueDepth > lowThreshold;
+        bool queueOverloaded = _smoothedQueueDepth > highThreshold;
+
         int next = current;
-        if (_smoothedQueueDepth > highThreshold && current > floor)
+        if ((queueOverloaded || tickOverloaded) && current > floor)
         {
             next = current - 1;
             _currentPhase = AdaptiveRadiusPhase.Throttling;
         }
-        else if (_smoothedQueueDepth < lowThreshold && current < _configuredMax)
+        else if (_smoothedQueueDepth < lowThreshold && (serverTickTimeMs <= 0f || serverTickTimeMs < 25f) && current < _configuredMax)
         {
             next = current + 1;
             _currentPhase = AdaptiveRadiusPhase.Recovering;

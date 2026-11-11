@@ -4,6 +4,8 @@
 	"optimum-guigpu-tooltip": "Selects GUI rendering backend: Skia GPU (hardware accelerated with automatic per-element fallback), Skia CPU, or legacy Cairo.",
 	"optimum-bgfps": "限制后台FPS",
 	"optimum-bgfps-tooltip": "游戏窗口失去焦点时限制为30FPS。",
+	"optimum-smoothchunkstreaming": "Smooth Chunk Exploration",
+	"optimum-smoothchunkstreaming-tooltip": "Temporarily throttles chunk send radius during fast flight when the server tick is overloaded, preventing severe frametime spikes.",
 	"optimum-framepacing": "平滑帧步调",
 	"optimum-framepacing-tooltip": "精确计时以减少微卡顿。",
 	"optimum-shadowcull": "跳过远处阴影",
