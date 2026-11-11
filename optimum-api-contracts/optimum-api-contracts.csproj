@@ -24,7 +24,6 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumVoxelIndexer.cs" Link="Config\OptimumVoxelIndexer.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumThreadGuard.cs" Link="Config\OptimumThreadGuard.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorkerInstances.cs" Link="Config\OptimumWorkerInstances.cs" />
-    <Compile Include="..\sources\VintagestoryApi\Config\OptimumBoundedHandoff.cs" Link="Config\OptimumBoundedHandoff.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkStreamStats.cs" Link="Config\OptimumChunkStreamStats.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumDispatchClaim.cs" Link="Config\OptimumDispatchClaim.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumTesselationWorkerRegistry.cs" Link="Config\OptimumTesselationWorkerRegistry.cs" />

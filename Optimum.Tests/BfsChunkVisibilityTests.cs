@@ -239,20 +239,6 @@ public class BfsChunkVisibilityTests
     }
 
     [Fact]
-    public void OptimumBoundedHandoff_ReleaseWhenEmpty_DoesNotThrow()
-    {
-        // Issue #176: Defensive handoff release. On session teardown / world transition,
-        // an over-release on an empty handoff must gracefully no-op instead of throwing
-        // an unhandled InvalidOperationException that disconnects multiplayer clients.
-        var handoff = new OptimumBoundedHandoff(4);
-        Assert.Equal(0, handoff.Reserved);
-
-        // Must not throw when releasing an empty handoff
-        handoff.Release();
-        Assert.Equal(0, handoff.Reserved);
-    }
-
-    [Fact]
     public void LibInlineBfs_MirrorsTheReferenceInvariants()
     {
         // Reconciles the two algorithm copies: the unit-tested reference
