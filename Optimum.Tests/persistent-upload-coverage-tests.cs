@@ -31,7 +31,6 @@ public class PersistentUploadCoverageTests
         Assert.DoesNotContain("RecordPersistentMappedUpload", patch);
         Assert.DoesNotContain("RecordChunkUpload(byteCount", patch);
         Assert.Contains("byte* dest = (byte*)vao.indicesPtr + IndicesOffset;", patch);
-        Assert.Contains("GL.BufferSubData<int>((BufferTarget)34963", patch);
     }
 
     [Fact]

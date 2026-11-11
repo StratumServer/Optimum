@@ -33,8 +33,12 @@ public sealed class RuntimeFailClosedTests
                     1),
             ]);
 
-            Assert.NotNull(cache.ValidateCache(["VintagestoryLib.dll"]));
-            Assert.Null(cache.ValidateCache(["VintagestoryLib.dll", "VintagestoryAPI.dll"]));
+            Assert.True(cache.ValidateCache(["VintagestoryLib.dll"]).IsValid);
+
+            CacheValidationResult missing = cache.ValidateCache(["VintagestoryLib.dll", "VintagestoryAPI.dll"]);
+            Assert.False(missing.IsValid);
+            Assert.Equal(CacheValidationStatus.RequiredAssemblyMissing, missing.Status);
+            Assert.Equal("VintagestoryAPI.dll", missing.TargetAssembly);
         }
         finally
         {
