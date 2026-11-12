@@ -249,6 +249,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "_scratchMouseUp",
         "_scratchMouseMove",
     },
+    // HudDebugScreen (#572): frame size the graph mesh was built for
+    ["Vintagestory.Client.NoObf.HudDebugScreen"] = new()
+    {
+        "frameSlicesWidth",
+        "frameSlicesHeight",
+    },
     // AmbientManager: reusable scratch buffers replacing per-frame array/BlockPos allocations
     ["Vintagestory.Client.NoObf.AmbientManager"] = new()
     {
@@ -587,6 +593,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "OnRenderBefore", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
+    // Issue #572: rebuild the debug graph mesh when the frame size changes instead of on a 2 s timer.
+    // The vanilla EveryOtherSecond stays in the assembly, unreferenced.
+    new("Vintagestory.Client.NoObf.HudDebugScreen", ".ctor", 1),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "updateFrameSlicesMesh", 0),
+    new("Vintagestory.Client.NoObf.HudDebugScreen", "GenFrameSlicesMesh", 0),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.

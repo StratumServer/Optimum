@@ -26,6 +26,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/HudEntityNameTags.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ParticleManager.cs.patch
