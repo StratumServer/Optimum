@@ -67,7 +67,8 @@ public static class ILPatcher
         List<HookTarget>? hooks = null,
         Dictionary<string, List<string>>? interfacesToInject = null,
         bool requireAllTargets = true,
-        Dictionary<string, List<string>>? fieldsToRetype = null)
+        Dictionary<string, List<string>>? fieldsToRetype = null,
+        List<string>? validationErrors = null)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -247,33 +248,31 @@ public static class ILPatcher
             $"{injectedInterfaces} interfaces injected, {patched}/{requiredTargetCount} required methods patched, " +
             $"{optionalSkipped} optional methods skipped, {hooked} hooks.");
 
-        var selfRefErrors = SelfConsistencyVerifier.VerifySelfReferences(vanillaAsm.MainModule);
-        if (selfRefErrors.Count > 0)
+        // Console.Error is not captured by test runners or CI logs, so every rejection is also
+        // appended to validationErrors for the caller to put in its exception message.
+        int Reject(string label, IReadOnlyList<string> errors)
         {
-            Console.Error.WriteLine($"\n  {selfRefErrors.Count} self-reference error(s), output not written:");
-            foreach (var err in selfRefErrors)
+            Console.Error.WriteLine($"\n  {errors.Count} {label} error(s), output not written:");
+            foreach (var err in errors)
+            {
                 Console.Error.WriteLine($"    {err}");
+                validationErrors?.Add($"{label}: {err}");
+            }
             return -1;
         }
 
+        var selfRefErrors = SelfConsistencyVerifier.VerifySelfReferences(vanillaAsm.MainModule);
+        if (selfRefErrors.Count > 0)
+            return Reject("self-reference", selfRefErrors);
+
         var pinvokeErrors = SelfConsistencyVerifier.VerifyPInvokeIntegrity(vanillaAsm.MainModule);
         if (pinvokeErrors.Count > 0)
-        {
-            Console.Error.WriteLine($"\n  {pinvokeErrors.Count} PInvoke integrity error(s), output not written:");
-            foreach (var err in pinvokeErrors)
-                Console.Error.WriteLine($"    {err}");
-            return -1;
-        }
+            return Reject("PInvoke integrity", pinvokeErrors);
 
         var initializerErrors = InjectedFieldInitializerVerifier.Verify(
             vanillaAsm.MainModule, compiledAsm.MainModule, preInjectionFields, transplantedMethodKeys);
         if (initializerErrors.Count > 0)
-        {
-            Console.Error.WriteLine($"\n  {initializerErrors.Count} injected-field initializer error(s), output not written:");
-            foreach (var err in initializerErrors)
-                Console.Error.WriteLine($"    {err}");
-            return -1;
-        }
+            return Reject("injected-field initializer", initializerErrors);
 
         if (retypedFields.Count > 0)
         {
@@ -281,22 +280,12 @@ public static class ILPatcher
             acceptedReaderKeys.UnionWith(retargetedInitializerKeys);
             var retypeErrors = RetypedFieldReaderVerifier.Verify(vanillaAsm.MainModule, retypedFields, acceptedReaderKeys);
             if (retypeErrors.Count > 0)
-            {
-                Console.Error.WriteLine($"\n  {retypeErrors.Count} retyped-field reader error(s), output not written:");
-                foreach (var err in retypeErrors)
-                    Console.Error.WriteLine($"    {err}");
-                return -1;
-            }
+                return Reject("retyped-field reader", retypeErrors);
         }
 
         var ilErrors = IlStackVerifier.VerifyModule(vanillaAsm.MainModule);
         if (ilErrors.Count > 0)
-        {
-            Console.Error.WriteLine($"\n  {ilErrors.Count} invalid IL error(s), output not written:");
-            foreach (var err in ilErrors)
-                Console.Error.WriteLine($"    {err}");
-            return -1;
-        }
+            return Reject("invalid IL", ilErrors);
 
         AssemblyWriter.Write(vanillaAsm, outputPath, preserveSymbols);
         if (preserveSymbols)

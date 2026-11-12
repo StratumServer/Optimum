@@ -189,7 +189,9 @@ public sealed class ModPatcherManifestConsistencyTests
     public void ModPatcher_SuccessfullyPatchesVanillaAssemblyWhenDonorsExist(string modName, string project)
     {
         string repoRoot = RepoRoot();
-        string vanillaPath = Path.Combine(repoRoot, ".vanilla", "win-x64", "vintagestory", "Mods", $"{project}.dll");
+        // The protected pristine snapshot, as on CI. The deployed vintagestory/Mods copy on a developer
+        // machine may already contain Optimum members, which hides injection errors (issue #564).
+        string vanillaPath = Path.Combine(repoRoot, ".vanilla", "win-x64", "runtime-donors", "Mods", $"{project}.dll");
         string compiledPath = Path.Combine(repoRoot, ".build", "runtime-donors", project, "bin", "Release", "net10.0", $"{project}.dll");
 
         if (!File.Exists(vanillaPath) || !File.Exists(compiledPath))

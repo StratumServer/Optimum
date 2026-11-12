@@ -1,15 +1,17 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
 --- a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
 +++ b/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
-@@ -17,10 +17,43 @@ public class WeatherSimulationParticles
+@@ -17,10 +17,45 @@ public class WeatherSimulationParticles
  
  	private static int[,] lowResRainHeightMap;
  
  	private static BlockPos centerPos;
  
-+	private int optimumLastHeightmapCenterX = int.MinValue;
++	private int optimumLastHeightmapCenterX;
 +
-+	private int optimumLastHeightmapCenterZ = int.MinValue;
++	private int optimumLastHeightmapCenterZ;
++
++	private bool optimumHeightmapCenterValid;
 +
 +	private void OnBlockChanged(BlockPos pos, Block oldBlock)
 +	{
@@ -45,7 +47,7 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
  	public static int lowStabColor;
  
  	public int rainParticleColor;
-@@ -210,10 +243,13 @@ public class WeatherSimulationParticles
+@@ -210,10 +245,13 @@ public class WeatherSimulationParticles
  		capi.Ambient.CurrentModifiers["desertstorm"] = desertStormAmbient;
  	}
  
@@ -59,19 +61,20 @@ diff --git a/VSEssentials/Vintagestory/GameContent/WeatherSimulationParticles.cs
  		{
  			capi.Event.RegisterAsyncParticleSpawner(asyncParticleSpawn);
  			capi.Event.RegisterRenderer(new DummyRenderer
-@@ -307,17 +343,22 @@ public class WeatherSimulationParticles
+@@ -307,17 +345,23 @@ public class WeatherSimulationParticles
  		particlePos.Set(capi.World.Player.Entity.Pos.X, rainMapHeightAt, capi.World.Player.Entity.Pos.Z);
  		int color = capi.World.ApplyColorMapOnRgba(lblock.ClimateColorMapResolved, lblock.SeasonColorMapResolved, -1, (int)particlePos.X, (int)particlePos.Y, (int)particlePos.Z, flipRb: false);
  		byte[] array = ColorUtil.ToBGRABytes(color);
  		color = ColorUtil.ToRgba(94, array[0], array[1], array[2]);
  		centerPos.Set((int)particlePos.X, 0, (int)particlePos.Z);
 -		for (int i = 0; i < 16; i++)
-+		if (Math.Abs(centerPos.X - optimumLastHeightmapCenterX) >= 4 || Math.Abs(centerPos.Z - optimumLastHeightmapCenterZ) >= 4)
++		if (!optimumHeightmapCenterValid || Math.Abs(centerPos.X - optimumLastHeightmapCenterX) >= 4 || Math.Abs(centerPos.Z - optimumLastHeightmapCenterZ) >= 4)
  		{
 -			int num = (i - 8) * 4;
 -			for (int j = 0; j < 16; j++)
 +			optimumLastHeightmapCenterX = centerPos.X;
 +			optimumLastHeightmapCenterZ = centerPos.Z;
++			optimumHeightmapCenterValid = true;
 +			for (int i = 0; i < 16; i++)
  			{
 -				int num2 = (j - 8) * 4;
