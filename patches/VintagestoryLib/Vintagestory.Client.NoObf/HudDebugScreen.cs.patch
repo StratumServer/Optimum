@@ -1,0 +1,81 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs b/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
+index 705596f..9bd9567 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs
+@@ -30,10 +30,14 @@ public class HudDebugScreen : HudElement
+ 
+ 	private MeshData frameSlicesUpdate;
+ 
+ 	private MeshRef frameSlicesRef;
+ 
++	private int frameSlicesWidth;
++
++	private int frameSlicesHeight;
++
+ 	private bool displayFullDebugInfo;
+ 
+ 	private bool displayOnlyFpsDebugInfo;
+ 
+ 	private bool displayOnlyFpsDebugInfoTemporary;
+@@ -69,11 +73,10 @@ public class HudDebugScreen : HudElement
+ 		capi.ChatCommands.GetOrCreate("debug").BeginSubCommand("edi").RequiresPrivilege(Privilege.chat)
+ 			.WithRootAlias("edi")
+ 			.WithDescription("Show/Hide Extended information on debug screen")
+ 			.HandleWith(ToggleExtendedDebugInfo)
+ 			.EndSubCommand();
+-		capi.Event.RegisterGameTickListener(EveryOtherSecond, 2000);
+ 		capi.Event.RegisterEventBusListener(delegate
+ 		{
+ 			displayOnlyFpsDebugInfoTemporary = false;
+ 			if (!displayFullDebugInfo && !displayOnlyFpsDebugInfo)
+ 			{
+@@ -105,15 +108,10 @@ public class HudDebugScreen : HudElement
+ 		textElement = debugTextComposer.GetDynamicText("debugScreenTextElem");
+ 		ScreenManager.hotkeyManager.SetHotKeyHandler("fpsgraph", OnKeyGraph);
+ 		ScreenManager.hotkeyManager.SetHotKeyHandler("debugscreenandgraph", OnKeyDebugScreenAndGraph);
+ 	}
+ 
+-	private void EveryOtherSecond(float dt)
+-	{
+-		GenFrameSlicesMesh();
+-	}
+-
+ 	private static TextCommandResult ToggleExtendedDebugInfo(TextCommandCallingArgs textCommandCallingArgs)
+ 	{
+ 		ClientSettings.ExtendedDebugInfo = !ClientSettings.ExtendedDebugInfo;
+ 		return TextCommandResult.Success("Extended debug info " + (ClientSettings.ExtendedDebugInfo ? "on" : "off"));
+ 	}
+@@ -342,10 +340,16 @@ public class HudDebugScreen : HudElement
+ 		clientMain.Platform.GlToggleBlend(on: true);
+ 	}
+ 
+ 	private void updateFrameSlicesMesh()
+ 	{
++		// Optimum: the slice X and baseline Y only depend on the frame size, so rebuild the mesh
++		// when it changes instead of on a 2 s timer that also ran while the graph was hidden.
++		if (frameSlicesWidth != capi.Render.FrameWidth || frameSlicesHeight != capi.Render.FrameHeight)
++		{
++			GenFrameSlicesMesh();
++		}
+ 		int num = capi.Render.FrameHeight - historyheight - 40;
+ 		for (int i = 0; i < 300; i++)
+ 		{
+ 			float num2 = dtHistory[i];
+ 			num2 = num2 * 60f * (float)historyheight;
+@@ -357,12 +361,14 @@ public class HudDebugScreen : HudElement
+ 	}
+ 
+ 	private void GenFrameSlicesMesh()
+ 	{
+ 		MeshData meshData = new MeshData(1200, 1800, withNormals: false, withUv: true, withRgba: true, withFlags: false);
+-		int num = capi.Render.FrameWidth - 310;
+-		int num2 = capi.Render.FrameHeight - historyheight - 40;
++		frameSlicesWidth = capi.Render.FrameWidth;
++		frameSlicesHeight = capi.Render.FrameHeight;
++		int num = frameSlicesWidth - 310;
++		int num2 = frameSlicesHeight - historyheight - 40;
+ 		for (int i = 0; i < 300; i++)
+ 		{
+ 			byte r = (byte)(255f * (float)i / 300f);
+ 			MeshData customQuadModelData = QuadMeshUtilExt.GetCustomQuadModelData(num + i, num2, 50f, 1f, 1f, r, 0, 0, byte.MaxValue);
+ 			meshData.AddMeshData(customQuadModelData);
