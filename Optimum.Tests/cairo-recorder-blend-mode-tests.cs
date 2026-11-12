@@ -330,6 +330,9 @@ public sealed class CairoRecorderBlendModeTests
 		Assert.Null (recorded.FirstMaterializationTrigger);
 	}
 
+	// Text edges depend on the host's font rasterizer: the GitHub runner differs from a developer machine by up to
+	// 38 levels on aliased glyph edges, so the pull request gate leaves this theory out (Category!=HostText).
+	[Trait ("Category", "HostText")]
 	[Theory]
 	[InlineData (Operator.Difference, Antialias.None)]
 	[InlineData (Operator.Difference, Antialias.Fast)]
