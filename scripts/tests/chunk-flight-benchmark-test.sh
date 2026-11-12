@@ -17,6 +17,16 @@ grep -q "log_interval=0" "$bench" || fail "MangoHud must sample every frame (log
 grep -q "log_interval=50" "$bench" && fail "MangoHud log_interval=50 hides single frame spikes"
 grep -q -- "--rndWorld" "$bench" || fail "each run needs a fresh world (--rndWorld)"
 grep -q "OPTIMUM_CHUNK_STREAM_LOG=1" "$bench" || fail "runs must enable the chunk stream log"
+grep -q -- "--require-upload-visibility" "$bench" || fail "the issue gate must be required on six-run measurements"
+grep -q -- "--no-optimum-stream-log" "$bench" || fail "a telemetry-disabled control run must be supported"
+grep -q 'REQUIRE_UPLOAD_VISIBILITY=$REQUIRE_UPLOAD_VISIBILITY' "$bench" || fail "run markers must record whether visibility evidence is mandatory"
+grep -q 'exactly six 60-second runs' "$bench" || fail "the issue #550 gate must enforce its six-run 60-second protocol"
+grep -q 'sleep "$DURATION"' "$bench" || fail "the measured flight must run to one uninterrupted duration deadline"
+grep -q '2_mid_flight' "$bench" && fail "a synchronous mid-flight screenshot must not extend or stall the measured interval"
+grep -q 'assemblies.sha256' "$bench" || fail "run artifacts must preserve the client assembly hashes"
+grep -q 'clientsettings-effective.json' "$bench" || fail "run artifacts must preserve the effective non-secret client settings"
+grep -q 'chunkVerticesUploadRateLimiter' "$bench" || fail "run artifacts must preserve the vanilla vertex limiter setting"
+grep -q 'opengl_version=' "$bench" || fail "the manifest must preserve the graphics driver version"
 
 
 # The flight must be a real one: normal terrain, sprint (Control) instead of sneak (Shift), a session
@@ -49,6 +59,13 @@ for tool in Xvfb xdotool scrot xdpyinfo; do printf '#!/bin/sh\nexit 0\n' > "$stu
 printf '#!/bin/sh\necho "OpenGL renderer string: llvmpipe (LLVM 20.1.2, 256 bits)"\n' > "$stubs/glxinfo"
 chmod +x "$stubs"/*
 echo '{"intSettings":{}}' > "$work/clientsettings.json"
+set +e
+output="$(PATH="$stubs:$PATH" SETTINGS_SOURCE="$work/clientsettings.json" bash "$bench" --gpu-wrapper "" --require-upload-visibility --duration 30 --runs 1 --output "$work/gateout" --arm "stub=$work" 2>&1)"
+status=$?
+set -e
+[[ "$status" -eq 2 ]] || fail "the required visibility gate accepted a short/single run (exit $status): $output"
+grep -q "exactly six 60-second runs" <<< "$output" || fail "visibility duration/run guard message missing: $output"
+
 set +e
 output="$(PATH="$stubs:$PATH" SETTINGS_SOURCE="$work/clientsettings.json" bash "$bench" --gpu-wrapper "" --output "$work/out" --arm "stub=$work" 2>&1)"
 status=$?

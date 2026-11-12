@@ -136,6 +136,61 @@ public class OptimumSimdCullingTests
     }
 
     [Fact]
+    public void UploadVisibilityUsesCurrentFrustumWhenCameraRotatesAtTheSamePosition()
+    {
+        bool original = OptimumConfig.SimdCullingEnabled;
+        try
+        {
+            OptimumConfig.SimdCullingEnabled = true;
+            var culler = new FrustumCulling();
+            var origin = new BlockPos(0, 0, 0);
+            double[] projection = Mat4d.Create();
+            Mat4d.Perspective(projection, 70f * GameMath.DEG2RAD, 1.6f, 0.1f, 500f);
+            double[] view = Mat4d.Create();
+            Mat4d.LookAt(view, [0, 0, 0], [0, 0, 100], [0, 1, 0]);
+            culler.CalcFrustumEquations(origin, projection, view);
+
+            var towardFirstDirection = new Sphere(0, 0, 20, 0.5f, 0.5f, 0.5f);
+            Assert.True(OptimumFrustumCullSimd.InFrustum(culler, towardFirstDirection));
+            var frustum = OptimumFrustumCullSimd.GetFrustum(culler);
+            var context = OptimumFrustumCullSimd.GetOrCreateContext(culler, frustum);
+            double[] firstD = new double[frustum.Length];
+            double[] firstNormalX = new double[frustum.Length];
+            double[] firstNormalY = new double[frustum.Length];
+            double[] firstNormalZ = new double[frustum.Length];
+            for (int i = 0; i < frustum.Length; i++)
+            {
+                firstD[i] = frustum[i].D;
+                firstNormalX[i] = frustum[i].normalX;
+                firstNormalY[i] = frustum[i].normalY;
+                firstNormalZ[i] = frustum[i].normalZ;
+            }
+
+            Mat4d.LookAt(view, [0, 0, 0], [100, 0, 0], [0, 1, 0]);
+            culler.CalcFrustumEquations(origin, projection, view);
+            bool normalsChanged = false;
+            for (int i = 0; i < frustum.Length; i++)
+            {
+                Assert.Equal(firstD[i], frustum[i].D);
+                normalsChanged |= firstNormalX[i] != frustum[i].normalX
+                    || firstNormalY[i] != frustum[i].normalY
+                    || firstNormalZ[i] != frustum[i].normalZ;
+            }
+            Assert.True(normalsChanged, "The fixture must rotate frustum normals while preserving every plane constant.");
+            Assert.False(context.IsUpToDate(frustum), "The cached SIMD planes must be invalidated when normals change, even if plane constants do not.");
+
+            OptimumDiagnostics.ResetSimdFrustumCounters();
+            Assert.False(OptimumFrustumCullSimd.InFrustumForTelemetry(culler, towardFirstDirection));
+            Assert.Equal(0, OptimumDiagnostics.SimdFrustumTests);
+            Assert.True(context.IsUpToDate(frustum), "Telemetry culling must refresh the warmed SIMD context without recording renderer diagnostics.");
+        }
+        finally
+        {
+            OptimumConfig.SimdCullingEnabled = original;
+        }
+    }
+
+    [Fact]
     public void SimdCullingMatchesScalarInFrustumShadowPass()
     {
         var culler = new FrustumCulling();

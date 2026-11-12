@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Threading.Tasks;
 using Vintagestory.API.Config;
 using Xunit;
 using OptimumInterop = Vintagestory.API.Config.VsModInterop;
@@ -210,6 +211,16 @@ public class ChunkStreamStatsTests
             "stream.uploadFrame.micros.samples.count",
             "stream.uploadChunk.micros.max",
             "stream.uploadQueueAge.micros.p95",
+            "stream.inFrustumQueueAge.micros.samples.count",
+            "stream.outOfFrustumQueueAge.micros.p95",
+            "stream.frameAfterUpload.micros.p99",
+            "stream.frameAfterNoUpload.micros.p99",
+            "stream.uploadVisibility.attempted.count",
+            "stream.uploadVisibility.below250ms.count",
+            "stream.uploadVisibility.classificationFailures.count",
+            "stream.uploadVisibility.capture.micros.p95",
+            "stream.uploadVisibility.classify.micros.p95",
+            "stream.uploadVisibility.record.micros.p95",
             "stream.sendCall.micros.p50",
             "stream.sentPerCall.count.p99",
             "stream.chunksSent.count",
@@ -223,6 +234,163 @@ public class ChunkStreamStatsTests
         }
 
         Assert.All(metrics.Values, value => Assert.True(double.IsFinite(value)));
+    }
+
+    [Fact]
+    public void VisibilityAgesUseExactQuarterSecondBoundaryAndSeparateFrustumBuckets()
+    {
+        bool wasEnabled = OptimumChunkStreamStats.Enabled;
+        try
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            OptimumChunkStreamStats.Reset();
+            long thresholdTicks = (Stopwatch.Frequency + 3L) / 4L;
+            long[] ages = { thresholdTicks - 1, thresholdTicks, thresholdTicks + 1 };
+            byte[] classifications = { 0, 0, 1 };
+
+            OptimumChunkStreamStats.RecordUploadVisibilityFrame(
+                4, 3, 1, ages, classifications, Stopwatch.Frequency / 10, Stopwatch.Frequency / 1000, false,
+                frameDeltaSeconds: 0.015625f, hasPreviousFrame: true, previousFrameUploaded: true);
+
+            Assert.Equal(2, OptimumChunkStreamStats.InFrustumQueueAgeMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.OutOfFrustumQueueAgeMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.VisibilityClassifyMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.VisibilityRecordMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.FrameMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.FrameAfterUploadMicros.Count);
+            string summary = OptimumChunkStreamStats.GetSummary();
+            Assert.Contains("visibilityAttempted=4, visibilityCaptured=3", summary);
+            Assert.Contains("visibilityInside=2, visibilityOutside=1", summary);
+            Assert.Contains("visibilityCapacityDropped=1", summary);
+            Assert.Contains("visibilityBelow250Ms=1", summary);
+            Assert.Contains("visibilityPending=0", summary);
+            Assert.Contains("visibilityRecordUs=n1", summary);
+            Assert.Contains("frameAfterUploadUs=n1", summary);
+        }
+        finally
+        {
+            OptimumChunkStreamStats.Reset();
+            OptimumChunkStreamStats.Enabled = wasEnabled;
+        }
+    }
+
+    [Fact]
+    public void FrameIntervalsUsePreviousFramesUploadStateAndSkipUnpairedInterval()
+    {
+        bool wasEnabled = OptimumChunkStreamStats.Enabled;
+        try
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            OptimumChunkStreamStats.Reset();
+
+            OptimumChunkStreamStats.RecordFrameInterval(0.016f, hasPreviousFrame: false, previousFrameUploaded: false);
+            OptimumChunkStreamStats.RecordFrameInterval(0.015625f, hasPreviousFrame: true, previousFrameUploaded: true);
+            OptimumChunkStreamStats.RecordFrameInterval(0.03125f, hasPreviousFrame: true, previousFrameUploaded: false);
+
+            Assert.Equal(3, OptimumChunkStreamStats.FrameMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.FrameAfterUploadMicros.Count);
+            Assert.Equal(1, OptimumChunkStreamStats.FrameAfterNoUploadMicros.Count);
+            Assert.Equal(15_625, OptimumChunkStreamStats.FrameAfterUploadMicros.Max);
+            Assert.Equal(31_250, OptimumChunkStreamStats.FrameAfterNoUploadMicros.Max);
+        }
+        finally
+        {
+            OptimumChunkStreamStats.Reset();
+            OptimumChunkStreamStats.Enabled = wasEnabled;
+        }
+    }
+
+    [Fact]
+    public async Task VisibilitySummaryAndResetDoNotSplitConcurrentFrameBatches()
+    {
+        bool wasEnabled = OptimumChunkStreamStats.Enabled;
+        try
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            OptimumChunkStreamStats.Reset();
+            const int batches = 1000;
+            long[] ages = { Stopwatch.Frequency / 10 };
+            byte[] classifications = { 0 };
+            long summarizedAttempts = 0;
+
+            Task writer = Task.Run(() => Parallel.For(0, batches, _ =>
+            {
+                OptimumChunkStreamStats.RecordUploadVisibilityFrame(1, 1, 0, ages, classifications, 1, Stopwatch.GetTimestamp(), false);
+            }));
+
+            while (!writer.IsCompleted)
+            {
+                string window = OptimumChunkStreamStats.GetSummaryAndReset();
+                summarizedAttempts += ParseSummaryCount(window, "visibilityAttempted");
+                Assert.Equal(ParseSummaryCount(window, "visibilityCaptured"), ParseSummaryCount(window, "visibilityInside") + ParseSummaryCount(window, "visibilityOutside") + ParseSummaryCount(window, "visibilityUnclassified") + ParseSummaryCount(window, "visibilityPending"));
+            }
+
+            await writer;
+            summarizedAttempts += ParseSummaryCount(OptimumChunkStreamStats.GetSummaryAndReset(), "visibilityAttempted");
+            Assert.Equal(batches, summarizedAttempts);
+        }
+        finally
+        {
+            OptimumChunkStreamStats.Reset();
+            OptimumChunkStreamStats.Enabled = wasEnabled;
+        }
+    }
+
+    [Fact]
+    public void InvalidVisibilityBatchIsReportedInsteadOfBreakingTheClient()
+    {
+        bool wasEnabled = OptimumChunkStreamStats.Enabled;
+        try
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            OptimumChunkStreamStats.Reset();
+            long[] ages = { 10 };
+            byte[] classifications = { 0 };
+
+            OptimumChunkStreamStats.RecordUploadVisibilityFrame(2, 1, 0, ages, classifications, 0, 0, false);
+
+            Assert.Contains("visibilityContractFailures=1", OptimumChunkStreamStats.GetSummary());
+        }
+        finally
+        {
+            OptimumChunkStreamStats.Reset();
+            OptimumChunkStreamStats.Enabled = wasEnabled;
+        }
+    }
+
+    [Fact]
+    public void VisibilityBatchRecordingDoesNotAllocateAfterStorageIsPrepared()
+    {
+        bool wasEnabled = OptimumChunkStreamStats.Enabled;
+        try
+        {
+            OptimumChunkStreamStats.Enabled = true;
+            OptimumChunkStreamStats.Reset();
+            long[] ages = { Stopwatch.Frequency / 10 };
+            byte[] classifications = { 0 };
+            OptimumChunkStreamStats.RecordUploadVisibilityFrame(1, 1, 0, ages, classifications, 10, Stopwatch.GetTimestamp(), false);
+            OptimumChunkStreamStats.Reset();
+
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 1000; i++)
+            {
+                OptimumChunkStreamStats.RecordUploadVisibilityFrame(1, 1, 0, ages, classifications, 10, Stopwatch.GetTimestamp(), false);
+            }
+
+            Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        }
+        finally
+        {
+            OptimumChunkStreamStats.Reset();
+            OptimumChunkStreamStats.Enabled = wasEnabled;
+        }
+    }
+
+    private static long ParseSummaryCount(string summary, string name)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(summary, $@"(?:^|[ ,]){name}=([0-9]+)");
+        Assert.True(match.Success, $"Missing {name} from summary: {summary}");
+        return long.Parse(match.Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static void ConfigureController()

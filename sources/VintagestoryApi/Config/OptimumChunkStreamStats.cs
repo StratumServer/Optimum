@@ -95,6 +95,38 @@ public sealed class OptimumHistogram
         }
     }
 
+    internal void AddBucketCounts(ReadOnlySpan<long> additions, long sampleCount, long sampleSum, long sampleMax)
+    {
+        if (additions.Length != buckets.Length)
+        {
+            throw new ArgumentException("Histogram bucket count does not match.", nameof(additions));
+        }
+
+        for (int i = 0; i < buckets.Length; i++)
+        {
+            long addition = additions[i];
+            if (addition != 0)
+            {
+                Interlocked.Add(ref buckets[i], addition);
+            }
+        }
+
+        Interlocked.Add(ref count, sampleCount);
+        Interlocked.Add(ref sum, sampleSum);
+
+        long observed = Volatile.Read(ref max);
+        while (sampleMax > observed)
+        {
+            long previous = Interlocked.CompareExchange(ref max, sampleMax, observed);
+            if (previous == observed)
+            {
+                break;
+            }
+
+            observed = previous;
+        }
+    }
+
     /// <summary>
     /// Upper bound of the bucket that holds the requested fraction of samples, clamped to the
     /// largest recorded value. Returns 0 when nothing was recorded.
@@ -170,6 +202,9 @@ public sealed class OptimumHistogram
 public static class OptimumChunkStreamStats
 {
     private static readonly double MicrosPerTick = 1_000_000.0 / Stopwatch.Frequency;
+    // Serializes visibility batches and their attributed frame intervals with window snapshots;
+    // older per-call histograms retain their interlocked, best-effort window semantics.
+    private static readonly object VisibilitySync = new();
 
     public static volatile bool Enabled;
 
@@ -185,6 +220,27 @@ public static class OptimumChunkStreamStats
     /// <summary>Time a finished mesh waited between tessellation and upload.</summary>
     public static readonly OptimumHistogram UploadQueueAgeMicros = new();
 
+    /// <summary>Queue age for uploaded meshes whose bounds are inside the current frustum.</summary>
+    public static readonly OptimumHistogram InFrustumQueueAgeMicros = new();
+
+    /// <summary>Queue age for uploaded meshes whose bounds are outside the current frustum.</summary>
+    public static readonly OptimumHistogram OutOfFrustumQueueAgeMicros = new();
+
+    /// <summary>Frame intervals following a frame that uploaded at least one chunk.</summary>
+    public static readonly OptimumHistogram FrameAfterUploadMicros = new();
+
+    /// <summary>Frame intervals following a frame that uploaded no chunks.</summary>
+    public static readonly OptimumHistogram FrameAfterNoUploadMicros = new();
+
+    /// <summary>Time spent capturing upload bounds and queue ages, in microseconds.</summary>
+    public static readonly OptimumHistogram VisibilityCaptureMicros = new();
+
+    /// <summary>Time spent classifying uploaded bounds against the frustum, in microseconds.</summary>
+    public static readonly OptimumHistogram VisibilityClassifyMicros = new();
+
+    /// <summary>Time spent bucketing and committing one visibility batch, including snapshot contention.</summary>
+    public static readonly OptimumHistogram VisibilityRecordMicros = new();
+
     /// <summary>Wall time of one sendAndEnqueueChunks call that sent chunks.</summary>
     public static readonly OptimumHistogram SendCallMicros = new();
 
@@ -194,6 +250,7 @@ public static class OptimumChunkStreamStats
     private const long Over33Micros = 33_333;
     private const long StutterMicros = 50_000;
     private const long HitchMicros = 100_000;
+    private static readonly long Below250MsTicksExclusive = (Stopwatch.Frequency + 3L) / 4L;
 
     private static long chunksSent;
     private static long poolAllocations;
@@ -202,6 +259,15 @@ public static class OptimumChunkStreamStats
     private static long framesOver33;
     private static long framesOver50;
     private static long framesOver100;
+    private static long visibilityAttempted;
+    private static long visibilityCaptured;
+    private static long visibilityInFrustum;
+    private static long visibilityOutOfFrustum;
+    private static long visibilityCapacityDropped;
+    private static long visibilityUnclassified;
+    private static long visibilityBelow250Ms;
+    private static long visibilityClassificationFailures;
+    private static long visibilityContractFailures;
 
     public static long ChunksSent => Interlocked.Read(ref chunksSent);
 
@@ -224,13 +290,34 @@ public static class OptimumChunkStreamStats
     /// <summary>Records one frame interval from the render thread.</summary>
     public static void RecordFrame(float deltaSeconds)
     {
-        if (!Enabled || deltaSeconds <= 0f)
+        RecordFrameInterval(deltaSeconds, hasPreviousFrame: false, previousFrameUploaded: false);
+    }
+
+    /// <summary>Records a frame and, when its predecessor is known, attributes it to that frame's uploads.</summary>
+    internal static void RecordFrameInterval(float deltaSeconds, bool hasPreviousFrame, bool previousFrameUploaded)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        RecordFrameIntervalUnsafe(deltaSeconds, hasPreviousFrame, previousFrameUploaded);
+    }
+
+    private static void RecordFrameIntervalUnsafe(float deltaSeconds, bool hasPreviousFrame, bool previousFrameUploaded)
+    {
+        if (deltaSeconds <= 0f)
         {
             return;
         }
 
         long micros = (long)(deltaSeconds * 1_000_000.0);
         FrameMicros.Record(micros);
+        if (hasPreviousFrame)
+        {
+            (previousFrameUploaded ? FrameAfterUploadMicros : FrameAfterNoUploadMicros).Record(micros);
+        }
+
         if (micros > Over33Micros)
         {
             Interlocked.Increment(ref framesOver33);
@@ -252,8 +339,11 @@ public static class OptimumChunkStreamStats
             return;
         }
 
-        Interlocked.Increment(ref uploadedChunks);
-        UploadChunkMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        if (Enabled)
+        {
+            Interlocked.Increment(ref uploadedChunks);
+            UploadChunkMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        }
     }
 
     public static void RecordUploadFrame(long startTicks, int uploaded)
@@ -263,7 +353,10 @@ public static class OptimumChunkStreamStats
             return;
         }
 
-        UploadFrameMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        if (Enabled)
+        {
+            UploadFrameMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        }
     }
 
     public static void RecordQueueAge(long readyToUploadTicks)
@@ -281,9 +374,12 @@ public static class OptimumChunkStreamStats
             return;
         }
 
-        Interlocked.Add(ref chunksSent, sent);
-        ChunksSentPerCall.Record(sent);
-        SendCallMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        if (Enabled)
+        {
+            Interlocked.Add(ref chunksSent, sent);
+            ChunksSentPerCall.Record(sent);
+            SendCallMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+        }
     }
 
     public static void RecordPoolAllocation()
@@ -294,12 +390,159 @@ public static class OptimumChunkStreamStats
         }
     }
 
+    /// <summary>
+    /// Records one complete Before/Opaque sample batch. A batch is committed under the same gate
+    /// as summary/reset so a window can never contain only half of a frame's classifications.
+    /// Classification values are 0 for in-frustum, 1 for out-of-frustum, and 2 for unclassified.
+    /// </summary>
+    internal static void RecordUploadVisibilityFrame(
+        int attempted,
+        int captured,
+        int capacityDropped,
+        ReadOnlySpan<long> queueAgeTicks,
+        ReadOnlySpan<byte> classifications,
+        long captureDurationTicks,
+        long classifyDurationTicks,
+        bool classificationFailed,
+        float frameDeltaSeconds = 0f,
+        bool hasPreviousFrame = false,
+        bool previousFrameUploaded = false)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+        long recordStartTicks = Stopwatch.GetTimestamp();
+
+        if (attempted < 0 || captured < 0 || capacityDropped < 0
+            || queueAgeTicks.Length != captured
+            || classifications.Length != captured
+            || attempted != captured + capacityDropped)
+        {
+            RecordVisibilityContractFailure();
+            return;
+        }
+
+        Span<long> insideBuckets = stackalloc long[OptimumHistogram.BucketCount];
+        Span<long> outsideBuckets = stackalloc long[OptimumHistogram.BucketCount];
+        if (captured > 0)
+        {
+            insideBuckets.Clear();
+            outsideBuckets.Clear();
+        }
+
+        long inside = 0;
+        long outside = 0;
+        long unclassified = 0;
+        long insideSum = 0;
+        long outsideSum = 0;
+        long insideMax = 0;
+        long outsideMax = 0;
+        long below250 = 0;
+        for (int i = 0; i < captured; i++)
+        {
+            long ageTicks = queueAgeTicks[i];
+            byte classification = classifications[i];
+            if (ageTicks < 0 || classification > 2)
+            {
+                RecordVisibilityContractFailure();
+                return;
+            }
+
+            long ageMicros = TicksToMicros(ageTicks);
+            switch (classification)
+            {
+                case 0:
+                    insideBuckets[OptimumHistogram.BucketIndex(ageMicros)]++;
+                    inside++;
+                    insideSum += ageMicros;
+                    insideMax = Math.Max(insideMax, ageMicros);
+                    if (ageTicks < Below250MsTicksExclusive)
+                    {
+                        below250++;
+                    }
+                    break;
+                case 1:
+                    outsideBuckets[OptimumHistogram.BucketIndex(ageMicros)]++;
+                    outside++;
+                    outsideSum += ageMicros;
+                    outsideMax = Math.Max(outsideMax, ageMicros);
+                    break;
+                default:
+                    unclassified++;
+                    break;
+            }
+        }
+
+        lock (VisibilitySync)
+        {
+            if (!Enabled)
+            {
+                return;
+            }
+
+            RecordFrameIntervalUnsafe(frameDeltaSeconds, hasPreviousFrame, previousFrameUploaded);
+            if (inside > 0)
+            {
+                InFrustumQueueAgeMicros.AddBucketCounts(insideBuckets, inside, insideSum, insideMax);
+            }
+            if (outside > 0)
+            {
+                OutOfFrustumQueueAgeMicros.AddBucketCounts(outsideBuckets, outside, outsideSum, outsideMax);
+            }
+            visibilityAttempted += attempted;
+            visibilityCaptured += captured;
+            visibilityInFrustum += inside;
+            visibilityOutOfFrustum += outside;
+            visibilityCapacityDropped += capacityDropped;
+            visibilityUnclassified += unclassified;
+            visibilityBelow250Ms += below250;
+
+            if (classificationFailed)
+            {
+                visibilityClassificationFailures++;
+            }
+            VisibilityCaptureMicros.Record(TicksToMicros(captureDurationTicks));
+            if (classifyDurationTicks > 0)
+            {
+                VisibilityClassifyMicros.Record(TicksToMicros(classifyDurationTicks));
+            }
+            VisibilityRecordMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - recordStartTicks));
+        }
+    }
+
+    private static void RecordVisibilityContractFailure()
+    {
+        lock (VisibilitySync)
+        {
+            if (Enabled)
+            {
+                visibilityContractFailures++;
+            }
+        }
+    }
+
     public static void Reset()
+    {
+        lock (VisibilitySync)
+        {
+            ResetUnsafe();
+        }
+    }
+
+    private static void ResetUnsafe()
     {
         FrameMicros.Reset();
         UploadFrameMicros.Reset();
         UploadChunkMicros.Reset();
         UploadQueueAgeMicros.Reset();
+        InFrustumQueueAgeMicros.Reset();
+        OutOfFrustumQueueAgeMicros.Reset();
+        FrameAfterUploadMicros.Reset();
+        FrameAfterNoUploadMicros.Reset();
+        VisibilityCaptureMicros.Reset();
+        VisibilityClassifyMicros.Reset();
+        VisibilityRecordMicros.Reset();
         SendCallMicros.Reset();
         ChunksSentPerCall.Reset();
         Interlocked.Exchange(ref chunksSent, 0);
@@ -309,6 +552,15 @@ public static class OptimumChunkStreamStats
         Interlocked.Exchange(ref framesOver33, 0);
         Interlocked.Exchange(ref framesOver50, 0);
         Interlocked.Exchange(ref framesOver100, 0);
+        visibilityAttempted = 0;
+        visibilityCaptured = 0;
+        visibilityInFrustum = 0;
+        visibilityOutOfFrustum = 0;
+        visibilityCapacityDropped = 0;
+        visibilityUnclassified = 0;
+        visibilityBelow250Ms = 0;
+        visibilityClassificationFailures = 0;
+        visibilityContractFailures = 0;
     }
 
     /// <summary>
@@ -317,10 +569,37 @@ public static class OptimumChunkStreamStats
     /// </summary>
     public static string GetSummary()
     {
+        lock (VisibilitySync)
+        {
+            return GetSummaryUnsafe();
+        }
+    }
+
+    /// <summary>Returns the current summary and serializes visibility batches with its window boundary.</summary>
+    internal static string GetSummaryAndReset()
+    {
+        return GetSummaryAndReset(out _);
+    }
+
+    /// <summary>Returns the current summary, captures its exact window boundary, and resets the window.
+    /// Visibility batches and their attributed frame intervals remain whole across this boundary.</summary>
+    public static string GetSummaryAndReset(out long windowEndEpochMs)
+    {
+        lock (VisibilitySync)
+        {
+            windowEndEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            string summary = GetSummaryUnsafe();
+            ResetUnsafe();
+            return summary;
+        }
+    }
+
+    private static string GetSummaryUnsafe()
+    {
         long sent = ChunksSent;
         long tessellated = OptimumDiagnostics.TessChunksProcessed - Interlocked.Read(ref tessBaseline);
         double ratio = sent == 0 ? 0.0 : (double)tessellated / sent;
-        var sb = new StringBuilder(384);
+        var sb = new StringBuilder(1024);
         sb.Append("Optimum chunk stream: ");
         AppendHistogram(sb, "frameUs", FrameMicros);
         sb.Append("over33ms=").Append(FramesOver33Ms)
@@ -330,6 +609,31 @@ public static class OptimumChunkStreamStats
         AppendHistogram(sb, "uploadFrameUs", UploadFrameMicros);
         AppendHistogram(sb, "uploadChunkUs", UploadChunkMicros);
         AppendHistogram(sb, "queueAgeUs", UploadQueueAgeMicros);
+        AppendHistogram(sb, "inFrustumQueueAgeUs", InFrustumQueueAgeMicros);
+        AppendBuckets(sb, "inFrustumQueueAgeBuckets", InFrustumQueueAgeMicros);
+        AppendHistogram(sb, "outOfFrustumQueueAgeUs", OutOfFrustumQueueAgeMicros);
+        AppendBuckets(sb, "outOfFrustumQueueAgeBuckets", OutOfFrustumQueueAgeMicros);
+        AppendHistogram(sb, "frameAfterUploadUs", FrameAfterUploadMicros);
+        AppendBuckets(sb, "frameAfterUploadBuckets", FrameAfterUploadMicros);
+        AppendHistogram(sb, "frameAfterNoUploadUs", FrameAfterNoUploadMicros);
+        AppendBuckets(sb, "frameAfterNoUploadBuckets", FrameAfterNoUploadMicros);
+        AppendHistogram(sb, "visibilityCaptureUs", VisibilityCaptureMicros);
+        AppendBuckets(sb, "visibilityCaptureBuckets", VisibilityCaptureMicros);
+        AppendHistogram(sb, "visibilityClassifyUs", VisibilityClassifyMicros);
+        AppendBuckets(sb, "visibilityClassifyBuckets", VisibilityClassifyMicros);
+        AppendHistogram(sb, "visibilityRecordUs", VisibilityRecordMicros);
+        AppendBuckets(sb, "visibilityRecordBuckets", VisibilityRecordMicros);
+        sb.Append("visibilityAttempted=").Append(visibilityAttempted)
+            .Append(", visibilityCaptured=").Append(visibilityCaptured)
+            .Append(", visibilityInside=").Append(visibilityInFrustum)
+            .Append(", visibilityOutside=").Append(visibilityOutOfFrustum)
+            .Append(", visibilityCapacityDropped=").Append(visibilityCapacityDropped)
+            .Append(", visibilityUnclassified=").Append(visibilityUnclassified)
+            .Append(", visibilityPending=").Append(visibilityCaptured - visibilityInFrustum - visibilityOutOfFrustum - visibilityUnclassified)
+            .Append(", visibilityBelow250Ms=").Append(visibilityBelow250Ms)
+            .Append(", visibilityClassificationFailures=").Append(visibilityClassificationFailures)
+            .Append(", visibilityContractFailures=").Append(visibilityContractFailures)
+            .Append(", ");
         AppendHistogram(sb, "sendCallUs", SendCallMicros);
         AppendHistogram(sb, "sentPerCall", ChunksSentPerCall);
         sb.Append("sent=").Append(sent)
@@ -352,6 +656,14 @@ public static class OptimumChunkStreamStats
     /// <summary>Adds the stable numeric keys for the benchmark metrics contract.</summary>
     public static void AddMetrics(IDictionary<string, double> values)
     {
+        lock (VisibilitySync)
+        {
+            AddMetricsUnsafe(values);
+        }
+    }
+
+    private static void AddMetricsUnsafe(IDictionary<string, double> values)
+    {
         AddHistogram(values, "stream.frame.micros", FrameMicros);
         values["stream.frames.over33ms.count"] = FramesOver33Ms;
         values["stream.frames.over50ms.count"] = FramesOver50Ms;
@@ -359,6 +671,23 @@ public static class OptimumChunkStreamStats
         AddHistogram(values, "stream.uploadFrame.micros", UploadFrameMicros);
         AddHistogram(values, "stream.uploadChunk.micros", UploadChunkMicros);
         AddHistogram(values, "stream.uploadQueueAge.micros", UploadQueueAgeMicros);
+        AddHistogram(values, "stream.inFrustumQueueAge.micros", InFrustumQueueAgeMicros);
+        AddHistogram(values, "stream.outOfFrustumQueueAge.micros", OutOfFrustumQueueAgeMicros);
+        AddHistogram(values, "stream.frameAfterUpload.micros", FrameAfterUploadMicros);
+        AddHistogram(values, "stream.frameAfterNoUpload.micros", FrameAfterNoUploadMicros);
+        AddHistogram(values, "stream.uploadVisibility.capture.micros", VisibilityCaptureMicros);
+        AddHistogram(values, "stream.uploadVisibility.classify.micros", VisibilityClassifyMicros);
+        AddHistogram(values, "stream.uploadVisibility.record.micros", VisibilityRecordMicros);
+        values["stream.uploadVisibility.attempted.count"] = visibilityAttempted;
+        values["stream.uploadVisibility.captured.count"] = visibilityCaptured;
+        values["stream.uploadVisibility.inFrustum.count"] = visibilityInFrustum;
+        values["stream.uploadVisibility.outOfFrustum.count"] = visibilityOutOfFrustum;
+        values["stream.uploadVisibility.capacityDropped.count"] = visibilityCapacityDropped;
+        values["stream.uploadVisibility.unclassified.count"] = visibilityUnclassified;
+        values["stream.uploadVisibility.pending.count"] = visibilityCaptured - visibilityInFrustum - visibilityOutOfFrustum - visibilityUnclassified;
+        values["stream.uploadVisibility.below250ms.count"] = visibilityBelow250Ms;
+        values["stream.uploadVisibility.classificationFailures.count"] = visibilityClassificationFailures;
+        values["stream.uploadVisibility.contractFailures.count"] = visibilityContractFailures;
         AddHistogram(values, "stream.sendCall.micros", SendCallMicros);
         AddHistogram(values, "stream.sentPerCall.count", ChunksSentPerCall);
         values["stream.chunksSent.count"] = ChunksSent;
@@ -382,6 +711,13 @@ public static class OptimumChunkStreamStats
             .Append("/p99 ").Append(histogram.Percentile(0.99))
             .Append("/max ").Append(histogram.Max)
             .Append(", ");
+    }
+
+    private static void AppendBuckets(StringBuilder sb, string name, OptimumHistogram histogram)
+    {
+        sb.Append(name).Append('=');
+        histogram.AppendNonZeroBuckets(sb);
+        sb.Append(", ");
     }
 
     private static void AddHistogram(IDictionary<string, double> values, string prefix, OptimumHistogram histogram)
