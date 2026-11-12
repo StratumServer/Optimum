@@ -20,6 +20,7 @@ public static class ModPatcher
             _ => throw new ArgumentException($"Unknown mod patch manifest: {modName}", nameof(modName)),
         };
 
+        var validationErrors = new List<string>();
         int total = ILPatcher.PatchWithInjection(
             vanillaPath,
             compiledPath,
@@ -28,12 +29,12 @@ public static class ModPatcher
             manifest.Members,
             manifest.Methods,
             interfacesToInject: manifest.Interfaces,
-            requireAllTargets: true);
+            requireAllTargets: true,
+            validationErrors: validationErrors);
 
         if (total < 0)
         {
-            throw new InvalidOperationException(
-                $"{modName} patch failed output validation. The patcher rejected the generated assembly.");
+            throw new InvalidOperationException(FormatValidationFailure(modName, validationErrors));
         }
 
         if (total == 0)
@@ -41,6 +42,24 @@ public static class ModPatcher
             throw new InvalidOperationException($"{modName} patch produced no changes.");
         }
         return true;
+    }
+
+    internal const int MaxReportedValidationErrors = 20;
+
+    internal static string FormatValidationFailure(string modName, IReadOnlyList<string> validationErrors)
+    {
+        var message = new System.Text.StringBuilder(
+            $"{modName} patch failed output validation. The patcher rejected the generated assembly.");
+        int shown = Math.Min(validationErrors.Count, MaxReportedValidationErrors);
+        for (int i = 0; i < shown; i++)
+        {
+            message.Append("\n  ").Append(validationErrors[i]);
+        }
+        if (validationErrors.Count > shown)
+        {
+            message.Append($"\n  (+{validationErrors.Count - shown} more)");
+        }
+        return message.ToString();
     }
 
     private static Manifest EssentialsManifest()
@@ -101,6 +120,7 @@ public static class ModPatcher
                 [
                     "optimumLastHeightmapCenterX",
                     "optimumLastHeightmapCenterZ",
+                    "optimumHeightmapCenterValid",
                 ],
                 ["Vintagestory.GameContent.WeatherSystemClient"] =
                 [
