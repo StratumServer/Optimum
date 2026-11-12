@@ -32,7 +32,8 @@ WINDOW_SECONDS = 5
 
 LINE_TIME = re.compile(r"^(\d{2}\.\d{2}\.\d{4} \d{2}:\d{2}:\d{2})")
 HIST = re.compile(r"(\w+)=n(\d+)/p50 (\d+)/p95 (\d+)/p99 (\d+)/max (\d+)")
-PAIR = re.compile(r"(?:^|[ ,])(over33ms|over50ms|over100ms|sent|uploaded|tessellated|poolAllocs|gcPauseMs|allocMB|tessPerSent|frameMeanUs|hitchMs|load1|cpuMhz|ahead|chunks|cols)=([0-9.]+)")
+PAIR = re.compile(r"(?:^|[ ,])(over33ms|over50ms|over100ms|sent|uploaded|tessellated|poolAllocs|gcPauseMs|allocMB|tessPerSent|frameMeanUs|hitchMs|load1|cpuMhz|ahead|chunks|cols|visibilityAttempted|visibilityCaptured|visibilityInside|visibilityOutside|visibilityCapacityDropped|visibilityUnclassified|visibilityPending|visibilityBelow250Ms|visibilityClassificationFailures|visibilityContractFailures|streamWindowStartEpochMs|streamWindowEndEpochMs)=([0-9.]+)")
+BUCKETS = re.compile(r"(\w+Buckets)=([0-9:,]*)")
 POSITION = re.compile(r"pos=(-?[0-9.]+),(-?[0-9.]+),(-?[0-9.]+)")
 
 
@@ -59,6 +60,40 @@ def percentile_from_buckets(buckets, fraction, cap=None):
     return 0.0
 
 
+def percentile_with_censoring(buckets, fraction):
+    total = sum(buckets.values())
+    if total == 0:
+        return None, False
+    rank = max(1, math.ceil(fraction * total))
+    seen = 0
+    for index in sorted(buckets):
+        seen += buckets[index]
+        if seen >= rank:
+            return float(bucket_upper_bound(index)), index == 4 * 47 - 1
+    return None, False
+
+
+def merge_bucket_counts(windows, key):
+    merged = {}
+    for window in windows:
+        for index, count in window["buckets"].get(key, {}).items():
+            merged[index] = merged.get(index, 0) + count
+    return merged
+
+
+def summarize_bucket_histogram(windows, bucket_key, histogram_key):
+    buckets = merge_bucket_counts(windows, bucket_key)
+    count = sum(buckets.values())
+    hist_max = max((window["hist"].get(histogram_key, (0, 0, 0, 0, 0))[4] for window in windows), default=0)
+    result = {"samples": count, "max": hist_max, "bucket_counts": buckets}
+    for percentile in (0.50, 0.95, 0.99):
+        value, censored = percentile_with_censoring(buckets, percentile)
+        name = f"p{int(percentile * 100)}"
+        result[name] = value
+        result[name + "_censored"] = censored
+    return result
+
+
 def parse_epoch(text):
     return datetime.datetime.strptime(text, "%d.%m.%Y %H:%M:%S").timestamp()
 
@@ -73,7 +108,7 @@ def parse_markers(path):
     return markers
 
 
-def stream_windows(log_path, start, end, marker="Optimum chunk stream:", previous=None):
+def stream_windows(log_path, start, end, marker="Optimum chunk stream:", previous=None, complete_only=False):
     """Windows logged under the marker that lie inside the flight, as dicts.
 
     When previous is a list, the last window that ended before the first flight window is appended
@@ -88,9 +123,9 @@ def stream_windows(log_path, start, end, marker="Optimum chunk stream:", previou
             if not match:
                 continue
             stamp = parse_epoch(match.group(1))
-            if stamp > end + 1:
+            if not complete_only and stamp > end + 1:
                 continue
-            window = {"epoch": stamp, "hist": {}, "values": {}, "frameBuckets": {}}
+            window = {"epoch": stamp, "start_epoch": stamp - WINDOW_SECONDS, "hist": {}, "values": {}, "buckets": {}, "frameBuckets": {}}
             position = POSITION.search(line)
             if position:
                 window["pos"] = tuple(float(v) for v in position.groups())
@@ -98,17 +133,99 @@ def stream_windows(log_path, start, end, marker="Optimum chunk stream:", previou
                 window["hist"][name] = tuple(int(x) for x in (n, p50, p95, p99, mx))
             for name, value in PAIR.findall(line):
                 window["values"][name] = float(value)
-            buckets = re.search(r"frameBuckets=([0-9:,]*)", line)
-            if buckets and buckets.group(1):
-                for pair in buckets.group(1).split(","):
-                    index, count = pair.split(":")
-                    window["frameBuckets"][int(index)] = int(count)
-            if stamp - WINDOW_SECONDS < start - 1:
+            for name, bucket_text in BUCKETS.findall(line):
+                values = {}
+                if bucket_text:
+                    for pair in bucket_text.split(","):
+                        if not pair:
+                            continue
+                        index, count = pair.split(":")
+                        values[int(index)] = int(count)
+                window["buckets"][name] = values
+                if name == "frameBuckets":
+                    window["frameBuckets"] = values
+            window["precise_bounds"] = "streamWindowStartEpochMs" in window["values"] and "streamWindowEndEpochMs" in window["values"]
+            if window["precise_bounds"]:
+                window["start_epoch"] = window["values"]["streamWindowStartEpochMs"] / 1000.0
+                window["end_epoch"] = window["values"]["streamWindowEndEpochMs"] / 1000.0
+            else:
+                window["end_epoch"] = stamp
+            if complete_only:
+                if window["precise_bounds"]:
+                    if window["end_epoch"] <= window["start_epoch"] or window["start_epoch"] < start or window["end_epoch"] > end:
+                        continue
+                elif window["start_epoch"] < start + 1 or window["epoch"] > end - 1:
+                    continue
+            elif stamp - WINDOW_SECONDS < start - 1:
                 if previous is not None:
                     previous[:] = [window]
                 continue
             windows.append(window)
     return windows
+
+
+def covered_seconds(windows):
+    """Return the union of telemetry-window bounds, excluding gaps and overlap."""
+    intervals = sorted(
+        (window["start_epoch"], window["end_epoch"])
+        for window in windows
+        if window["end_epoch"] > window["start_epoch"]
+    )
+    if not intervals:
+        return 0.0
+
+    total = 0.0
+    start, end = intervals[0]
+    for next_start, next_end in intervals[1:]:
+        if next_start > end:
+            total += end - start
+            start, end = next_start, next_end
+        else:
+            end = max(end, next_end)
+    return total + end - start
+
+
+def telemetry_window_discontinuities(windows):
+    """Return internal gaps or overlaps; precise snapshots should share exact boundaries."""
+    intervals = sorted(
+        (window["start_epoch"], window["end_epoch"])
+        for window in windows
+        if window["end_epoch"] > window["start_epoch"]
+    )
+    discontinuities = []
+    for previous, current in zip(intervals, intervals[1:]):
+        delta = current[0] - previous[1]
+        if abs(delta) > 0.001:
+            discontinuities.append(delta)
+    return discontinuities
+
+
+def histogram_bucket_mismatches(windows, required=False):
+    """Find per-window summaries whose reported sample count disagrees with bucket totals."""
+    pairs = (
+        ("inFrustumQueueAgeUs", "inFrustumQueueAgeBuckets"),
+        ("outOfFrustumQueueAgeUs", "outOfFrustumQueueAgeBuckets"),
+        ("frameAfterUploadUs", "frameAfterUploadBuckets"),
+        ("frameAfterNoUploadUs", "frameAfterNoUploadBuckets"),
+        ("visibilityCaptureUs", "visibilityCaptureBuckets"),
+        ("visibilityClassifyUs", "visibilityClassifyBuckets"),
+        ("visibilityRecordUs", "visibilityRecordBuckets"),
+    )
+    mismatches = []
+    for index, window in enumerate(windows, start=1):
+        for histogram_name, bucket_name in pairs:
+            histogram = window["hist"].get(histogram_name)
+            buckets_present = bucket_name in window["buckets"]
+            if histogram is None or not buckets_present:
+                if required:
+                    mismatches.append(f"window {index} is missing {histogram_name} or {bucket_name}")
+                continue
+            bucket_count = sum(window["buckets"][bucket_name].values())
+            if bucket_count != histogram[0]:
+                mismatches.append(
+                    f"window {index} {histogram_name} reports {histogram[0]} samples but {bucket_name} accounts for {bucket_count}"
+                )
+    return mismatches
 
 
 def flight_path(windows, before, duration, min_blocks):
@@ -174,6 +291,108 @@ def mangohud_frames(csv_path, start, end):
     return frames
 
 
+def summarize_visibility_windows(windows, duration, required=False, flight_start=None, flight_end=None):
+    """Summarise only complete in-flight telemetry windows and return validation failures."""
+    present = required or any(
+        "visibilityAttempted" in window["values"] or "inFrustumQueueAgeBuckets" in window["buckets"]
+        for window in windows
+    )
+    if not present:
+        return {"present": False, "invalid_reasons": []}
+
+    age_inside = summarize_bucket_histogram(windows, "inFrustumQueueAgeBuckets", "inFrustumQueueAgeUs")
+    age_outside = summarize_bucket_histogram(windows, "outOfFrustumQueueAgeBuckets", "outOfFrustumQueueAgeUs")
+    after_upload = summarize_bucket_histogram(windows, "frameAfterUploadBuckets", "frameAfterUploadUs")
+    after_no_upload = summarize_bucket_histogram(windows, "frameAfterNoUploadBuckets", "frameAfterNoUploadUs")
+    capture = summarize_bucket_histogram(windows, "visibilityCaptureBuckets", "visibilityCaptureUs")
+    classify = summarize_bucket_histogram(windows, "visibilityClassifyBuckets", "visibilityClassifyUs")
+    record = summarize_bucket_histogram(windows, "visibilityRecordBuckets", "visibilityRecordUs")
+
+    counter_names = (
+        "visibilityAttempted", "visibilityCaptured", "visibilityInside", "visibilityOutside",
+        "visibilityCapacityDropped", "visibilityUnclassified", "visibilityPending",
+        "visibilityBelow250Ms", "visibilityClassificationFailures", "visibilityContractFailures",
+    )
+    counters = {name: sum(window["values"].get(name, 0) for window in windows) for name in counter_names}
+    coverage_seconds = covered_seconds(windows)
+    failures = []
+
+    minimum_coverage = 45 if required else min(45, duration * 0.75)
+    if coverage_seconds < minimum_coverage:
+        failures.append(f"only {coverage_seconds:.3f}s of complete telemetry windows, below the required {minimum_coverage:.3f}s coverage")
+    if required and not (59.5 <= duration <= 60.5):
+        failures.append(f"required issue flights must be 60s; this run measured {duration:.3f}s")
+    if required and any(not window["precise_bounds"] for window in windows):
+        failures.append("one or more telemetry windows lack precise start/end timestamps")
+    if required and windows and flight_start is not None and flight_end is not None:
+        if windows[0]["start_epoch"] > flight_start + WINDOW_SECONDS + 0.5:
+            failures.append("complete telemetry starts more than one window after the flight began")
+        if windows[-1]["end_epoch"] < flight_end - WINDOW_SECONDS - 0.5:
+            failures.append("complete telemetry ends more than one window before the flight ended")
+    if required:
+        for delta in telemetry_window_discontinuities(windows):
+            if delta > 0:
+                failures.append(f"telemetry windows contain an internal gap of {delta:.3f}s")
+            else:
+                failures.append(f"telemetry windows overlap by {-delta:.3f}s")
+    failures.extend(histogram_bucket_mismatches(windows, required=required))
+    if counters["visibilityAttempted"] != counters["visibilityCaptured"] + counters["visibilityCapacityDropped"]:
+        failures.append("attempted visibility samples do not equal captured plus capacity-dropped samples")
+    if counters["visibilityCaptured"] != counters["visibilityInside"] + counters["visibilityOutside"] + counters["visibilityUnclassified"] + counters["visibilityPending"]:
+        failures.append("captured visibility samples do not reconcile with inside, outside, unclassified, and pending counts")
+    if counters["visibilityCapacityDropped"]:
+        failures.append(f"{int(counters['visibilityCapacityDropped'])} visibility samples were dropped by the bounded buffer")
+    if counters["visibilityUnclassified"] or counters["visibilityPending"]:
+        failures.append("visibility classification left unclassified or pending samples")
+    if counters["visibilityClassificationFailures"] or counters["visibilityContractFailures"]:
+        failures.append("visibility classification or accounting reported a failure")
+    if counters["visibilityInside"] != age_inside["samples"]:
+        failures.append("in-frustum sample counter does not match its age histogram")
+    if counters["visibilityOutside"] != age_outside["samples"]:
+        failures.append("out-of-frustum sample counter does not match its age histogram")
+    if counters["visibilityBelow250Ms"] > age_inside["samples"]:
+        failures.append("below-250-ms count exceeds in-frustum age samples")
+    if age_inside["samples"] < 200:
+        failures.append(f"only {age_inside['samples']} in-frustum queue-age samples, below the required 200")
+    if after_upload["samples"] < 200 or after_no_upload["samples"] < 200:
+        failures.append("one or both upload/no-upload frame distributions have fewer than 200 samples")
+    for label, histogram in (("in-frustum queue age", age_inside), ("out-of-frustum queue age", age_outside),
+                             ("frames after uploads", after_upload), ("frames after no uploads", after_no_upload)):
+        if histogram["p95_censored"]:
+            failures.append(f"{label} p95 falls in the maximum histogram bucket and is censored")
+
+    below_fraction = (counters["visibilityBelow250Ms"] / age_inside["samples"]) if age_inside["samples"] else None
+    threshold_reached = below_fraction is not None and below_fraction >= 0.95
+    threshold_failure = None
+    if below_fraction is not None and not threshold_reached:
+        threshold_failure = f"only {below_fraction:.3%} of in-frustum uploads were younger than 250 ms"
+    run_passes = not failures and threshold_reached
+
+    return {
+        "present": True,
+        "windows": len(windows),
+        "coverage_seconds": coverage_seconds,
+        "counters": counters,
+        "in_frustum_age": age_inside,
+        "out_of_frustum_age": age_outside,
+        "frame_after_upload": after_upload,
+        "frame_after_no_upload": after_no_upload,
+        "capture_cost": capture,
+        "classify_cost": classify,
+        "record_cost": record,
+        "bucket_sets": {
+            "inFrustumQueueAgeBuckets": age_inside["bucket_counts"],
+            "outOfFrustumQueueAgeBuckets": age_outside["bucket_counts"],
+            "frameAfterUploadBuckets": after_upload["bucket_counts"],
+            "frameAfterNoUploadBuckets": after_no_upload["bucket_counts"],
+        },
+        "below_250_fraction": below_fraction,
+        "threshold_failure": threshold_failure,
+        "threshold_pass": run_passes,
+        "invalid_reasons": failures,
+    }
+
+
 def summarise_run(run_dir):
     markers = parse_markers(os.path.join(run_dir, "markers.env"))
     start = float(markers["FLIGHT_START_EPOCH"])
@@ -182,6 +401,15 @@ def summarise_run(run_dir):
     result = {"arm": markers["ARM"], "run": os.path.basename(run_dir), "renderer": markers.get("RENDERER", ""), "sources": {}}
     log_path = os.path.join(run_dir, "client-main.log")
     windows = stream_windows(log_path, start, end) if os.path.exists(log_path) else []
+    visibility_windows = stream_windows(log_path, start, end, complete_only=True) if os.path.exists(log_path) else []
+    visibility = summarize_visibility_windows(
+        visibility_windows,
+        duration,
+        required=markers.get("REQUIRE_UPLOAD_VISIBILITY") == "1",
+        flight_start=start,
+        flight_end=end,
+    )
+    result["upload_visibility"] = visibility
     merged = {}
     for window in windows:
         for index, count in window["frameBuckets"].items():
@@ -209,6 +437,44 @@ def summarise_run(run_dir):
         client["pool_allocs"] = sum(w["values"].get("poolAllocs", 0) for w in windows)
         client["gc_pause_ms_total"] = windows[-1]["values"].get("gcPauseMs", 0.0) - (windows[0]["values"].get("gcPauseMs", 0.0) if len(windows) > 1 else 0.0)
         client["windows"] = len(windows)
+    if visibility["present"]:
+        client = result["sources"].setdefault("client", {})
+        inside = visibility["in_frustum_age"]
+        outside = visibility["out_of_frustum_age"]
+        after_upload = visibility["frame_after_upload"]
+        after_no_upload = visibility["frame_after_no_upload"]
+        client.update({
+            "visibility_windows": visibility["windows"],
+            "visibility_coverage_seconds": visibility["coverage_seconds"],
+            "in_frustum_queue_age_samples": inside["samples"],
+            "in_frustum_queue_age_p50_ms_estimate": (inside["p50"] / 1000.0) if inside["p50"] is not None else None,
+            "in_frustum_queue_age_p95_ms_estimate": (inside["p95"] / 1000.0) if inside["p95"] is not None else None,
+            "in_frustum_queue_age_p99_ms_estimate": (inside["p99"] / 1000.0) if inside["p99"] is not None else None,
+            "out_of_frustum_queue_age_samples": outside["samples"],
+            "out_of_frustum_queue_age_p95_ms_estimate": (outside["p95"] / 1000.0) if outside["p95"] is not None else None,
+            "in_frustum_below250_count": visibility["counters"]["visibilityBelow250Ms"],
+            "in_frustum_below250_fraction": visibility["below_250_fraction"],
+            "frame_after_upload_samples": after_upload["samples"],
+            "frame_after_upload_p50_ms_estimate": (after_upload["p50"] / 1000.0) if after_upload["p50"] is not None else None,
+            "frame_after_upload_p95_ms_estimate": (after_upload["p95"] / 1000.0) if after_upload["p95"] is not None else None,
+            "frame_after_upload_p99_ms_estimate": (after_upload["p99"] / 1000.0) if after_upload["p99"] is not None else None,
+            "frame_after_no_upload_samples": after_no_upload["samples"],
+            "frame_after_no_upload_p50_ms_estimate": (after_no_upload["p50"] / 1000.0) if after_no_upload["p50"] is not None else None,
+            "frame_after_no_upload_p95_ms_estimate": (after_no_upload["p95"] / 1000.0) if after_no_upload["p95"] is not None else None,
+            "frame_after_no_upload_p99_ms_estimate": (after_no_upload["p99"] / 1000.0) if after_no_upload["p99"] is not None else None,
+            "visibility_capture_p95_ms": (visibility["capture_cost"]["p95"] / 1000.0) if visibility["capture_cost"]["p95"] is not None else None,
+            "visibility_classify_p95_ms": (visibility["classify_cost"]["p95"] / 1000.0) if visibility["classify_cost"]["p95"] is not None else None,
+            "visibility_record_p95_ms": (visibility["record_cost"]["p95"] / 1000.0) if visibility["record_cost"]["p95"] is not None else None,
+            "visibility_attempted": visibility["counters"]["visibilityAttempted"],
+            "visibility_captured": visibility["counters"]["visibilityCaptured"],
+            "visibility_dropped": visibility["counters"]["visibilityCapacityDropped"],
+            "visibility_unclassified": visibility["counters"]["visibilityUnclassified"],
+            "visibility_pending": visibility["counters"]["visibilityPending"],
+            "visibility_threshold_pass": visibility["threshold_pass"],
+            "visibility_threshold_failure": visibility["threshold_failure"],
+            "visibility_invalid_reasons": visibility["invalid_reasons"],
+        })
+        client["visibility_bucket_sets"] = visibility["bucket_sets"]
     before = []
     meter = stream_windows(log_path, start, end, "ChunkFlightMeter: frameUs=", before) if os.path.exists(log_path) else []
     meter_buckets = {}
@@ -230,6 +496,10 @@ def summarise_run(run_dir):
         }
     result["min_blocks"] = float(markers.get("MIN_BLOCKS", 0))
     result["path"] = flight_path(meter, before, duration, result["min_blocks"])
+    if visibility["invalid_reasons"]:
+        prior = result["path"].get("invalid")
+        reasons = "; ".join(visibility["invalid_reasons"])
+        result["path"]["invalid"] = f"{prior}; {reasons}" if prior else reasons
     if meter:
         result["mean_cpu_mhz"] = sum(w["values"].get("cpuMhz", 0) for w in meter) / len(meter)
         result["mean_load1"] = sum(w["values"].get("load1", 0) for w in meter) / len(meter)
@@ -277,7 +547,26 @@ def flatten(runs, source):
         item.update(run.get("path", {}))
         if "client" in run["sources"]:
             for key in ("upload_frame_p99_ms_worst_window", "queue_age_p99_ms_worst_window", "chunks_sent", "tess_per_sent", "pool_allocs", "gc_pause_ms_total", "windows"):
-                item["detail_" + key] = run["sources"]["client"][key]
+                if key in run["sources"]["client"]:
+                    item["detail_" + key] = run["sources"]["client"][key]
+            for key in (
+                "visibility_windows", "visibility_coverage_seconds", "in_frustum_queue_age_samples",
+                "in_frustum_queue_age_p50_ms_estimate", "in_frustum_queue_age_p95_ms_estimate",
+                "in_frustum_queue_age_p99_ms_estimate", "out_of_frustum_queue_age_samples",
+                "out_of_frustum_queue_age_p95_ms_estimate", "in_frustum_below250_count",
+                "in_frustum_below250_fraction", "frame_after_upload_samples",
+                "frame_after_upload_p50_ms_estimate", "frame_after_upload_p95_ms_estimate",
+                "frame_after_upload_p99_ms_estimate", "frame_after_no_upload_samples",
+                "frame_after_no_upload_p50_ms_estimate", "frame_after_no_upload_p95_ms_estimate",
+                "frame_after_no_upload_p99_ms_estimate", "visibility_capture_p95_ms",
+                "visibility_classify_p95_ms", "visibility_record_p95_ms", "visibility_attempted", "visibility_captured",
+                "visibility_dropped", "visibility_unclassified", "visibility_pending",
+                "visibility_threshold_pass", "visibility_threshold_failure", "visibility_invalid_reasons",
+            ):
+                if key in run["sources"]["client"]:
+                    item["detail_" + key] = run["sources"]["client"][key]
+            if "visibility_bucket_sets" in run["sources"]["client"]:
+                item["detail_visibility_bucket_sets"] = run["sources"]["client"]["visibility_bucket_sets"]
         flat.append(item)
     return flat
 
@@ -389,9 +678,33 @@ def render(all_runs):
                 verdict = "noise" if p >= 0.05 else ("first is better" if (delta > 0) == (better == "higher") else "second is better")
                 comparisons.append(f"- {label}: {names[i]} {statistics.mean(a):.2f} vs {names[j]} {statistics.mean(b):.2f} (t={t:.2f}, df={df:.1f}, p={p:.3f}): {verdict}")
     extras = []
-    for run in runs:
+    for run in all_runs:
         if "detail_windows" in run:
             extras.append(f"- {run['run']}: upload p99 worst window {run['detail_upload_frame_p99_ms_worst_window']:.2f} ms, queue age p99 worst window {run['detail_queue_age_p99_ms_worst_window']:.2f} ms, chunks sent {run['detail_chunks_sent']:.0f}, tessellations per sent chunk {run['detail_tess_per_sent']:.2f}, pool allocations {run['detail_pool_allocs']:.0f}, GC pause {run['detail_gc_pause_ms_total']:.0f} ms")
+        if "detail_in_frustum_queue_age_samples" in run:
+            fraction = run["detail_in_frustum_below250_fraction"]
+            fraction_text = "n/a" if fraction is None else f"{fraction:.2%}"
+            decision = "INVALID" if run["detail_visibility_invalid_reasons"] else ("PASS" if run["detail_visibility_threshold_pass"] else "FAIL")
+            p95_inside = run["detail_in_frustum_queue_age_p95_ms_estimate"]
+            p95_outside = run["detail_out_of_frustum_queue_age_p95_ms_estimate"]
+            p95_after_upload = run["detail_frame_after_upload_p95_ms_estimate"]
+            p95_after_no_upload = run["detail_frame_after_no_upload_p95_ms_estimate"]
+            fmt = lambda value: "n/a" if value is None else f"{value:.2f} ms"
+            extras.append(
+            f"- {run['run']}: visibility windows {run['detail_visibility_windows']} / {run['detail_visibility_coverage_seconds']:.3f} s; "
+                f"in-frustum queue age n={run['detail_in_frustum_queue_age_samples']}, p95 estimate {fmt(p95_inside)}, "
+                f"<250 ms {fraction_text} ({run['detail_in_frustum_below250_count']:.0f} samples): {decision}; "
+                f"outside n={run['detail_out_of_frustum_queue_age_samples']}, p95 estimate {fmt(p95_outside)}; "
+                f"frame after upload n={run['detail_frame_after_upload_samples']}, p95 {fmt(p95_after_upload)}; "
+                f"after no upload n={run['detail_frame_after_no_upload_samples']}, p95 {fmt(p95_after_no_upload)}; "
+                f"capture/classification/recording CPU p95 {fmt(run['detail_visibility_capture_p95_ms'])}/"
+                f"{fmt(run['detail_visibility_classify_p95_ms'])}/{fmt(run['detail_visibility_record_p95_ms'])}; "
+                f"dropped/unclassified/pending {run['detail_visibility_dropped']:.0f}/{run['detail_visibility_unclassified']:.0f}/{run['detail_visibility_pending']:.0f}"
+            )
+            for reason in run["detail_visibility_invalid_reasons"]:
+                extras.append(f"  - INVALID evidence: {reason}")
+            if run.get("detail_visibility_threshold_failure"):
+                extras.append(f"  - Threshold: {run['detail_visibility_threshold_failure']}")
     flights, warnings = [], []
     for run in all_runs:
         if "flight_blocks" not in run:
@@ -413,7 +726,52 @@ def render(all_runs):
     if comparisons:
         text += ["### Welch t-test per metric", "", *comparisons, ""]
     if extras:
-        text += ["### Streaming detail (Optimum builds)", "", *extras, ""]
+        text += ["### Streaming detail (Optimum builds)", "", *extras, "", "Queue-age and frame percentiles are upper-bound estimates from fixed histogram buckets. The <250 ms fraction is exact and uses raw elapsed ticks.", ""]
+    visibility_arms = {}
+    for run in all_runs:
+        if "detail_visibility_threshold_pass" in run:
+            visibility_arms.setdefault(run["arm"], []).append(run)
+    if visibility_arms:
+        summaries = []
+        for arm, items in visibility_arms.items():
+            valid = [item for item in items if not item.get("invalid")]
+            if len(items) != 6 or len(valid) != 6:
+                summaries.append(f"- {arm}: INCOMPLETE, {len(valid)}/6 runs valid; no issue decision")
+                continue
+            passed = all(item["detail_visibility_threshold_pass"] for item in valid)
+            below = sum(item["detail_in_frustum_below250_count"] for item in valid)
+            samples = sum(item["detail_in_frustum_queue_age_samples"] for item in valid)
+            fraction = below / samples if samples else 0.0
+            p95_values = [item["detail_in_frustum_queue_age_p95_ms_estimate"] for item in valid if item["detail_in_frustum_queue_age_p95_ms_estimate"] is not None]
+            range_text = f"{min(p95_values):.2f} to {max(p95_values):.2f} ms" if p95_values else "n/a"
+            summaries.append(
+                f"- {arm}: {'PASS' if passed else 'FAIL'} all six per-run gates; pooled exact <250 ms fraction "
+                f"{fraction:.2%} ({below}/{samples}); per-run p95 estimate range {range_text}"
+            )
+            pooled_labels = (
+                ("inFrustumQueueAgeBuckets", "in-frustum queue age"),
+                ("outOfFrustumQueueAgeBuckets", "out-of-frustum queue age"),
+                ("frameAfterUploadBuckets", "frames after uploads"),
+                ("frameAfterNoUploadBuckets", "frames after no uploads"),
+            )
+            for bucket_key, label in pooled_labels:
+                pooled_buckets = {}
+                for item in valid:
+                    for index, count in item.get("detail_visibility_bucket_sets", {}).get(bucket_key, {}).items():
+                        pooled_buckets[index] = pooled_buckets.get(index, 0) + count
+                count = sum(pooled_buckets.values())
+                if not count:
+                    summaries.append(f"  - pooled {label}: no samples")
+                    continue
+                percentiles = []
+                for fraction_value in (0.50, 0.95, 0.99):
+                    value, _ = percentile_with_censoring(pooled_buckets, fraction_value)
+                    percentiles.append("n/a" if value is None else f"{value / 1000.0:.2f} ms")
+                summaries.append(
+                    f"  - pooled {label}: n={count}; p50/p95/p99 upper-bound estimates "
+                    + "/".join(percentiles)
+                )
+        text += ["### Issue #550 six-run gate", "", *summaries, ""]
     if invalid:
         text += ["### INVALID runs, excluded from the statistics", "", *[f"- {run['run']}: INVALID, {run['invalid']}" for run in invalid], ""]
     renderers = sorted({run["renderer"] for run in all_runs if run["renderer"]})
@@ -547,6 +905,118 @@ def self_test():
         assert "| optimum | 2 | meter |" in text and "| vanilla | 2 | meter |" in text, text
         assert "optimum-02: the player outran chunk loading" in text, text
         assert "frames over 50 ms per 100 blocks" in text and "vanilla-01: measured from 512000.0,160.0,512000.0, 520 blocks at 26.0 blocks/s" in text, text
+
+    # Visibility telemetry excludes partial flight-edge windows and decides the 250 ms rule exactly.
+    with tempfile.TemporaryDirectory() as root:
+        start = datetime.datetime(2026, 11, 12, 10, 0, 0).timestamp()
+        end = start + 60
+
+        def bucket_text(values):
+            counts = {}
+            for value in values:
+                if value < SUB_BUCKETS:
+                    index = value
+                else:
+                    msb = value.bit_length() - 1
+                    index = ((msb - 1) << SUB_BUCKET_BITS) + ((value >> (msb - SUB_BUCKET_BITS)) & (SUB_BUCKETS - 1))
+                counts[index] = counts.get(index, 0) + 1
+            return ",".join(f"{index}:{count}" for index, count in sorted(counts.items()))
+
+        def visibility_line(window_start, window_end, below, logged_delay=0):
+            inside = [10_000] * below + [300_000] * (100 - below)
+            outside = [300_000] * 5
+            after_upload = [16_000] * 20
+            after_no_upload = [20_000] * 20
+            time_text = datetime.datetime.fromtimestamp(window_end + logged_delay).strftime("%d.%m.%Y %H:%M:%S")
+            return (
+                f"{time_text} [Notification] streamWindowStartEpochMs={round(window_start * 1000)}, "
+                f"streamWindowEndEpochMs={round(window_end * 1000)}, Optimum chunk stream: "
+                f"frameUs=n1/p50 16000/p95 16000/p99 16000/max 16000, frameBuckets={bucket_text([16_000])}, "
+                f"inFrustumQueueAgeUs=n100/p50 10000/p95 300000/p99 300000/max 300000, "
+                f"inFrustumQueueAgeBuckets={bucket_text(inside)}, "
+                f"outOfFrustumQueueAgeUs=n5/p50 300000/p95 300000/p99 300000/max 300000, "
+                f"outOfFrustumQueueAgeBuckets={bucket_text(outside)}, "
+                f"frameAfterUploadUs=n20/p50 16000/p95 16000/p99 16000/max 16000, "
+                f"frameAfterUploadBuckets={bucket_text(after_upload)}, "
+                f"frameAfterNoUploadUs=n20/p50 20000/p95 20000/p99 20000/max 20000, "
+                f"frameAfterNoUploadBuckets={bucket_text(after_no_upload)}, "
+                f"visibilityCaptureUs=n1/p50 1/p95 1/p99 1/max 1, visibilityCaptureBuckets=1:1, "
+                f"visibilityClassifyUs=n1/p50 1/p95 1/p99 1/max 1, visibilityClassifyBuckets=1:1, "
+                f"visibilityRecordUs=n1/p50 1/p95 1/p99 1/max 1, visibilityRecordBuckets=1:1, "
+                f"visibilityAttempted=105, visibilityCaptured=105, visibilityInside=100, visibilityOutside=5, "
+                f"visibilityCapacityDropped=0, visibilityUnclassified=0, visibilityPending=0, "
+                f"visibilityBelow250Ms={below}, visibilityClassificationFailures=0, visibilityContractFailures=0\n"
+            )
+
+        log_path = os.path.join(root, "client-main.log")
+        with open(log_path, "w", encoding="utf-8") as handle:
+            handle.write(visibility_line(start - 0.001, start + 4.999, 0))  # Rounded log time, partial warm-up window.
+            for i in range(12):
+                window_start = start + i * WINDOW_SECONDS
+                handle.write(visibility_line(window_start, window_start + WINDOW_SECONDS, 95, logged_delay=2))
+            handle.write(visibility_line(end - 4.999, end + 0.001, 0))  # Rounded log time, partial post-flight window.
+        complete = stream_windows(log_path, start, end, complete_only=True)
+        assert len(complete) == 12, len(complete)
+        passing = summarize_visibility_windows(complete, 60)
+        assert passing["coverage_seconds"] == 60 and not passing["invalid_reasons"], passing
+        assert passing["below_250_fraction"] == 0.95 and passing["threshold_pass"], passing
+        assert covered_seconds([
+            {"start_epoch": 0, "end_epoch": 5},
+            {"start_epoch": 4, "end_epoch": 10},
+            {"start_epoch": 12, "end_epoch": 13},
+        ]) == 11
+        gapped = complete[:5] + complete[6:]
+        gap_summary = summarize_visibility_windows(gapped, 60, required=True)
+        assert any("internal gap" in reason for reason in gap_summary["invalid_reasons"]), gap_summary
+        edge_missing = summarize_visibility_windows(complete[2:], 60, required=True, flight_start=start, flight_end=end)
+        assert any("starts more than one window" in reason for reason in edge_missing["invalid_reasons"]), edge_missing
+        bucket_mismatch = [{**window, "hist": dict(window["hist"]), "buckets": dict(window["buckets"])} for window in complete]
+        bucket_mismatch[0]["buckets"]["frameAfterUploadBuckets"] = {}
+        mismatch_summary = summarize_visibility_windows(bucket_mismatch, 60, required=True)
+        assert any("frameAfterUploadUs reports 20 samples but frameAfterUploadBuckets accounts for 0" in reason
+                   for reason in mismatch_summary["invalid_reasons"]), mismatch_summary
+
+        failing_windows = [{**window, "values": dict(window["values"])} for window in complete]
+        for window in failing_windows:
+            window["values"]["visibilityBelow250Ms"] = 94
+        failing = summarize_visibility_windows(failing_windows, 60)
+        assert failing["below_250_fraction"] == 0.94 and not failing["threshold_pass"], failing
+        assert not failing["invalid_reasons"] and failing["threshold_failure"], failing
+        short_required = summarize_visibility_windows(complete, 30, required=True)
+        assert any("must be 60s" in reason for reason in short_required["invalid_reasons"]), short_required
+        missing_required = summarize_visibility_windows([], 60, required=True)
+        assert missing_required["present"] and missing_required["invalid_reasons"], missing_required
+
+        # A valid below-threshold run is a FAIL within the six-run decision, not invalid evidence.
+        runs_root = os.path.join(root, "runs")
+        os.makedirs(runs_root)
+        for i in range(6):
+            run_dir = os.path.join(runs_root, f"optimum-{i + 1:02d}")
+            os.makedirs(run_dir)
+            with open(os.path.join(run_dir, "markers.env"), "w", encoding="utf-8") as handle:
+                handle.write(f"ARM=optimum\nFLIGHT_START_EPOCH={start}\nFLIGHT_END_EPOCH={end}\nREQUIRE_UPLOAD_VISIBILITY=1\nMIN_BLOCKS=0\n")
+            with open(os.path.join(run_dir, "client-main.log"), "w", encoding="utf-8") as handle:
+                for window_index in range(12):
+                    window_start = start + window_index * WINDOW_SECONDS
+                    below = 94 if i == 2 else 95
+                    handle.write(visibility_line(window_start, window_start + WINDOW_SECONDS, below, logged_delay=2))
+        required_runs = [summarise_run(path) for path in sorted(glob.glob(os.path.join(runs_root, "*")))]
+        required_flat = flatten(required_runs, choose_source(required_runs)[0])
+        failing = next(run for run in required_flat if run["run"] == "optimum-03")
+        assert "invalid" not in failing and not failing["detail_visibility_threshold_pass"], failing
+        report = render(required_flat)
+        assert "optimum: FAIL all six per-run gates" in report and "INCOMPLETE" not in report, report
+        assert "optimum-03: visibility windows 12 / 60.000 s" in report and "Threshold: only 94.000%" in report, report
+        assert "pooled in-frustum queue age: n=7200; p50/p95/p99 upper-bound estimates" in report, report
+
+    with tempfile.TemporaryDirectory() as root:
+        run_dir = os.path.join(root, "required-01")
+        os.makedirs(run_dir)
+        with open(os.path.join(run_dir, "markers.env"), "w", encoding="utf-8") as handle:
+            handle.write("ARM=optimum\nFLIGHT_START_EPOCH=1794400000\nFLIGHT_END_EPOCH=1794400060\nREQUIRE_UPLOAD_VISIBILITY=1\nMIN_BLOCKS=0\n")
+        missing = summarise_run(run_dir)
+        report = render(flatten([missing], None))
+        assert "required-01: INVALID" in report and "INCOMPLETE, 0/6 runs valid" in report, report
     print("self-test ok")
     return 0
 

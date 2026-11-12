@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..1d0816f 100644
+index 5714490..81c6780 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 @@ -1,22 +1,48 @@
@@ -53,7 +53,7 @@ index 5714490..1d0816f 100644
  
  	private Vec3i chunkPos = new Vec3i();
  
-@@ -24,20 +50,40 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -24,25 +50,81 @@ public class ChunkTesselatorManager : ClientSystem
  
  	private int singleUploadDelayCounter;
  
@@ -69,11 +69,43 @@ index 5714490..1d0816f 100644
 +	// torn down, where the previous unconditional game.EntityPlayer.Pos
 +	// read threw and stalled tessellation.
 +	private Vec3d _lastSortPlayerPos;
++	private Vec3d _lastSortCameraPos;
 +	private float _lastSortYaw;
++	private float _lastSortPitch;
++	private EnumCameraMode _lastSortCameraMode;
++	private float _lastSortCameraFov;
++	private float _lastSortCameraZNear;
++	private float _lastSortCameraZFar;
++	private int _lastSortScreenWidth;
++	private int _lastSortScreenHeight;
 +	private bool queueNeedsSort;
++	private bool _prioritySortFrustumRefreshPending;
 +	private Action<TesselatedChunk> _optimumRecalcPriority;
 +	private const double SortMoveThresholdSq = 0.25;
 +	private const float SortYawThreshold = 0.05f;
++	private const float SortPitchThreshold = 0.05f;
++	private const int PriorityAgeUnitsPerSecond = 100000;
++	private long prioritySortTimestamp;
++	private double priorityAgeUnitsPerTick;
++
++	// Opt-in visibility telemetry uses fixed storage with no per-upload garbage.
++	private const int optimumVisibilitySampleCapacity = 4096;
++	private Sphere[] optimumVisibilityBounds;
++	private long[] optimumVisibilityQueueAgeTicks;
++	private byte[] optimumVisibilityClassifications;
++	private int optimumVisibilitySampleCount;
++	private int optimumVisibilityAttempted;
++	private int optimumVisibilityCapacityDropped;
++	private long optimumVisibilityCaptureTicks;
++	private bool optimumVisibilityRendererRegistered;
++	private DummyRenderer optimumVisibilityRenderer;
++	private bool optimumVisibilityFailureLogged;
++	private bool optimumHasPreviousUploadFrame;
++	private bool optimumPreviousFrameUploaded;
++	private float optimumVisibilityFrameDeltaSeconds;
++	private bool optimumVisibilityFrameHasPrevious;
++	private bool optimumVisibilityFramePreviousUploaded;
++	private bool optimumVisibilityFramePending;
 +
  	public static long cumulativeTime;
  
@@ -90,11 +122,20 @@ index 5714490..1d0816f 100644
 +		Volatile.Write(ref uploadCapacity, OptimumConfig.GetTesselationUploadCapacity(ClientSettings.ViewDistance, 0));
 +		OptimumDiagnostics.RecordTessHandoffCapacity(Volatile.Read(ref uploadCapacity));
  		game.eventManager.RegisterRenderer(OnBeforeFrame, EnumRenderStage.Before, "chtema", 0.99);
++		game.api.Event.LeaveWorld += OnOptimumLeaveWorld;
  	}
  
  	public override void Dispose(ClientMain game)
  	{
-@@ -50,93 +96,167 @@ public class ChunkTesselatorManager : ClientSystem
++		OptimumFlushPendingVisibilityFrame(classificationFailed: true);
++		game.api.Event.LeaveWorld -= OnOptimumLeaveWorld;
++		OptimumUnregisterVisibilityRenderer();
+ 		game.ShouldTesselateTerrain = false;
+ 		lock (tessChunksQueueLock)
+ 		{
+ 			tessChunksQueue?.Clear();
+ 			tessChunksQueue = null;
+@@ -50,93 +132,419 @@ public class ChunkTesselatorManager : ClientSystem
  		lock (tessChunksQueuePriorityLock)
  		{
  			tessChunksQueuePriority?.Clear();
@@ -117,7 +158,26 @@ index 5714490..1d0816f 100644
  	public void OnBeforeFrame(float dt)
  	{
 +		long uploadStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
-+		OptimumChunkStreamStats.RecordFrame(dt);
++		bool telemetryEnabled = OptimumChunkStreamStats.Enabled;
++		if (telemetryEnabled)
++		{
++			OptimumEnsureVisibilityRenderer();
++			OptimumFlushPendingVisibilityFrame(classificationFailed: true);
++			optimumVisibilityAttempted = 0;
++			optimumVisibilityCapacityDropped = 0;
++			optimumVisibilityCaptureTicks = 0;
++		}
++		else
++		{
++			OptimumFlushPendingVisibilityFrame(classificationFailed: true);
++			OptimumUnregisterVisibilityRenderer();
++			optimumHasPreviousUploadFrame = false;
++			optimumPreviousFrameUploaded = false;
++		}
++		optimumVisibilityFrameDeltaSeconds = telemetryEnabled ? dt : 0f;
++		optimumVisibilityFrameHasPrevious = telemetryEnabled && optimumHasPreviousUploadFrame;
++		optimumVisibilityFramePreviousUploaded = telemetryEnabled && optimumPreviousFrameUploaded;
++		optimumVisibilityFramePending = telemetryEnabled;
 +		long optimumStreamStart = OptimumChunkStreamStats.Now();
 +		int optimumUploaded = 0;
 +		int queueBacklog = (tessChunksQueuePriority != null ? tessChunksQueuePriority.Count : 0) + (tessChunksQueue != null ? tessChunksQueue.Count : 0);
@@ -146,9 +206,15 @@ index 5714490..1d0816f 100644
  					ClientChunk chunkAtBlockPos = game.WorldMap.GetChunkAtBlockPos(tesselatedChunk.positionX, tesselatedChunk.positionYAndDimension, tesselatedChunk.positionZ);
  					if (chunkAtBlockPos != null)
  					{
-+						OptimumDiagnostics.RecordTessUpload(System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp);
++						long uploadQueueAgeTicks = System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp;
++						Sphere uploadBounds = telemetryEnabled ? tesselatedChunk.boundingSphere : default;
++						OptimumDiagnostics.RecordTessUpload(uploadQueueAgeTicks);
 +						long optimumChunkStart = OptimumChunkStreamStats.Now();
  						game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos);
++						if (telemetryEnabled)
++						{
++							OptimumCaptureVisibilitySample(uploadQueueAgeTicks, uploadBounds);
++						}
 +						OptimumChunkStreamStats.RecordUploadChunk(optimumChunkStart);
 +						optimumUploaded++;
  						singleUploadDelayCounter = 10;
@@ -182,25 +248,62 @@ index 5714490..1d0816f 100644
  		{
 -			tessChunksQueue.RunForEach(delegate(TesselatedChunk eachTC)
 +			var plr = game.EntityPlayer;
-+			bool moved = plr != null
++			var cameraPlayer = game.player;
++			bool cameraPoseChanged = plr != null && cameraPlayer != null
++				&& (_lastSortPlayerPos == null
++					|| plr.Pos.X != _lastSortPlayerPos.X
++					|| plr.Pos.Y != _lastSortPlayerPos.Y
++					|| plr.Pos.Z != _lastSortPlayerPos.Z
++					|| _lastSortCameraPos == null
++					|| game.MainCamera.CameraEyePos.X != _lastSortCameraPos.X
++					|| game.MainCamera.CameraEyePos.Y != _lastSortCameraPos.Y
++					|| game.MainCamera.CameraEyePos.Z != _lastSortCameraPos.Z
++					|| cameraPlayer.CameraMode != _lastSortCameraMode
++					|| cameraPlayer.CameraYaw != _lastSortYaw
++					|| cameraPlayer.CameraPitch != _lastSortPitch);
++			bool cameraChanged = plr != null && cameraPlayer != null
 +				&& (_lastSortPlayerPos == null
 +					|| plr.Pos.SquareDistanceTo(_lastSortPlayerPos) >= SortMoveThresholdSq
-+					|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, plr.Pos.Yaw)) >= SortYawThreshold);
-+			if (moved || (plr != null && queueNeedsSort))
-+			{
-+				queueNeedsSort = false;
-+				tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);
-+				tessChunksQueue.Sort();
-+				_lastSortPlayerPos = (_lastSortPlayerPos ?? new Vec3d()).Set(plr.Pos.X, plr.Pos.Y, plr.Pos.Z);
-+				_lastSortYaw = plr.Pos.Yaw;
-+				OptimumDiagnostics.ChunkUploadSort.Hit();
-+			}
-+			else
++					|| _lastSortCameraPos == null
++					|| game.MainCamera.CameraEyePos.SquareDistanceTo(_lastSortCameraPos) >= SortMoveThresholdSq
++					|| cameraPlayer.CameraMode != _lastSortCameraMode
++					|| Math.Abs(GameMath.AngleRadDistance(_lastSortYaw, cameraPlayer.CameraYaw)) >= SortYawThreshold
++					|| Math.Abs(GameMath.AngleRadDistance(_lastSortPitch, cameraPlayer.CameraPitch)) >= SortPitchThreshold);
++			bool projectionChanged = _lastSortCameraFov != game.MainCamera.Fov
++				|| _lastSortCameraZNear != game.MainCamera.ZNear
++				|| _lastSortCameraZFar != game.MainCamera.ZFar
++				|| _lastSortScreenWidth != game.Width
++				|| _lastSortScreenHeight != game.Height;
++			bool queueSortRequested = queueNeedsSort;
++			bool sortRequested = cameraChanged || queueSortRequested || projectionChanged;
++			if (plr != null && cameraPlayer != null && (sortRequested || _prioritySortFrustumRefreshPending))
  			{
 -				eachTC.RecalcPriority(game.player);
 -			});
 -			tessChunksQueue.Sort();
 -			while (tessChunksQueue.Count > 0 && num2 < num3)
++				queueNeedsSort = false;
++				prioritySortTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
++				priorityAgeUnitsPerTick = PriorityAgeUnitsPerSecond / (double)System.Diagnostics.Stopwatch.Frequency;
++				tessChunksQueue.RunForEach(_optimumRecalcPriority ??= OptimumRecalcPriority);
++				tessChunksQueue.Sort();
++				_lastSortPlayerPos = (_lastSortPlayerPos ?? new Vec3d()).Set(plr.Pos.X, plr.Pos.Y, plr.Pos.Z);
++				_lastSortCameraPos = (_lastSortCameraPos ?? new Vec3d()).Set(game.MainCamera.CameraEyePos.X, game.MainCamera.CameraEyePos.Y, game.MainCamera.CameraEyePos.Z);
++				_lastSortCameraMode = cameraPlayer.CameraMode;
++				_lastSortYaw = cameraPlayer.CameraYaw;
++				_lastSortPitch = cameraPlayer.CameraPitch;
++				_lastSortCameraFov = game.MainCamera.Fov;
++				_lastSortCameraZNear = game.MainCamera.ZNear;
++				_lastSortCameraZFar = game.MainCamera.ZFar;
++				_lastSortScreenWidth = game.Width;
++				_lastSortScreenHeight = game.Height;
++				// The Before callback runs before vanilla refreshes the frustum planes.
++				// Re-sort once next frame so a stopped camera uses the newly calculated planes.
++				_prioritySortFrustumRefreshPending = cameraChanged || projectionChanged || (queueSortRequested && cameraPoseChanged);
++				OptimumDiagnostics.ChunkUploadSort.Hit();
++			}
++			else
++			{
 +				OptimumDiagnostics.ChunkUploadSort.Skip();
 +			}
 +			while (tessChunksQueue.Count > 0 && num2 < num3 && (System.Diagnostics.Stopwatch.GetTimestamp() - uploadStartTicks) < maxUploadTicks)
@@ -210,9 +313,15 @@ index 5714490..1d0816f 100644
  				ClientChunk chunkAtBlockPos2 = game.WorldMap.GetChunkAtBlockPos(tesselatedChunk.positionX, tesselatedChunk.positionYAndDimension, tesselatedChunk.positionZ);
  				if (chunkAtBlockPos2 != null)
  				{
-+					OptimumDiagnostics.RecordTessUpload(System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp);
++					long uploadQueueAgeTicks = System.Diagnostics.Stopwatch.GetTimestamp() - tesselatedChunk.readyToUploadTimestamp;
++					Sphere uploadBounds = telemetryEnabled ? tesselatedChunk.boundingSphere : default;
++					OptimumDiagnostics.RecordTessUpload(uploadQueueAgeTicks);
 +					long optimumChunkStart = OptimumChunkStreamStats.Now();
  					game.chunkRenderer.AddTesselatedChunk(tesselatedChunk, chunkAtBlockPos2);
++					if (telemetryEnabled)
++					{
++						OptimumCaptureVisibilitySample(uploadQueueAgeTicks, uploadBounds);
++					}
 +					OptimumChunkStreamStats.RecordUploadChunk(optimumChunkStart);
 +					optimumUploaded++;
  					num2 += tesselatedChunk.VerticesCount;
@@ -228,9 +337,191 @@ index 5714490..1d0816f 100644
 +		OptimumFrameUploadDone(optimumStreamStart, optimumUploaded, dt);
 +	}
 +
++	private void OptimumEnsureVisibilityRenderer()
++	{
++		if (optimumVisibilityRendererRegistered || !OptimumChunkStreamStats.Enabled)
++		{
++			return;
++		}
++
++		optimumVisibilityBounds ??= new Sphere[optimumVisibilitySampleCapacity];
++		optimumVisibilityQueueAgeTicks ??= new long[optimumVisibilitySampleCapacity];
++		optimumVisibilityClassifications ??= new byte[optimumVisibilitySampleCapacity];
++		optimumVisibilityRenderer ??= new DummyRenderer
++		{
++			RenderOrder = 0.05,
++			action = OnOptimumAfterFrustum
++		};
++		game.eventManager.RegisterRenderer(optimumVisibilityRenderer, EnumRenderStage.Opaque, "optimum-frustum");
++		optimumVisibilityRendererRegistered = true;
++	}
++
++	private void OptimumUnregisterVisibilityRenderer()
++	{
++		if (!optimumVisibilityRendererRegistered || optimumVisibilityRenderer == null)
++		{
++			return;
++		}
++
++		game.eventManager.UnregisterRenderer(optimumVisibilityRenderer, EnumRenderStage.Opaque);
++		optimumVisibilityRendererRegistered = false;
++	}
++
++	private void OptimumCaptureVisibilitySample(long queueAgeTicks, Sphere bounds)
++	{
++		long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++		optimumVisibilityAttempted++;
++		if (optimumVisibilitySampleCount >= optimumVisibilitySampleCapacity)
++		{
++			optimumVisibilityCapacityDropped++;
++			optimumVisibilityCaptureTicks += System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
++			return;
++		}
++
++		int index = optimumVisibilitySampleCount++;
++		optimumVisibilityQueueAgeTicks[index] = queueAgeTicks;
++		optimumVisibilityBounds[index] = bounds;
++		optimumVisibilityClassifications[index] = 2;
++		optimumVisibilityCaptureTicks += System.Diagnostics.Stopwatch.GetTimestamp() - startTicks;
++	}
++
++	private void OnOptimumAfterFrustum(float dt)
++	{
++		if (!OptimumChunkStreamStats.Enabled)
++		{
++			OptimumFlushPendingVisibilityFrame(classificationFailed: true);
++			OptimumUnregisterVisibilityRenderer();
++			return;
++		}
++
++		long classifyStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
++		bool classificationFailed = false;
++		try
++		{
++			for (int i = 0; i < optimumVisibilitySampleCount; i++)
++			{
++				Sphere bounds = optimumVisibilityBounds[i];
++				if (!OptimumIsValidVisibilityBounds(bounds))
++				{
++					classificationFailed = true;
++					optimumVisibilityClassifications[i] = 2;
++					OptimumLogVisibilityFailure("a chunk mesh had non-finite coordinates or negative bounds");
++					continue;
++				}
++
++				optimumVisibilityClassifications[i] = OptimumFrustumCullSimd.InFrustumForTelemetry(game.frustumCuller, bounds) ? (byte)0 : (byte)1;
++			}
++		}
++		catch (Exception exception)
++		{
++			classificationFailed = true;
++			OptimumLogVisibilityFailure(exception.ToString());
++			for (int i = 0; i < optimumVisibilitySampleCount; i++)
++			{
++				optimumVisibilityClassifications[i] = 2;
++			}
++		}
++		finally
++		{
++			long classifyDurationTicks = System.Diagnostics.Stopwatch.GetTimestamp() - classifyStartTicks;
++			OptimumRecordVisibilityFrame(classifyDurationTicks, classificationFailed);
++		}
++	}
++
++	private static bool OptimumIsValidVisibilityBounds(Sphere bounds)
++	{
++		return float.IsFinite(bounds.x)
++			&& float.IsFinite(bounds.y)
++			&& float.IsFinite(bounds.z)
++			&& float.IsFinite(bounds.radius)
++			&& float.IsFinite(bounds.radiusY)
++			&& float.IsFinite(bounds.radiusZ)
++			&& bounds.radius >= 0f
++			&& bounds.radiusY >= 0f
++			&& bounds.radiusZ >= 0f;
++	}
++
++	private void OptimumLogVisibilityFailure(string detail)
++	{
++		if (optimumVisibilityFailureLogged)
++		{
++			return;
++		}
++
++		optimumVisibilityFailureLogged = true;
++		game.Logger.Warning("[Optimum] Upload-visibility telemetry classification failed: {0}", detail);
++	}
++
++	private void OptimumRecordVisibilityFrame(long classifyDurationTicks, bool classificationFailed)
++	{
++		int captured = optimumVisibilitySampleCount;
++		if (OptimumChunkStreamStats.Enabled)
++		{
++			ReadOnlySpan<long> ages = captured == 0 ? ReadOnlySpan<long>.Empty : optimumVisibilityQueueAgeTicks.AsSpan(0, captured);
++			ReadOnlySpan<byte> classifications = captured == 0 ? ReadOnlySpan<byte>.Empty : optimumVisibilityClassifications.AsSpan(0, captured);
++			OptimumChunkStreamStats.RecordUploadVisibilityFrame(
++				optimumVisibilityAttempted,
++				captured,
++				optimumVisibilityCapacityDropped,
++				ages,
++				classifications,
++				optimumVisibilityCaptureTicks,
++				classifyDurationTicks,
++				classificationFailed,
++				optimumVisibilityFrameDeltaSeconds,
++				optimumVisibilityFrameHasPrevious,
++				optimumVisibilityFramePreviousUploaded);
++		}
++
++		optimumVisibilitySampleCount = 0;
++		optimumVisibilityAttempted = 0;
++		optimumVisibilityCapacityDropped = 0;
++		optimumVisibilityCaptureTicks = 0;
++		optimumVisibilityFrameDeltaSeconds = 0f;
++		optimumVisibilityFrameHasPrevious = false;
++		optimumVisibilityFramePreviousUploaded = false;
++		optimumVisibilityFramePending = false;
++	}
++
++	private void OptimumFlushPendingVisibilityFrame(bool classificationFailed)
++	{
++		if (optimumVisibilityAttempted == 0 && optimumVisibilitySampleCount == 0 && optimumVisibilityCapacityDropped == 0 && !optimumVisibilityFramePending)
++		{
++			return;
++		}
++
++		for (int i = 0; i < optimumVisibilitySampleCount; i++)
++		{
++			optimumVisibilityClassifications[i] = 2;
++		}
++		OptimumRecordVisibilityFrame(0, classificationFailed);
++	}
++
++	private void OnOptimumLeaveWorld()
++	{
++		OptimumFlushPendingVisibilityFrame(classificationFailed: true);
++		OptimumUnregisterVisibilityRenderer();
++		optimumHasPreviousUploadFrame = false;
++		optimumPreviousFrameUploaded = false;
++		optimumVisibilityFailureLogged = false;
++	}
++
 +	private void OptimumRecalcPriority(TesselatedChunk chunk)
 +	{
 +		chunk.RecalcPriority(game.player);
++		// Old off-screen work must not jump ahead of meshes the player can see.
++		bool hasQueueAge = chunk.readyToUploadTimestamp > 0
++			&& prioritySortTimestamp > chunk.readyToUploadTimestamp;
++		bool inLatestFrustum = hasQueueAge
++			&& game.frustumCuller != null
++			&& OptimumIsValidVisibilityBounds(chunk.boundingSphere)
++			&& OptimumFrustumCullSimd.InFrustumForTelemetry(game.frustumCuller, chunk.boundingSphere);
++		chunk.priority = OptimumChunkUploadPriority.ApplyAge(
++			chunk.priority,
++			chunk.readyToUploadTimestamp,
++			prioritySortTimestamp,
++			priorityAgeUnitsPerTick,
++			inLatestFrustum);
 +	}
 +
 +	// Occupancy is the real queue length, so it cannot drift from what is waiting for upload.
@@ -239,6 +530,8 @@ index 5714490..1d0816f 100644
 +	private void OptimumFrameUploadDone(long streamStart, int uploaded, float dt)
 +	{
 +		OptimumChunkStreamStats.RecordUploadFrame(streamStart, uploaded);
++		optimumHasPreviousUploadFrame = OptimumChunkStreamStats.Enabled;
++		optimumPreviousFrameUploaded = OptimumChunkStreamStats.Enabled && uploaded > 0;
 +		int occupancy = (tessChunksQueuePriority?.Count ?? 0) + (tessChunksQueue?.Count ?? 0);
 +		OptimumDiagnostics.RecordTessHandoffReserved(occupancy);
 +		OptimumInflowPacer.Shared.PublishClientSample(occupancy, Volatile.Read(ref uploadCapacity), dt * 1000f);
@@ -271,7 +564,7 @@ index 5714490..1d0816f 100644
  		{
  			recycler?.DoRecycling();
  			return;
-@@ -176,10 +296,14 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -176,10 +584,14 @@ public class ChunkTesselatorManager : ClientSystem
  		int num4 = (game.frustumCuller.ViewDistanceSq + 16800) * 3 / 2;
  		int num5 = 0;
  		num2 = game.dirtyChunks.Count;
@@ -286,7 +579,7 @@ index 5714490..1d0816f 100644
  				return;
  			}
  			lock (game.dirtyChunksLock)
-@@ -244,21 +368,22 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -244,21 +656,22 @@ public class ChunkTesselatorManager : ClientSystem
  	}
  
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
@@ -310,7 +603,7 @@ index 5714490..1d0816f 100644
  			if (!clientChunk.loadedFromServer)
  			{
  				requeue = true;
-@@ -308,13 +433,27 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -308,13 +721,27 @@ public class ChunkTesselatorManager : ClientSystem
  			num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
  		}
  		catch (RetryTesselationException)
@@ -338,7 +631,7 @@ index 5714490..1d0816f 100644
  			lock (tessChunksQueuePriorityLock)
  			{
  				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
-@@ -323,11 +462,15 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -323,11 +750,15 @@ public class ChunkTesselatorManager : ClientSystem
  		}
  		else
  		{

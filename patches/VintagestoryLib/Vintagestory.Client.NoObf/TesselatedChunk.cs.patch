@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-index bdcda35..d9a8eb1 100644
+index bdcda35..5530cc6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-@@ -24,10 +24,12 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -24,15 +24,17 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  
  	internal TesselatedChunkPart[] edgeParts;
  
@@ -14,7 +14,13 @@ index bdcda35..d9a8eb1 100644
  
  	public int CompareTo(TesselatedChunk obj)
  	{
- 		return priority - obj.priority;
+-		return priority - obj.priority;
++		return priority.CompareTo(obj.priority);
+ 	}
+ 
+ 	public bool MergeIfEqual(TesselatedChunk otc)
+ 	{
+ 		if (positionX == otc.positionX && positionYAndDimension == otc.positionYAndDimension && positionZ == otc.positionZ)
 @@ -45,10 +47,11 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  			if (otc.edgeParts != null)
  			{

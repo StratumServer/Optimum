@@ -41,15 +41,18 @@ public class OptimumStatusModSystem : ModSystem
             };
         }
 
-        // Chunk streaming statistics: OPTIMUM_CHUNK_STREAM_LOG=1 records upload, queue age and
-        // send distributions and logs one window every five seconds for the flight benchmark.
+        // Chunk streaming statistics: OPTIMUM_CHUNK_STREAM_LOG=1 records upload, visibility,
+        // frame-split, queue-age and send distributions every five seconds for the flight benchmark.
         if (System.Environment.GetEnvironmentVariable("OPTIMUM_CHUNK_STREAM_LOG") == "1")
         {
             OptimumChunkStreamStats.Enabled = true;
+            long chunkStreamWindowStartEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             api.Event.RegisterGameTickListener(_ =>
             {
-                api.Logger.Notification("[Optimum] " + OptimumChunkStreamStats.GetSummary());
-                OptimumChunkStreamStats.Reset();
+                string summary = OptimumChunkStreamStats.GetSummaryAndReset(out long windowEndEpochMs);
+                api.Logger.Notification("[Optimum] streamWindowStartEpochMs={0}, streamWindowEndEpochMs={1}, {2}",
+                    chunkStreamWindowStartEpochMs, windowEndEpochMs, summary);
+                chunkStreamWindowStartEpochMs = windowEndEpochMs;
             }, 5000);
             api.Event.LeaveWorld += () =>
             {

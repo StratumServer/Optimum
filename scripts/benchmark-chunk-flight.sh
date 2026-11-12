@@ -42,6 +42,8 @@
 #   --gpu-wrapper CMD       command that puts the client on the GPU (default: vglrun -d egl0 -c proxy)
 #   --mod-path DIR          directory with extra client mods, e.g. the frame meter, repeatable
 #   --mangohud              also log MangoHud (it does not hook a client run through VirtualGL)
+#   --require-upload-visibility  mark each run INVALID unless complete visibility telemetry is present
+#   --no-optimum-stream-log record a telemetry-disabled control run
 #   --allow-software-gl     measure on a software renderer (the run is refused otherwise)
 #   --output DIR            output directory
 # Environment: DISPLAY_NUM (default :99), RESOLUTION (default 1920x1080), SETTINGS_SOURCE.
@@ -67,6 +69,8 @@ SETTINGS_SOURCE="${SETTINGS_SOURCE:-$HOME/.config/VintagestoryData/clientsetting
 OPTIMUM_CONFIG="${OPTIMUM_CONFIG:-}"
 USE_MANGOHUD="${USE_MANGOHUD:-0}"
 ALLOW_SOFTWARE_GL="${ALLOW_SOFTWARE_GL:-0}"
+REQUIRE_UPLOAD_VISIBILITY="${REQUIRE_UPLOAD_VISIBILITY:-0}"
+OPTIMUM_STREAM_LOG="${OPTIMUM_STREAM_LOG:-1}"
 GPU_WRAPPER="${GPU_WRAPPER-auto}"
 ARM_SPECS=()
 MOD_PATHS=()
@@ -90,12 +94,23 @@ while [[ $# -gt 0 ]]; do
         --mod-path) MOD_PATHS+=("$2"); shift 2 ;;
         --mangohud) USE_MANGOHUD=1; shift ;;
         --no-mangohud) USE_MANGOHUD=0; shift ;;
+        --require-upload-visibility) REQUIRE_UPLOAD_VISIBILITY=1; OPTIMUM_STREAM_LOG=1; shift ;;
+        --no-optimum-stream-log) OPTIMUM_STREAM_LOG=0; shift ;;
         --allow-software-gl) ALLOW_SOFTWARE_GL=1; shift ;;
         --output) OUTPUT_DIR="$2"; shift 2 ;;
         -h|--help) sed -n '2,/^# Environment:/p' "${BASH_SOURCE[0]}"; exit 0 ;;
         *) echo "ERROR: unknown option $1" >&2; exit 2 ;;
     esac
 done
+
+if [[ "$REQUIRE_UPLOAD_VISIBILITY" == "1" && "$OPTIMUM_STREAM_LOG" != "1" ]]; then
+    echo "ERROR: --require-upload-visibility needs Optimum chunk stream logging." >&2
+    exit 2
+fi
+if [[ "$REQUIRE_UPLOAD_VISIBILITY" == "1" && ( "$DURATION" != "60" || "$RUNS" != "6" ) ]]; then
+    echo "ERROR: the issue #550 visibility gate requires exactly six 60-second runs." >&2
+    exit 2
+fi
 
 # About 82 percent of the calibrated 26.7 blocks per second.
 [[ -n "$MIN_BLOCKS" ]] || MIN_BLOCKS=$((DURATION * 22))
@@ -156,7 +171,10 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
-RENDERER="$(DISPLAY="$DISPLAY_NUM" "${WRAP[@]}" glxinfo -B 2>/dev/null | sed -n 's/^OpenGL renderer string: //p' | head -n 1)"
+GL_INFO="$(DISPLAY="$DISPLAY_NUM" "${WRAP[@]}" glxinfo -B 2>/dev/null || true)"
+RENDERER="$(sed -n 's/^OpenGL renderer string: //p' <<< "$GL_INFO" | head -n 1)"
+OPENGL_VENDOR="$(sed -n 's/^OpenGL vendor string: //p' <<< "$GL_INFO" | head -n 1)"
+OPENGL_VERSION="$(sed -n 's/^OpenGL core profile version string: //p' <<< "$GL_INFO" | head -n 1)"
 echo "GL renderer: ${RENDERER:-unknown}"
 if [[ "$ALLOW_SOFTWARE_GL" != "1" ]] && [[ -z "$RENDERER" || "$RENDERER" =~ [Ll]lvmpipe|[Ss]oftpipe|[Ss]wrast ]]; then
     echo "ERROR: the client would render on '${RENDERER:-no renderer}'. Software frame times say nothing about the GPU path. Use a GPU wrapper or pass --allow-software-gl." >&2
@@ -168,6 +186,8 @@ fi
     echo "revision=$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
     echo "dirty=$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null | wc -l)"
     echo "renderer=$RENDERER"
+    echo "opengl_vendor=$OPENGL_VENDOR"
+    echo "opengl_version=$OPENGL_VERSION"
     echo "gpu_wrapper=${WRAP[*]:-none}"
     echo "kernel=$(uname -sr)"
     echo "cpu=$(LC_ALL=C lscpu 2>/dev/null | sed -n 's/^Model name:[[:space:]]*//p' | head -n 1)"
@@ -237,13 +257,48 @@ with open(target, "w", encoding="utf-8") as handle:
     json.dump(settings, handle)
 PY
 
+    mkdir -p "$run_dir/evidence"
+    cp "$data/ModConfig/optimum.json" "$run_dir/evidence/optimum.json"
+    python3 - "$data/clientsettings.json" "$run_dir/evidence/clientsettings-effective.json" <<'PY'
+import json, sys
+source, target = sys.argv[1:3]
+with open(source, encoding="utf-8") as handle:
+    settings = json.load(handle)
+int_settings = settings.get("intSettings", {})
+keys = (
+    "viewDistance", "vsyncMode", "screenWidth", "screenHeight", "musicLevel", "soundLevel",
+    "entitySoundLevel", "ambientSoundLevel", "weatherSoundLevel", "masterSoundLevel",
+    "chunkVerticesUploadRateLimiter",
+)
+with open(target, "w", encoding="utf-8") as handle:
+    json.dump({key: int_settings.get(key) for key in keys}, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+PY
+sha256sum "$data/clientsettings.json" | awk '{print $1 "  clientsettings.json"}' > "$run_dir/evidence/config.sha256"
+sha256sum "$run_dir/evidence/optimum.json" | awk '{print $1 "  optimum.json"}' >> "$run_dir/evidence/config.sha256"
+while IFS= read -r -d '' assembly; do
+    assembly_hash="$(sha256sum "$assembly" | cut -d' ' -f1)"
+    printf '%s  %s\n' "$assembly_hash" "${assembly#"$dir"/}"
+done < <(find "$dir" -maxdepth 1 -type f -name '*.dll' -print0 | sort -z) > "$run_dir/evidence/assemblies.sha256"
+for mod_path in "${MOD_PATHS[@]}"; do
+    while IFS= read -r -d '' assembly; do
+        assembly_hash="$(sha256sum "$assembly" | cut -d' ' -f1)"
+        printf '%s  %s\n' "$assembly_hash" "${assembly#"$mod_path"/}"
+    done < <(find "$mod_path" -maxdepth 2 -type f -name '*.dll' -print0 | sort -z) >> "$run_dir/evidence/mod-assemblies.sha256"
+done
+
     echo "[$arm #$index] launching $dir"
     local mango=() mods=()
     if [[ "$USE_MANGOHUD" == "1" ]]; then mango=(mangohud --dlsym); fi
     for mod_path in "${MOD_PATHS[@]}"; do mods+=(--addModPath "$mod_path"); done
     (
         cd "$dir"
-        export DISPLAY="$DISPLAY_NUM" OPTIMUM_CHUNK_STREAM_LOG=1 CHUNKFLIGHT_SETUP="$SETUP"
+        export DISPLAY="$DISPLAY_NUM" CHUNKFLIGHT_SETUP="$SETUP"
+        if [[ "$OPTIMUM_STREAM_LOG" == "1" ]]; then
+            export OPTIMUM_CHUNK_STREAM_LOG=1
+        else
+            unset OPTIMUM_CHUNK_STREAM_LOG
+        fi
         if [[ "$USE_MANGOHUD" == "1" ]]; then
             export MANGOHUD=1 MANGOHUD_CONFIG="output_folder=$run_dir/mangohud,autostart_log=1,log_interval=0,no_display"
         fi
@@ -322,12 +377,11 @@ PY
     local start end
     DISPLAY="$DISPLAY_NUM" xdotool keydown Control_L keydown w
     sleep "$RAMP"
-    start="$(date +%s)"
-    sleep $((DURATION / 2))
-    DISPLAY="$DISPLAY_NUM" scrot "$run_dir/2_mid_flight.png" 2>/dev/null || true
+    start="$(date +%s.%3N)"
+    # Keep captures outside the timed interval; a synchronous screenshot stalls the measured client.
+    sleep "$DURATION"
     kill -0 "$pid" 2>/dev/null || fail_run "the client exited during the flight"
-    sleep $((DURATION - DURATION / 2))
-    end="$(date +%s)"
+    end="$(date +%s.%3N)"
     DISPLAY="$DISPLAY_NUM" scrot "$run_dir/3_after_flight.png" 2>/dev/null || true
     DISPLAY="$DISPLAY_NUM" xdotool keyup w keyup Control_L
     # One more window so the last flight window is in the log.
@@ -345,6 +399,14 @@ PY
         echo "SETUP=$SETUP"
         echo "WARMUP_SECONDS=$waited"
         echo "MIN_BLOCKS=$MIN_BLOCKS"
+        echo "REQUIRE_UPLOAD_VISIBILITY=$REQUIRE_UPLOAD_VISIBILITY"
+        echo "OPTIMUM_STREAM_LOG=$OPTIMUM_STREAM_LOG"
+        echo "RESOLUTION=$RESOLUTION"
+        echo "VIEW_DISTANCE=$VIEW_DISTANCE"
+        echo "GPU_WRAPPER=${WRAP[*]:-none}"
+        echo "OPENGL_VENDOR=$OPENGL_VENDOR"
+        echo "OPENGL_RENDERER=$RENDERER"
+        echo "OPENGL_VERSION=$OPENGL_VERSION"
     } > "$run_dir/markers.env"
     end_run
 }

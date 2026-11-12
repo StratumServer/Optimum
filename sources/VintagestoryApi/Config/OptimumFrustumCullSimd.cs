@@ -40,32 +40,36 @@ public static class OptimumFrustumCullSimd
         public Vector128<float> AbsNy0, AbsNy1;
         public Vector128<float> AbsNz0, AbsNz1;
 
-        private double _d0;
-        private double _d1;
-        private double _d2;
-        private double _d3;
-        private double _d4;
-        private double _d5;
+        private readonly double[] _planeValues = new double[24];
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsUpToDate(Plane[] planes)
         {
-            return _d0 == planes[0].D
-                && _d1 == planes[1].D
-                && _d2 == planes[2].D
-                && _d3 == planes[3].D
-                && _d4 == planes[4].D
-                && _d5 == planes[5].D;
+            for (int i = 0; i < 6; i++)
+            {
+                int offset = i * 4;
+                if (_planeValues[offset] != planes[i].normalX
+                    || _planeValues[offset + 1] != planes[i].normalY
+                    || _planeValues[offset + 2] != planes[i].normalZ
+                    || _planeValues[offset + 3] != planes[i].D)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public void Update(Plane[] planes)
         {
-            _d0 = planes[0].D;
-            _d1 = planes[1].D;
-            _d2 = planes[2].D;
-            _d3 = planes[3].D;
-            _d4 = planes[4].D;
-            _d5 = planes[5].D;
+            for (int i = 0; i < 6; i++)
+            {
+                int offset = i * 4;
+                _planeValues[offset] = planes[i].normalX;
+                _planeValues[offset + 1] = planes[i].normalY;
+                _planeValues[offset + 2] = planes[i].normalZ;
+                _planeValues[offset + 3] = planes[i].D;
+            }
 
             if (Vector256.IsHardwareAccelerated)
             {
@@ -407,6 +411,17 @@ public static class OptimumFrustumCullSimd
 
     public static bool InFrustum(FrustumCulling culler, Sphere sphere)
     {
+        return InFrustumCore(culler, sphere, recordDiagnostics: true);
+    }
+
+    /// <summary>Tests upload-visibility telemetry bounds without counting them as renderer culls.</summary>
+    internal static bool InFrustumForTelemetry(FrustumCulling culler, Sphere sphere)
+    {
+        return InFrustumCore(culler, sphere, recordDiagnostics: false);
+    }
+
+    private static bool InFrustumCore(FrustumCulling culler, Sphere sphere, bool recordDiagnostics)
+    {
         Plane[] planes = GetFrustum(culler);
         if (planes == null || planes.Length < 6)
         {
@@ -417,7 +432,10 @@ public static class OptimumFrustumCullSimd
         {
             var ctx = GetOrCreateContext(culler, planes);
             bool outside = ctx.IsOutside6(sphere.x, sphere.y, sphere.z, sphere.radius, sphere.radiusY, sphere.radiusZ);
-            OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
+            if (recordDiagnostics)
+            {
+                OptimumDiagnostics.RecordSimdFrustumTest(culled: outside);
+            }
             return !outside;
         }
 
