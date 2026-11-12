@@ -9,6 +9,22 @@ namespace Optimum.Tests;
 
 public sealed class CairoDebugStartupTests
 {
+    // A reference built through the solution lands in bin/Debug even when the tests are Release, so look for the
+    // configuration the tests run in first and then the other one.
+    private static string FindFixture()
+    {
+        string running = AppContext.BaseDirectory.Contains(Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar) ? "Release" : "Debug";
+        string other = running == "Release" ? "Debug" : "Release";
+        try
+        {
+            return PatchReader.FindRepositoryFile($"tools/Cairo.AbiFixture/bin/{running}/net10.0/Cairo.AbiFixture.dll");
+        }
+        catch (FileNotFoundException)
+        {
+            return PatchReader.FindRepositoryFile($"tools/Cairo.AbiFixture/bin/{other}/net10.0/Cairo.AbiFixture.dll");
+        }
+    }
+
     [Theory]
     [InlineData(null, false)]
     [InlineData("0", false)]
@@ -16,8 +32,7 @@ public sealed class CairoDebugStartupTests
     [InlineData("trace", true)]
     public async Task FreshProcessRespectsEnvironmentAndPublicEnableField(string? setting, bool expected)
     {
-        string configuration = AppContext.BaseDirectory.Contains(Path.DirectorySeparatorChar + "Release" + Path.DirectorySeparatorChar) ? "Release" : "Debug";
-        string fixture = PatchReader.FindRepositoryFile($"tools/Cairo.AbiFixture/bin/{configuration}/net10.0/Cairo.AbiFixture.dll");
+        string fixture = FindFixture();
         var start = new ProcessStartInfo("dotnet") { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         start.ArgumentList.Add(fixture); start.ArgumentList.Add("--debug-state");
         if (setting == null) start.Environment.Remove("CAIRO_DEBUG_DISPOSE");
