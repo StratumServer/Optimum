@@ -1635,9 +1635,10 @@ public sealed class CairoNativeFreeRecordedGuiTests
 			Assert.InRange (translucent.Green, 179, 181);
 			Assert.InRange (translucent.Blue, 89, 91);
 			Assert.Equal (0, CairoNativeGuard.DeniedCount);
-			if (CairoNativeGuard.Mode == "deny") {
-				InvalidOperationException exception = Assert.Throws<InvalidOperationException> (() => _ = surface.Handle);
-				Assert.Contains ("Cairo materialization is forbidden", exception.Message);
+			if (!CairoNativeGuard.NativeAllowed) {
+				// The wrapper refuses native handles the same way for surfaces, contexts and fonts.
+				NotSupportedException exception = Assert.Throws<NotSupportedException> (() => _ = surface.Handle);
+				Assert.Contains ("no native handle unless the libcairo compatibility backend is explicitly enabled", exception.Message);
 				Assert.Equal (0, CairoNativeGuard.DeniedCount);
 			}
 		}
@@ -1708,11 +1709,13 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		string corrupt = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "optimum-png-corrupt-" + Guid.NewGuid ().ToString ("N") + ".png");
 		try {
 			File.WriteAllBytes (malformed, new byte[] { 1, 2, 3, 4 });
-			File.WriteAllBytes (corrupt, Convert.FromBase64String ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/FZsAAAAASUVORK5CYII="));
+			File.WriteAllBytes (corrupt, Convert.FromBase64String (CorruptPng));
 			Surface.ConfigureAutomaticRecording (true);
 			AssertManagedPngErrorSurface (missing, Status.FileNotFound);
 			AssertManagedPngErrorSurface (malformed, Status.ReadError);
-			AssertManagedPngErrorSurface (corrupt, Status.PngError);
+			// libcairo 1.18.0 reports NoMemory for the corrupt image where 1.18.4 reports PngError, so the native
+			// half of this case lives in the version gated CorruptPngStatusMatchesPinnedNative.
+			AssertManagedPngErrorSurface (corrupt, Status.PngError, compareNative: false);
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
 			AssertNoCairoNativeLoad (deniedBefore);
 		} finally {
@@ -1722,7 +1725,24 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		}
 	}
 
-	static void AssertManagedPngErrorSurface (string filename, Status expectedStatus)
+	[NativeCairoExpectationFact]
+	public void CorruptPngStatusMatchesPinnedNative()
+	{
+		bool automaticRecording = Surface.AutomaticRecordingEnabled;
+		string corrupt = System.IO.Path.Combine (System.IO.Path.GetTempPath (), "optimum-png-corrupt-" + Guid.NewGuid ().ToString ("N") + ".png");
+		try {
+			File.WriteAllBytes (corrupt, Convert.FromBase64String (CorruptPng));
+			Surface.ConfigureAutomaticRecording (true);
+			AssertManagedPngErrorSurface (corrupt, Status.PngError);
+		} finally {
+			Surface.ConfigureAutomaticRecording (automaticRecording);
+			if (File.Exists (corrupt)) File.Delete (corrupt);
+		}
+	}
+
+	const string CorruptPng = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/FZsAAAAASUVORK5CYII=";
+
+	static void AssertManagedPngErrorSurface (string filename, Status expectedStatus, bool compareNative = true)
 	{
 		using var surface = new ImageSurface (filename);
 		Assert.Equal (expectedStatus, surface.Status);
@@ -1741,7 +1761,7 @@ public sealed class CairoNativeFreeRecordedGuiTests
 		context.Fill ();
 		Assert.Equal (expectedStatus, context.Status);
 		Assert.Equal (expectedStatus, surface.Finish ());
-		if (!CairoNativeGuard.NativeAllowed) return;
+		if (!compareNative || !CairoNativeGuard.NativeAllowed) return;
 
 		Surface.ConfigureAutomaticRecording (false);
 		using var nativeSurface = new ImageSurface (filename);

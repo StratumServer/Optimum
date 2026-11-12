@@ -39,7 +39,7 @@ public sealed class CairoFontSelectionParityTests
                 Assert.InRange (Math.Abs (native.Value.Height - actual.Height), 0, 1.0 / 256);
             }
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 
@@ -102,7 +102,7 @@ public sealed class CairoFontSelectionParityTests
                 for (int i = 0; i < pixels.Length; i += 4)
                     if (pixels[i] > 200 && pixels[i + 1] > 200 && pixels[i + 2] > 200) { hasText = true; break; }
                 Assert.True (hasText, "The default-family text did not produce white glyph pixels.");
-                Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+                CairoTestEnvironment.AssertLibcairoUnmapped ();
             }
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
         } finally { Surface.ConfigureAutomaticRecording (previous); }
@@ -130,7 +130,7 @@ public sealed class CairoFontSelectionParityTests
             Assert.Equal (expected, context.Status);
             if (expected == Status.Success) Assert.True (context.TextExtents ("Ab").XAdvance > 0);
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 }

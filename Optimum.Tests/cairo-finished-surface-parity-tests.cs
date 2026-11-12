@@ -31,7 +31,7 @@ public sealed class CairoFinishedSurfaceParityTests
             string[] actual = Exercise (operation);
             if (native != null) Assert.Equal (native, actual);
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 

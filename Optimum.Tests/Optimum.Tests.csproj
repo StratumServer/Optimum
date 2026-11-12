@@ -22,6 +22,18 @@
          all patches applied. Tests that reference its types live behind DONOR_AVAILABLE. -->
     <ProjectReference Include="..\build\VintagestoryLib\VintagestoryLib.csproj" Condition="'$(DonorAvailable)' == 'true'" />
   </ItemGroup>
+  <!-- The SVG tests P/Invoke nanosvg, which only ships with the game. Copy it next to the test assembly when
+       the bootstrapped game files are present; without it those tests report themselves as skipped. -->
+  <PropertyGroup>
+    <NanoSvgFileName Condition="$([MSBuild]::IsOSPlatform('Windows'))">nanosvg.dll</NanoSvgFileName>
+    <NanoSvgFileName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libnanosvg.dylib</NanoSvgFileName>
+    <NanoSvgFileName Condition="'$(NanoSvgFileName)' == ''">libnanosvg.so</NanoSvgFileName>
+    <NanoSvgPath Condition="Exists('..\.vanilla\win-x64\vintagestory\Lib\$(NanoSvgFileName)')">..\.vanilla\win-x64\vintagestory\Lib\$(NanoSvgFileName)</NanoSvgPath>
+    <NanoSvgPath Condition="'$(NanoSvgPath)' == '' And Exists('..\.vanilla\linux-x64\vintagestory\Lib\$(NanoSvgFileName)')">..\.vanilla\linux-x64\vintagestory\Lib\$(NanoSvgFileName)</NanoSvgPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(NanoSvgPath)' != ''">
+    <None Include="$(NanoSvgPath)" Link="$(NanoSvgFileName)" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
   <PropertyGroup Condition="'$(DonorAvailable)' != 'true'">
     <DefineConstants>$(DefineConstants);NO_DONOR</DefineConstants>
   </PropertyGroup>

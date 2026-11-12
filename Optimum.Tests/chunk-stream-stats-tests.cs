@@ -97,13 +97,21 @@ public class ChunkStreamStatsTests
         var histogram = new OptimumHistogram();
         histogram.Record(10);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 10_000; i++)
+        // The runtime can allocate on this thread while it tiers up the loop, so one clean pass is the proof:
+        // an allocation inside Record would show up in every pass.
+        long fewest = long.MaxValue;
+        for (int pass = 0; pass < 5 && fewest != 0; pass++)
         {
-            histogram.Record(i);
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 10_000; i++)
+            {
+                histogram.Record(i);
+            }
+
+            fewest = Math.Min(fewest, GC.GetAllocatedBytesForCurrentThread() - before);
         }
 
-        Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.Equal(0, fewest);
     }
 
     [Fact]

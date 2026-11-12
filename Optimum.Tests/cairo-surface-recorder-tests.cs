@@ -37,7 +37,7 @@ public sealed class CairoSurfaceRecorderTests
 		} finally { Surface.ConfigureAutomaticRecording (automatic); }
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ReplayMaterializesRecordedPrefixAndAllowsNativeDrawing()
 	{
 		using var recorded = new ImageSurface (Format.Argb32, 32, 24);
@@ -81,7 +81,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Equal (expected.Data, surface.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void CpuEscapeAfterGpuCommitReplaysRecordedPrefixIntoCairoSurface()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
@@ -175,7 +175,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.InRange (maxChannelDelta, 0, 3);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ActiveCairoSaveStackDoesNotBlockSkiaSnapshot()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 16, 12);
@@ -204,7 +204,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void HandleDataDataPointerAndPngBoundariesMaterializePrefix()
 	{
 		foreach (string boundary in new[] { "handle", "data", "pointer", "png" }) {
@@ -278,7 +278,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Null(recorder.FirstMaterializationTrigger);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void MaterializationDiagnosticsCountActualReplayOnceWithoutUpload()
 	{
 		using var observer = SubscribeMaterializationMetricsForTest ();
@@ -302,7 +302,7 @@ public sealed class CairoSurfaceRecorderTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void MaterializationDiagnosticsCountGpuReadbackAndFailedReplayExactlyOnce()
 	{
 		using var observer = SubscribeMaterializationMetricsForTest ();
@@ -341,7 +341,7 @@ public sealed class CairoSurfaceRecorderTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void MaterializationDiagnosticsBoundTriggerKindsAndReset()
 	{
 		using var observer = SubscribeMaterializationMetricsForTest ();
@@ -383,7 +383,7 @@ public sealed class CairoSurfaceRecorderTests
 		public void Dispose () => remove.Invoke (null, [callback]);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ExistingHandleOrContextMakesSurfaceIneligible()
 	{
 		using var raw = new ImageSurface (Format.Argb32, 4, 4);
@@ -395,7 +395,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Throws<InvalidOperationException> (() => shared.BeginRecording ());
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ExternalImageStorageRemainsPinnedAndIneligibleForRecording()
 	{
 		var pixels = new byte[8 * 8 * 4];
@@ -415,7 +415,7 @@ public sealed class CairoSurfaceRecorderTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void RecordingAndDisposalAreBoundToTheCreatingThread()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
@@ -459,7 +459,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Equal (SurfaceRecordingState.Disposed, surface.RecordingState);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void UnsupportedSurfaceKindsStayNativeAndDisposalIsIdempotent()
 	{
 		var native = new ImageSurface (Format.Argb32, 4, 4);
@@ -488,7 +488,7 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Throws<ObjectDisposedException> (() => recorder.FillRectangle (0, 0, 1, 1, 0, 0, 0, 1));
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void FailedMaterializationIsStableAndDisposalClearsIt()
 	{
 		var surface = new ImageSurface (Format.Argb32, 4, 4);

@@ -240,7 +240,7 @@ public sealed class CairoManagedGraphicsStateTests
 		}
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(1)]
 	[InlineData(2)]
 	[InlineData(3)]
@@ -267,7 +267,7 @@ public sealed class CairoManagedGraphicsStateTests
 		}
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(new double[0], 0.0)]
 	[InlineData(new[] { 3.0 }, 1.0)]
 	[InlineData(new[] { 3.0 }, -1.0)]
@@ -295,7 +295,7 @@ public sealed class CairoManagedGraphicsStateTests
 		} finally { Marshal.FreeHGlobal(buffer); }
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(-3.0)]
 	[InlineData(0.0)]
 	[InlineData(1e-9)]
@@ -311,7 +311,7 @@ public sealed class CairoManagedGraphicsStateTests
 		AssertSame(native, managed, "scalar " + value);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void RestoreWithoutSaveLatchesInvalidRestoreAndIgnoresLaterOperations()
 	{
 		using var surface = new ImageSurface(Format.Argb32, 4, 4);

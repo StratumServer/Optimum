@@ -94,7 +94,7 @@ public sealed class CairoRecorderTextTests
 		});
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData (1f, 1d, HintStyle.Default)]
 	[InlineData (1.5f, 1d, HintStyle.Default)]
 	[InlineData (2f, 1d, HintStyle.Default)]

@@ -11,7 +11,7 @@ public sealed class CairoContextRecorderTests
 {
 	static CairoContextRecorderTests () { _ = CairoAPI.Version; }
 
-	[Fact]
+	[NativeCairoFact]
 	public void SupportedContextOperationsStayRecordedAndMetadataDoesNotMaterialize()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 18, 14);
@@ -158,7 +158,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (cairoPixels, actual.Data);
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public void ArcPathConstructionStaysRecordedAndMatchesCairo(bool negative)
@@ -265,7 +265,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (new PointD (2, 3), context.CurrentPoint);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SolidColorSettersStayRecordedAndMatchCairoAndSkia()
 	{
 		Action<Context>[] setColors = {
@@ -364,7 +364,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Throws<ObjectDisposedException> (() => disposed.SetSourceRGBA ((float[])null));
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void DisposingRecordedContextLeavesDisplayListForGpuUploadOrLaterCairoReplay()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 12, 10);
@@ -388,7 +388,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (SurfaceRecordingState.NativeMaterialized, recorder.State);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ExposingRawContextHandleMaterializesRecordedCommands()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 10, 10);
@@ -430,7 +430,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void PushGroupMaterializesRecordedPrefixBeforeNativeGroupSetup()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 8, 8);
@@ -594,7 +594,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Null (actual.FirstMaterializationTrigger);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void CairoOnlyOperationsPreserveOutputAfterRecordedPrefix()
 	{
 		using var actual = new ImageSurface (Format.Argb32, 96, 64);
@@ -897,7 +897,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, actual.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SecondContextMaterializesCommandsIntoFirstContext()
 	{
 		using var surface = new ImageSurface (Format.Argb32, 12, 12);
@@ -918,7 +918,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, surface.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SetTargetMaterializesOldSurfaceAndAttachesNewRecorder()
 	{
 		using var oldSurface = new ImageSurface (Format.Argb32, 12, 12);
@@ -948,7 +948,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (expected.Data, newSurface.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void NativeContextRemainsUsableAfterSurfaceWrapperDisposal()
 	{
 		var surface = new ImageSurface (Format.Argb32, 8, 8);
@@ -970,7 +970,7 @@ public sealed class CairoContextRecorderTests
 		Assert.Equal (IntPtr.Zero, context.Handle);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SurfaceDisposalMaterializesAndDetachesLiveRecordingContext()
 	{
 		var surface = new ImageSurface (Format.Argb32, 8, 8);

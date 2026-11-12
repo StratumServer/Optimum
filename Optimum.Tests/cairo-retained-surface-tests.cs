@@ -57,7 +57,7 @@ public sealed class CairoRetainedSurfaceTests
 			$"Closed stroke scale {scale}, cap {cap}, byte {i}: GPU geometry={actual[i]}, Cairo={expected[i]}");
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(false)]
 	[InlineData(true)]
 	public void DisposedSourceReflectsSubsequentWritesThroughItsLiveContext(bool exposePatternHandle)
@@ -130,7 +130,7 @@ public sealed class CairoRetainedSurfaceTests
 		Assert.Equal(pixels, target.Data);
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void SvgGeometryRecordsNativeViewportPathsAndSolidColors()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='16' height='12'><rect width='8' height='12' fill='#ff0000'/><rect x='8' width='8' height='12' fill='#0000ff'/></svg>";
@@ -180,7 +180,7 @@ public sealed class CairoRetainedSurfaceTests
 		Assert.Equal(SurfaceRecordingState.GpuRendered, surface.RecordingState);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ClosingGpuRenderedSurfaceDoesNotReplayPixelsUnlessTheContextIsUsedAgain()
 	{
 		var surface = new ImageSurface(Format.Argb32, 8, 8); var recorder = surface.BeginRecording();
@@ -277,7 +277,7 @@ public sealed class CairoRetainedSurfaceTests
 		Assert.Equal(native.Data, recorded.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ExposingPatternHandleReplaysRecordedPixelsForNativeConsumers()
 	{
 		using var surface = new ImageSurface(Format.Argb32, 8, 8); surface.BeginRecording();

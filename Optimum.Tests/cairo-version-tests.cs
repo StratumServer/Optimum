@@ -6,8 +6,8 @@ using Xunit;
 
 /// <summary>
 /// CairoAPI.Version and CairoAPI.VersionString no longer call libcairo; they report the fixed API level the
-/// wrapper was validated against. The tests pin the two values to each other and, where the system libcairo is the
-/// same 1.18 series, to what that library reports.
+/// wrapper was validated against. The tests pin the two values to each other and, where the system libcairo is at
+/// least that release of the same 1.18 series, to what that library reports.
 /// </summary>
 public sealed class CairoVersionTests
 {
@@ -32,15 +32,12 @@ public sealed class CairoVersionTests
 		Assert.Equal ("1.18.4", CairoAPI.VersionString);
 	}
 
-	[Fact]
+	// An older patch release of the series (1.18.0 on Ubuntu 24.04) cannot equal the pinned constant, so the
+	// comparison only runs from the pinned release on.
+	[NativeCairoExpectationFact]
 	public void FixedVersionMatchesTheSystemLibcairoOfTheSameSeries ()
 	{
-		bool linux = OperatingSystem.IsLinux () && NativeLibrary.TryLoad ("libcairo.so.2", out var library);
-		if (!linux) {
-			Assert.False (Environment.GetEnvironmentVariable ("OPTIMUM_REQUIRE_NATIVE_CAIRO") == "1",
-				"libcairo.so.2 is required (OPTIMUM_REQUIRE_NATIVE_CAIRO=1) but cannot be loaded.");
-			return;
-		}
+		if (!OperatingSystem.IsLinux ()) return; // The direct imports below name the Linux library.
 
 		int system = Native.cairo_version ();
 		string systemString = Marshal.PtrToStringAnsi (Native.cairo_version_string ());
