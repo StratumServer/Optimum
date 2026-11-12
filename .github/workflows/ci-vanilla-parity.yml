@@ -81,11 +81,10 @@ jobs:
         shell: bash
         run: bash scripts/check-patches.sh --strict-unavailable
 
-      - name: 1.2 Mathematical & Algorithmic Parity Tests
+      - name: 1.2 Full Optimum.Tests Suite
         shell: bash
         run: |
-          dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
-            --filter "FullyQualifiedName~Mat4f|FullyQualifiedName~SortableQueue|FullyQualifiedName~UniqueQueue|FullyQualifiedName~ColorUtil|FullyQualifiedName~Perception" \
+          dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release --no-build \
             --logger "trx;LogFileName=unit-parity-results.trx"
 
   # ============================================================================
