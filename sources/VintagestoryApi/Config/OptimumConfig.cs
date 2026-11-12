@@ -244,6 +244,13 @@ public static class OptimumConfig
     public static bool IndirectDrawEnabled = false;
 
     /// <summary>
+    /// Experimental chunk upload staging. Requires persistent buffer storage, copy-buffer, and
+    /// sync support. Keep disabled unless GPU-specific measurements justify the extra copy path.
+    /// Changes take effect after restarting the client.
+    /// </summary>
+    public static bool ChunkUploadStagingRingEnabled = false;
+
+    /// <summary>
     /// Set at startup after OpenGL capability probe. False on macOS (OpenGL 4.1) and legacy drivers.
     /// </summary>
     public static bool IndirectDrawSupported = false;
@@ -1288,6 +1295,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.ChunkDeserializeParallelMinY), ChunkDeserializeParallelMinY.ToString()),
         (nameof(OptimumConfigData.ShaderPreprocessParallel), ShaderPreprocessParallel.ToString()),
         (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
+        (nameof(OptimumConfigData.ChunkUploadStagingRing), ChunkUploadStagingRingEnabled.ToString()),
         (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
         (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
     };
@@ -1405,6 +1413,7 @@ public static class OptimumConfig
             LaunchTaskBudgetMs = Math.Clamp(data.LaunchTaskBudgetMs, 1, 500);
             WorldgenWorkerPolicy = data.WorldgenWorkerPolicy ?? "auto";
             IndirectDrawEnabled = data.IndirectDraw;
+            ChunkUploadStagingRingEnabled = data.ChunkUploadStagingRing;
             SimdCullingEnabled = data.SimdCulling;
             KometGuardEnabled = data.KometGuard;
         }
@@ -1486,6 +1495,7 @@ public static class OptimumConfig
             LaunchTaskBudgetMs = LaunchTaskBudgetMs,
             WorldgenWorkerPolicy = WorldgenWorkerPolicy,
             IndirectDraw = IndirectDrawEnabled,
+            ChunkUploadStagingRing = ChunkUploadStagingRingEnabled,
             SimdCulling = SimdCullingEnabled,
             KometGuard = KometGuardEnabled,
         };
@@ -1591,6 +1601,7 @@ internal sealed class OptimumConfigData
     public int LaunchTaskBudgetMs { get; set; } = 100;
     public string WorldgenWorkerPolicy { get; set; } = "auto";
     public bool IndirectDraw { get; set; } = false;
+    public bool ChunkUploadStagingRing { get; set; } = false;
     public bool SimdCulling { get; set; } = true;
     public bool KometGuard { get; set; } = true;
 }
@@ -1601,7 +1612,7 @@ public static class OptimumDiagnostics
     /// Version of the stable, numeric benchmark metrics contract. Bump when
     /// metric keys or their meanings change.
     /// </summary>
-    public const int BenchmarkMetricsSchemaVersion = 4;
+    public const int BenchmarkMetricsSchemaVersion = 5;
 
     // Garbage collection pause instrumentation
     private static long _gcPauseHitchCount;

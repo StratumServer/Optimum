@@ -39,6 +39,30 @@ public class OptimumStatusTests
     }
 
     [Fact]
+    public void ChunkUploadStagingRingIsOptInAndPersists()
+    {
+        bool original = OptimumConfig.ChunkUploadStagingRingEnabled;
+        string dir = Path.Combine(Path.GetTempPath(), "optimum-upload-ring-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        try
+        {
+            Assert.False(new OptimumConfigData().ChunkUploadStagingRing);
+            OptimumConfig.SetDataPath(dir);
+            OptimumConfig.ChunkUploadStagingRingEnabled = true;
+            OptimumConfig.Save();
+            OptimumConfig.ChunkUploadStagingRingEnabled = false;
+            OptimumConfig.Load();
+            Assert.True(OptimumConfig.ChunkUploadStagingRingEnabled);
+        }
+        finally
+        {
+            OptimumConfig.ChunkUploadStagingRingEnabled = original;
+            OptimumConfig.SetDataPath(null);
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
     public void WorldgenStatusReportsSuspendedPolicy()
     {
         string source = File.ReadAllText(PatchReader.FindRepositoryFile(

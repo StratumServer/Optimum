@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index 4536b4c..05a9bba 100644
+index 4536b4c..ecb9656 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -126,15 +126,7 @@ index 4536b4c..05a9bba 100644
  		}
  		Signals[0] = PosixSignalRegistration.Create(PosixSignal.SIGTERM, OnExit);
  		Signals[1] = PosixSignalRegistration.Create(PosixSignal.SIGINT, OnExit);
-@@ -286,17 +364,18 @@ public class ClientProgram
- 		GameWindowSettings gameWindowSettings = GameWindowSettings.Default;
- 		NativeWindowSettings val2 = new NativeWindowSettings
- 		{
- 			Title = "Vintage Story",
- 			APIVersion = new Version(num3, num4),
- 			ClientSize = new Vector2i(ClientSettings.ScreenWidth, ClientSettings.ScreenHeight),
- 			Flags = (ContextFlags)0,
- 			Vsync = ClientSettings.VsyncMode != 0 ? VSyncMode.On : VSyncMode.Off,
+@@ -294,10 +372,11 @@ public class ClientProgram
  			WindowState = val,
  			WindowBorder = (WindowBorder)ClientSettings.WindowBorder
  		};
@@ -145,3 +137,16 @@ index 4536b4c..05a9bba 100644
  		}
  		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
  		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
+ 		if ((int)val == 0 && !RuntimeEnv.IsWaylandSession)
+@@ -330,10 +409,11 @@ public class ClientProgram
+ 		{
+ 			((GameWindow)gameWindowNative).Run();
+ 		}
+ 		finally
+ 		{
++			clientPlatformWindows.DisposeOptimumChunkUploadRing();
+ 			if (RuntimeEnv.OS == OS.Windows)
+ 			{
+ 				GLFW.IconifyWindow(((NativeWindow)gameWindowNative).WindowPtr);
+ 			}
+ 			Thread.CurrentThread.Priority = ThreadPriority.Normal;

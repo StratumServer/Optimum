@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
-index bfae02c..2f624fb 100644
+index bfae02c..65c008a 100644
 --- a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
 +++ b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
 @@ -290,13 +290,21 @@ public abstract class RenderAPIBase : IRenderAPI
@@ -24,3 +24,34 @@ index bfae02c..2f624fb 100644
  		}
  	}
  
+@@ -340,17 +348,26 @@ public abstract class RenderAPIBase : IRenderAPI
+ 		plat.UpdateMesh(meshRef, updatedata);
+ 	}
+ 
+ 	public void UpdateChunkMesh(MeshRef meshRef, MeshData updatedata)
+ 	{
+-		if (useSSBOs && (updatedata.CustomInts == null || updatedata.CustomInts.InterleaveStride < 8))
++		ClientPlatformWindows windows = plat as ClientPlatformWindows;
++		if (windows != null) windows.BeginOptimumChunkUploadScope();
++		try
+ 		{
+-			plat.UpdateSSBOMesh(meshRef, updatedata);
++			if (useSSBOs && (updatedata.CustomInts == null || updatedata.CustomInts.InterleaveStride < 8))
++			{
++				plat.UpdateSSBOMesh(meshRef, updatedata);
++			}
++			else
++			{
++				plat.UpdateMesh(meshRef, updatedata);
++			}
+ 		}
+-		else
++		finally
+ 		{
+-			plat.UpdateMesh(meshRef, updatedata);
++			if (windows != null) windows.EndOptimumChunkUploadScope();
+ 		}
+ 	}
+ 
+ 	public MeshRef AllocateEmptyMesh(int xyzSize, int normalsSize, int uvSize, int rgbaSize, int flagsSize, int indicesSize, CustomMeshDataPartFloat customFloats, CustomMeshDataPartShort customShorts, CustomMeshDataPartByte customBytes, CustomMeshDataPartInt customInts, EnumDrawMode drawMode = EnumDrawMode.Triangles, bool staticDraw = true)
+ 	{

@@ -173,6 +173,13 @@ public static class OptimumChunkStreamStats
 
     public static volatile bool Enabled;
 
+    public enum UploadRingFallbackReason
+    {
+        Capacity,
+        Oversized,
+        RingFailure,
+    }
+
     /// <summary>Time between frames, as reported to the frame hook.</summary>
     public static readonly OptimumHistogram FrameMicros = new();
 
@@ -184,6 +191,12 @@ public static class OptimumChunkStreamStats
 
     /// <summary>Time a finished mesh waited between tessellation and upload.</summary>
     public static readonly OptimumHistogram UploadQueueAgeMicros = new();
+
+    /// <summary>CPU submission time of one staged buffer copy.</summary>
+    public static readonly OptimumHistogram UploadRingCopyMicros = new();
+
+    /// <summary>Bytes copied into staging per render frame.</summary>
+    public static readonly OptimumHistogram UploadRingFrameBytes = new();
 
     /// <summary>Wall time of one sendAndEnqueueChunks call that sent chunks.</summary>
     public static readonly OptimumHistogram SendCallMicros = new();
@@ -199,6 +212,13 @@ public static class OptimumChunkStreamStats
     private static long poolAllocations;
     private static long uploadedChunks;
     private static long tessBaseline;
+    private static long uploadRingCopyCalls;
+    private static long uploadRingCopyBytes;
+    private static long uploadRingFallbackCalls;
+    private static long uploadRingFallbackBytes;
+    private static long uploadRingCapacityFallbacks;
+    private static long uploadRingOversizedFallbacks;
+    private static long uploadRingFailureFallbacks;
     private static long framesOver33;
     private static long framesOver50;
     private static long framesOver100;
@@ -266,6 +286,38 @@ public static class OptimumChunkStreamStats
         UploadFrameMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
     }
 
+    public static void RecordUploadRingCopy(long startTicks, int bytes)
+    {
+        if (!Enabled) return;
+        Interlocked.Increment(ref uploadRingCopyCalls);
+        Interlocked.Add(ref uploadRingCopyBytes, bytes);
+        if (startTicks != 0) UploadRingCopyMicros.Record(TicksToMicros(Stopwatch.GetTimestamp() - startTicks));
+    }
+
+    public static void RecordUploadRingFrameBytes(long bytes)
+    {
+        if (Enabled) UploadRingFrameBytes.Record(bytes);
+    }
+
+    public static void RecordUploadRingFallback(int bytes, UploadRingFallbackReason reason)
+    {
+        if (!Enabled) return;
+        Interlocked.Increment(ref uploadRingFallbackCalls);
+        Interlocked.Add(ref uploadRingFallbackBytes, bytes);
+        switch (reason)
+        {
+            case UploadRingFallbackReason.Capacity:
+                Interlocked.Increment(ref uploadRingCapacityFallbacks);
+                break;
+            case UploadRingFallbackReason.Oversized:
+                Interlocked.Increment(ref uploadRingOversizedFallbacks);
+                break;
+            case UploadRingFallbackReason.RingFailure:
+                Interlocked.Increment(ref uploadRingFailureFallbacks);
+                break;
+        }
+    }
+
     public static void RecordQueueAge(long readyToUploadTicks)
     {
         if (Enabled)
@@ -300,11 +352,20 @@ public static class OptimumChunkStreamStats
         UploadFrameMicros.Reset();
         UploadChunkMicros.Reset();
         UploadQueueAgeMicros.Reset();
+        UploadRingCopyMicros.Reset();
+        UploadRingFrameBytes.Reset();
         SendCallMicros.Reset();
         ChunksSentPerCall.Reset();
         Interlocked.Exchange(ref chunksSent, 0);
         Interlocked.Exchange(ref poolAllocations, 0);
         Interlocked.Exchange(ref uploadedChunks, 0);
+        Interlocked.Exchange(ref uploadRingCopyCalls, 0);
+        Interlocked.Exchange(ref uploadRingCopyBytes, 0);
+        Interlocked.Exchange(ref uploadRingFallbackCalls, 0);
+        Interlocked.Exchange(ref uploadRingFallbackBytes, 0);
+        Interlocked.Exchange(ref uploadRingCapacityFallbacks, 0);
+        Interlocked.Exchange(ref uploadRingOversizedFallbacks, 0);
+        Interlocked.Exchange(ref uploadRingFailureFallbacks, 0);
         Interlocked.Exchange(ref tessBaseline, OptimumDiagnostics.TessChunksProcessed);
         Interlocked.Exchange(ref framesOver33, 0);
         Interlocked.Exchange(ref framesOver50, 0);
@@ -329,6 +390,8 @@ public static class OptimumChunkStreamStats
             .Append(", ");
         AppendHistogram(sb, "uploadFrameUs", UploadFrameMicros);
         AppendHistogram(sb, "uploadChunkUs", UploadChunkMicros);
+        AppendHistogram(sb, "uploadRingCopyUs", UploadRingCopyMicros);
+        AppendHistogram(sb, "uploadRingFrameBytes", UploadRingFrameBytes);
         AppendHistogram(sb, "queueAgeUs", UploadQueueAgeMicros);
         AppendHistogram(sb, "sendCallUs", SendCallMicros);
         AppendHistogram(sb, "sentPerCall", ChunksSentPerCall);
@@ -337,6 +400,13 @@ public static class OptimumChunkStreamStats
             .Append(", tessellated=").Append(tessellated)
             .Append(", tessPerSent=").Append(ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
             .Append(", poolAllocs=").Append(PoolAllocations)
+            .Append(", uploadRingCopies=").Append(Interlocked.Read(ref uploadRingCopyCalls))
+            .Append('/').Append(Interlocked.Read(ref uploadRingCopyBytes))
+            .Append(", uploadRingFallbacks=").Append(Interlocked.Read(ref uploadRingFallbackCalls))
+            .Append('/').Append(Interlocked.Read(ref uploadRingFallbackBytes))
+            .Append("(capacity=").Append(Interlocked.Read(ref uploadRingCapacityFallbacks))
+            .Append(",oversized=").Append(Interlocked.Read(ref uploadRingOversizedFallbacks))
+            .Append(",failure=").Append(Interlocked.Read(ref uploadRingFailureFallbacks)).Append(')')
             .Append(", pacerBudget=").Append(OptimumInflowPacer.Shared.Budget)
             .Append(", pacerPhase=").Append(OptimumInflowPacer.Shared.Phase)
             .Append(", pacerCuts=").Append(OptimumInflowPacer.Shared.Decreases)
@@ -358,12 +428,21 @@ public static class OptimumChunkStreamStats
         values["stream.frames.over100ms.count"] = FramesOver100Ms;
         AddHistogram(values, "stream.uploadFrame.micros", UploadFrameMicros);
         AddHistogram(values, "stream.uploadChunk.micros", UploadChunkMicros);
+        AddHistogram(values, "stream.uploadRingCopy.micros", UploadRingCopyMicros);
+        AddHistogram(values, "stream.uploadRingFrame.bytes", UploadRingFrameBytes);
         AddHistogram(values, "stream.uploadQueueAge.micros", UploadQueueAgeMicros);
         AddHistogram(values, "stream.sendCall.micros", SendCallMicros);
         AddHistogram(values, "stream.sentPerCall.count", ChunksSentPerCall);
         values["stream.chunksSent.count"] = ChunksSent;
         values["stream.chunksUploaded.count"] = UploadedChunks;
         values["stream.poolAllocations.count"] = PoolAllocations;
+        values["stream.uploadRingCopy.calls.count"] = Interlocked.Read(ref uploadRingCopyCalls);
+        values["stream.uploadRingCopy.bytes"] = Interlocked.Read(ref uploadRingCopyBytes);
+        values["stream.uploadRingFallback.calls.count"] = Interlocked.Read(ref uploadRingFallbackCalls);
+        values["stream.uploadRingFallback.bytes"] = Interlocked.Read(ref uploadRingFallbackBytes);
+        values["stream.uploadRingFallback.capacity.count"] = Interlocked.Read(ref uploadRingCapacityFallbacks);
+        values["stream.uploadRingFallback.oversized.count"] = Interlocked.Read(ref uploadRingOversizedFallbacks);
+        values["stream.uploadRingFallback.failure.count"] = Interlocked.Read(ref uploadRingFailureFallbacks);
         values["stream.pacer.budget.count"] = OptimumInflowPacer.Shared.Budget;
         values["stream.pacer.decreases.count"] = OptimumInflowPacer.Shared.Decreases;
         values["stream.pacer.increases.count"] = OptimumInflowPacer.Shared.Increases;
