@@ -130,6 +130,10 @@ public static class ApiPatcher
             method.Name == "ToRGBAFloats" && method.Parameters.Count == 5);
         var colorUtilGetIncandescenceLegacy = bridge.Methods.Single(method =>
             method.Name == "GetIncandescenceColorAsColor4f" && method.Parameters.Count == 1);
+        var deleteGuiTextures = bridge.Methods.Single(method =>
+            method.Name == "DeleteGuiTextures" && method.Parameters.Count == 2);
+        var deleteGuiTexture = bridge.Methods.Single(method =>
+            method.Name == "DeleteGuiTexture" && method.Parameters.Count == 2);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -186,6 +190,10 @@ public static class ApiPatcher
             vanilla.MainModule.ImportReference(colorUtilToRgba),
             vanilla.MainModule.ImportReference(colorUtilGetIncandescenceLegacy));
         int guiCompositionMetrics = PatchGuiCompositionMetrics(vanilla.MainModule, contracts.MainModule);
+        int guiTextureDisposals = PatchGuiTextureDisposal(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(deleteGuiTextures),
+            vanilla.MainModule.ImportReference(deleteGuiTexture));
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
@@ -294,6 +302,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 GuiComposer composition metrics patch, applied {guiCompositionMetrics}.");
         }
+        if (guiTextureDisposals != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 GUI texture disposal patches, applied {guiTextureDisposals}.");
+        }
         if (fontMeasurementMetrics != 2)
         {
             throw new InvalidOperationException(
@@ -349,6 +362,7 @@ public static class ApiPatcher
                 $"{evolvingNatFloatOperators} EvolvingNatFloat equality operators, " +
                 $"{colorUtilMethods} ColorUtil scalar incandescence + RGBA methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
+                $"{guiTextureDisposals} GUI texture disposals, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -1115,6 +1129,90 @@ public static class ApiPatcher
         clientApi.Methods.Add(method);
         Console.WriteLine($"  API PATCHED: {typeName}.{methodName}(int)");
         return 1;
+    }
+
+    /// <summary>
+    /// Vanilla never deletes the GL textures that GuiElementItemSlotGridBase caches per background icon and
+    /// color, or the one GuiElementCustomDraw.Redraw generates. Adds the deletion to the grid's Dispose and
+    /// gives the custom draw a Dispose override. The grid element is reused after Dispose, so the cache is cleared.
+    /// </summary>
+    internal static int PatchGuiTextureDisposal(
+        ModuleDefinition module,
+        MethodReference deleteTexturesBridge,
+        MethodReference deleteTextureBridge)
+    {
+        const string gridTypeName = "Vintagestory.API.Client.GuiElementItemSlotGridBase";
+        const string drawTypeName = "Vintagestory.API.Client.GuiElementCustomDraw";
+        const string elementTypeName = "Vintagestory.API.Client.GuiElement";
+        var grid = module.GetType(gridTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName} is missing from the vanilla API.");
+        var draw = module.GetType(drawTypeName)
+            ?? throw new InvalidOperationException($"{drawTypeName} is missing from the vanilla API.");
+        var element = module.GetType(elementTypeName)
+            ?? throw new InvalidOperationException($"{elementTypeName} is missing from the vanilla API.");
+
+        var apiField = element.Fields.SingleOrDefault(field => field.Name == "api")
+            ?? throw new InvalidOperationException($"{elementTypeName}.api is missing from the vanilla API.");
+        var textureCache = grid.Fields.SingleOrDefault(field => field.Name == "slotTextureIdsByBgIconAndColor")
+            ?? throw new InvalidOperationException($"{gridTypeName}.slotTextureIdsByBgIconAndColor is missing from the vanilla API.");
+        var textureId = draw.Fields.SingleOrDefault(field => field.Name == "texId" && field.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{drawTypeName}.texId is missing from the vanilla API.");
+        var elementDispose = element.Methods.SingleOrDefault(method =>
+            method.Name == "Dispose" && method.Parameters.Count == 0 && method.IsVirtual)
+            ?? throw new InvalidOperationException($"{elementTypeName}.Dispose is missing from the vanilla API.");
+
+        var gridDispose = grid.Methods.SingleOrDefault(method =>
+            method.Name == "Dispose" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.Dispose is missing from the vanilla API.");
+        if (draw.Methods.Any(method => method.Name == "Dispose" && method.Parameters.Count == 0))
+        {
+            throw new InvalidOperationException($"{drawTypeName} already declares Dispose.");
+        }
+
+        // Right after base.Dispose(): the crossedOutTexture null check below it compiles to an early ret,
+        // so anything placed at the end of the method would be skipped on that path.
+        var baseCall = gridDispose.Body.Instructions.FirstOrDefault(instruction =>
+            instruction.OpCode == OpCodes.Call &&
+            instruction.Operand is MethodReference called &&
+            called.Name == "Dispose" &&
+            called.DeclaringType.FullName == elementTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName}.Dispose does not call GuiElement.Dispose.");
+        ClearDebugInformation(gridDispose);
+        var gridIl = gridDispose.Body.GetILProcessor();
+        var cursor = baseCall;
+        foreach (var instruction in new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, textureCache),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, apiField),
+            Instruction.Create(OpCodes.Call, deleteTexturesBridge),
+        })
+        {
+            gridIl.InsertAfter(cursor, instruction);
+            cursor = instruction;
+        }
+
+        var drawDispose = new MethodDefinition(
+            "Dispose",
+            MethodAttributes.Public | MethodAttributes.Virtual | MethodAttributes.HideBySig,
+            module.TypeSystem.Void);
+        var drawBody = new MethodBody(drawDispose) { InitLocals = false };
+        var drawIl = drawBody.GetILProcessor();
+        drawIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        drawIl.Append(Instruction.Create(OpCodes.Call, elementDispose));
+        drawIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        drawIl.Append(Instruction.Create(OpCodes.Ldflda, textureId));
+        drawIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        drawIl.Append(Instruction.Create(OpCodes.Ldfld, apiField));
+        drawIl.Append(Instruction.Create(OpCodes.Call, deleteTextureBridge));
+        drawIl.Append(Instruction.Create(OpCodes.Ret));
+        drawDispose.Body = drawBody;
+        draw.Methods.Add(drawDispose);
+
+        Console.WriteLine($"  API PATCHED: {gridTypeName}.Dispose deletes the cached slot background textures");
+        Console.WriteLine($"  API PATCHED: {drawTypeName}.Dispose deletes the redrawn texture");
+        return 2;
     }
 
     internal static int PatchGuiCompositionMetrics(ModuleDefinition module, ModuleDefinition contracts)
