@@ -8,7 +8,7 @@ public sealed class CairoSolidColorTests
 {
 	static CairoSolidColorTests() { _ = CairoAPI.Version; }
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(false, Extend.None)]
 	[InlineData(false, Extend.Repeat)]
 	[InlineData(false, Extend.Pad)]
@@ -43,7 +43,7 @@ public sealed class CairoSolidColorTests
 		Assert.Equal(native.Data, recorded.Data);
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(-.25)]
 	[InlineData(0)]
 	[InlineData(.5)]
@@ -82,7 +82,7 @@ public sealed class CairoSolidColorTests
 		}
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(Operator.Clear)]
 	[InlineData(Operator.Source)]
 	[InlineData(Operator.In)]
@@ -114,7 +114,7 @@ public sealed class CairoSolidColorTests
 		}
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(Operator.Source)]
 	[InlineData(Operator.Over)]
 	public void RecordedSolidColorsPreserveNativePremultipliedBytes(Operator operation)
@@ -159,7 +159,7 @@ public sealed class CairoSolidMaskTests
 {
 	static CairoSolidMaskTests () { _ = CairoAPI.Version; }
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData(-.25)]
 	[InlineData(0)]
 	[InlineData(.4)]

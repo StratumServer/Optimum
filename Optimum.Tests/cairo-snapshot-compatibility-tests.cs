@@ -25,20 +25,16 @@ public sealed class CairoSnapshotCompatibilityTests
 		Assert.Null (recorder.FirstMaterializationTrigger);
 	}
 
-	[Fact]
+	// The mode is process wide, so this runs only where the process already allows libcairo. Switching the
+	// variable inside the test would map libcairo under every native-free test sharing the process.
+	[NativeCairoFact]
 	public void ManagedSurfacePatternCanBeReplayedThroughExplicitNativeCompatibility ()
 	{
-		string previousNativeMode = Environment.GetEnvironmentVariable (CairoNativeGuard.ModeVariable);
-		try {
-			Environment.SetEnvironmentVariable (CairoNativeGuard.ModeVariable, "allow");
-			using var source = ImageSurface.CreateForRecordedGui (Format.Argb32, 8, 8);
-			source.BeginRecording ().FillRectangle (1, 1, 6, 6, .2, .7, .4, 1);
-			using var managedPattern = new SurfacePattern (source);
-			using var nativePattern = managedPattern.MaterializeNativeForReplay ();
-			Assert.False (nativePattern.IsManagedSource);
-			Assert.NotEqual (IntPtr.Zero, nativePattern.Handle);
-		} finally {
-			Environment.SetEnvironmentVariable (CairoNativeGuard.ModeVariable, previousNativeMode);
-		}
+		using var source = ImageSurface.CreateForRecordedGui (Format.Argb32, 8, 8);
+		source.BeginRecording ().FillRectangle (1, 1, 6, 6, .2, .7, .4, 1);
+		using var managedPattern = new SurfacePattern (source);
+		using var nativePattern = managedPattern.MaterializeNativeForReplay ();
+		Assert.False (nativePattern.IsManagedSource);
+		Assert.NotEqual (IntPtr.Zero, nativePattern.Handle);
 	}
 }

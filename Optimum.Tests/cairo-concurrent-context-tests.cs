@@ -43,7 +43,7 @@ public sealed class CairoConcurrentContextTests
                 Assert.Equal (expected.Data, replayed.Data);
             }
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 
@@ -203,7 +203,7 @@ public sealed class CairoConcurrentContextTests
             Assert.Equal (unchecked ((int)0xff0000ff), BitConverter.ToInt32 (pixels, 4 * 4));
             Assert.Equal (0, BitConverter.ToInt32 (pixels, 3 * 4));
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 }

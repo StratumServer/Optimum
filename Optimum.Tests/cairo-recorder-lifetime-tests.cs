@@ -47,7 +47,7 @@ public sealed class CairoRecorderLifetimeTests
 		} finally { detach (); }
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void NativeReplayKeepsPixelsFromExposedManagedSourceSnapshot ()
 	{
 		bool previousRecording = Surface.AutomaticRecordingEnabled;

@@ -22,7 +22,11 @@ public sealed class CairoFinishedTextParityTests
         int denied = CairoNativeGuard.DeniedCount;
         try {
             (Status Surface, Status Context, PointD Point)? native = null;
-            if (CairoNativeGuard.NativeAllowed) {
+            // libcairo 1.18.0 flags the finished surface for TextPath (4) and GlyphPath (11); the expectations come
+            // from 1.18.4. On an older host only the managed half runs here, and
+            // FinishedPathContractsMatchPinnedNative reports the gap as a skip.
+            bool pinnedNative = !(operation is 4 or 11) || CairoTestEnvironment.NativeVersion >= CairoTestEnvironment.ExpectationVersion;
+            if (CairoNativeGuard.NativeAllowed && pinnedNative) {
                 Surface.ConfigureAutomaticRecording (false);
                 native = Exercise (operation, warmFont);
             }
@@ -35,9 +39,16 @@ public sealed class CairoFinishedTextParityTests
                 Assert.InRange (Math.Abs (native.Value.Point.Y - actual.Point.Y), 0, 1.0 / 256);
             }
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
+
+    [NativeCairoExpectationTheory]
+    [InlineData (4, false)]
+    [InlineData (4, true)]
+    [InlineData (11, false)]
+    [InlineData (11, true)]
+    public void FinishedPathContractsMatchPinnedNative (int operation, bool warmFont) => FinishedTextAndGlyphContractsMatchNative (operation, warmFont);
 
     [Theory]
     [InlineData (false, 0)]
@@ -75,7 +86,7 @@ public sealed class CairoFinishedTextParityTests
                 }
             }
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 

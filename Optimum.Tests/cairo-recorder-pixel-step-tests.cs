@@ -94,7 +94,7 @@ public sealed class CairoRecorderPixelStepTests
 		}, edgeAllowance: false, flatTolerance: 0);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void PixelStepsOnNativeSurfacesAreUnchanged ()
 	{
 		using var recorded = new ImageSurface (Format.Argb32, 28, 16);

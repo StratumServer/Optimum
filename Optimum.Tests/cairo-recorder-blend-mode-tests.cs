@@ -276,7 +276,7 @@ public sealed class CairoRecorderBlendModeTests
 			});
 	}
 
-	[Theory]
+	[NativeCairoTheory]
 	[InlineData (0)]
 	[InlineData (1)]
 	[InlineData (2)]
@@ -546,7 +546,11 @@ public sealed class CairoRecorderBlendModeTests
 			context.Rectangle (8.25, 7.5, 180, 110); context.Clip ();
 			context.Translate (17.375, 6.625); context.Rotate (.06); context.Scale (1.25, .8);
 			context.SelectFontFace ("sans-serif", FontSlant.Normal, FontWeight.Normal); context.SetFontSize (17);
-			using var options = new FontOptions { Antialias = Antialias.Subpixel };
+			// Hinted advances are rounded differently by Cairo and Skia under this rotated, anisotropic transform.
+			// Over 38 glyphs that drifts stems by two to five pixels depending on the host font, which saturates
+			// the filtered difference (108 to 119 across six families) and hides the cropping this test is about.
+			// Unhinted metrics keep both sides on the same pen positions (15 to 77 across the same families).
+			using var options = new FontOptions { Antialias = Antialias.Subpixel, HintMetrics = HintMetrics.Off };
 			context.FontOptions = options;
 			context.SetSourceRGBA (.78, .33, .16, .75);
 			context.MoveTo (-22.5, 33.25); context.ShowText ("LCD crop ffi Ág through a clipped edge");
@@ -558,7 +562,7 @@ public sealed class CairoRecorderBlendModeTests
 		actual.BeginRecording ();
 		using (var context = new Context (actual)) Draw (context);
 		byte[] skia = CairoRecorderParityTests.RenderSkia (actual, width, height);
-		CairoRecorderParityTests.AssertLocalAa (expected, skia, width, height, 110);
+		CairoRecorderParityTests.AssertLocalAa (expected, skia, width, height);
 	}
 
 	[Theory]

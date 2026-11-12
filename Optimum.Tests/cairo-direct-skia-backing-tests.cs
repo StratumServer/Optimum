@@ -4,6 +4,10 @@ using Cairo;
 using SkiaSharp;
 using Xunit;
 
+// GlobalDirectSkiaBackingConfigEnablesDirectBackingAutomatically flips a process-wide switch. While it is on, every
+// Context created by a parallel test class becomes a direct Skia context, whose stroke extents are a conservative
+// box, so this class runs in a collection that excludes parallel classes.
+[Collection ("GUI metrics")]
 public sealed class CairoDirectSkiaBackingTests
 {
 	[Fact]

@@ -58,7 +58,7 @@ public sealed class CairoRecordedContextQueryTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void RecordedGetSourceReturnsTheCurrentSolidColorOrPattern()
 	{
 		var (surface, context) = Recorded();

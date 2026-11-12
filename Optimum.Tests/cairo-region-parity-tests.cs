@@ -42,18 +42,9 @@ public sealed class CairoRegionParityTests
 		[DllImport (Lib)] internal static extern int cairo_region_xor_rectangle (IntPtr dst, ref RectangleInt rectangle);
 	}
 
-	static readonly bool nativeAvailable = ProbeNative ();
-
-	static bool ProbeNative ()
-	{
-		if (!OperatingSystem.IsLinux ())
-			return false;
-		if (NativeLibrary.TryLoad ("libcairo.so.2", out var handle)) {
-			NativeLibrary.Free (handle);
-			return true;
-		}
-		return false;
-	}
+	// The direct imports above name the Linux library. Probing goes through the shared test environment so a
+	// native-free run never maps libcairo into the process.
+	static readonly bool nativeAvailable = OperatingSystem.IsLinux () && CairoTestEnvironment.NativeCairoAvailable;
 
 	// False means the lockstep tests have nothing to compare against on this host.
 	static bool RequireNative ()
@@ -199,7 +190,7 @@ public sealed class CairoRegionParityTests
 		Assert.Equal ((Status) nativeStatus, managedStatus);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SeededOperationSequencesMatchSystemCairo ()
 	{
 		if (!RequireNative ())
@@ -240,7 +231,7 @@ public sealed class CairoRegionParityTests
 		Assert.True (nativeEqual == right.Managed.Equals (left.Managed), $"{context}: reverse Equals native {nativeEqual}");
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void EmptyResultsKeepTheSameExtentsOriginAsSystemCairo ()
 	{
 		if (!RequireNative ())
@@ -268,7 +259,7 @@ public sealed class CairoRegionParityTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void DegenerateAndOverflowingRectanglesMatchSystemCairo ()
 	{
 		if (!RequireNative ())
@@ -304,7 +295,7 @@ public sealed class CairoRegionParityTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SmallTranslationsOfBandedRegionsMatchSystemCairo ()
 	{
 		if (!RequireNative ())
@@ -321,7 +312,7 @@ public sealed class CairoRegionParityTests
 		}
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void LargeTranslationsInsideTheIntRangeMatchSystemCairo ()
 	{
 		if (!RequireNative ())

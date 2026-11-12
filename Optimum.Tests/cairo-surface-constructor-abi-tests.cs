@@ -32,6 +32,6 @@ public sealed class CairoSurfaceConstructorAbiTests
 		using var instance = (Surface)Activator.CreateInstance (derived);
 
 		Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-		if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+		CairoTestEnvironment.AssertLibcairoUnmapped ();
 	}
 }

@@ -120,7 +120,7 @@ public sealed class CairoPreparationReuseTests : IDisposable
         Assert.Equal(expectedPoint.X, reusedPoint.X); Assert.Equal(expectedPoint.Y, reusedPoint.Y);
     }
 
-    [Fact]
+    [NanoSvgFact]
     public void RecordedSvgOwnsItsLeaseAfterCallerDisposalAndCacheClear()
     {
         using var surface = new ImageSurface(Format.Argb32, 32, 32);
@@ -139,7 +139,7 @@ public sealed class CairoPreparationReuseTests : IDisposable
         Assert.Equal(SKColors.Red, bitmap.GetPixel(8, 8));
     }
 
-    [Fact]
+    [NanoSvgFact]
     public void SvgContentAndViewportInvalidateWhileTintStaysOutsideTheGeometry()
     {
         using var first = RecordedSvgGeometry.Acquire(Svg("red"), 32, 32, 32, 32);

@@ -104,7 +104,7 @@ public sealed class CairoNilFontFaceParityTests
             if (CairoNativeGuard.NativeAllowed) { Surface.ConfigureAutomaticRecording (false); exercise (); }
             Surface.ConfigureAutomaticRecording (true); exercise ();
             Assert.Equal (denied, CairoNativeGuard.DeniedCount);
-            if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+            CairoTestEnvironment.AssertLibcairoUnmapped ();
         } finally { Surface.ConfigureAutomaticRecording (previous); }
     }
 }

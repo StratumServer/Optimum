@@ -66,7 +66,7 @@ public sealed class CairoUniformFontMatrixHintMetricsTests
 			}
 			Assert.True (mismatches.Count == 0, string.Join (Environment.NewLine, mismatches));
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
-			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+			CairoTestEnvironment.AssertLibcairoUnmapped ();
 		} finally {
 			Surface.ConfigureAutomaticRecording (oldRecording);
 		}

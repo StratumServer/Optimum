@@ -34,7 +34,7 @@ public sealed class CairoGradientTests
             yield return new object[] { geometry.Name, geometry.Radial, geometry.Coordinates, extend, stopSet, scale };
     }
 
-    [Theory]
+    [NativeCairoTheory]
     [MemberData(nameof(Cases))]
     public void RecordedGradientMatchesIndependentNativeAndFrozenReplay(string name, bool radial, double[] coordinates, Extend extend, int stopSet, double scale)
     {

@@ -76,8 +76,7 @@ public sealed class CairoUniformFontMatrixParityTests
 			}
 
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
-			if (!CairoNativeGuard.NativeAllowed)
-				Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+			CairoTestEnvironment.AssertLibcairoUnmapped ();
 		} finally {
 			Surface.ConfigureAutomaticRecording (oldRecording);
 		}

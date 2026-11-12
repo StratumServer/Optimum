@@ -9,7 +9,7 @@ using Xunit;
 
 public sealed class CairoSvgNativeTests
 {
-	[Fact]
+	[NanoSvgFact]
 	public void SolidPathsAreNotLimitedByTheOldRectangleQualificationBudget()
 	{
 		var svg = new StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' width='257' height='4'>");
@@ -19,7 +19,7 @@ public sealed class CairoSvgNativeTests
 		Assert.NotNull(picture);
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData("<circle cx='4' cy='2' r='1.5'/>")]
 	[InlineData("<rect x='.3' y='.7' width='6' height='2'/>")]
 	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
@@ -31,7 +31,7 @@ public sealed class CairoSvgNativeTests
 		Assert.NotNull(picture);
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void NativeViewportScaleDeterminesPixelAlignment()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4'/><rect x='3' width='5' height='4'/></svg>";
@@ -40,14 +40,14 @@ public sealed class CairoSvgNativeTests
 		AssertRecordedSvgMatchesNative(svg, 16, 12, 16, 12, 2, 0, 2);
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void AlignedPartialSvgCoverageMatchesNativeRasterization()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='1' y='1' width='6' height='2' fill='#3585cd'/></svg>";
 		AssertRecordedSvgMatchesNative(svg, 8, 4, 8, 4, 1, 0, 0);
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData("linear", "pad")]
 	[InlineData("linear", "repeat")]
 	[InlineData("linear", "reflect")]
@@ -61,7 +61,7 @@ public sealed class CairoSvgNativeTests
 		Assert.Contains("does not support SVG gradient fills", exception.Message);
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData(1)]
 	[InlineData(.8)]
 	[InlineData(.35)]
@@ -85,7 +85,7 @@ public sealed class CairoSvgNativeTests
 		}
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData(0)]
 	[InlineData(.35)]
 	public void SvgOverlayReconstructsIntegerColorBytesBeforeLegacyComposition(double backdropAlpha)

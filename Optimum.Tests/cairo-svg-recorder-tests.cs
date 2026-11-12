@@ -7,7 +7,7 @@ using Xunit;
 
 public sealed class CairoSvgRecorderTests
 {
-	[Fact]
+	[NanoSvgFact]
 	public void TiledSolidRectanglesMatchNanoSvgPixels()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4' fill='#3585cd' fill-opacity='.8'/><rect x='3' width='5' height='4' fill='#d7396b' fill-opacity='.45'/></svg>";
@@ -25,7 +25,7 @@ public sealed class CairoSvgRecorderTests
 		}
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void TintedSvgGeometryCanBeRecordedForOverlayComposition ()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='2' width='4' height='4' fill='#3585cd'/></svg>";
@@ -33,14 +33,14 @@ public sealed class CairoSvgRecorderTests
 		Assert.NotNull (picture);
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void OpaqueOnlyTextureUploadStillRequiresTiledGeometry ()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect x='2' width='4' height='4' fill='#3585cd'/></svg>";
 		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, requireOpaque: true));
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData("<rect width='8' height='4' fill='#3585cd' fill-opacity='.8'/>")]
 	[InlineData("<rect width='8' height='4' fill='#3585cd' opacity='.5'/>")]
 	public void PartiallyTransparentSvgStaysOnNativeTextureUploadPath (string content)
@@ -49,7 +49,7 @@ public sealed class CairoSvgRecorderTests
 		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null, requireOpaque: true));
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void OpaqueTiledSvgCanBeRecordedForTextureUpload ()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><rect width='3' height='4' fill='#3585cd'/><rect x='3' width='5' height='4' fill='#d7396b'/></svg>";
@@ -62,7 +62,7 @@ public sealed class CairoSvgRecorderTests
 		Assert.Equal (expected, actual);
 	}
 
-	[Theory]
+	[NanoSvgTheory]
 	[InlineData("<circle cx='4' cy='2' r='1.5'/>")]
 	[InlineData("<rect x='.25' width='8' height='4'/>")]
 	[InlineData("<rect width='8' height='4' stroke='red' stroke-width='1'/>")]
@@ -75,14 +75,14 @@ public sealed class CairoSvgRecorderTests
 		Assert.NotNull (picture);
 	}
 
-	[Fact]
+	[NanoSvgFact]
 	public void GradientSvgRemainsExplicitlyUnsupported ()
 	{
 		const string svg = "<svg xmlns='http://www.w3.org/2000/svg' width='8' height='4'><defs><linearGradient id='g'><stop offset='0' stop-color='red'/><stop offset='1' stop-color='blue'/></linearGradient></defs><rect width='8' height='4' fill='url(#g)'/></svg>";
 		Assert.Throws<NotSupportedException> (() => RecordedSvgGeometry.Parse (svg, 8, 4, 8, 4, null));
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void NativeMaterializationReplaysSvgOnceWhenReplayReadsSurfacePixels ()
 	{
 		_ = CairoAPI.Version; // Install the Cairo Linux resolver before first native call.

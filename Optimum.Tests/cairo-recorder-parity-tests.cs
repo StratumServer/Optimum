@@ -904,7 +904,7 @@ public sealed class CairoRecorderParityTests
 		Assert.Equal (expected, actual.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void NativeConsumerOfRecordingSourceMaterializesTheSource ()
 	{
 		using var source = new ImageSurface (Format.Argb32, 4, 4);
@@ -919,7 +919,7 @@ public sealed class CairoRecorderParityTests
 		Assert.Equal (source.Data, target.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void MaterializedTargetMaterializesItsRecordingSourceBeforeNativeDrawing ()
 	{
 		using var source = new ImageSurface (Format.Argb32, 4, 4);
@@ -1059,7 +1059,7 @@ public sealed class CairoRecorderParityTests
 		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void GetTargetAliasCpuAccessMaterializesAndDetachesTheContext ()
 	{
 		Action<Context, ImageSurface> draw = (context, surface) => {
@@ -1082,7 +1082,7 @@ public sealed class CairoRecorderParityTests
 		Assert.Equal (expected, actual.Data);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ContextOnGetTargetAliasMaterializes ()
 	{
 		Action<Context, ImageSurface> draw = (context, surface) => {
@@ -1278,7 +1278,7 @@ public sealed class CairoRecorderParityTests
 		}, edgeAllowance: false, flatTolerance: 2);
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void GroupsMaterializeWhilePatternMasksStayManaged ()
 	{
 		AssertMaterializesWith (24, 24, context => {

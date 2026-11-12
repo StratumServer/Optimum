@@ -78,7 +78,7 @@ public sealed class CairoAffineFontMatrixTests
 			}
 
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
-			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+			CairoTestEnvironment.AssertLibcairoUnmapped ();
 		} finally {
 			Surface.ConfigureAutomaticRecording (oldRecording);
 		}
@@ -310,7 +310,7 @@ public sealed class CairoAffineFontMatrixTests
 			}
 
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
-			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+			CairoTestEnvironment.AssertLibcairoUnmapped ();
 		} finally {
 			Surface.ConfigureAutomaticRecording (oldRecording);
 		}
@@ -362,7 +362,7 @@ public sealed class CairoAffineFontMatrixTests
 			}
 
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
-			if (!CairoNativeGuard.NativeAllowed) Assert.Empty (CairoNativeGuard.LoadedLibcairoMappings ());
+			CairoTestEnvironment.AssertLibcairoUnmapped ();
 		} finally {
 			Surface.ConfigureAutomaticRecording (oldRecording);
 		}

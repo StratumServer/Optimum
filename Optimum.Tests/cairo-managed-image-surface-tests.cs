@@ -32,7 +32,7 @@ public sealed class CairoManagedImageSurfaceTests
 		Assert.Equal ((byte) 0xA5, Marshal.ReadByte (pixels, 5));
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void ManagedPixelPinLivesUntilTheLastNativeSurfaceAliasIsDestroyed ()
 	{
 		(AliasState state, WeakReference<ManagedImageSurfaceStorage> storage) = CreateAliasedSurface ();

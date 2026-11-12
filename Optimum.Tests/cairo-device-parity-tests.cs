@@ -61,16 +61,15 @@ public sealed class CairoDevicePolicyTests
 
 	static bool NativeAvailable ()
 	{
-		if (OperatingSystem.IsLinux () && NativeLibrary.TryLoad ("libcairo.so.2", out var handle)) {
-			NativeLibrary.Free (handle);
+		// The direct imports above name the Linux library; the shared probe keeps native-free runs unmapped.
+		if (OperatingSystem.IsLinux () && CairoTestEnvironment.NativeCairoAvailable)
 			return true;
-		}
 		Assert.False (Environment.GetEnvironmentVariable ("OPTIMUM_REQUIRE_NATIVE_CAIRO") == "1",
 			"libcairo.so.2 is required (OPTIMUM_REQUIRE_NATIVE_CAIRO=1) but cannot be loaded.");
 		return false;
 	}
 
-	[Fact]
+	[NativeCairoFact]
 	public void SeededCallSequencesMatchASystemScriptDevice ()
 	{
 		if (!NativeAvailable ())
