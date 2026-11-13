@@ -14,6 +14,7 @@ namespace Optimum.Tests;
 public sealed class GuiTextureDisposeTests
 {
     private const string GridPatchPath = "patches/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs.patch";
+    private const string ConfigListPatchPath = "patches/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementConfigList.cs.patch";
     private const string CustomDrawPatchPath = "patches/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementCustomDraw.cs.patch";
 
     [Fact]
@@ -28,6 +29,13 @@ public sealed class GuiTextureDisposeTests
         Assert.Contains("base.Dispose();", draw);
         Assert.Contains("if (texId > 0) api.Render.GLDeleteTexture(texId);", draw);
         Assert.Contains("texId = 0;", draw);
+
+        // Issue #581: the config list texture is deleted with the element and the id is reset, because a
+        // disposed composer can be disposed or recomposed again.
+        string configList = PatchReader.ReadPatch(ConfigListPatchPath);
+        Assert.Contains("if (textureId > 0) api.Render.GLDeleteTexture(textureId);", configList);
+        Assert.Contains("textureId = 0;", configList);
+        Assert.Contains("hoverTexture.Dispose();", configList);
     }
 
     [Fact]
@@ -35,7 +43,7 @@ public sealed class GuiTextureDisposeTests
     {
         string patcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/api-patcher.cs"));
         Assert.Contains("PatchGuiTextureDisposal(", patcher);
-        Assert.Contains("if (guiTextureDisposals != 2)", patcher);
+        Assert.Contains("if (guiTextureDisposals != 3)", patcher);
     }
 
     [Fact]
@@ -54,7 +62,7 @@ public sealed class GuiTextureDisposeTests
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(deleteTextures),
             vanilla.MainModule.ImportReference(deleteTexture));
-        Assert.Equal(2, patched);
+        Assert.Equal(3, patched);
         Assert.Empty(IlStackVerifier.VerifyModule(vanilla.MainModule));
 
         var grid = vanilla.MainModule.GetType("Vintagestory.API.Client.GuiElementItemSlotGridBase")!;
@@ -76,6 +84,19 @@ public sealed class GuiTextureDisposeTests
         Assert.False(drawDispose.IsNewSlot);
         Assert.Contains(drawDispose.Body.Instructions, i => i.OpCode == OpCodes.Call && ((MethodReference)i.Operand).Name == "Dispose");
         Assert.Contains(drawDispose.Body.Instructions, i => i.OpCode == OpCodes.Call && ((MethodReference)i.Operand).Name == "DeleteGuiTexture");
+
+        var configList = vanilla.MainModule.GetType("Vintagestory.API.Client.GuiElementConfigList")!;
+        var configListDispose = configList.Methods.Single(m => m.Name == "Dispose" && m.Parameters.Count == 0);
+        var configListInstructions = configListDispose.Body.Instructions.ToList();
+        int configBaseCall = configListInstructions.FindIndex(i => i.OpCode == OpCodes.Call && ((MethodReference)i.Operand).Name == "Dispose"
+            && ((MethodReference)i.Operand).DeclaringType.Name == "GuiElement");
+        int configDelete = configListInstructions.FindIndex(i => i.OpCode == OpCodes.Call && ((MethodReference)i.Operand).Name == "DeleteGuiTexture");
+        int configHoverDispose = configListInstructions.FindIndex(i => i.OpCode == OpCodes.Callvirt && ((MethodReference)i.Operand).Name == "Dispose"
+            && ((MethodReference)i.Operand).DeclaringType.Name == "LoadedTexture");
+        Assert.True(configBaseCall >= 0 && configDelete > configBaseCall, "the deletion follows base.Dispose()");
+        Assert.True(configHoverDispose > configDelete, "the hover texture is still disposed");
+        Assert.Equal("textureId", ((FieldReference)configListInstructions[configDelete - 3].Operand).Name);
+        Assert.Equal(OpCodes.Ldflda, configListInstructions[configDelete - 3].OpCode);
     }
 
     // Walks up from the test output to the repository root; AppContext.BaseDirectory is several levels below it.
