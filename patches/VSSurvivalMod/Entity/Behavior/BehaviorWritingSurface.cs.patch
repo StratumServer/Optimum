@@ -1,0 +1,12 @@
+diff --git a/VSSurvivalMod/Entity/Behavior/BehaviorWritingSurface.cs b/VSSurvivalMod/Entity/Behavior/BehaviorWritingSurface.cs
+--- a/VSSurvivalMod/Entity/Behavior/BehaviorWritingSurface.cs
++++ b/VSSurvivalMod/Entity/Behavior/BehaviorWritingSurface.cs
+@@ -375,6 +375,8 @@ namespace Vintagestory.GameContent
+         {
+             base.OnEntityDespawn(despawn);
+ 
++            if (capi != null) capi.Event.ReloadTextures -= Event_ReloadTextures;
++
+             // Note this typically gets called twice client-side when a chunk unloads, once when the client chunk unloads, and once when processing the server packet UnloadChunk(). Also assetloc might be null for other reasons, if a chunk near the world edge unloads before tesselating in the tesselation queue
+             if (assetloc != null) capi?.EntityTextureAtlas.FreeTextureSpace(assetloc);
+             assetloc = null;

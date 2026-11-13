@@ -1,0 +1,14 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorWritingSurface.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorWritingSurface.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorWritingSurface.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorWritingSurface.cs
+@@ -341,6 +341,10 @@ public class EntityBehaviorWritingSurface : EntityBehavior, ITexPositionSource
+ 	public override void OnEntityDespawn(EntityDespawnData despawn)
+ 	{
+ 		base.OnEntityDespawn(despawn);
++		if (capi != null)
++		{
++			capi.Event.ReloadTextures -= Event_ReloadTextures;
++		}
+ 		if (assetloc != null)
+ 		{
+ 			capi?.EntityTextureAtlas.FreeTextureSpace(assetloc);
