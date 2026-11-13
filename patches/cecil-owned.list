@@ -24,6 +24,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/HudDebugScreen.cs.patch

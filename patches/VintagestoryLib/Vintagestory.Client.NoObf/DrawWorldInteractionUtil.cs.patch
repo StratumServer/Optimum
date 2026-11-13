@@ -1,0 +1,248 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+index 1bbe344..466c1a4 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs
+@@ -1,5 +1,6 @@
++using System;
+ using System.Collections.Generic;
+ using Cairo;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+@@ -32,17 +33,60 @@ public class DrawWorldInteractionUtil
+ 		this.capi = capi;
+ 		Composers = composers;
+ 		composerKeyCode = "worldInteractionHelp" + composerSuffixCode;
+ 	}
+ 
++	// Optimum: composing rasterizes every line and uploads a texture. The help is re-evaluated on the caller's cadence,
++	// but it is only composed again when what it would draw differs from what is shown.
++	private List<WorldInteraction> lines = new List<WorldInteraction>();
++
++	private List<ItemStack[]> lineStacks = new List<ItemStack[]>();
++
++	private List<object> parts = new List<object>();
++
++	private List<object> shownParts = new List<object>();
++
++	private List<int> values = new List<int>();
++
++	private List<int> shownValues = new List<int>();
++
+ 	public void ComposeBlockWorldInteractionHelp(WorldInteraction[] wis)
+ 	{
+-		if (wis == null || wis.Length == 0)
++		lines.Clear();
++		lineStacks.Clear();
++		if (wis != null)
++		{
++			foreach (WorldInteraction wi in wis)
++			{
++				ItemStack[] stacks = wi.Itemstacks;
++				if (stacks != null && wi.GetMatchingStacks != null)
++				{
++					stacks = wi.GetMatchingStacks(wi, capi.World.Player.CurrentBlockSelection, capi.World.Player.CurrentEntitySelection);
++					if (stacks == null || stacks.Length == 0)
++					{
++						continue;
++					}
++				}
++				if (stacks != null || wi.ShouldApply == null || wi.ShouldApply(wi, capi.World.Player.CurrentBlockSelection, capi.World.Player.CurrentEntitySelection))
++				{
++					lines.Add(wi);
++					lineStacks.Add(stacks);
++				}
++			}
++		}
++		if (lines.Count == 0)
+ 		{
+ 			Composers.Remove(composerKeyCode);
+ 			return;
+ 		}
++		describeLines();
++		if (composer != null && composer.Composed && Composers[composerKeyCode] == composer && sameAsShown())
++		{
++			lines.Clear();
++			lineStacks.Clear();
++			return;
++		}
+ 		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-1");
+ 		ElementBounds elementBounds = ElementStdBounds.AutosizedMainDialog.WithAlignment(EnumDialogArea.CenterMiddle);
+ 		if (composer == null)
+ 		{
+ 			composer = capi.Gui.CreateCompo(composerKeyCode, elementBounds);
+@@ -51,57 +95,128 @@ public class DrawWorldInteractionUtil
+ 		{
+ 			composer.Clear(elementBounds);
+ 		}
+ 		Composers[composerKeyCode] = composer;
+ 		double lineHeight = GuiElement.scaled(UnscaledLineHeight);
+-		int num = 0;
+-		foreach (WorldInteraction wi in wis)
++		for (int i = 0; i < lines.Count; i++)
++		{
++			WorldInteraction wi = lines[i];
++			ItemStack[] stacks = lineStacks[i];
++			double fixedY = (double)i * (UnscaledLineHeight + 8.0);
++			ElementBounds elementBounds2 = ElementBounds.Fixed(0.0, fixedY, 600.0, 80.0);
++			composer.AddIf(stacks != null && stacks.Length != 0).AddCustomRender(elementBounds2.FlatCopy(), delegate(float dt, ElementBounds bounds)
++			{
++				long num2 = capi.World.ElapsedMilliseconds / 1000 % stacks.Length;
++				float size = (float)lineHeight * 0.8f;
++				_ = lineHeight;
++				ElementBounds elementBounds3 = new ElementBounds();
++				elementBounds3.fixedX = bounds.renderX / (double)RuntimeEnv.GUIScale - 5.0;
++				elementBounds3.fixedY = bounds.renderY / (double)RuntimeEnv.GUIScale - 5.0;
++				elementBounds3.fixedWidth = lineHeight / (double)RuntimeEnv.GUIScale + 10.0;
++				elementBounds3.fixedHeight = lineHeight / (double)RuntimeEnv.GUIScale + 10.0;
++				elementBounds3.WithEmptyParent();
++				elementBounds3.CalcWorldBounds();
++				capi.Render.PushScissor(elementBounds3);
++				capi.Render.RenderItemstackToGui(new DummySlot(stacks[num2]), bounds.renderX + lineHeight / 2.0, bounds.renderY + lineHeight / 2.0, 100.0, size, ColorUtil.ColorFromRgba(Color));
++				capi.Render.PopScissor();
++			}).EndIf()
++				.AddStaticCustomDraw(elementBounds2, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
++				{
++					drawHelp(ctx, surface, bounds, stacks, lineHeight, wi);
++				});
++		}
++		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-2");
++		composer.Compose();
++		List<object> swappedParts = shownParts;
++		shownParts = parts;
++		parts = swappedParts;
++		List<int> swappedValues = shownValues;
++		shownValues = values;
++		values = swappedValues;
++		lines.Clear();
++		lineStacks.Clear();
++		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-3");
++	}
++
++	// What drawHelp reads: the line texts, mouse button, hotkeys with their current mappings, whether a stack box is
++	// drawn, plus language, GUI scale, font size and line height. Item stacks are compared by reference because the
++	// icon is drawn live from the captured array every frame.
++	private void describeLines()
++	{
++		parts.Clear();
++		values.Clear();
++		parts.Add(Lang.CurrentLocale);
++		values.Add(BitConverter.SingleToInt32Bits(RuntimeEnv.GUIScale));
++		values.Add(BitConverter.SingleToInt32Bits(FontSize));
++		values.Add(BitConverter.SingleToInt32Bits((float)UnscaledLineHeight));
++		for (int i = 0; i < lines.Count; i++)
+ 		{
+-			ItemStack[] stacks = wi.Itemstacks;
+-			if (stacks != null && wi.GetMatchingStacks != null)
++			WorldInteraction wi = lines[i];
++			ItemStack[] stacks = lineStacks[i];
++			parts.Add(wi.ActionLangCode);
++			values.Add((int)wi.MouseButton);
++			values.Add(wi.RequireFreeHand ? 1 : 0);
++			values.Add(wi.HotKeyCodes?.Length ?? (-1));
++			if (wi.HotKeyCodes != null)
+ 			{
+-				stacks = wi.GetMatchingStacks(wi, capi.World.Player.CurrentBlockSelection, capi.World.Player.CurrentEntitySelection);
+-				if (stacks == null || stacks.Length == 0)
++				foreach (string hotKeyCode in wi.HotKeyCodes)
+ 				{
+-					continue;
++					describeHotKey(hotKeyCode);
+ 				}
+ 			}
+-			if (stacks != null || wi.ShouldApply == null || wi.ShouldApply(wi, capi.World.Player.CurrentBlockSelection, capi.World.Player.CurrentEntitySelection))
++			else
+ 			{
+-				double fixedY = (double)num * (UnscaledLineHeight + 8.0);
+-				ElementBounds elementBounds2 = ElementBounds.Fixed(0.0, fixedY, 600.0, 80.0);
+-				composer.AddIf(stacks != null && stacks.Length != 0).AddCustomRender(elementBounds2.FlatCopy(), delegate(float dt, ElementBounds bounds)
++				describeHotKey(wi.HotKeyCode);
++			}
++			if (wi.MouseButton == EnumMouseButton.Left)
++			{
++				describeHotKey("primarymouse");
++			}
++			if (wi.MouseButton == EnumMouseButton.Right)
++			{
++				describeHotKey("secondarymouse");
++			}
++			values.Add(stacks?.Length ?? (-1));
++			if (stacks != null)
++			{
++				foreach (ItemStack stack in stacks)
+ 				{
+-					long num2 = capi.World.ElapsedMilliseconds / 1000 % stacks.Length;
+-					float size = (float)lineHeight * 0.8f;
+-					_ = lineHeight;
+-					ElementBounds elementBounds3 = new ElementBounds();
+-					elementBounds3.fixedX = bounds.renderX / (double)RuntimeEnv.GUIScale - 5.0;
+-					elementBounds3.fixedY = bounds.renderY / (double)RuntimeEnv.GUIScale - 5.0;
+-					elementBounds3.fixedWidth = lineHeight / (double)RuntimeEnv.GUIScale + 10.0;
+-					elementBounds3.fixedHeight = lineHeight / (double)RuntimeEnv.GUIScale + 10.0;
+-					elementBounds3.WithEmptyParent();
+-					elementBounds3.CalcWorldBounds();
+-					capi.Render.PushScissor(elementBounds3);
+-					capi.Render.RenderItemstackToGui(new DummySlot(stacks[num2]), bounds.renderX + lineHeight / 2.0, bounds.renderY + lineHeight / 2.0, 100.0, size, ColorUtil.ColorFromRgba(Color));
+-					capi.Render.PopScissor();
+-				}).EndIf()
+-					.AddStaticCustomDraw(elementBounds2, delegate(Context ctx, ImageSurface surface, ElementBounds bounds)
+-					{
+-						drawHelp(ctx, surface, bounds, stacks, lineHeight, wi);
+-					});
+-				num++;
++					parts.Add(stack);
++				}
+ 			}
+ 		}
+-		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-2");
+-		if (num == 0)
++	}
++
++	private void describeHotKey(string code)
++	{
++		KeyCombination mapping = capi.Input.GetHotKeyByCode(code)?.CurrentMapping;
++		parts.Add(code);
++		values.Add(mapping?.KeyCode ?? (-1));
++		values.Add((mapping == null) ? 0 : ((mapping.Ctrl ? 1 : 0) | (mapping.Shift ? 2 : 0)));
++	}
++
++	private bool sameAsShown()
++	{
++		if (parts.Count != shownParts.Count || values.Count != shownValues.Count)
+ 		{
+-			Composers.Remove(composerKeyCode);
+-			return;
++			return false;
+ 		}
+-		composer.Compose();
+-		capi.World.FrameProfiler.Mark("blockinteractionhelp-recomp-3");
++		for (int i = 0; i < values.Count; i++)
++		{
++			if (values[i] != shownValues[i])
++			{
++				return false;
++			}
++		}
++		for (int j = 0; j < parts.Count; j++)
++		{
++			if (!object.ReferenceEquals(parts[j], shownParts[j]) && !(parts[j] is string text && text.Equals(shownParts[j])))
++			{
++				return false;
++			}
++		}
++		return true;
+ 	}
+ 
+ 	public void drawHelp(Context ctx, ImageSurface surface, ElementBounds currentBounds, ItemStack[] stacks, double lineheight, WorldInteraction wi)
+ 	{
+ 		//IL_00bb: Unknown result type (might be due to invalid IL or missing references)
+@@ -242,7 +357,9 @@ public class DrawWorldInteractionUtil
+ 	}
+ 
+ 	public void Dispose()
+ 	{
+ 		composer?.Dispose();
++		shownParts.Clear();
++		shownValues.Clear();
+ 	}
+ }
