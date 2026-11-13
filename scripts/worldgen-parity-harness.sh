@@ -14,10 +14,29 @@
 # vanilla serial by ~249 chunks (13.8%). A byte-exact hash gate is therefore
 # unachievable BY VANILLA ITSELF and was replaced by a statistical gate:
 #
-#   patched divergence vs vanilla  <=  reference divergence + max(5, 3*sqrt(ref))
+#   patched divergence vs vanilla  <=  noise + max(5, 3*sqrt(noise))
+#   noise = max(reference divergence, per-table noise floor)
 #
 # where the reference is vanilla-vs-vanilla (serial mode) or
-# vanillaMT-vs-vanillaSerial (when OPTIMUM_WORLDGEN_MT=1). The mapregion table
+# vanillaMT-vs-vanillaSerial (when OPTIMUM_WORLDGEN_MT=1). The reference is a
+# single pair of runs, so it is a noisy estimate of the noise itself: when it
+# comes out low (4 or 8 where the long-run mean is 13), the limit drops with it
+# and a normal patched run fails. The floor is serial mode only and sits far
+# below what a real regression produces (vanilla's own multithreaded worldgen
+# differs by ~249 chunks).
+#
+# Measured on the 91 CI runs of this job between 2026-11-08 and 2026-11-13
+# (vanilla-vs-vanilla reference, patched-vs-vanilla, both against vanilla A):
+#   chunk     (1800 rows)  reference 107 +/- 9.3,  patched 105 +/- 8.6,  max 128
+#   mapchunk  (225 rows)   reference 12.7 +/- 4.3, patched 11.3 +/- 5.1, max 25
+# The per-run limit without a floor failed twice in 91 runs, both on mapchunk
+# with a low reference (ref 8, patched 18, limit 17; ref 4, patched 17, limit
+# 10), on code that does not touch worldgen. The floors are chosen so that the
+# smallest possible limit stays at least 3.5 standard deviations above the mean
+# patched count: chunk 107 gives a limit of 139 (3.9 sd), mapchunk 17 (the
+# reference mean plus one sd) gives 30 (3.6 sd). With them no observed pair
+# fails. Worldgen exceptions, scheduler faults and row-count changes still fail
+# the gate regardless of these counts. The mapregion table
 # is reported but not gated (structure/list ordering makes every region blob
 # differ even between two identical vanilla runs). gamedata/playerdata carry
 # timestamps and are excluded entirely.
@@ -184,10 +203,26 @@ row_count() {
     sqlite_query "$db" "SELECT count(*) FROM $table;"
 }
 
-# Gate threshold: reference + max(5, 3*sqrt(reference)), rounded up.
+# Gate threshold: noise + max(5, 3*sqrt(noise)), rounded up, where noise is the
+# reference divergence but never below the floor for that table.
 gate_limit() {
-    local ref="$1"
-    awk -v r="$ref" 'BEGIN { m = 3 * sqrt(r); if (m < 5) m = 5; printf "%d\n", int(r + m + 0.999) }'
+    local ref="$1" floor="${2:-0}"
+    awk -v r="$ref" -v f="$floor" 'BEGIN { if (r < f) r = f; m = 3 * sqrt(r); if (m < 5) m = 5; printf "%d\n", int(r + m + 0.999) }'
+}
+
+# Per-table noise floor, derived from the long-run vanilla-vs-vanilla divergence
+# (serial mode only: the multithreaded reference is a different comparison with
+# a much higher mean).
+noise_floor() {
+    if [ "$MT_MODE" = "1" ]; then
+        echo 0
+        return
+    fi
+    case "$1" in
+        chunk) echo 107 ;;
+        mapchunk) echo 17 ;;
+        *) echo 0 ;;
+    esac
 }
 
 check_log_for_worldgen_errors() {
@@ -337,7 +372,7 @@ for table in chunk mapchunk; do
     rows_patched=$(row_count "$table" "$PATCHED_DB")
     ref=$(count_diff "$table" "$VANILLA_A" "$REF_DB")
     patched=$(count_diff "$table" "$VANILLA_A" "$PATCHED_DB")
-    limit=$(gate_limit "$ref")
+    limit=$(gate_limit "$ref" "$(noise_floor "$table")")
     if [ "$rows" != "$rows_patched" ]; then
         verdict="FAIL (row count $rows_patched != $rows)"
         FAILED=true
