@@ -303,10 +303,10 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 1 GuiComposer composition metrics patch, applied {guiCompositionMetrics}.");
         }
-        if (guiTextureDisposals != 2)
+        if (guiTextureDisposals != 3)
         {
             throw new InvalidOperationException(
-                $"Expected 2 GUI texture disposal patches, applied {guiTextureDisposals}.");
+                $"Expected 3 GUI texture disposal patches, applied {guiTextureDisposals}.");
         }
         if (guiSlotNotifiedPatches != 3)
         {
@@ -1140,8 +1140,10 @@ public static class ApiPatcher
 
     /// <summary>
     /// Vanilla never deletes the GL textures that GuiElementItemSlotGridBase caches per background icon and
-    /// color, or the one GuiElementCustomDraw.Redraw generates. Adds the deletion to the grid's Dispose and
-    /// gives the custom draw a Dispose override. The grid element is reused after Dispose, so the cache is cleared.
+    /// color, the one GuiElementCustomDraw.Redraw generates, or the one GuiElementConfigList.Refresh generates.
+    /// Adds the deletion to the grid's and the config list's Dispose and gives the custom draw a Dispose override.
+    /// The grid element is reused after Dispose, so its cache is cleared; the config list texture id is reset to 0
+    /// because a disposed composer can be disposed or recomposed again.
     /// </summary>
     internal static int PatchGuiTextureDisposal(
         ModuleDefinition module,
@@ -1167,6 +1169,15 @@ public static class ApiPatcher
         var elementDispose = element.Methods.SingleOrDefault(method =>
             method.Name == "Dispose" && method.Parameters.Count == 0 && method.IsVirtual)
             ?? throw new InvalidOperationException($"{elementTypeName}.Dispose is missing from the vanilla API.");
+
+        const string configListTypeName = "Vintagestory.API.Client.GuiElementConfigList";
+        var configList = module.GetType(configListTypeName)
+            ?? throw new InvalidOperationException($"{configListTypeName} is missing from the vanilla API.");
+        var configListTextureId = configList.Fields.SingleOrDefault(field => field.Name == "textureId" && field.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{configListTypeName}.textureId is missing from the vanilla API.");
+        var configListDispose = configList.Methods.SingleOrDefault(method =>
+            method.Name == "Dispose" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{configListTypeName}.Dispose is missing from the vanilla API.");
 
         var gridDispose = grid.Methods.SingleOrDefault(method =>
             method.Name == "Dispose" && method.Parameters.Count == 0 && method.HasBody)
@@ -1217,9 +1228,33 @@ public static class ApiPatcher
         drawDispose.Body = drawBody;
         draw.Methods.Add(drawDispose);
 
+        // Right after base.Dispose(), as in the grid, so a later early return in vanilla cannot skip the deletion.
+        var configListBaseCall = configListDispose.Body.Instructions.FirstOrDefault(instruction =>
+            instruction.OpCode == OpCodes.Call &&
+            instruction.Operand is MethodReference called &&
+            called.Name == "Dispose" &&
+            called.DeclaringType.FullName == elementTypeName)
+            ?? throw new InvalidOperationException($"{configListTypeName}.Dispose does not call GuiElement.Dispose.");
+        ClearDebugInformation(configListDispose);
+        var configListIl = configListDispose.Body.GetILProcessor();
+        var configListCursor = configListBaseCall;
+        foreach (var instruction in new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldflda, configListTextureId),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, apiField),
+            Instruction.Create(OpCodes.Call, deleteTextureBridge),
+        })
+        {
+            configListIl.InsertAfter(configListCursor, instruction);
+            configListCursor = instruction;
+        }
+
         Console.WriteLine($"  API PATCHED: {gridTypeName}.Dispose deletes the cached slot background textures");
         Console.WriteLine($"  API PATCHED: {drawTypeName}.Dispose deletes the redrawn texture");
-        return 2;
+        Console.WriteLine($"  API PATCHED: {configListTypeName}.Dispose deletes the list texture");
+        return 3;
     }
 
     /// <summary>
