@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
-index 754d8c2..385977a 100644
+index 754d8c2..41fea8d 100644
 --- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 +++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 @@ -21,12 +21,12 @@ namespace Vintagestory.API.Client
@@ -32,7 +32,34 @@ index 754d8c2..385977a 100644
          ItemStack referenceDistributStack;
  
          public CanClickSlotDelegate CanClickSlot;
-@@ -557,11 +557,11 @@ namespace Vintagestory.API.Client
+@@ -95,11 +95,11 @@ namespace Vintagestory.API.Client
+             prevSlotQuantity = inventory.Count;
+             this.inventory = inventory;
+             cols = columns;
+             SendPacketHandler = sendPacket;
+ 
+-            inventory.SlotNotified += OnSlotNotified;
++            // Optimum: subscribed when composed, not here. A grid built by a skipped AddIf is never composed or disposed.
+ 
+             DrawIconHandler = api.Gui.Icons.DrawIconInt;
+         }
+ 
+         private void OnSlotNotified(int slotid)
+@@ -119,10 +119,13 @@ namespace Vintagestory.API.Client
+             SlotBounds = new ElementBounds[availableSlots.Count];
+             scissorBounds = new ElementBounds[availableSlots.Count];
+ 
+             if (slotQuantityTextures != null) Dispose();
+ 
++            // Optimum: Dispose removed the subscription and this element is reused, so subscribe on every compose.
++            inventory.SlotNotified += OnSlotNotified;
++
+             slotQuantityTextures = new LoadedTexture[availableSlots.Count];
+             for (int k = 0; k < slotQuantityTextures.Length; k++) slotQuantityTextures[k] = new LoadedTexture(this.api);
+ 
+             this.rows = (int)Math.Ceiling(1f * availableSlots.Count / cols);
+ 
+@@ -557,11 +560,11 @@ namespace Vintagestory.API.Client
          {
              searchText = text.ToSearchFriendly().ToLowerInvariant();
  
@@ -45,7 +72,7 @@ index 754d8c2..385977a 100644
              {
                  ItemSlot slot = inventory[val.Key];
  
-@@ -647,13 +647,24 @@ namespace Vintagestory.API.Client
+@@ -647,13 +650,24 @@ namespace Vintagestory.API.Client
                          renderedSlots.Add(val.Key, slot);
                      }
                  }
@@ -72,12 +99,15 @@ index 754d8c2..385977a 100644
              rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
              ComposeInteractiveElements();
          }
-@@ -1076,10 +1087,14 @@ namespace Vintagestory.API.Client
+@@ -1076,10 +1090,17 @@ namespace Vintagestory.API.Client
  
          public override void Dispose()
          {
              base.Dispose();
  
++            // Optimum: the inventory outlives the element, so drop the subscription that pins this element and its dialog.
++            inventory.SlotNotified -= OnSlotNotified;
++
 +            // Optimum: the element is reused after Dispose, so delete the cached backgrounds and clear the cache.
 +            foreach (int texId in slotTextureIdsByBgIconAndColor.Values) api.Render.GLDeleteTexture(texId);
 +            slotTextureIdsByBgIconAndColor.Clear();
