@@ -255,6 +255,19 @@ var membersToInject = new Dictionary<string, List<string>>
         "frameSlicesWidth",
         "frameSlicesHeight",
     },
+    // DrawWorldInteractionUtil (#571): what the help showed last, and the scratch lists used to compare it
+    ["Vintagestory.Client.NoObf.DrawWorldInteractionUtil"] = new()
+    {
+        "lines",
+        "lineStacks",
+        "parts",
+        "shownParts",
+        "values",
+        "shownValues",
+        "describeLines",
+        "describeHotKey",
+        "sameAsShown",
+    },
     // AmbientManager: reusable scratch buffers replacing per-frame array/BlockPos allocations
     ["Vintagestory.Client.NoObf.AmbientManager"] = new()
     {
@@ -598,6 +611,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.HudDebugScreen", ".ctor", 1),
     new("Vintagestory.Client.NoObf.HudDebugScreen", "updateFrameSlicesMesh", 0),
     new("Vintagestory.Client.NoObf.HudDebugScreen", "GenFrameSlicesMesh", 0),
+    // Issue #571: recompose the interaction help only when what it would draw changes. The constructor initializes the
+    // injected lists; ComposeBlockWorldInteractionHelp keeps the vanilla lambda bodies and captured names.
+    new("Vintagestory.Client.NoObf.DrawWorldInteractionUtil", ".ctor", 3),
+    new("Vintagestory.Client.NoObf.DrawWorldInteractionUtil", "ComposeBlockWorldInteractionHelp", 1),
+    new("Vintagestory.Client.NoObf.DrawWorldInteractionUtil", "Dispose", 0),
     // ChunkRenderer: shadow far vegetation skip (reads injected OptimumShadowFarVegetation)
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RenderOpaque", 1),
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
