@@ -634,7 +634,8 @@ namespace Vintagestory.Client.NoObf
 							if (checkEachStep) CheckCpuUploadGlError("bind-texture-and-set-filters");
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
 								PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
-							CheckCpuUploadGlError("upload-pixels");
+							// With the per step checks off, any step since the drain may have raised this error.
+							CheckCpuUploadGlError(checkEachStep ? "upload-pixels" : "upload (step not isolated; turn on OpenGL error checking to name it)");
 						}
 						finally
 						{
