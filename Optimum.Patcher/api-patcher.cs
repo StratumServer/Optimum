@@ -195,6 +195,7 @@ public static class ApiPatcher
             vanilla.MainModule.ImportReference(deleteGuiTextures),
             vanilla.MainModule.ImportReference(deleteGuiTexture));
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
+        int guiHoverTextPatches = PatchGuiHoverTextSameText(vanilla.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
@@ -313,6 +314,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 3 slot grid SlotNotified patches, applied {guiSlotNotifiedPatches}.");
         }
+        if (guiHoverTextPatches != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 hover text same-text patches, applied {guiHoverTextPatches}.");
+        }
         if (fontMeasurementMetrics != 2)
         {
             throw new InvalidOperationException(
@@ -370,6 +376,7 @@ public static class ApiPatcher
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{guiTextureDisposals} GUI texture disposals, " +
                 $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
+                $"{guiHoverTextPatches} hover text same-text skips, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -1370,6 +1377,133 @@ public static class ApiPatcher
         Console.WriteLine($"  API PATCHED: {gridTypeName} constructor no longer subscribes to SlotNotified");
         Console.WriteLine($"  API PATCHED: {gridTypeName}.ComposeInteractiveElements subscribes on every compose");
         return 3;
+    }
+
+    /// <summary>
+    /// GuiElementHoverText.SetNewText recomposes unconditionally: it re-parses the rich text, rebuilds a blurred
+    /// background and uploads a texture. The hotbar gear tooltip calls it every frame with the same text. Skips the
+    /// recompose when the text is unchanged, a texture exists, and it was composed at the current GUI scale. The scale
+    /// is part of the key because a scale change recomposes the composer in place and keeps this element and its
+    /// texture, so a non-zero texture id alone would leave a stale texture.
+    /// </summary>
+    internal static int PatchGuiHoverTextSameText(ModuleDefinition module)
+    {
+        const string hoverTypeName = "Vintagestory.API.Client.GuiElementHoverText";
+        const string textBaseTypeName = "Vintagestory.API.Client.GuiElementTextBase";
+        const string textureTypeName = "Vintagestory.API.Client.LoadedTexture";
+        const string runtimeEnvTypeName = "Vintagestory.API.Config.RuntimeEnv";
+        var hover = module.GetType(hoverTypeName)
+            ?? throw new InvalidOperationException($"{hoverTypeName} is missing from the vanilla API.");
+        var textBase = module.GetType(textBaseTypeName)
+            ?? throw new InvalidOperationException($"{textBaseTypeName} is missing from the vanilla API.");
+        var texture = module.GetType(textureTypeName)
+            ?? throw new InvalidOperationException($"{textureTypeName} is missing from the vanilla API.");
+        var runtimeEnv = module.GetType(runtimeEnvTypeName)
+            ?? throw new InvalidOperationException($"{runtimeEnvTypeName} is missing from the vanilla API.");
+
+        var textField = textBase.Fields.SingleOrDefault(field => field.Name == "text" && field.FieldType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{textBaseTypeName}.text is missing from the vanilla API.");
+        var hoverTexture = hover.Fields.SingleOrDefault(field => field.Name == "hoverTexture" && field.FieldType.FullName == textureTypeName)
+            ?? throw new InvalidOperationException($"{hoverTypeName}.hoverTexture is missing from the vanilla API.");
+        var textureId = texture.Fields.SingleOrDefault(field => field.Name == "TextureId" && field.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{textureTypeName}.TextureId is missing from the vanilla API.");
+        var guiScale = runtimeEnv.Fields.SingleOrDefault(field => field.Name == "GUIScale" && field.IsStatic && field.FieldType.MetadataType == MetadataType.Single)
+            ?? throw new InvalidOperationException($"{runtimeEnvTypeName}.GUIScale is missing from the vanilla API.");
+        if (hover.Fields.Any(field => field.Name == "composedGuiScale"))
+        {
+            throw new InvalidOperationException($"{hoverTypeName}.composedGuiScale already exists.");
+        }
+
+        var recompose = hover.Methods.SingleOrDefault(method => method.Name == "Recompose" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{hoverTypeName}.Recompose is missing from the vanilla API.");
+        var setNewText = hover.Methods.SingleOrDefault(method =>
+            method.Name == "SetNewText" && method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.MetadataType == MetadataType.String && method.HasBody)
+            ?? throw new InvalidOperationException($"{hoverTypeName}.SetNewText(string) is missing from the vanilla API.");
+
+        // SetNewText must be exactly "this.text = text; Recompose();" so the guard cannot skip anything else.
+        var original = setNewText.Body.Instructions;
+        if (original.Count != 6 ||
+            original[0].OpCode != OpCodes.Ldarg_0 || original[1].OpCode != OpCodes.Ldarg_1 ||
+            original[2].OpCode != OpCodes.Stfld || original[3].OpCode != OpCodes.Ldarg_0 ||
+            original[4].OpCode != OpCodes.Call || original[5].OpCode != OpCodes.Ret ||
+            original[4].Operand is not MethodReference recomposeCall || recomposeCall.Name != "Recompose")
+        {
+            throw new InvalidOperationException($"{hoverTypeName}.SetNewText(string) has an unexpected shape.");
+        }
+
+        // Reuse the string equality reference the vanilla module already uses so it binds to the same facade assembly.
+        MethodReference? stringEquality = null;
+        foreach (var type in module.Types)
+        {
+            foreach (var method in type.Methods)
+            {
+                if (!method.HasBody) continue;
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.Operand is MethodReference reference && reference.Name == "op_Equality" &&
+                        reference.DeclaringType.FullName == "System.String" && reference.Parameters.Count == 2)
+                    {
+                        stringEquality = reference;
+                        break;
+                    }
+                }
+
+                if (stringEquality != null) break;
+            }
+
+            if (stringEquality != null) break;
+        }
+
+        stringEquality ??= module.ImportReference(
+            typeof(string).GetMethod("op_Equality", new[] { typeof(string), typeof(string) })
+            ?? throw new InvalidOperationException("string.op_Equality is missing."));
+
+        var composedGuiScale = new FieldDefinition("composedGuiScale", FieldAttributes.Private, module.TypeSystem.Single);
+        hover.Fields.Add(composedGuiScale);
+
+        // Recompose: stamp the scale first. Nothing branches to its first instruction, but retarget in case it ever does.
+        ClearDebugInformation(recompose);
+        var recomposeIl = recompose.Body.GetILProcessor();
+        var recomposeFirst = recompose.Body.Instructions[0];
+        var stamp = new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldsfld, guiScale),
+            Instruction.Create(OpCodes.Stfld, composedGuiScale),
+        };
+        foreach (var instruction in stamp) recomposeIl.InsertBefore(recomposeFirst, instruction);
+        foreach (var instruction in recompose.Body.Instructions)
+        {
+            if (ReferenceEquals(instruction.Operand, recomposeFirst)) instruction.Operand = stamp[0];
+        }
+
+        // SetNewText: return early when text, texture and scale all match; otherwise run the original body.
+        ClearDebugInformation(setNewText);
+        var setIl = setNewText.Body.GetILProcessor();
+        var first = original[0];
+        var guard = new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_1),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, textField),
+            Instruction.Create(OpCodes.Call, stringEquality),
+            Instruction.Create(OpCodes.Brfalse, first),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, hoverTexture),
+            Instruction.Create(OpCodes.Ldfld, textureId),
+            Instruction.Create(OpCodes.Brfalse, first),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, composedGuiScale),
+            Instruction.Create(OpCodes.Ldsfld, guiScale),
+            Instruction.Create(OpCodes.Bne_Un, first),
+            Instruction.Create(OpCodes.Ret),
+        };
+        foreach (var instruction in guard) setIl.InsertBefore(first, instruction);
+
+        Console.WriteLine($"  API PATCHED: {hoverTypeName}.Recompose records the GUI scale it composed at");
+        Console.WriteLine($"  API PATCHED: {hoverTypeName}.SetNewText skips an unchanged text with a current texture");
+        return 2;
     }
 
     internal static int PatchGuiCompositionMetrics(ModuleDefinition module, ModuleDefinition contracts)

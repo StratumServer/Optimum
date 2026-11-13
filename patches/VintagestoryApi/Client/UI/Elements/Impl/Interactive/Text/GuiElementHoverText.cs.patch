@@ -1,0 +1,35 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementHoverText.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementHoverText.cs
+index b81698e..ab30a41 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementHoverText.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Text/GuiElementHoverText.cs
+@@ -131,12 +131,17 @@ namespace Vintagestory.API.Client
+             hoverHeight = scaled(currentHeight);
+             hoverWidth = scaled(hoverWidth);
+         }
+ 
+ 
++        // Optimum: the GUI scale the hover texture was composed at. A scale change recomposes the composer in
++        // place and keeps this element and its texture, so SetNewText compares it with the current scale.
++        float composedGuiScale;
++
+         void Recompose()
+         {
++            composedGuiScale = RuntimeEnv.GUIScale;
+             descriptionElement.SetNewText(text, Font);
+             RecalcBounds();
+             Bounds.CalcWorldBounds();
+ 
+             ElementBounds textBounds = Bounds.CopyOnlySize();
+@@ -245,10 +250,12 @@ namespace Vintagestory.API.Client
+         /// Sets the text of the component and changes it.
+         /// </summary>
+         /// <param name="text">The text to change.</param>
+         public void SetNewText(string text)
+         {
++            // Optimum: callers such as the hotbar gear pass the same text every frame.
++            if (text == this.text && hoverTexture.TextureId != 0 && composedGuiScale == RuntimeEnv.GUIScale) return;
+             this.text = text;
+             Recompose();
+         }
+ 
+         /// <summary>
