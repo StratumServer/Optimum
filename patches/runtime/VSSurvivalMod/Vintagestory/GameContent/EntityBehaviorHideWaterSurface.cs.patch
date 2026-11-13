@@ -1,0 +1,11 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorHideWaterSurface.cs b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorHideWaterSurface.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorHideWaterSurface.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorHideWaterSurface.cs
+@@ -81,6 +81,7 @@ public class EntityBehaviorHideWaterSurface(Entity entity) : EntityBehavior(enti
+ 	public override void OnEntityDespawn(EntityDespawnData despawn)
+ 	{
+ 		base.OnEntityDespawn(despawn);
++		capi?.Event.UnregisterRenderer(this, EnumRenderStage.OIT);
+ 		meshref?.Dispose();
+ 	}
+ 

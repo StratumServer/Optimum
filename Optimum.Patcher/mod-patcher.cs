@@ -30,7 +30,8 @@ public static class ModPatcher
             manifest.Methods,
             interfacesToInject: manifest.Interfaces,
             requireAllTargets: true,
-            validationErrors: validationErrors);
+            validationErrors: validationErrors,
+            verifyStaticFieldInitializers: true);
 
         if (total < 0)
         {
@@ -74,7 +75,6 @@ public static class ModPatcher
             {
                 ["Vintagestory.GameContent.EntityBehaviorCollectEntities"] =
                 [
-                    "OptimumCollectStrideInterval",
                     "partitionUtil",
                 ],
                 ["Vintagestory.Essentials.AStar"] =
@@ -346,6 +346,8 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockEntityFirepit", "FromTreeAttributes", 2),
                 new("Vintagestory.GameContent.BlockEntityFirepit", "getContentMesh", 2),
                 new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.EntityBehaviorHideWaterSurface", "OnEntityDespawn", 1),
+                new("Vintagestory.GameContent.EntityBehaviorWritingSurface", "OnEntityDespawn", 1),
             ]);
     }
 

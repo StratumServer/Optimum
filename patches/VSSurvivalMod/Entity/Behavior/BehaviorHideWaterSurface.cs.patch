@@ -1,0 +1,11 @@
+diff --git a/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs b/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
+--- a/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
++++ b/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs
+@@ -97,6 +97,7 @@ namespace Vintagestory.GameContent
+         {
+             base.OnEntityDespawn(despawn);
+ 
++            capi?.Event.UnregisterRenderer(this, EnumRenderStage.OIT);
+             meshref?.Dispose();
+         }
+ 

@@ -5,7 +5,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperatur
  	[DocumentAsJson("Optional", "37", false)]
  	public float NormalBodyTemperature;
  
-+	public static readonly string[] ShiverAnimationNames = new string[3] { "shiver", "coldidle", "coldidleheld" };
++	public static string[] ShiverAnimationNames;
 +
  	private bool firstTick;
  
@@ -15,7 +15,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperatur
  			}
  		}
 -		else if (entity.AnimManager.IsAnimationActive("coldidle") || entity.AnimManager.IsAnimationActive("coldidleheld"))
-+		else if (entity.AnimManager.IsAnimationActive(ShiverAnimationNames))
++		else if (entity.AnimManager.IsAnimationActive(ShiverAnimationNames ??= new string[3] { "shiver", "coldidle", "coldidleheld" }))
  		{
  			entity.StopAnimation("coldidle");
  			entity.StopAnimation("coldidleheld");
