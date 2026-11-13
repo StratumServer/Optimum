@@ -194,6 +194,7 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(deleteGuiTextures),
             vanilla.MainModule.ImportReference(deleteGuiTexture));
+        int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
@@ -307,6 +308,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 GUI texture disposal patches, applied {guiTextureDisposals}.");
         }
+        if (guiSlotNotifiedPatches != 3)
+        {
+            throw new InvalidOperationException(
+                $"Expected 3 slot grid SlotNotified patches, applied {guiSlotNotifiedPatches}.");
+        }
         if (fontMeasurementMetrics != 2)
         {
             throw new InvalidOperationException(
@@ -363,6 +369,7 @@ public static class ApiPatcher
                 $"{colorUtilMethods} ColorUtil scalar incandescence + RGBA methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{guiTextureDisposals} GUI texture disposals, " +
+                $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -1213,6 +1220,121 @@ public static class ApiPatcher
         Console.WriteLine($"  API PATCHED: {gridTypeName}.Dispose deletes the cached slot background textures");
         Console.WriteLine($"  API PATCHED: {drawTypeName}.Dispose deletes the redrawn texture");
         return 2;
+    }
+
+    /// <summary>
+    /// GuiElementItemSlotGridBase subscribes to inventory.SlotNotified in its constructor and never unsubscribes.
+    /// The inventory outlives the dialog, so the delegate keeps every closed dialog alive, and a grid built by a
+    /// skipped AddIf (never composed, never disposed) stays subscribed for good. Dispose now removes the
+    /// subscription, the constructor no longer subscribes, and ComposeInteractiveElements subscribes on every compose.
+    /// </summary>
+    internal static int PatchGuiSlotNotifiedSubscription(ModuleDefinition module)
+    {
+        const string gridTypeName = "Vintagestory.API.Client.GuiElementItemSlotGridBase";
+        const string elementTypeName = "Vintagestory.API.Client.GuiElement";
+        const string inventoryTypeName = "Vintagestory.API.Common.IInventory";
+        var grid = module.GetType(gridTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName} is missing from the vanilla API.");
+        var inventoryInterface = module.GetType(inventoryTypeName)
+            ?? throw new InvalidOperationException($"{inventoryTypeName} is missing from the vanilla API.");
+
+        var inventoryField = grid.Fields.SingleOrDefault(field => field.Name == "inventory" && field.FieldType.FullName == inventoryTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName}.inventory is missing from the vanilla API.");
+        var handler = grid.Methods.SingleOrDefault(method =>
+            method.Name == "OnSlotNotified" && method.Parameters.Count == 1 && method.Parameters[0].ParameterType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{gridTypeName}.OnSlotNotified is missing from the vanilla API.");
+        var addAccessor = inventoryInterface.Methods.SingleOrDefault(method => method.Name == "add_SlotNotified")
+            ?? throw new InvalidOperationException($"{inventoryTypeName}.SlotNotified is missing from the vanilla API.");
+        var removeAccessor = inventoryInterface.Methods.SingleOrDefault(method => method.Name == "remove_SlotNotified")
+            ?? throw new InvalidOperationException($"{inventoryTypeName}.SlotNotified is missing from the vanilla API.");
+        // Reuse the constructor's own Action<int> reference so the new code binds to the same facade assembly as vanilla.
+        var actionConstructor = grid.Methods
+            .Where(method => method.IsConstructor && !method.IsStatic && method.HasBody)
+            .SelectMany(method => method.Body.Instructions)
+            .Select(instruction => instruction.Operand)
+            .OfType<MethodReference>()
+            .FirstOrDefault(reference => reference.Name == ".ctor" && reference.DeclaringType.FullName == "System.Action`1<System.Int32>")
+            ?? module.ImportReference(
+                typeof(Action<int>).GetConstructor(new[] { typeof(object), typeof(IntPtr) })
+                ?? throw new InvalidOperationException("Action<int>(object, IntPtr) is missing."));
+
+        Instruction[] SubscriptionCall(MethodDefinition accessor) => new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, inventoryField),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldftn, handler),
+            Instruction.Create(OpCodes.Newobj, actionConstructor),
+            Instruction.Create(OpCodes.Callvirt, accessor),
+        };
+
+        // 1. Dispose: right after base.Dispose(), before the early ret that crossedOutTexture?.Dispose() compiles to.
+        var dispose = grid.Methods.SingleOrDefault(method =>
+            method.Name == "Dispose" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.Dispose is missing from the vanilla API.");
+        var baseDispose = dispose.Body.Instructions.FirstOrDefault(instruction =>
+            instruction.OpCode == OpCodes.Call &&
+            instruction.Operand is MethodReference called &&
+            called.Name == "Dispose" &&
+            called.DeclaringType.FullName == elementTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName}.Dispose does not call GuiElement.Dispose.");
+        ClearDebugInformation(dispose);
+        var disposeIl = dispose.Body.GetILProcessor();
+        var cursor = baseDispose;
+        foreach (var instruction in SubscriptionCall(removeAccessor))
+        {
+            disposeIl.InsertAfter(cursor, instruction);
+            cursor = instruction;
+        }
+
+        // 2. Constructor: drop "inventory.SlotNotified += OnSlotNotified" (ldarg.2, ldarg.0, ldftn, newobj, callvirt).
+        var constructor = grid.Methods.SingleOrDefault(method =>
+            method.IsConstructor && !method.IsStatic && method.HasBody &&
+            method.Body.Instructions.Any(instruction => instruction.OpCode == OpCodes.Callvirt &&
+                instruction.Operand is MethodReference called && called.Name == "add_SlotNotified"))
+            ?? throw new InvalidOperationException($"{gridTypeName} has no constructor that subscribes to SlotNotified.");
+        var constructorInstructions = constructor.Body.Instructions;
+        int subscribe = constructorInstructions.IndexOf(constructorInstructions.Single(instruction =>
+            instruction.OpCode == OpCodes.Callvirt && instruction.Operand is MethodReference called && called.Name == "add_SlotNotified"));
+        if (subscribe < 4 ||
+            constructorInstructions[subscribe - 4].OpCode != OpCodes.Ldarg_2 ||
+            constructorInstructions[subscribe - 3].OpCode != OpCodes.Ldarg_0 ||
+            constructorInstructions[subscribe - 2].OpCode != OpCodes.Ldftn ||
+            constructorInstructions[subscribe - 1].OpCode != OpCodes.Newobj)
+        {
+            throw new InvalidOperationException($"{gridTypeName} constructor SlotNotified subscription has an unexpected shape.");
+        }
+        ClearDebugInformation(constructor);
+        var constructorIl = constructor.Body.GetILProcessor();
+        for (int i = 0; i < 5; i++) constructorIl.Remove(constructorInstructions[subscribe - 4]);
+
+        // 3. ComposeInteractiveElements: subscribe on every compose, after the "if (slotQuantityTextures != null) Dispose();".
+        // The branch over that Dispose() targets the next instruction, so it is retargeted to the new code.
+        var compose = grid.Methods.SingleOrDefault(method =>
+            method.Name == "ComposeInteractiveElements" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeInteractiveElements is missing from the vanilla API.");
+        var reuseDispose = compose.Body.Instructions.FirstOrDefault(instruction =>
+            (instruction.OpCode == OpCodes.Call || instruction.OpCode == OpCodes.Callvirt) &&
+            instruction.Operand is MethodReference called &&
+            called.Name == "Dispose" &&
+            called.Parameters.Count == 0 &&
+            (called.DeclaringType.FullName == gridTypeName || called.DeclaringType.FullName == elementTypeName))
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeInteractiveElements does not call Dispose().");
+        var afterDispose = reuseDispose.Next
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeInteractiveElements ends after Dispose().");
+        ClearDebugInformation(compose);
+        var composeIl = compose.Body.GetILProcessor();
+        var added = SubscriptionCall(addAccessor);
+        foreach (var instruction in added) composeIl.InsertBefore(afterDispose, instruction);
+        foreach (var instruction in compose.Body.Instructions)
+        {
+            if (ReferenceEquals(instruction.Operand, afterDispose)) instruction.Operand = added[0];
+        }
+
+        Console.WriteLine($"  API PATCHED: {gridTypeName}.Dispose removes the SlotNotified subscription");
+        Console.WriteLine($"  API PATCHED: {gridTypeName} constructor no longer subscribes to SlotNotified");
+        Console.WriteLine($"  API PATCHED: {gridTypeName}.ComposeInteractiveElements subscribes on every compose");
+        return 3;
     }
 
     internal static int PatchGuiCompositionMetrics(ModuleDefinition module, ModuleDefinition contracts)
