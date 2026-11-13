@@ -107,6 +107,64 @@ public sealed class PatcherValidationMessageTests : IDisposable
     }
 
     [Fact]
+    public void PatchWithInjectionAcceptsAnAllowListedStaticFieldInitializer()
+    {
+        var validationErrors = new List<string>();
+        string output = PatchStaticFixture(new HashSet<string> { "Fixture.Holder::optimumNames" }, validationErrors);
+
+        Assert.Empty(validationErrors);
+        Assert.True(File.Exists(output));
+    }
+
+    [Fact]
+    public void AnAllowListDoesNotHideOtherStaticFields()
+    {
+        var validationErrors = new List<string>();
+        string output = PatchStaticFixture(new HashSet<string> { "Fixture.Holder::somethingElse" }, validationErrors);
+
+        string error = Assert.Single(validationErrors);
+        Assert.Contains("Fixture.Holder::optimumNames", error);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void LibStaticInitializerAllowListHasWellFormedUniqueEntries()
+    {
+        Assert.NotEmpty(LibStaticInitializerAllowList.Names);
+        foreach (string name in LibStaticInitializerAllowList.Names)
+        {
+            string[] parts = name.Split("::");
+            Assert.Equal(2, parts.Length);
+            Assert.StartsWith("Vintagestory.", parts[0]);
+            Assert.NotEmpty(parts[1]);
+        }
+    }
+
+    private string PatchStaticFixture(IReadOnlySet<string> allowed, List<string> validationErrors)
+    {
+        string vanilla = Path.Combine(temp.FullName, "vanilla", "StaticFixture.dll");
+        string donor = Path.Combine(temp.FullName, "donor", "StaticFixture.dll");
+        string output = Path.Combine(temp.FullName, "out", "StaticFixture.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(vanilla)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(donor)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        BuildStaticFixture(vanilla, withInjectedStaticField: false, initializeInStaticConstructor: false);
+        BuildStaticFixture(donor, withInjectedStaticField: true, initializeInStaticConstructor: true);
+
+        ILPatcher.PatchWithInjection(
+            vanilla,
+            donor,
+            output,
+            new(),
+            new() { ["Fixture.Holder"] = ["optimumNames"] },
+            new(),
+            validationErrors: validationErrors,
+            verifyStaticFieldInitializers: true,
+            allowedStaticFieldInitializers: allowed);
+        return output;
+    }
+
+    [Fact]
     public void ValidationFailureMessageNamesTheChecksAndCapsTheList()
     {
         var errors = new List<string>();

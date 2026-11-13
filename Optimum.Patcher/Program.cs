@@ -971,7 +971,9 @@ int total = ILPatcher.PatchWithInjection(
             TargetGenericArity: 0,
             InsertBeforeTarget: true),
     },
-    fieldsToRetype: fieldsToRetype);
+    fieldsToRetype: fieldsToRetype,
+    verifyStaticFieldInitializers: true,
+    allowedStaticFieldInitializers: LibStaticInitializerAllowList.Names);
 
         Console.WriteLine($"\nDone.");
         return total > 0 ? 0 : 1;

@@ -69,7 +69,8 @@ public static class ILPatcher
         bool requireAllTargets = true,
         Dictionary<string, List<string>>? fieldsToRetype = null,
         List<string>? validationErrors = null,
-        bool verifyStaticFieldInitializers = false)
+        bool verifyStaticFieldInitializers = false,
+        IReadOnlySet<string>? allowedStaticFieldInitializers = null)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -272,7 +273,7 @@ public static class ILPatcher
 
         var initializerErrors = InjectedFieldInitializerVerifier.Verify(
             vanillaAsm.MainModule, compiledAsm.MainModule, preInjectionFields, transplantedMethodKeys,
-            verifyStaticFieldInitializers);
+            verifyStaticFieldInitializers, allowedStaticFieldInitializers);
         if (initializerErrors.Count > 0)
             return Reject("injected-field initializer", initializerErrors);
 

@@ -25,9 +25,10 @@ namespace Optimum.Patcher;
 /// error, because nothing ever runs it and the field stays at its CLR default
 /// (issue #589: <c>static readonly string[] ShiverAnimationNames = new[] ...</c>).
 /// A static field injected this way has to be assigned where it is read.
-/// The static check is opt-in (<c>includeStaticFields</c>): the mod patcher turns it on, while
-/// the VintagestoryLib patch still has injected static fields that rely on a donor static
-/// constructor and need their own triage before the check can cover them.
+/// The static check is opt-in (<c>includeStaticFields</c>). The mod patcher and the
+/// VintagestoryLib patch turn it on. The VintagestoryLib patch passes
+/// <see cref="LibStaticInitializerAllowList"/> for the fields that were audited and are harmless,
+/// so a new one fails the build instead of reaching a player as a null.
 /// </summary>
 public static class InjectedFieldInitializerVerifier
 {
@@ -50,7 +51,8 @@ public static class InjectedFieldInitializerVerifier
         ModuleDefinition compiled,
         Dictionary<string, HashSet<string>> preInjectionFields,
         HashSet<string> transplantedMethodKeys,
-        bool includeStaticFields = false)
+        bool includeStaticFields = false,
+        IReadOnlySet<string>? allowedStaticFields = null)
     {
         var errors = new List<string>();
         foreach (var vanillaType in FlattenTypes(vanilla))
@@ -68,6 +70,9 @@ public static class InjectedFieldInitializerVerifier
 
             foreach (var field in injectedFields)
             {
+                // Audited static fields (see LibStaticInitializerAllowList) keep their CLR default on purpose.
+                if (field.IsStatic && allowedStaticFields?.Contains($"{vanillaType.FullName}::{field.Name}") == true) continue;
+
                 foreach (var donorCtor in compiledType.Methods.Where(m =>
                     m.HasBody && m.IsConstructor && m.IsStatic == field.IsStatic))
                 {
