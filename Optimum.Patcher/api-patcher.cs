@@ -196,6 +196,7 @@ public static class ApiPatcher
             vanilla.MainModule.ImportReference(deleteGuiTexture));
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int guiHoverTextPatches = PatchGuiHoverTextSameText(vanilla.MainModule);
+        int guiStatbarPatches = PatchGuiStatbarOnDemand(vanilla.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
         int fontMeasurementMetrics = PatchFontMeasurementMetrics(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int textLayoutMetrics = PatchTextDrawUtilFontOverloads(vanilla.MainModule);
@@ -319,6 +320,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 hover text same-text patches, applied {guiHoverTextPatches}.");
         }
+        if (guiStatbarPatches != 5)
+        {
+            throw new InvalidOperationException(
+                $"Expected 5 statbar on-demand patches, applied {guiStatbarPatches}.");
+        }
         if (fontMeasurementMetrics != 2)
         {
             throw new InvalidOperationException(
@@ -377,6 +383,7 @@ public static class ApiPatcher
                 $"{guiTextureDisposals} GUI texture disposals, " +
                 $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
                 $"{guiHoverTextPatches} hover text same-text skips, " +
+                $"{guiStatbarPatches} statbar on-demand edits, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -1504,6 +1511,181 @@ public static class ApiPatcher
         Console.WriteLine($"  API PATCHED: {hoverTypeName}.Recompose records the GUI scale it composed at");
         Console.WriteLine($"  API PATCHED: {hoverTypeName}.SetNewText skips an unchanged text with a current texture");
         return 2;
+    }
+
+    /// <summary>
+    /// GuiElementStatbar.recomposeOverlays runs on every value change (several times per second while diving). It
+    /// rasterized the hover text synchronously on the main thread, although the text is only visible while the mouse is
+    /// over the bar, and queued the flash overlay again, although that overlay only depends on the bounds, the GUI scale
+    /// and the color. Keeps the hover string in pendingValueText and rasterizes it, with the original instructions, in a
+    /// new buildPendingValueText method that RenderInteractiveElements calls from its hover branch, and composes the flash
+    /// overlay from ComposeElements, the lifecycle point that already composes the base texture.
+    /// </summary>
+    internal static int PatchGuiStatbarOnDemand(ModuleDefinition module)
+    {
+        const string typeName = "Vintagestory.API.Client.GuiElementStatbar";
+        var statbar = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+        if (statbar.Fields.Any(field => field.Name == "pendingValueText"))
+        {
+            throw new InvalidOperationException($"{typeName}.pendingValueText already exists.");
+        }
+
+        FieldDefinition Field(string name) => statbar.Fields.SingleOrDefault(field => field.Name == name)
+            ?? throw new InvalidOperationException($"{typeName}.{name} is missing from the vanilla API.");
+        var showValueOnHover = Field("ShowValueOnHover");
+        var onGetStatbarValue = Field("onGetStatbarValue");
+        _ = Field("valueTexture");
+        _ = Field("valueFont");
+
+        var recompose = statbar.Methods.SingleOrDefault(method => method.Name == "recomposeOverlays" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{typeName}.recomposeOverlays is missing from the vanilla API.");
+        var render = statbar.Methods.SingleOrDefault(method => method.Name == "RenderInteractiveElements" && method.Parameters.Count == 1 && method.HasBody)
+            ?? throw new InvalidOperationException($"{typeName}.RenderInteractiveElements is missing from the vanilla API.");
+
+        // recomposeOverlays: "if (ShowValueOnHover) { GenOrUpdateTextTexture(onGetStatbarValue(), valueFont, ref valueTexture, ...); }"
+        var original = recompose.Body.Instructions.ToList();
+        int show = original.FindIndex(instruction => instruction.OpCode == OpCodes.Ldfld && instruction.Operand is FieldReference field && field.Name == "ShowValueOnHover");
+        int invoke = original.FindIndex(instruction => instruction.OpCode == OpCodes.Callvirt && instruction.Operand is MethodReference called && called.Name == "Invoke" && called.DeclaringType.Name == "StatbarValueDelegate");
+        int generate = original.FindIndex(instruction => instruction.OpCode == OpCodes.Callvirt && instruction.Operand is MethodReference called && called.Name == "GenOrUpdateTextTexture");
+        if (show < 1 || invoke <= show + 5 || generate <= invoke ||
+            original.Count(instruction => instruction.Operand is FieldReference field && field.Name == "ShowValueOnHover") != 1 ||
+            original.Count(instruction => instruction.Operand is MethodReference called && called.Name == "GenOrUpdateTextTexture") != 1 ||
+            original[show + 1].Operand is not Instruction ||
+            original[generate + 1].OpCode != OpCodes.Ret || original.Count != generate + 2 ||
+            original[show + 2].OpCode != OpCodes.Ldarg_0 || original[show + 5].OpCode != OpCodes.Callvirt)
+        {
+            throw new InvalidOperationException($"{typeName}.recomposeOverlays has an unexpected shape.");
+        }
+
+        Instruction Clone(Instruction source) => source.Operand switch
+        {
+            null => Instruction.Create(source.OpCode),
+            FieldReference field => Instruction.Create(source.OpCode, field),
+            MethodReference method => Instruction.Create(source.OpCode, method),
+            TypeReference type => Instruction.Create(source.OpCode, type),
+            double value => Instruction.Create(source.OpCode, value),
+            float value => Instruction.Create(source.OpCode, value),
+            int value => Instruction.Create(source.OpCode, value),
+            sbyte value => Instruction.Create(source.OpCode, value),
+            string value => Instruction.Create(source.OpCode, value),
+            _ => throw new InvalidOperationException($"{typeName}.recomposeOverlays has an unsupported operand {source.Operand.GetType().Name}."),
+        };
+
+        var pendingValueText = new FieldDefinition("pendingValueText", FieldAttributes.Private, module.TypeSystem.String);
+        statbar.Fields.Add(pendingValueText);
+
+        // New method: if (pendingValueText == null) return; GenOrUpdateTextTexture(pendingValueText, valueFont, ref valueTexture, ...); pendingValueText = null;
+        var build = new MethodDefinition("buildPendingValueText", MethodAttributes.Private | MethodAttributes.HideBySig, module.TypeSystem.Void);
+        var buildBody = new MethodBody(build) { InitLocals = false, MaxStackSize = 8 };
+        var buildIl = buildBody.GetILProcessor();
+        var end = Instruction.Create(OpCodes.Ret);
+        buildIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        buildIl.Append(Instruction.Create(OpCodes.Ldfld, pendingValueText));
+        buildIl.Append(Instruction.Create(OpCodes.Brfalse, end));
+        for (int i = show + 2; i <= show + 5; i++) buildIl.Append(Clone(original[i]));          // this.api.Gui.TextTexture
+        buildIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        buildIl.Append(Instruction.Create(OpCodes.Ldfld, pendingValueText));
+        for (int i = invoke + 1; i <= generate; i++) buildIl.Append(Clone(original[i]));       // valueFont, ref valueTexture, new TextBackground { ... }, GenOrUpdateTextTexture
+        buildIl.Append(Instruction.Create(OpCodes.Ldarg_0));
+        buildIl.Append(Instruction.Create(OpCodes.Ldnull));
+        buildIl.Append(Instruction.Create(OpCodes.Stfld, pendingValueText));
+        buildIl.Append(end);
+        build.Body = buildBody;
+        statbar.Methods.Add(build);
+
+        // recomposeOverlays now only keeps the string. The brfalse over the block keeps targeting the final ret.
+        ClearDebugInformation(recompose);
+        var recomposeIl = recompose.Body.GetILProcessor();
+        var branch = original[show + 1];
+        for (int i = show + 2; i <= generate; i++) recomposeIl.Remove(original[i]);
+        var cursor = branch;
+        foreach (var instruction in new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, onGetStatbarValue),
+            Clone(original[invoke]),
+            Instruction.Create(OpCodes.Stfld, pendingValueText),
+        })
+        {
+            recomposeIl.InsertAfter(cursor, instruction);
+            cursor = instruction;
+        }
+
+        // RenderInteractiveElements: build the text right after the "ShowValueOnHover && Bounds.PointInside(...)" test passes.
+        var renderBody = render.Body.Instructions.ToList();
+        var pointInside = renderBody.Where(instruction => instruction.OpCode == OpCodes.Callvirt &&
+            instruction.Operand is MethodReference called && called.Name == "PointInside" && called.Parameters.Count == 2).ToList();
+        if (pointInside.Count != 1 || pointInside[0].Next == null || pointInside[0].Next.Operand is not Instruction ||
+            (pointInside[0].Next.OpCode != OpCodes.Brfalse && pointInside[0].Next.OpCode != OpCodes.Brfalse_S))
+        {
+            throw new InvalidOperationException($"{typeName}.RenderInteractiveElements has an unexpected hover branch.");
+        }
+
+        ClearDebugInformation(render);
+        // The added call grows the method between its short branches and their targets, so widen them first.
+        foreach (var instruction in render.Body.Instructions)
+            instruction.OpCode = instruction.OpCode.Code switch {
+                Code.Br_S => OpCodes.Br, Code.Brfalse_S => OpCodes.Brfalse, Code.Brtrue_S => OpCodes.Brtrue,
+                Code.Beq_S => OpCodes.Beq, Code.Bne_Un_S => OpCodes.Bne_Un,
+                Code.Bge_S => OpCodes.Bge, Code.Bge_Un_S => OpCodes.Bge_Un,
+                Code.Bgt_S => OpCodes.Bgt, Code.Bgt_Un_S => OpCodes.Bgt_Un,
+                Code.Ble_S => OpCodes.Ble, Code.Ble_Un_S => OpCodes.Ble_Un,
+                Code.Blt_S => OpCodes.Blt, Code.Blt_Un_S => OpCodes.Blt_Un,
+                Code.Leave_S => OpCodes.Leave, _ => instruction.OpCode
+            };
+        var renderIl = render.Body.GetILProcessor();
+        var hoverBranch = pointInside[0].Next;
+        var call = Instruction.Create(OpCodes.Call, build);
+        renderIl.InsertAfter(hoverBranch, Instruction.Create(OpCodes.Ldarg_0));
+        renderIl.InsertAfter(hoverBranch.Next, call);
+
+        // The flash overlay does not depend on the value: compose it with the base texture and drop it from the recompose task.
+        var flashCompose = statbar.Methods.SingleOrDefault(method => method.Name == "ComposeFlashOverlay" && method.Parameters.Count == 0)
+            ?? throw new InvalidOperationException($"{typeName}.ComposeFlashOverlay is missing from the vanilla API.");
+        var composeElements = statbar.Methods.SingleOrDefault(method => method.Name == "ComposeElements" && method.Parameters.Count == 2 && method.HasBody)
+            ?? throw new InvalidOperationException($"{typeName}.ComposeElements is missing from the vanilla API.");
+        var valuesSetLoads = composeElements.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ldfld &&
+            instruction.Operand is FieldReference field && field.Name == "valuesSet").ToList();
+        if (valuesSetLoads.Count != 1 || valuesSetLoads[0].Previous?.OpCode != OpCodes.Ldarg_0 ||
+            composeElements.Body.Instructions.Any(instruction => ReferenceEquals(instruction.Operand, valuesSetLoads[0].Previous)))
+        {
+            throw new InvalidOperationException($"{typeName}.ComposeElements has an unexpected valuesSet check.");
+        }
+
+        var lambdaLoad = recompose.Body.Instructions.Where(instruction => instruction.OpCode == OpCodes.Ldftn).ToList();
+        if (lambdaLoad.Count != 1)
+        {
+            throw new InvalidOperationException($"{typeName}.recomposeOverlays has an unexpected recompose task.");
+        }
+
+        var lambda = ((MethodReference)lambdaLoad[0].Operand).Resolve();
+        var lambdaBody = lambda.Body.Instructions.ToList();
+        if (lambdaBody.Count != 5 || lambdaBody[0].OpCode != OpCodes.Ldarg_0 || lambdaBody[1].Operand is not MethodReference valueCall ||
+            valueCall.Name != "ComposeValueOverlay" || lambdaBody[2].OpCode != OpCodes.Ldarg_0 ||
+            lambdaBody[3].Operand is not MethodReference flashCall || flashCall.Name != "ComposeFlashOverlay" || lambdaBody[4].OpCode != OpCodes.Ret)
+        {
+            throw new InvalidOperationException($"{typeName}.recomposeOverlays task has an unexpected shape.");
+        }
+
+        ClearDebugInformation(lambda);
+        var lambdaIl = lambda.Body.GetILProcessor();
+        lambdaIl.Remove(lambdaBody[3]);
+        lambdaIl.Remove(lambdaBody[2]);
+
+        ClearDebugInformation(composeElements);
+        var composeIl = composeElements.Body.GetILProcessor();
+        var anchor = valuesSetLoads[0].Previous;
+        composeIl.InsertBefore(anchor, Instruction.Create(OpCodes.Ldarg_0));
+        composeIl.InsertBefore(anchor, Instruction.Create(OpCodes.Call, flashCompose));
+
+        Console.WriteLine($"  API PATCHED: {typeName}.recomposeOverlays keeps the hover string instead of rasterizing it");
+        Console.WriteLine($"  API PATCHED: {typeName}.buildPendingValueText rasterizes the hover string on demand");
+        Console.WriteLine($"  API PATCHED: {typeName}.RenderInteractiveElements builds the hover text on the first hovered frame");
+        Console.WriteLine($"  API PATCHED: {typeName}.recomposeOverlays no longer queues the flash overlay");
+        Console.WriteLine($"  API PATCHED: {typeName}.ComposeElements composes the flash overlay with the base texture");
+        return 5;
     }
 
     internal static int PatchGuiCompositionMetrics(ModuleDefinition module, ModuleDefinition contracts)
