@@ -1,0 +1,24 @@
+diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementCustomDraw.cs b/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementCustomDraw.cs
+index 13b64ec..c0d9080 100644
+--- a/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementCustomDraw.cs
++++ b/VintagestoryApi/Client/UI/Elements/Impl/Static/GuiElementCustomDraw.cs
+@@ -62,10 +62,19 @@ namespace Vintagestory.API.Client
+ 
+         public override void RenderInteractiveElements(float deltaTime)
+         {
+             if (interactive) api.Render.Render2DTexture(texId, Bounds);
+         }
++
++        // Optimum: Redraw() generates this texture, so free it with the element.
++        public override void Dispose()
++        {
++            base.Dispose();
++
++            if (texId > 0) api.Render.GLDeleteTexture(texId);
++            texId = 0;
++        }
+     }
+ 
+     public static partial class GuiComposerHelpers
+     {
+         /// <summary>

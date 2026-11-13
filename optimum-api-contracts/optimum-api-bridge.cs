@@ -243,6 +243,19 @@ public static class OptimumApiBridge
         return playerPos.HorDistanceSqTo(sphere.x, sphere.z);
     }
 
+    // GUI elements that generate raw GL texture ids call these from their patched Dispose.
+    public static void DeleteGuiTextures(System.Collections.Generic.Dictionary<string, int> textureIds, ICoreClientAPI api)
+    {
+        foreach (int textureId in textureIds.Values) api.Render.GLDeleteTexture(textureId);
+        textureIds.Clear();
+    }
+
+    public static void DeleteGuiTexture(ref int textureId, ICoreClientAPI api)
+    {
+        if (textureId > 0) api.Render.GLDeleteTexture(textureId);
+        textureId = 0;
+    }
+
     public static void MarkInventoryDirty()
     {
         Volatile.Write(ref inventoryDirty, 1);

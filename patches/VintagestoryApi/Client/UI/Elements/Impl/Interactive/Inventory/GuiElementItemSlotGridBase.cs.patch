@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
-index 754d8c2..e28b348 100644
+index 754d8c2..385977a 100644
 --- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 +++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 @@ -21,12 +21,12 @@ namespace Vintagestory.API.Client
@@ -71,4 +71,19 @@ index 754d8c2..e28b348 100644
  
              rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
              ComposeInteractiveElements();
+         }
+@@ -1076,10 +1087,14 @@ namespace Vintagestory.API.Client
+ 
+         public override void Dispose()
+         {
+             base.Dispose();
+ 
++            // Optimum: the element is reused after Dispose, so delete the cached backgrounds and clear the cache.
++            foreach (int texId in slotTextureIdsByBgIconAndColor.Values) api.Render.GLDeleteTexture(texId);
++            slotTextureIdsByBgIconAndColor.Clear();
++
+             for (int i = 0; slotQuantityTextures != null && i < slotQuantityTextures.Length; i++) slotQuantityTextures[i]?.Dispose();
+             slotTexture.Dispose();
+             highlightSlotTexture.Dispose();
+             crossedOutTexture?.Dispose();
          }
