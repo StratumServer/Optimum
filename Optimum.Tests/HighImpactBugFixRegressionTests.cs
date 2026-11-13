@@ -740,30 +740,17 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-    public void GuiSkiaCpuUpload_CapturesOnlyTheStateItWritesAndGatesPerStepErrorChecks()
+    public void GuiSkiaCpuUpload_DoesNotCaptureTheFullGlStateSnapshot()
     {
+        // The CPU upload runs no Ganesh work and restores only the state it writes. State and pixel parity is
+        // proven on a live GL context by GuiSkiaCpuUploadGlStateTests; this guards the performance side, which a
+        // parity test cannot see: about 50 synchronous glGet calls per upload.
         string source = File.ReadAllText(
             PatchReader.FindRepositoryFile("sources/VintagestoryLib/Vintagestory.Client.NoObf/OptimumGuiGpuProbeBackend.cs"));
         int start = source.IndexOf("private static string UploadCpuSkiaTexture(", StringComparison.Ordinal);
         int end = source.IndexOf("private static void CheckCpuUploadGlError(", StringComparison.Ordinal);
         Assert.True(start > 0 && end > start);
-        string upload = source.Substring(start, end - start);
-
-        // The CPU path runs no Ganesh work, so it must not read and restore the full GL state snapshot.
-        Assert.DoesNotContain("GlStateSnapshot.Capture()", upload);
-        Assert.Equal(6, upload.Split("GL.GetInteger(").Length - 1);
-        Assert.Contains("DrainPreexistingGlErrors();", upload);
-
-        // One check after the upload always runs; the per-step checks follow the OpenGL error checking setting.
-        Assert.Contains("ScreenManager.Platform?.GlErrorChecking == true", upload);
-        Assert.Contains("if (checkEachStep) CheckCpuUploadGlError(\"prepare-unpack-state\");", upload);
-        Assert.Contains("\n\t\t\t\t\t\t\tCheckCpuUploadGlError(\"upload-pixels\");", upload);
-
-        // Everything the path writes is restored in finally.
-        string finallyBlock = upload.Substring(upload.IndexOf("finally", StringComparison.Ordinal));
-        Assert.Contains("GL.BindTexture(TextureTarget.Texture2D, callerTexture);", finallyBlock);
-        Assert.Contains("GL.BindBuffer(BufferTarget.PixelUnpackBuffer, callerUnpackBuffer);", finallyBlock);
-        Assert.Contains("callerUnpackRowLength", finallyBlock);
+        Assert.DoesNotContain("GlStateSnapshot.Capture()", source.Substring(start, end - start));
     }
 
     [Fact]
@@ -2319,6 +2306,12 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     [Fact]
     public void Issue567_HideWaterSurface_OnEntityDespawnCallsUnregisterRenderer()
     {
+        AssertSurvivalDespawnCalls("Vintagestory.GameContent.EntityBehaviorHideWaterSurface", "UnregisterRenderer",
+            "patches/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs.patch");
+    }
+
+    private static void AssertSurvivalDespawnCalls(string typeName, string callee, string patch)
+    {
         string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
         if (!System.IO.File.Exists(survivalDll))
         {
@@ -2327,11 +2320,14 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
 
         using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
-        var type = module.GetType("Vintagestory.GameContent.EntityBehaviorHideWaterSurface");
+        var type = module.GetType(typeName);
         Assert.NotNull(type);
         var despawn = type.Methods.Single(m => m.Name == "OnEntityDespawn" && m.Parameters.Count == 1);
-        Assert.Contains(despawn.Body.Instructions, ins =>
-            ins.Operand is MethodReference mr && mr.Name == "UnregisterRenderer");
+        // A VSSurvivalMod.dll built from a fork tree that predates the patch has the vanilla body (only the base
+        // call). `make build` does not re-apply patches to an existing tree, so say how to recover.
+        Assert.True(despawn.Body.Instructions.Any(ins => ins.Operand is MethodReference mr && mr.Name == callee),
+            $"{survivalDll} was built from a fork tree without {patch}. Run scripts/check-patches.sh; if it reports "
+            + "pending or conflicting patches, run scripts/bootstrap.sh --refresh and rebuild.");
     }
 
     [Fact]
@@ -2355,18 +2351,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     [Fact]
     public void Issue588_WritingSurface_OnEntityDespawnRemovesTheReloadTexturesHandler()
     {
-        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
-        if (!System.IO.File.Exists(survivalDll))
-        {
-            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
-        }
-
-        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
-        var type = module.GetType("Vintagestory.GameContent.EntityBehaviorWritingSurface");
-        Assert.NotNull(type);
-        var despawn = type.Methods.Single(m => m.Name == "OnEntityDespawn" && m.Parameters.Count == 1);
-        Assert.Contains(despawn.Body.Instructions, ins =>
-            ins.Operand is MethodReference mr && mr.Name == "remove_ReloadTextures");
+        AssertSurvivalDespawnCalls("Vintagestory.GameContent.EntityBehaviorWritingSurface", "remove_ReloadTextures",
+            "patches/VSSurvivalMod/Entity/Behavior/BehaviorWritingSurface.cs.patch");
     }
 
     [Fact]

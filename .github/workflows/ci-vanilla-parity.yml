@@ -356,7 +356,17 @@ jobs:
 
       - name: Run Headless GUI & Mesher Scenario Tests
         shell: bash
+        env:
+          # The OpenGL context tests must run here; without this they would skip silently.
+          OPTIMUM_REQUIRE_GL_TESTS: 1
+          LIBGL_ALWAYS_SOFTWARE: 1
         run: |
           xvfb-run -a dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
-            --filter "FullyQualifiedName~GreedyMesher|FullyQualifiedName~Shader|FullyQualifiedName~ChiselLod" \
+            --filter "FullyQualifiedName~GreedyMesher|FullyQualifiedName~Shader|FullyQualifiedName~ChiselLod|FullyQualifiedName~GuiSkiaCpuUploadGl" \
             --logger "trx;LogFileName=gui-mesher-results.trx"
+          python3 - <<'PY'
+          import re, sys
+          trx = open("Optimum.Tests/TestResults/gui-mesher-results.trx", encoding="utf-8-sig").read()
+          if not re.search(r'testName="[^"]*GuiSkiaCpuUploadGlStateTests[^"]*"[^>]*outcome="Passed"', trx):
+              sys.exit("The OpenGL Skia CPU upload test did not run and pass.")
+          PY
