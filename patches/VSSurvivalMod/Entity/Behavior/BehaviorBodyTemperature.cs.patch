@@ -5,7 +5,7 @@ diff --git a/VSSurvivalMod/Entity/Behavior/BehaviorBodyTemperature.cs b/VSSurviv
          [DocumentAsJson("Optional", "37")]
          public float NormalBodyTemperature;
  
-+        public static readonly string[] ShiverAnimationNames = new string[] { "shiver", "coldidle", "coldidleheld" };
++        public static string[] ShiverAnimationNames;
 +
          bool firstTick;
  
@@ -15,7 +15,7 @@ diff --git a/VSSurvivalMod/Entity/Behavior/BehaviorBodyTemperature.cs b/VSSurviv
              else
              {
 -                if (entity.AnimManager.IsAnimationActive("coldidle") || entity.AnimManager.IsAnimationActive("coldidleheld"))
-+                if (entity.AnimManager.IsAnimationActive(ShiverAnimationNames))
++                if (entity.AnimManager.IsAnimationActive(ShiverAnimationNames ??= new string[] { "shiver", "coldidle", "coldidleheld" }))
                  {
                      entity.StopAnimation("coldidle");
                      entity.StopAnimation("coldidleheld");

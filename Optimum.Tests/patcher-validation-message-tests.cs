@@ -49,6 +49,64 @@ public sealed class PatcherValidationMessageTests : IDisposable
     }
 
     [Fact]
+    public void PatchWithInjectionRejectsAStaticFieldInitializedByADonorStaticConstructor()
+    {
+        string vanilla = Path.Combine(temp.FullName, "vanilla", "StaticFixture.dll");
+        string donor = Path.Combine(temp.FullName, "donor", "StaticFixture.dll");
+        string output = Path.Combine(temp.FullName, "out", "StaticFixture.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(vanilla)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(donor)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        BuildStaticFixture(vanilla, withInjectedStaticField: false, initializeInStaticConstructor: false);
+        BuildStaticFixture(donor, withInjectedStaticField: true, initializeInStaticConstructor: true);
+
+        var validationErrors = new List<string>();
+        int total = ILPatcher.PatchWithInjection(
+            vanilla,
+            donor,
+            output,
+            new(),
+            new() { ["Fixture.Holder"] = ["optimumNames"] },
+            new(),
+            validationErrors: validationErrors,
+            verifyStaticFieldInitializers: true);
+
+        Assert.Equal(-1, total);
+        string error = Assert.Single(validationErrors);
+        Assert.Contains("Fixture.Holder::optimumNames", error);
+        Assert.Contains("static", error);
+        Assert.False(File.Exists(output));
+    }
+
+    [Fact]
+    public void PatchWithInjectionAcceptsAStaticFieldThatIsAssignedWhereItIsRead()
+    {
+        string vanilla = Path.Combine(temp.FullName, "vanilla", "StaticFixture.dll");
+        string donor = Path.Combine(temp.FullName, "donor", "StaticFixture.dll");
+        string output = Path.Combine(temp.FullName, "out", "StaticFixture.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(vanilla)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(donor)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(output)!);
+        BuildStaticFixture(vanilla, withInjectedStaticField: false, initializeInStaticConstructor: false);
+        BuildStaticFixture(donor, withInjectedStaticField: true, initializeInStaticConstructor: false);
+
+        var validationErrors = new List<string>();
+        int total = ILPatcher.PatchWithInjection(
+            vanilla,
+            donor,
+            output,
+            new(),
+            new() { ["Fixture.Holder"] = ["optimumNames"] },
+            new(),
+            validationErrors: validationErrors,
+            verifyStaticFieldInitializers: true);
+
+        Assert.True(total >= 0, string.Join("; ", validationErrors));
+        Assert.Empty(validationErrors);
+        Assert.True(File.Exists(output));
+    }
+
+    [Fact]
     public void ValidationFailureMessageNamesTheChecksAndCapsTheList()
     {
         var errors = new List<string>();
@@ -116,6 +174,62 @@ public sealed class PatcherValidationMessageTests : IDisposable
         }
         il.Emit(OpCodes.Ret);
         holder.Methods.Add(ctor);
+
+        assembly.Write(path);
+    }
+
+    // Static counterpart of BuildFixture: the donor's static constructor assigns the injected static
+    // field, vanilla has no static constructor at all, so nothing would ever run the assignment.
+    private static void BuildStaticFixture(string path, bool withInjectedStaticField, bool initializeInStaticConstructor)
+    {
+        var assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("StaticFixture", new Version(1, 0)), "StaticFixture", ModuleKind.Dll);
+        var module = assembly.MainModule;
+        var holder = new TypeDefinition(
+            "Fixture", "Holder",
+            Mono.Cecil.TypeAttributes.Public | Mono.Cecil.TypeAttributes.Class,
+            module.TypeSystem.Object);
+        module.Types.Add(holder);
+
+        var objectCtor = new MethodReference(".ctor", module.TypeSystem.Void, module.TypeSystem.Object)
+        {
+            HasThis = true,
+        };
+        var ctor = new MethodDefinition(
+            ".ctor",
+            Mono.Cecil.MethodAttributes.Public | Mono.Cecil.MethodAttributes.HideBySig |
+            Mono.Cecil.MethodAttributes.SpecialName | Mono.Cecil.MethodAttributes.RTSpecialName,
+            module.TypeSystem.Void);
+        var ctorIl = ctor.Body.GetILProcessor();
+        ctorIl.Emit(OpCodes.Ldarg_0);
+        ctorIl.Emit(OpCodes.Call, objectCtor);
+        ctorIl.Emit(OpCodes.Ret);
+        holder.Methods.Add(ctor);
+
+        if (withInjectedStaticField)
+        {
+            var field = new FieldDefinition(
+                "optimumNames",
+                Mono.Cecil.FieldAttributes.Public | Mono.Cecil.FieldAttributes.Static,
+                new ArrayType(module.TypeSystem.String));
+            holder.Fields.Add(field);
+
+            if (initializeInStaticConstructor)
+            {
+                var cctor = new MethodDefinition(
+                    ".cctor",
+                    Mono.Cecil.MethodAttributes.Private | Mono.Cecil.MethodAttributes.Static |
+                    Mono.Cecil.MethodAttributes.HideBySig | Mono.Cecil.MethodAttributes.SpecialName |
+                    Mono.Cecil.MethodAttributes.RTSpecialName,
+                    module.TypeSystem.Void);
+                var il = cctor.Body.GetILProcessor();
+                il.Emit(OpCodes.Ldc_I4_1);
+                il.Emit(OpCodes.Newarr, module.TypeSystem.String);
+                il.Emit(OpCodes.Stsfld, field);
+                il.Emit(OpCodes.Ret);
+                holder.Methods.Add(cctor);
+            }
+        }
 
         assembly.Write(path);
     }

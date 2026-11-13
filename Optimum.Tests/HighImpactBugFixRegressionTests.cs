@@ -2342,6 +2342,21 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             ins.Operand is MethodReference mr && mr.Name == "remove_ReloadTextures");
     }
 
+    [Fact]
+    public void Issue589_ShiverAnimationNames_HasNoInitializerAndIsAssignedWhereItIsRead()
+    {
+        string sourcePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSSurvivalMod/Entity/Behavior/BehaviorBodyTemperature.cs.patch"));
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorBodyTemperature.cs.patch"));
+        foreach (string patch in new[] { sourcePatch, runtimePatch })
+        {
+            Assert.Contains("public static string[] ShiverAnimationNames;", patch);
+            Assert.Contains("IsAnimationActive(ShiverAnimationNames ??= new string[", patch);
+            Assert.DoesNotContain("static readonly string[] ShiverAnimationNames", patch);
+        }
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;

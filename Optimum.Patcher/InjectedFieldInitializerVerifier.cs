@@ -19,6 +19,15 @@ namespace Optimum.Patcher;
 /// that stores to that field must have its vanilla counterpart transplanted.
 /// Donor-only constructors with no vanilla counterpart are ignored because no
 /// vanilla caller can reach them.
+///
+/// The same holds for static fields and the static constructor, with one
+/// difference: a donor static constructor that has no vanilla counterpart is an
+/// error, because nothing ever runs it and the field stays at its CLR default
+/// (issue #589: <c>static readonly string[] ShiverAnimationNames = new[] ...</c>).
+/// A static field injected this way has to be assigned where it is read.
+/// The static check is opt-in (<c>includeStaticFields</c>): the mod patcher turns it on, while
+/// the VintagestoryLib patch still has injected static fields that rely on a donor static
+/// constructor and need their own triage before the check can cover them.
 /// </summary>
 public static class InjectedFieldInitializerVerifier
 {
@@ -40,7 +49,8 @@ public static class InjectedFieldInitializerVerifier
         ModuleDefinition vanilla,
         ModuleDefinition compiled,
         Dictionary<string, HashSet<string>> preInjectionFields,
-        HashSet<string> transplantedMethodKeys)
+        HashSet<string> transplantedMethodKeys,
+        bool includeStaticFields = false)
     {
         var errors = new List<string>();
         foreach (var vanillaType in FlattenTypes(vanilla))
@@ -49,7 +59,7 @@ public static class InjectedFieldInitializerVerifier
             if (!preInjectionFields.TryGetValue(vanillaType.FullName, out var originalFields)) continue;
 
             var injectedFields = vanillaType.Fields
-                .Where(f => !originalFields.Contains(f.Name) && !f.HasConstant && !f.IsStatic)
+                .Where(f => !originalFields.Contains(f.Name) && !f.HasConstant && (includeStaticFields || !f.IsStatic))
                 .ToList();
             if (injectedFields.Count == 0) continue;
 
@@ -59,13 +69,23 @@ public static class InjectedFieldInitializerVerifier
             foreach (var field in injectedFields)
             {
                 foreach (var donorCtor in compiledType.Methods.Where(m =>
-                    m.HasBody && m.IsConstructor && !m.IsStatic))
+                    m.HasBody && m.IsConstructor && m.IsStatic == field.IsStatic))
                 {
                     if (!StoresField(donorCtor, field)) continue;
 
                     var vanillaCtor = vanillaType.Methods.FirstOrDefault(m =>
-                        m.IsConstructor && !m.IsStatic && MethodSignature.Matches(m, donorCtor));
-                    if (vanillaCtor == null) continue;
+                        m.IsConstructor && m.IsStatic == field.IsStatic && MethodSignature.Matches(m, donorCtor));
+                    if (vanillaCtor == null)
+                    {
+                        if (!field.IsStatic) continue;
+
+                        errors.Add(
+                            $"{vanillaType.FullName}::{field.Name} is a static field injected and initialized by donor " +
+                            $"{donorCtor.FullName}, but vanilla has no static constructor to transplant it into; " +
+                            "the field would stay at its CLR default at runtime. Assign it where it is read instead.");
+                        continue;
+                    }
+
                     if (transplantedMethodKeys.Contains(MethodSignature.GetKey(vanillaCtor))) continue;
 
                     errors.Add(

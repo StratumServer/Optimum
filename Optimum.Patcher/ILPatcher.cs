@@ -68,7 +68,8 @@ public static class ILPatcher
         Dictionary<string, List<string>>? interfacesToInject = null,
         bool requireAllTargets = true,
         Dictionary<string, List<string>>? fieldsToRetype = null,
-        List<string>? validationErrors = null)
+        List<string>? validationErrors = null,
+        bool verifyStaticFieldInitializers = false)
     {
         var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
@@ -270,7 +271,8 @@ public static class ILPatcher
             return Reject("PInvoke integrity", pinvokeErrors);
 
         var initializerErrors = InjectedFieldInitializerVerifier.Verify(
-            vanillaAsm.MainModule, compiledAsm.MainModule, preInjectionFields, transplantedMethodKeys);
+            vanillaAsm.MainModule, compiledAsm.MainModule, preInjectionFields, transplantedMethodKeys,
+            verifyStaticFieldInitializers);
         if (initializerErrors.Count > 0)
             return Reject("injected-field initializer", initializerErrors);
 
