@@ -346,6 +346,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockEntityFirepit", "FromTreeAttributes", 2),
                 new("Vintagestory.GameContent.BlockEntityFirepit", "getContentMesh", 2),
                 new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
+                new("Vintagestory.GameContent.EntityBehaviorHideWaterSurface", "OnEntityDespawn", 1),
             ]);
     }
 

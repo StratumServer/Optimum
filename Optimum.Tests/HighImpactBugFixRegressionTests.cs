@@ -2271,6 +2271,42 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.PotInFirepitRenderer" && m.MethodName == "OnRenderFrame");
     }
 
+    [Fact]
+    public void Issue567_HideWaterSurface_UnregistersOitRendererOnDespawn()
+    {
+        string sourcePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/VSSurvivalMod/Entity/Behavior/BehaviorHideWaterSurface.cs.patch"));
+        string runtimePatch = File.ReadAllText(
+            PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/EntityBehaviorHideWaterSurface.cs.patch"));
+        Assert.Contains("+            capi?.Event.UnregisterRenderer(this, EnumRenderStage.OIT);", sourcePatch);
+        Assert.Contains("+\t\tcapi?.Event.UnregisterRenderer(this, EnumRenderStage.OIT);", runtimePatch);
+
+        var manifestMethod = typeof(Optimum.Patcher.ModPatcher)
+            .GetMethod("SurvivalManifest", BindingFlags.NonPublic | BindingFlags.Static)!;
+        object manifest = manifestMethod.Invoke(null, null)!;
+        var methods = (IEnumerable<Optimum.Patcher.MethodTarget>)manifest.GetType().GetProperty("Methods")!.GetValue(manifest)!;
+        Assert.Contains(methods, m => m.TypeFullName == "Vintagestory.GameContent.EntityBehaviorHideWaterSurface"
+            && m.MethodName == "OnEntityDespawn" && m.ParamCount == 1);
+    }
+
+    [Fact]
+    public void Issue567_HideWaterSurface_OnEntityDespawnCallsUnregisterRenderer()
+    {
+        string survivalDll = System.IO.Path.Combine(AppContext.BaseDirectory, "VSSurvivalMod.dll");
+        if (!System.IO.File.Exists(survivalDll))
+        {
+            survivalDll = PatchReader.FindRepositoryFile("bin/Release/net10.0/VSSurvivalMod.dll");
+        }
+        Assert.True(System.IO.File.Exists(survivalDll), $"VSSurvivalMod.dll not found at {survivalDll}");
+
+        using var module = AssemblyDefinition.ReadAssembly(survivalDll).MainModule;
+        var type = module.GetType("Vintagestory.GameContent.EntityBehaviorHideWaterSurface");
+        Assert.NotNull(type);
+        var despawn = type.Methods.Single(m => m.Name == "OnEntityDespawn" && m.Parameters.Count == 1);
+        Assert.Contains(despawn.Body.Instructions, ins =>
+            ins.Operand is MethodReference mr && mr.Name == "UnregisterRenderer");
+    }
+
     public class StubProxy<T> : DispatchProxy where T : class
     {
         private System.Func<MethodInfo, object[], object> handler;
