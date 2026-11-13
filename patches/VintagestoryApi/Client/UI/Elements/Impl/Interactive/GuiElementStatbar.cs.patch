@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
-index c024532..7d59f28 100644
+index c024532..3458f66 100644
 --- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
 +++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs
 @@ -67,11 +67,11 @@ namespace Vintagestory.API.Client
@@ -15,7 +15,65 @@ index c024532..7d59f28 100644
          public override void ComposeElements(Context ctx, ImageSurface surface)
          {
              Bounds.CalcWorldBounds();
-@@ -234,10 +234,11 @@ namespace Vintagestory.API.Client
+@@ -84,10 +84,14 @@ namespace Vintagestory.API.Client
+             ctx.SetSourceRGBA(0.15, 0.15, 0.15, 1);
+             ctx.Fill();
+             EmbossRoundRectangleElement(ctx, 0, 0, Bounds.InnerWidth, Bounds.InnerHeight, false, 3, 1);
+ 
+ 
++            // Optimum: the flash overlay only depends on the bounds, the GUI scale and the color, so it is composed
++            // with the base texture instead of on every value change.
++            ComposeFlashOverlay();
++
+             if (valuesSet)
+             {
+                 recomposeOverlays();
+             }
+ 
+@@ -99,24 +103,35 @@ namespace Vintagestory.API.Client
+         void recomposeOverlays()
+         {
+             TyronThreadPool.QueueTask(() =>
+             {
+                 ComposeValueOverlay();
+-                ComposeFlashOverlay();
+             }, "StatbarRecompose");
+ 
+             if (ShowValueOnHover)
+             {
+-                api.Gui.TextTexture.GenOrUpdateTextTexture(onGetStatbarValue(), valueFont, ref valueTexture, new TextBackground()
+-                {
+-                    FillColor = GuiStyle.DialogStrongBgColor,
+-                    Padding = 5,
+-                    BorderWidth = 2
+-                });
++                // Optimum: the text is only visible while the mouse is over the bar, so keep the string and
++                // rasterize it on the first hovered frame instead of on every value change.
++                pendingValueText = onGetStatbarValue();
+             }
+         }
+ 
++        string pendingValueText;
++
++        void buildPendingValueText()
++        {
++            if (pendingValueText == null) return;
++
++            api.Gui.TextTexture.GenOrUpdateTextTexture(pendingValueText, valueFont, ref valueTexture, new TextBackground()
++            {
++                FillColor = GuiStyle.DialogStrongBgColor,
++                Padding = 5,
++                BorderWidth = 2
++            });
++            pendingValueText = null;
++        }
++
+ 
+         void ComposeValueOverlay()
+         {
+             Bounds.CalcWorldBounds();
+ 
+@@ -234,10 +249,11 @@ namespace Vintagestory.API.Client
                  ctx.LineTo(x, Math.Max(3, Bounds.InnerHeight - 1));
                  ctx.ClosePath();
                  ctx.Stroke();
@@ -27,7 +85,7 @@ index c024532..7d59f28 100644
                  generateTexture(surface, ref barTexture);
                  if (surfacePrev != null)
                  {
-@@ -271,10 +272,11 @@ namespace Vintagestory.API.Client
+@@ -271,10 +287,11 @@ namespace Vintagestory.API.Client
              RoundRectangle(ctx, (int)scaled(15), (int)scaled(15), Bounds.OuterWidthInt - 2, Bounds.OuterHeightInt - 2, 1);
              ctx.Operator = Operator.Clear;
              ctx.SetSourceRGBA(0, 0, 0, 0);
@@ -39,3 +97,15 @@ index c024532..7d59f28 100644
                  generateTexture(surface, ref flashTexture);
                  ctx.Dispose();
                  surface.Dispose();
+@@ -333,10 +350,11 @@ namespace Vintagestory.API.Client
+                 api.Render.RenderTexture(barTexture.TextureId, x, y, Bounds.OuterWidthInt + 1, valueHeight);
+             }
+ 
+             if (ShowValueOnHover && Bounds.PointInside(api.Input.MouseX, api.Input.MouseY))
+             {
++                buildPendingValueText();
+                 double tx = api.Input.MouseX + 16;
+                 double ty = api.Input.MouseY + valueTexture.Height - 4;
+                 api.Render.RenderTexture(valueTexture.TextureId, tx, ty, valueTexture.Width, valueTexture.Height, 2000);
+             }
+         }
