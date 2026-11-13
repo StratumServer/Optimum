@@ -740,6 +740,33 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
+    public void GuiSkiaCpuUpload_CapturesOnlyTheStateItWritesAndGatesPerStepErrorChecks()
+    {
+        string source = File.ReadAllText(
+            PatchReader.FindRepositoryFile("sources/VintagestoryLib/Vintagestory.Client.NoObf/OptimumGuiGpuProbeBackend.cs"));
+        int start = source.IndexOf("private static string UploadCpuSkiaTexture(", StringComparison.Ordinal);
+        int end = source.IndexOf("private static void CheckCpuUploadGlError(", StringComparison.Ordinal);
+        Assert.True(start > 0 && end > start);
+        string upload = source.Substring(start, end - start);
+
+        // The CPU path runs no Ganesh work, so it must not read and restore the full GL state snapshot.
+        Assert.DoesNotContain("GlStateSnapshot.Capture()", upload);
+        Assert.Equal(6, upload.Split("GL.GetInteger(").Length - 1);
+        Assert.Contains("DrainPreexistingGlErrors();", upload);
+
+        // One check after the upload always runs; the per-step checks follow the OpenGL error checking setting.
+        Assert.Contains("ScreenManager.Platform?.GlErrorChecking == true", upload);
+        Assert.Contains("if (checkEachStep) CheckCpuUploadGlError(\"prepare-unpack-state\");", upload);
+        Assert.Contains("\n\t\t\t\t\t\t\tCheckCpuUploadGlError(\"upload-pixels\");", upload);
+
+        // Everything the path writes is restored in finally.
+        string finallyBlock = upload.Substring(upload.IndexOf("finally", StringComparison.Ordinal));
+        Assert.Contains("GL.BindTexture(TextureTarget.Texture2D, callerTexture);", finallyBlock);
+        Assert.Contains("GL.BindBuffer(BufferTarget.PixelUnpackBuffer, callerUnpackBuffer);", finallyBlock);
+        Assert.Contains("callerUnpackRowLength", finallyBlock);
+    }
+
+    [Fact]
     public void SurfaceRecorder_SharesClipSnapshotAcrossConsecutiveDrawCommands()
     {
         string source = File.ReadAllText(

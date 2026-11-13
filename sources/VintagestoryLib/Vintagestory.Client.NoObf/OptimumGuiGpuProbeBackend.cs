@@ -603,37 +603,48 @@ namespace Vintagestory.Client.NoObf
 						rasterSurface.Flush(true);
 						if (!rasterSurface.ReadPixels(bitmap.Info, bitmap.GetPixels(), bitmap.RowBytes, 0, 0))
 							throw new InvalidOperationException("Skia CPU could not copy the LCD raster into the GUI upload bitmap.");
-						GlStateSnapshot uploadState = GlStateSnapshot.Capture();
+						// The CPU upload binds one texture and uploads pixels. It runs no Ganesh work, so it only needs to
+						// restore what it writes: the texture binding of the current unit, the unpack buffer and the unpack
+						// parameters. Reading and restoring the full Ganesh snapshot cost about 50 synchronous glGet calls.
+						GL.GetInteger(GetPName.TextureBinding2D, out int callerTexture);
+						GL.GetInteger((GetPName)0x88EF, out int callerUnpackBuffer); // PIXEL_UNPACK_BUFFER_BINDING
+						GL.GetInteger((GetPName)0x0CF5, out int callerUnpackAlignment); // UNPACK_ALIGNMENT
+						GL.GetInteger((GetPName)0x0CF2, out int callerUnpackRowLength); // UNPACK_ROW_LENGTH
+						GL.GetInteger((GetPName)0x0CF3, out int callerUnpackSkipRows); // UNPACK_SKIP_ROWS
+						GL.GetInteger((GetPName)0x0CF4, out int callerUnpackSkipPixels); // UNPACK_SKIP_PIXELS
 						// The CPU upload is the recovery route after Ganesh or a preflight
 						// failure. Do not mistake GL errors already queued by that failed
 						// attempt (or the engine's preceding draw) for a failure of TexImage2D.
 						string preexistingErrors = DrainPreexistingGlErrors();
-						int isolatedVertexArray = 0;
+						// Error flags stay set until read, so the check after the upload catches a failure of any step.
+						// The per-step checks only name the step, so they follow the OpenGL error checking setting.
+						bool checkEachStep = ScreenManager.Platform?.GlErrorChecking == true;
 						try
 						{
-							GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
-							CheckCpuUploadGlError("unbind-pixel-unpack-buffer");
-							GL.ActiveTexture(TextureUnit.Texture0);
-							CheckCpuUploadGlError("select-texture-unit");
+							if (callerUnpackBuffer != 0) GL.BindBuffer(BufferTarget.PixelUnpackBuffer, 0);
+							// Rows are width * 4 bytes, so any alignment up to 4 reads them without padding.
+							if (callerUnpackAlignment > 4) GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+							if (callerUnpackRowLength != 0) GL.PixelStore((PixelStoreParameter)0x0CF2, 0);
+							if (callerUnpackSkipRows != 0) GL.PixelStore((PixelStoreParameter)0x0CF3, 0);
+							if (callerUnpackSkipPixels != 0) GL.PixelStore((PixelStoreParameter)0x0CF4, 0);
+							if (checkEachStep) CheckCpuUploadGlError("prepare-unpack-state");
 							GL.BindTexture(TextureTarget.Texture2D, texture);
-							CheckCpuUploadGlError("bind-texture");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
-							CheckCpuUploadGlError("set-min-filter");
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
-							CheckCpuUploadGlError("set-mag-filter");
-							GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-							CheckCpuUploadGlError("set-unpack-alignment");
-							GL.PixelStore((PixelStoreParameter)0x0CF2, 0); // UNPACK_ROW_LENGTH
-							CheckCpuUploadGlError("set-unpack-row-length");
-							GL.PixelStore((PixelStoreParameter)0x0CF3, 0); // UNPACK_SKIP_ROWS
-							CheckCpuUploadGlError("set-unpack-skip-rows");
-							GL.PixelStore((PixelStoreParameter)0x0CF4, 0); // UNPACK_SKIP_PIXELS
-							CheckCpuUploadGlError("set-unpack-skip-pixels");
+							if (checkEachStep) CheckCpuUploadGlError("bind-texture-and-set-filters");
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,
 								PixelFormat.Bgra, PixelType.UnsignedByte, bitmap.GetPixels());
 							CheckCpuUploadGlError("upload-pixels");
 						}
-						finally { uploadState.Restore(ref isolatedVertexArray); }
+						finally
+						{
+							GL.BindTexture(TextureTarget.Texture2D, callerTexture);
+							if (callerUnpackBuffer != 0) GL.BindBuffer(BufferTarget.PixelUnpackBuffer, callerUnpackBuffer);
+							if (callerUnpackAlignment > 4) GL.PixelStore(PixelStoreParameter.UnpackAlignment, callerUnpackAlignment);
+							if (callerUnpackRowLength != 0) GL.PixelStore((PixelStoreParameter)0x0CF2, callerUnpackRowLength);
+							if (callerUnpackSkipRows != 0) GL.PixelStore((PixelStoreParameter)0x0CF3, callerUnpackSkipRows);
+							if (callerUnpackSkipPixels != 0) GL.PixelStore((PixelStoreParameter)0x0CF4, callerUnpackSkipPixels);
+						}
 						return preexistingErrors;
 					}
 				}
