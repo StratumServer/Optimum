@@ -362,11 +362,13 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: 1
         run: |
           xvfb-run -a dotnet test Optimum.Tests/Optimum.Tests.csproj -c Release \
-            --filter "FullyQualifiedName~GreedyMesher|FullyQualifiedName~Shader|FullyQualifiedName~ChiselLod|FullyQualifiedName~GuiSkiaCpuUploadGl" \
+            --filter "FullyQualifiedName~GreedyMesher|FullyQualifiedName~Shader|FullyQualifiedName~ChiselLod|FullyQualifiedName~GuiSkiaCpuUploadGl|FullyQualifiedName~GuiSkiaGpuUploadGl" \
             --logger "trx;LogFileName=gui-mesher-results.trx"
           python3 - <<'PY'
           import re, sys
           trx = open("Optimum.Tests/TestResults/gui-mesher-results.trx", encoding="utf-8-sig").read()
-          if not re.search(r'testName="[^"]*GuiSkiaCpuUploadGlStateTests[^"]*"[^>]*outcome="Passed"', trx):
-              sys.exit("The OpenGL Skia CPU upload test did not run and pass.")
+          for name, count in (("GuiSkiaCpuUploadGlStateTests", 1), ("GuiSkiaGpuUploadGlTests", 4)):
+              passed = len(re.findall(r'testName="[^"]*' + name + r'[^"]*"[^>]*outcome="Passed"', trx))
+              if passed != count:
+                  sys.exit(f"{name}: {passed} of {count} OpenGL tests ran and passed.")
           PY
