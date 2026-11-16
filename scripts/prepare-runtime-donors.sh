@@ -460,6 +460,9 @@ if [[ " ${eligible_projects[*]} " == *" VSEssentials "* ]]; then
     cp -f \
         "$repo_root/sources/VSEssentials/Systems/OptimumStatus.cs" \
         "$runtime_root/VSEssentials/Vintagestory/GameContent/OptimumStatusModSystem.cs"
+    cp -f \
+        "$repo_root/sources/VSEssentials/Entity/Behavior/SelectionBoxRayBounds.cs" \
+        "$runtime_root/VSEssentials/Vintagestory/GameContent/SelectionBoxRayBounds.cs"
 fi
 if [[ " ${eligible_projects[*]} " == *" VSSurvivalMod "* ]]; then
     cp -f \

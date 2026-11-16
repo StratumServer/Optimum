@@ -29,6 +29,20 @@ public sealed class ModPatcherManifestConsistencyTests
         ["CreativeManifest", "VSCreativeMod"],
     ];
 
+    [Fact]
+    public void SelectionBoxRayBoundsIsInjectedWithItsChangedRuntimeMethods()
+    {
+        const string typeName = "Vintagestory.GameContent.EntityBehaviorSelectionBoxes";
+        var injectedTypes = GetManifestProperty<List<string>>("EssentialsManifest", "Types");
+        var methods = GetManifestProperty<List<MethodTarget>>("EssentialsManifest", "Methods");
+
+        Assert.Contains("Vintagestory.GameContent.SelectionBoxRayBounds", injectedTypes);
+        Assert.Contains(methods, method => method.TypeFullName == typeName && method.MethodName == "setupWireframe" && method.ParamCount == 0);
+        Assert.Contains(methods, method => method.TypeFullName == typeName && method.MethodName == "OnRenderFrame" && method.ParamCount == 2);
+        Assert.Contains(methods, method => method.TypeFullName == typeName && method.MethodName == "Render" && method.ParamCount == 3);
+        Assert.Contains(methods, method => method.TypeFullName == typeName && method.MethodName == "getHitIndex" && method.ParamCount == 1);
+    }
+
     [Theory]
     [MemberData(nameof(Manifests))]
     public void EveryInjectedMemberIsDeclaredInItsRuntimePatch(string manifestMethodName, string project)

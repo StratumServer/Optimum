@@ -1,0 +1,61 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorSelectionBoxes.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorSelectionBoxes.cs
+index dd93213..1634101 100644
+--- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorSelectionBoxes.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorSelectionBoxes.cs
+@@ -111,7 +111,6 @@ public class EntityBehaviorSelectionBoxes(Entity entity) : EntityBehavior(entity
+ 			if (capi != null)
+ 			{
+ 				capi.Event.RegisterRenderer(this, EnumRenderStage.AfterFinalComposition, "selectionboxesbhdebug");
+-				BoxWireframe = WireframeCube.CreateUnitCube(capi, -1);
+ 			}
+ 			rendererRegistered = true;
+ 		}
+@@ -123,12 +122,27 @@ public class EntityBehaviorSelectionBoxes(Entity entity) : EntityBehavior(entity
+ 		{
+ 			return;
+ 		}
++		var player = capi.World.Player;
++		EntityPlayer eplr = player.Entity;
++		var currentSelection = player.CurrentEntitySelection;
++		if (!debug && currentSelection?.Entity != entity && eplr.MountedOn?.Entity != entity)
++		{
++			var eyeOffset = eplr.LocalEyePos;
++			var playerPosition = eplr.Pos;
++			EntityPos entityPosition = entity.Pos;
++			if (SelectionBoxRayBounds.IsEntityBeyondRayRange(
++				playerPosition.X + eyeOffset.X, playerPosition.InternalY + eyeOffset.Y, playerPosition.Z + eyeOffset.Z,
++				entityPosition.X, entityPosition.InternalY, entityPosition.Z,
++				entity.SelectionBox, player.WorldData.PickingRange))
++			{
++				return;
++			}
++		}
+ 		int hitIndex = getHitIndex();
+-		if (hitIndex < 0 && capi.World.Player.CurrentEntitySelection?.Entity != entity)
++		if (hitIndex < 0 && currentSelection?.Entity != entity)
+ 		{
+ 			return;
+ 		}
+-		EntityPlayer eplr = capi.World.Player.Entity;
+ 		if (debug)
+ 		{
+ 			for (int i = 0; i < selectionBoxes.Length; i++)
+@@ -167,6 +181,7 @@ public class EntityBehaviorSelectionBoxes(Entity entity) : EntityBehavior(entity
+ 			mvmat.Translate(pos.X - eplr.CameraPos.X, pos.InternalY - eplr.CameraPos.Y, pos.Z - eplr.CameraPos.Z);
+ 		}
+ 		applyBoxTransform(mvmat, apap);
++		BoxWireframe ??= WireframeCube.CreateUnitCube(capi, -1);
+ 		BoxWireframe.Render(capi, mvmat, 1.6f, color);
+ 	}
+ 
+@@ -235,6 +250,10 @@ public class EntityBehaviorSelectionBoxes(Entity entity) : EntityBehavior(entity
+ 			AttachmentPointAndPose apap = selectionBoxes[i];
+ 			mvmat.Identity();
+ 			applyBoxTransform(mvmat, apap);
++			if (SelectionBoxRayBounds.IsBeyondRayLength(mvmat, pickingray.origin, num3))
++			{
++				continue;
++			}
+ 			mvMatInv.Set(mvmat.Values).Invert();
+ 			Vec4d vec4d = mvMatInv.TransformVector(vec);
+ 			Ray r = new Ray(d: mvMatInv.TransformVector(vec2).XYZ, o: vec4d.XYZ);
