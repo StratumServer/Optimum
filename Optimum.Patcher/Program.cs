@@ -756,6 +756,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderSkyColor", "OnRenderFrame3D", 1),
     // SystemSoundEngine: audio listener update threshold + periodic refresh
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),
+    // Issue #577: scanning chunk blocks is read-only; preserve compressed chunk buffers.
+    new("Vintagestory.Client.NoObf.SystemClientTickingBlocks", "OnSeperateThreadGameTick", 1),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)
     new("Vintagestory.Client.RenderAPIBase", "RenderMultiTextureMesh", 3),
     // Issue #480: bounds-check atlasNumber in TextureAtlasManager.RegenMipMaps

@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs
+index 3c0625b..82a746d 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemClientTickingBlocks.cs
+@@ -327,11 +327,11 @@ public class SystemClientTickingBlocks : ClientSystem
+ 			{
+ 				num5 = num11;
+ 				num6 = num12;
+ 				num7 = num13;
+ 				worldChunk = game.WorldMap.GetChunk(num11, num12, num13);
+-				worldChunk?.Unpack();
++				worldChunk?.Unpack_ReadOnly();
+ 			}
+ 			if (worldChunk == null)
+ 			{
+ 				scanPosition++;
+ 				continue;
