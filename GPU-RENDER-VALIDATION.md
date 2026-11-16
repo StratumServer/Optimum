@@ -44,6 +44,10 @@ All six Release test projects passed:
 | Optimum.Update.Tests | 97 | 0 |
 | **Total** | **3,208** | **15** |
 
-## In-world session remains open
+## In-world sessions
 
-The default datapath contains no saved world. I did not create a new world. The ten-minute in-world session with the inventory, character dialog and chat has not been run. These results cover the physical OpenGL tests and client startup only. Issues #596 and #597 remain open pending that real-world session.
+Both adapters were tested with independent copies of the existing world the user created in vanilla. No new world was created for this validation, and the original save remained unchanged. Each authenticated client joined the save and had more than ten minutes of active play. The Intel run opened the inventory, character dialog and chat, and resized the window to 1100x700, 1280x850 and 1500x950. The NVIDIA run exercised the same screens and sizes. At 1280x850 and 1500x950 the interface remained legible without missing text, black rectangles or incorrect colors. At 1100x700 the Environment panel extends below the viewport; the framebuffer and dialog rebuilds completed without errors.
+
+Both client logs contain `Optimum Skia GL probe passed` and `No issues captured during startup`. Neither contains `GUI GPU render candidate failed` or `Downgrading to Skia CPU`. Both copied profiles retained `GuiGpuRenderEnabled=true` and `GuiRenderBackend=skia-gpu` after shutdown. Both sessions saved and exited normally. The original save's SHA-256 remained unchanged.
+
+These results cover the requested checks for issues #596 and #597; the issues remain open for maintainers to review.
