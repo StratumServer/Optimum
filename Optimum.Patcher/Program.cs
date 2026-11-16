@@ -132,11 +132,14 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "OptimumReadLightBatch",
     },
-    // Issue #72: BFS visibility walk state reused per pass by CullInvisibleChunks.
+    // Issue #72: flat-grid BFS visibility walk state reused per pass by CullInvisibleChunks.
     ["Vintagestory.Client.NoObf.ChunkCuller"] = new()
     {
-        "bfsQueue",
-        "bfsVisited",
+        "bfsGrid",
+        "bfsChunkGrid",
+        "bfsLastRecalcMs",
+        "bfsRecalcPending",
+        "bfsLastLogMs",
     },
     // Issue #74: reusable ItemRenderInfo scratch + fill/reset helpers so the GUI
     // item render path avoids a per-slot allocation without touching the public API.
@@ -734,17 +737,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.GuiScreenMods", "OnReloadMods", 0),
     // R3: scale the occlusion-culling engagement threshold by view distance
     new("Vintagestory.Client.NoObf.ChunkCuller", "CullInvisibleChunks", 0),
-    // Issue #72: BFS visibility flood fill + its helpers, transplanted alongside
-    // CullInvisibleChunks (which calls runBfsVisibility when the toggle is on).
-    new("Vintagestory.Client.NoObf.ChunkCuller", "runBfsVisibility", 1),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsReachable", 5),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsOppositeOf", 1),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsChunkKey", 3),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsPack", 3),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsEncodeNode", 4),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackX", 1),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackY", 1),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsUnpackZ", 1),
+    // Issue #72: flat-grid BFS visibility walk + its helpers, transplanted alongside
+    // CullInvisibleChunks (which calls them when the toggle is on).
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsPrepareGrid", 0),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsResetAndFill", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "runFlatBfsVisibility", 1),
     new("Vintagestory.Client.NoObf.ChunkCuller", "countVisibleMarked", 0),
     // AmbientManager: reusable scratch buffers instead of per-frame array/BlockPos allocations.
     // All four run every frame from the UpdateAmbient renderer registration.
