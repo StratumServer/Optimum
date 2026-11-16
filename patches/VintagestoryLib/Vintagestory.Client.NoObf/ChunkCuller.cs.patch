@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
-index 7befa7d..9bb3141 100644
+index 7befa7d..4381045 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 @@ -1,8 +1,9 @@
@@ -12,28 +12,33 @@ index 7befa7d..9bb3141 100644
  
  namespace Vintagestory.Client.NoObf;
  
-@@ -30,10 +31,20 @@ public class ChunkCuller
+@@ -30,10 +31,25 @@ public class ChunkCuller
  
  	private bool nowOff;
  
  	private const long ExtraDimensionsStart = 4503599627370496L;
  
-+	// Optimum issue #72: BFS visibility walk (Minecraft/Sodium technique). Reuses
-+	// two collections across passes so a steady camera does no per-pass allocation.
-+	// These are Cecil-injected fields, so their C# initializers never run (the
-+	// constructor is not transplanted); they are lazily created in runBfsVisibility
-+	// with ??=. The opposite-face lookup is a static method for the same reason -
-+	// an injected static array field would also skip its initializer.
-+	private Queue<long> bfsQueue;
++	// Optimum issue #72: flat-grid BFS visibility walk (Minecraft/Sodium technique,
++	// flat grid, entry-face mask and throttle after tehtelev's ChunkCuller). These are
++	// Cecil-injected fields, so their C# initializers never run (the constructor is not
++	// transplanted); they are created lazily on the culling thread. The grid and the
++	// chunk lookup array are sized at the start of a pass, never from a settings watcher.
++	private OptimumChunkVisibilityGrid bfsGrid;
 +
-+	private Dictionary<long, int> bfsVisited;
++	private ClientChunk[] bfsChunkGrid;
++
++	private long bfsLastRecalcMs;
++
++	private bool bfsRecalcPending;
++
++	private long bfsLastLogMs;
 +
  	public ChunkCuller(ClientMain game)
  	{
  		this.game = game;
  		ClientSettings.Inst.AddWatcher<int>("viewDistance", genShellVectors);
  		genShellVectors(ClientSettings.ViewDistance);
-@@ -63,12 +74,21 @@ public class ChunkCuller
+@@ -63,12 +79,21 @@ public class ChunkCuller
  		cubicShellPositions = hashSet.ToArray();
  	}
  
@@ -56,7 +61,7 @@ index 7befa7d..9bb3141 100644
  				return;
  			}
  			ClientChunk.bufIndex = 1;
-@@ -94,10 +114,11 @@ public class ChunkCuller
+@@ -94,25 +119,55 @@ public class ChunkCuller
  				}
  			}
  			nowOff = true;
@@ -65,48 +70,94 @@ index 7befa7d..9bb3141 100644
 +		OptimumDiagnostics.OcclusionCullingScale.Hit();
  		nowOff = false;
  		Vec3d cameraPos = game.player.Entity.CameraPos;
- 		if (centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32) && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
+-		if (centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32) && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
++		bool sameChunk = centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32);
++		if (OptimumConfig.BfsChunkVisibilityEnabled)
++		{
++			// Optimum issue #72: while the camera stays in one chunk, recalculate only after a
++			// significant change of the regeneration queue (or when it drains), and not more often
++			// than the cooldowns documented on OptimumChunkVisibilityGrid. A camera chunk change
++			// recalculates at once.
++			long nowMs = Environment.TickCount64;
++			if (!OptimumChunkVisibilityGrid.ShouldRecalculate(sameChunk, game.chunkPositionsForRegenTrav.Count, qCount, ref bfsRecalcPending, nowMs, bfsLastRecalcMs))
++			{
++				return;
++			}
++			bfsLastRecalcMs = nowMs;
++		}
++		else if (sameChunk && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
  		{
  			return;
-@@ -125,16 +146,50 @@ public class ChunkCuller
+ 		}
+ 		qCount = game.chunkPositionsForRegenTrav.Count;
++		long passStart = System.Diagnostics.Stopwatch.GetTimestamp();
+ 		centerpos.Set((int)(cameraPos.X / 32.0), (int)(cameraPos.Y / 32.0), (int)(cameraPos.Z / 32.0));
+ 		isAboveHeightLimit = centerpos.Y >= game.WorldMap.ChunkMapSizeY;
++		// The toggle is read once per pass: every later branch uses this local, so a runtime
++		// change cannot send a pass to the walk without its grid having been prepared.
++		bool flatBfs = OptimumConfig.BfsChunkVisibilityEnabled;
++		if (flatBfs)
++		{
++			bfsPrepareGrid();
++		}
+ 		lock (game.WorldMap.chunksLock)
+ 		{
+ 			Dictionary<long, ClientChunk> chunks = game.WorldMap.chunks;
+-			foreach (KeyValuePair<long, ClientChunk> item in chunks)
++			if (flatBfs)
+ 			{
+-				item.Value.SetVisible(visible: false);
++				bfsResetAndFill(chunks);
++			}
++			else
++			{
++				foreach (KeyValuePair<long, ClientChunk> item in chunks)
++				{
++					item.Value.SetVisible(visible: false);
++				}
+ 			}
+ 			for (int i = -1; i <= 1; i++)
+ 			{
+ 				for (int j = -1; j <= 2; j++)
+ 				{
+@@ -125,16 +180,50 @@ public class ChunkCuller
  						}
  					}
  				}
  			}
  		}
 -		for (int l = 0; l < cubicShellPositions.Length; l++)
-+		if (OptimumConfig.BfsChunkVisibilityEnabled)
++		if (flatBfs)
  		{
 -			Vec3i toPosRel = cubicShellPositions[l];
 -			traverseRayAndMarkVisible(centerpos, toPosRel, 0.25);
 -			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
 -			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
-+			// Optimum issue #72: breadth-first flood fill over the per-chunk
-+			// face-connectivity graph instead of per-shell raycasts. Linear in
-+			// loaded chunks and front-to-back, versus the raycast's up-to-3 rays
-+			// per shell position (thousands of chunks at high view distance -
-+			// the cost Mojang's own author rejected). The adapter reports every
-+			// chunk as in-frustum so the marked-visible set matches the raycast's
-+			// contract: ChunkCuller marks reachable chunks, and the mesh pools do
-+			// the frustum cull later. Robust all-incoming-faces reachability plus
-+			// the camera-neighbourhood seed above keep it from ever hiding a chunk
-+			// the player can see.
++			// Optimum issue #72: breadth-first walk over the per-chunk face-connectivity graph
++			// instead of per-shell raycasts, on a flat grid outside the world chunk lock. Like the
++			// vanilla raycast it only marks reachable chunks visible; the mesh pools frustum-cull
++			// afterwards. The camera-neighbourhood seed above keeps the chunks around the camera
++			// visible whatever the walk reaches.
 +			OptimumDiagnostics.BfsChunkVisibility.Hit();
-+			long bfsStart = System.Diagnostics.Stopwatch.GetTimestamp();
-+			lock (game.WorldMap.chunksLock)
-+			{
-+				runBfsVisibility(ClientSettings.Occlusionculling);
-+			}
++			runFlatBfsVisibility(ClientSettings.Occlusionculling);
++			long bfsTicks = System.Diagnostics.Stopwatch.GetTimestamp() - passStart;
 +			int bfsVisible = OptimumDiagnostics.CullWalkLogEnabled ? countVisibleMarked() : 0;
-+			if (OptimumDiagnostics.RecordChunkCullerWalk(bfs: true, System.Diagnostics.Stopwatch.GetTimestamp() - bfsStart, bfsVisible))
++			bool logNow = OptimumDiagnostics.RecordChunkCullerWalk(bfs: true, bfsTicks, bfsVisible);
++			if (OptimumDiagnostics.CullWalkLogEnabled)
 +			{
-+				game.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkCullerWalkSummary());
++				// Also log by time: with the throttle a pass can be seconds apart, and a window with no
++				// line after it cannot be measured.
++				long logNowMs = Environment.TickCount64;
++				if (logNow || logNowMs - bfsLastLogMs >= 4000L)
++				{
++					bfsLastLogMs = logNowMs;
++					game.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkCullerWalkSummary());
++				}
 +			}
 +		}
 +		else
 +		{
 +			OptimumDiagnostics.BfsChunkVisibility.Skip();
-+			long rayStart = System.Diagnostics.Stopwatch.GetTimestamp();
 +			for (int l = 0; l < cubicShellPositions.Length; l++)
 +			{
 +				Vec3i toPosRel = cubicShellPositions[l];
@@ -114,8 +165,9 @@ index 7befa7d..9bb3141 100644
 +				traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
 +				traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
 +			}
++			long rayTicks = System.Diagnostics.Stopwatch.GetTimestamp() - passStart;
 +			int rayVisible = OptimumDiagnostics.CullWalkLogEnabled ? countVisibleMarked() : 0;
-+			if (OptimumDiagnostics.RecordChunkCullerWalk(bfs: false, System.Diagnostics.Stopwatch.GetTimestamp() - rayStart, rayVisible))
++			if (OptimumDiagnostics.RecordChunkCullerWalk(bfs: false, rayTicks, rayVisible))
 +			{
 +				game.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetChunkCullerWalkSummary());
 +			}
@@ -124,162 +176,101 @@ index 7befa7d..9bb3141 100644
  	}
  
  	private void traverseRayAndMarkVisible(Vec3i fromPos, Vec3i toPosRel, double yoffset = 0.5, double xoffset = 0.5)
-@@ -192,6 +247,234 @@ public class ChunkCuller
+@@ -192,6 +281,118 @@ public class ChunkCuller
  				}
  			}
  		}
  		return null;
  	}
 +
-+	// Optimum issue #72: breadth-first visibility flood fill over the per-chunk
-+	// face-connectivity graph, replacing the per-shell raycast. Runs under
-+	// game.WorldMap.chunksLock (taken by the caller). Mirrors the unit-tested
-+	// OptimumChunkVisibilityBfs reference in the API assembly: queue of packed
-+	// chunk coords each carrying the incoming face, a never-go-back direction
-+	// mask per visited chunk, robust all-incoming-faces reachability (MC-70850
-+	// safe), and the camera chunk always seeded. Frustum culling is intentionally
-+	// NOT applied here: like the vanilla raycast, this only marks reachable chunks
-+	// visible and the mesh pools frustum-cull afterwards, so the marked set can
-+	// never be smaller than what the player can see.
-+	private void runBfsVisibility(bool useOcclusion)
++	// Sizes the grid for the current view distance and world height. Runs on the culling
++	// thread at the start of a pass; every later step of the pass reads the grid object's
++	// own dimensions, so a view distance change cannot tear a pass. The area is the
++	// square of radius viewDistance / 32 + 4 around the camera chunk (the vanilla octagon
++	// shell is viewDistance / 32 + 1 and the ray budget reaches up to +3 past the shell),
++	// and +/- (world height + 2) vertically.
++	private void bfsPrepareGrid()
 +	{
-+		Dictionary<long, ClientChunk> chunks = game.WorldMap.chunks;
-+		// Cecil-injected fields skip their C# initializers (ctor is not transplanted),
-+		// so create them lazily on first use. See cecil-injected-field-initializer-tests.
-+		if (bfsQueue == null)
++		if (bfsGrid == null)
 +		{
-+			bfsQueue = new Queue<long>();
++			bfsGrid = new OptimumChunkVisibilityGrid();
 +		}
-+		if (bfsVisited == null)
++		bfsGrid.Prepare(ClientSettings.ViewDistance / 32 + 4, game.WorldMap.ChunkMapSizeY + 2);
++		// The chunk references are cleared at the end of every pass, so a reused array is empty.
++		if (bfsChunkGrid == null || bfsChunkGrid.Length < bfsGrid.CellCount)
 +		{
-+			bfsVisited = new Dictionary<long, int>();
-+		}
-+		bfsQueue.Clear();
-+		bfsVisited.Clear();
-+
-+		int cx = centerpos.X;
-+		int cy = centerpos.Y;
-+		int cz = centerpos.Z;
-+
-+		// Bound the flood to the loaded shell. The vanilla raycast is implicitly
-+		// bounded by each ray's march length (fromPos.ManhattanDistanceTo(toPos) + 2);
-+		// the BFS needs an explicit radius or it floods unboundedly through invalid
-+		// (never-loaded) sky/space coordinates - which spun the culling thread and
-+		// froze the client. One chunk past the shell radius covers everything the
-+		// renderer can show.
-+		int bfsRadius = ClientSettings.ViewDistance / 32 + 2;
-+		int bfsRadiusY = game.WorldMap.ChunkMapSizeY + 2;
-+
-+		long rootPack = bfsPack(cx, cy, cz);
-+		bfsVisited[rootPack] = 0x3F;
-+		bfsQueue.Enqueue(bfsEncodeNode(cx, cy, cz, -1));
-+
-+		while (bfsQueue.Count > 0)
-+		{
-+			long node = bfsQueue.Dequeue();
-+			int nodeFromFace = (int)((node >> 60) & 0x7) - 1; // -1 == seed (no incoming face)
-+			int ncx = bfsUnpackX(node);
-+			int ncy = bfsUnpackY(node);
-+			int ncz = bfsUnpackZ(node);
-+
-+			for (int dir = 0; dir < 6; dir++)
-+			{
-+				// (1) never-go-back: skip stepping back to the immediate parent chunk we entered from
-+				if (nodeFromFace >= 0 && dir == nodeFromFace)
-+				{
-+					continue;
-+				}
-+
-+				// (2) reachability through the current chunk (robust MC-70850-safe form):
-+				// enterable seed (nodeFromFace < 0) always passes; otherwise the current
-+				// chunk must be visible-through SOME incoming face to this exit face.
-+				// First-ring exemption mirrors the vanilla raycast's `num2 > 1` guard:
-+				// the camera chunk and its immediate (Manhattan distance <= 1) neighbours
-+				// always let the flood pass through, so a lone solid chunk right next to
-+				// the camera does not blank everything behind it.
-+				int camDist = Math.Abs(ncx - cx) + Math.Abs(ncy - cy) + Math.Abs(ncz - cz);
-+				if (useOcclusion && nodeFromFace >= 0 && camDist > 1 && !bfsReachable(chunks, ncx, ncy, ncz, dir))
-+				{
-+					continue;
-+				}
-+
-+				int nx = ncx + BlockFacing.ALLFACES[dir].Normali.X;
-+				int ny = ncy + BlockFacing.ALLFACES[dir].Normali.Y;
-+				int nz = ncz + BlockFacing.ALLFACES[dir].Normali.Z;
-+
-+				// View-distance bound: never expand past the loaded shell. Without
-+				// this the flood runs off into never-loaded coordinates forever.
-+				if (System.Math.Abs(nx - cx) > bfsRadius || System.Math.Abs(nz - cz) > bfsRadius
-+					|| System.Math.Abs(ny - cy) > bfsRadiusY)
-+				{
-+					continue;
-+				}
-+
-+				// Stop at invalid chunk positions. Mirrors the raycast's stop but
-+				// ALWAYS continues on an invalid position (the raycast's own guard
-+				// only kept going above the height limit to let sky rays exit the
-+				// march; the BFS has the radius cap for that and must never expand
-+				// into an invalid coordinate, or it floods unboundedly).
-+				if (!game.WorldMap.IsValidChunkPosFast(nx, ny, nz))
-+				{
-+					continue;
-+				}
-+
-+				int inFace = bfsOppositeOf(dir);
-+				int inMask = 1 << inFace;
-+				long nPack = bfsPack(nx, ny, nz);
-+
-+				if (bfsVisited.TryGetValue(nPack, out var seenMask))
-+				{
-+					if ((seenMask & inMask) != 0)
-+					{
-+						continue;
-+					}
-+					bfsVisited[nPack] = seenMask | inMask;
-+				}
-+				else
-+				{
-+					bfsVisited[nPack] = inMask;
-+					if (chunks.TryGetValue(bfsChunkKey(nx, ny, nz), out var value) && value != null)
-+					{
-+						value.SetVisible(visible: true);
-+					}
-+				}
-+
-+				bfsQueue.Enqueue(bfsEncodeNode(nx, ny, nz, inFace));
-+			}
-+		}
-+
-+		// Seed chunk itself: always visible even when embedded in solid.
-+		if (chunks.TryGetValue(bfsChunkKey(cx, cy, cz), out var root) && root != null)
-+		{
-+			root.SetVisible(visible: true);
++			bfsChunkGrid = new ClientChunk[bfsGrid.CellCount];
 +		}
 +	}
 +
-+	// Robust reachability: reachable toward toFace if visible-through ANY incoming
-+	// face. Checking every incoming face rather than only the recorded flow face is
-+	// what prevents the MC-70850 see-through/missing-chunk bug. ClientChunk.IsTraversable
-+	// returns true on stale traversability data, so this only ever over-includes.
-+	private bool bfsReachable(Dictionary<long, ClientChunk> chunks, int cx, int cy, int cz, int toFace)
++	// Optimum issue #72 (after tehtelev's ChunkCuller): one pass over the loaded chunks
++	// that resets visibility and copies each chunk inside the grid area into the flat
++	// grid, with its traversability bits. Runs under chunksLock. The key is decoded as
++	// ChunkIndex3D inverted: key = (y * mulZ + z) * mulX + x; keys of other dimensions
++	// produce a y far outside the grid and are skipped.
++	private void bfsResetAndFill(Dictionary<long, ClientChunk> chunks)
 +	{
-+		if (!chunks.TryGetValue(bfsChunkKey(cx, cy, cz), out var chunk) || chunk == null)
++		OptimumChunkVisibilityGrid grid = bfsGrid;
++		ClientChunk[] chunkGrid = bfsChunkGrid;
++		int w = grid.Width;
++		int h = grid.Height;
++		int r = grid.RadiusXZ;
++		int ry = grid.RadiusY;
++		long mulX = game.WorldMap.index3dMulX;
++		long mulXZ = mulX * game.WorldMap.index3dMulZ;
++		long cx = centerpos.X;
++		long cy = centerpos.Y;
++		long cz = centerpos.Z;
++		foreach (KeyValuePair<long, ClientChunk> item in chunks)
 +		{
-+			return true; // not loaded: cannot block sight
-+		}
-+		BlockFacing to = BlockFacing.ALLFACES[toFace];
-+		for (int from = 0; from < 6; from++)
-+		{
-+			if (from == toFace)
++			ClientChunk chunk = item.Value;
++			chunk.SetVisible(visible: false);
++			long key = item.Key;
++			long y = key / mulXZ;
++			long ly = y - cy + ry;
++			if ((ulong)ly >= (ulong)h)
 +			{
 +				continue;
 +			}
-+			if (chunk.IsTraversable(BlockFacing.ALLFACES[from], to))
++			long rem = key - y * mulXZ;
++			long z = rem / mulX;
++			long lz = z - cz + r;
++			long lx = rem - z * mulX - cx + r;
++			if ((ulong)lx >= (ulong)w || (ulong)lz >= (ulong)w)
 +			{
-+				return true;
++				continue;
++			}
++			int idx = (int)((ly * w + lz) * w + lx);
++			chunkGrid[idx] = chunk;
++			// Plain reads of the same fields vanilla's IsTraversable reads, which the chunk visibility
++			// thread rewrites without a lock. A recalculation that sees the bits of a regeneration in
++			// progress can hide the chunk until the next one, as in vanilla; closing that window needs
++			// the writer in SystemChunkVisibilityCalc to publish the bits before the flag.
++			bool fresh = chunk.traversabilityFresh;
++			grid.SetCell(idx, OptimumChunkVisibilityGrid.EncodeCell(chunk.traversability, fresh));
++		}
++	}
++
++	// Optimum issue #72: breadth-first visibility walk over the flat grid, run outside
++	// chunksLock on the snapshot taken by bfsResetAndFill, then the reached loaded chunks
++	// are marked visible. Like the vanilla raycast it only marks reachable chunks; the
++	// mesh pools frustum-cull afterwards.
++	private void runFlatBfsVisibility(bool useOcclusion)
++	{
++		OptimumChunkVisibilityGrid grid = bfsGrid;
++		grid.Run(centerpos.X, centerpos.Y, centerpos.Z, game.WorldMap.ChunkMapSizeX, game.WorldMap.ChunkMapSizeY, game.WorldMap.ChunkMapSizeZ, useOcclusion);
++		ClientChunk[] chunkGrid = bfsChunkGrid;
++		int count = grid.QueueLength;
++		for (int i = 0; i < count; i++)
++		{
++			ClientChunk chunk = chunkGrid[grid.ReachedCell(i)];
++			if (chunk != null)
++			{
++				chunk.SetVisible(visible: true);
 +			}
 +		}
-+		return false;
++		// Drop the chunk references so unloaded chunks are not kept alive until the next pass.
++		Array.Clear(chunkGrid, 0, grid.CellCount);
 +	}
 +
 +	// Measurement-only (issue #72 A/B): counts chunks currently marked visible in
@@ -302,60 +293,5 @@ index 7befa7d..9bb3141 100644
 +			}
 +		}
 +		return n;
-+	}
-+
-+	// BlockFacing.Index ordering: N=0,E=1,S=2,W=3,U=4,D=5. Opposite pairs
-+	// N<->S, E<->W, U<->D. Static so no injected-field initializer is needed.
-+	private static int bfsOppositeOf(int dir)
-+	{
-+		switch (dir)
-+		{
-+			case 0: return 2;
-+			case 1: return 3;
-+			case 2: return 0;
-+			case 3: return 1;
-+			case 4: return 5;
-+			default: return 4;
-+		}
-+	}
-+
-+	private long bfsChunkKey(int cx, int cy, int cz)
-+	{
-+		return ((long)cy * (long)game.WorldMap.index3dMulZ + cz) * game.WorldMap.index3dMulX + cx;
-+	}
-+
-+	// Reversible bit-pack of a cubic chunk coord for the visited map. 20 bits per
-+	// axis (biased by 2^19 so negatives stay non-negative) fits any real world's
-+	// chunk range (+/-524287 chunks = +/-16.7M blocks) inside the low 60 bits,
-+	// leaving the top 4 bits free for the incoming face in bfsEncodeNode without
-+	// overflowing the signed 64-bit long.
-+	private static long bfsPack(int cx, int cy, int cz)
-+	{
-+		long x = cx + 524288L;
-+		long y = cy + 524288L;
-+		long z = cz + 524288L;
-+		return (x & 0xFFFFF) | ((y & 0xFFFFF) << 20) | ((z & 0xFFFFF) << 40);
-+	}
-+
-+	// Queue node = packed coord (low 60 bits) with the incoming face (+1, 0 = seed)
-+	// in bits 60-62. No shift of bfsPack, so nothing overflows.
-+	private static long bfsEncodeNode(int cx, int cy, int cz, int fromFace)
-+	{
-+		return bfsPack(cx, cy, cz) | ((long)((fromFace + 1) & 0x7) << 60);
-+	}
-+
-+	private static int bfsUnpackX(long node)
-+	{
-+		return (int)((node & 0xFFFFF) - 524288L);
-+	}
-+
-+	private static int bfsUnpackY(long node)
-+	{
-+		return (int)(((node >> 20) & 0xFFFFF) - 524288L);
-+	}
-+
-+	private static int bfsUnpackZ(long node)
-+	{
-+		return (int)(((node >> 40) & 0xFFFFF) - 524288L);
 +	}
  }

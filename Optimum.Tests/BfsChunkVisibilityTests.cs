@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.Linq;
 using Vintagestory.API.Config;
 using Xunit;
 
@@ -12,46 +14,65 @@ namespace Optimum.Tests;
 /// </summary>
 public class BfsChunkVisibilityTests
 {
-    /// <summary>
-    /// Synthetic chunk graph. Every loaded chunk is fully traversable (all faces
-    /// passable) unless listed in <see cref="opaque"/>, which blocks ALL traversal
-    /// through that chunk (no face pair passable) — a fully solid chunk.
-    /// </summary>
-    private sealed class FakeGraph : IChunkVisibilityGraph
+    private static HashSet<(int, int, int)> RunGrid(
+        IEnumerable<(int, int, int)> loaded,
+        IEnumerable<(int, int, int)>? opaque = null,
+        (int X, int Y, int Z) cam = default,
+        int radius = 4,
+        bool useOcclusion = true)
     {
-        private readonly HashSet<(int, int, int)> loaded;
-        private readonly HashSet<(int, int, int)> opaque;
-        private readonly HashSet<(int, int, int)>? outOfFrustum;
-        public readonly HashSet<(int, int, int)> Visible = new();
+        var loadedSet = new HashSet<(int, int, int)>(loaded);
+        var opaqueSet = opaque == null ? new HashSet<(int, int, int)>() : new HashSet<(int, int, int)>(opaque);
+        int minX = loadedSet.Min(c => c.Item1);
+        int minY = loadedSet.Min(c => c.Item2);
+        int minZ = loadedSet.Min(c => c.Item3);
+        int shiftX = minX < 0 ? -minX : 0;
+        int shiftY = minY < 0 ? -minY : 0;
+        int shiftZ = minZ < 0 ? -minZ : 0;
 
-        public FakeGraph(
-            IEnumerable<(int, int, int)> loaded,
-            IEnumerable<(int, int, int)>? opaque = null,
-            IEnumerable<(int, int, int)>? outOfFrustum = null)
+        int maxX = loadedSet.Max(c => c.Item1) + shiftX + 1;
+        int maxY = loadedSet.Max(c => c.Item2) + shiftY + 1;
+        int maxZ = loadedSet.Max(c => c.Item3) + shiftZ + 1;
+        int ry = maxY + 2;
+
+        var grid = new OptimumChunkVisibilityGrid();
+        grid.Prepare(radius, ry);
+        int scx = cam.X + shiftX;
+        int scy = cam.Y + shiftY;
+        int scz = cam.Z + shiftZ;
+
+        foreach (var c in loadedSet)
         {
-            this.loaded = new HashSet<(int, int, int)>(loaded);
-            this.opaque = opaque == null ? new() : new HashSet<(int, int, int)>(opaque);
-            this.outOfFrustum = outOfFrustum == null ? null : new HashSet<(int, int, int)>(outOfFrustum);
+            int sx = c.Item1 + shiftX;
+            int sy = c.Item2 + shiftY;
+            int sz = c.Item3 + shiftZ;
+            int lx = sx - scx + radius;
+            int ly = sy - scy + ry;
+            int lz = sz - scz + radius;
+            if ((uint)lx < (uint)grid.Width && (uint)lz < (uint)grid.Width && (uint)ly < (uint)grid.Height)
+            {
+                ushort trav = opaqueSet.Contains(c) ? (ushort)0 : OptimumChunkVisibilityGrid.AllPass;
+                grid.SetCell(grid.IndexOf(lx, ly, lz), OptimumChunkVisibilityGrid.EncodeCell(trav, fresh: true));
+            }
         }
 
-        public bool ChunkExists(int cx, int cy, int cz) => loaded.Contains((cx, cy, cz));
+        grid.Run(scx, scy, scz, maxX, maxY, maxZ, useOcclusion);
 
-        public bool IsVisibleThrough(int cx, int cy, int cz, int fromFace, int toFace)
+        var visible = new HashSet<(int, int, int)>();
+        for (int i = 0; i < grid.QueueLength; i++)
         {
-            if (opaque.Contains((cx, cy, cz))) return false;
-            return true; // all non-opaque chunks are fully passable
+            int idx = grid.ReachedCell(i);
+            int lx = idx % grid.Width;
+            int rest = idx / grid.Width;
+            int lz = rest % grid.Width;
+            int ly = rest / grid.Width;
+            var pos = (cam.X + lx - radius, cam.Y + ly - ry, cam.Z + lz - radius);
+            if (loadedSet.Contains(pos))
+            {
+                visible.Add(pos);
+            }
         }
-
-        public bool IsInFrustum(int cx, int cy, int cz)
-        {
-            if (outOfFrustum == null) return true;
-            return !outOfFrustum.Contains((cx, cy, cz));
-        }
-
-        public void MarkVisible(int cx, int cy, int cz) => Visible.Add((cx, cy, cz));
-
-        public bool IsWithinWorldBounds(int cx, int cy, int cz) =>
-            loaded.Contains((cx, cy, cz)); // treat only loaded coords as in-bounds for the test
+        return visible;
     }
 
     private static List<(int, int, int)> Grid(int r)
@@ -67,14 +88,10 @@ public class BfsChunkVisibilityTests
     [Fact]
     public void OpenField_AllInFrustumChunksVisible()
     {
-        // No opaque chunks, everything in frustum: every loaded chunk must be visible.
         var grid = Grid(3);
-        var graph = new FakeGraph(grid);
-        var bfs = new OptimumChunkVisibilityBfs();
+        var visible = RunGrid(grid, radius: 4);
 
-        bfs.Run(graph, 0, 0, 0);
-
-        Assert.Equal(new HashSet<(int, int, int)>(grid), graph.Visible);
+        Assert.Equal(new HashSet<(int, int, int)>(grid), visible);
     }
 
     [Fact]
@@ -90,26 +107,21 @@ public class BfsChunkVisibilityTests
             for (int z = -4; z <= 4; z++)
                 wall.Add((2, y, z));
 
-        var graph = new FakeGraph(grid, opaque: wall);
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
+        var visible = RunGrid(grid, opaque: wall, radius: 5);
 
-        // Everything at X <= 1 is reachable and must be visible (no over-cull).
         foreach (var c in grid)
         {
             if (c.Item1 <= 1)
             {
-                Assert.Contains(c, graph.Visible);
+                Assert.Contains(c, visible);
             }
         }
-        // The wall plane itself is adjacent to a visible chunk, so it is visible.
         foreach (var c in wall)
         {
-            Assert.Contains(c, graph.Visible);
+            Assert.Contains(c, visible);
         }
-        // At least some chunks strictly behind the full wall were culled (benefit exists).
         int behind = 0;
-        foreach (var c in grid) if (c.Item1 >= 3 && !graph.Visible.Contains(c)) behind++;
+        foreach (var c in grid) if (c.Item1 >= 3 && !visible.Contains(c)) behind++;
         Assert.True(behind > 0, "expected some occluded chunks behind a full solid wall to be culled");
     }
 
@@ -118,146 +130,132 @@ public class BfsChunkVisibilityTests
     {
         // A lone solid chunk one step from the camera must NOT hide the chunks
         // behind it: vanilla's raycast passes through the first ring (its `num2 > 1`
-        // guard), so the BFS first-ring exemption must too. Regression for the
-        // over-cull the adversarial review found.
+        // guard), so the BFS first-ring exemption must too.
         var grid = Grid(3);
-        var graph = new FakeGraph(grid, opaque: new[] { (0, 0, -1) }); // solid, distance 1 north
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
+        var visible = RunGrid(grid, opaque: new[] { (0, 0, -1) }, radius: 4);
 
-        // The chunks directly behind the first-ring solid chunk stay visible.
-        Assert.Contains((0, 0, -2), graph.Visible);
-        Assert.Contains((0, 0, -3), graph.Visible);
+        Assert.Contains((0, 0, -2), visible);
+        Assert.Contains((0, 0, -3), visible);
     }
 
     [Fact]
     public void NeverOverCullsVersusGroundTruthReachability()
     {
-        // Random-ish opaque set; compare BFS visible set against an independent
-        // brute-force adjacency reachability that ignores never-go-back/frustum
-        // (the maximal set of chunks connected to the camera through passable
-        // chunks). BFS with occlusion may cull MORE than pure adjacency, but the
-        // invariant we assert is the safety direction that matters for MC-70850:
-        // every chunk BFS marks visible is genuinely graph-connected to the camera.
         var grid = Grid(4);
         var opaque = new List<(int, int, int)>
         {
             (2, 0, 0), (2, 1, 0), (2, -1, 0), (-3, 0, 2), (0, 2, -2), (1, 1, 1),
         };
-        var graph = new FakeGraph(grid, opaque: opaque);
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
-
+        var visible = RunGrid(grid, opaque: opaque, radius: 5);
         var reachable = BruteForceReachable(new HashSet<(int, int, int)>(grid), new HashSet<(int, int, int)>(opaque), (0, 0, 0));
 
-        // Safety: BFS never marks a chunk visible that is not actually reachable.
-        foreach (var v in graph.Visible)
+        foreach (var v in visible)
         {
             Assert.Contains(v, reachable);
         }
     }
 
     [Fact]
-    public void FrustumCulledChunksAreNotVisible_NorAreChunksOnlyReachableThroughThem()
-    {
-        // Put the entire X>0 half-space out of frustum. Those chunks must not be
-        // visible, and because the flood cannot pass through a frustum-culled chunk,
-        // nothing solely behind them becomes visible either.
-        var grid = Grid(2);
-        var outFov = new List<(int, int, int)>();
-        foreach (var c in grid) if (c.Item1 > 0) outFov.Add(c);
-
-        var graph = new FakeGraph(grid, outOfFrustum: outFov);
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
-
-        foreach (var c in outFov)
-        {
-            Assert.DoesNotContain(c, graph.Visible);
-        }
-        // X<=0 chunks remain visible.
-        foreach (var c in grid) if (c.Item1 <= 0) Assert.Contains(c, graph.Visible);
-    }
-
-    [Fact]
     public void CameraChunkAlwaysVisibleEvenWhenSolid()
     {
-        // Camera embedded in a solid chunk: the chunk it's in must still render.
         var grid = Grid(1);
-        var graph = new FakeGraph(grid, opaque: new[] { (0, 0, 0) });
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
+        var visible = RunGrid(grid, opaque: new[] { (0, 0, 0) }, radius: 2);
 
-        Assert.Contains((0, 0, 0), graph.Visible);
+        Assert.Contains((0, 0, 0), visible);
     }
 
     [Fact]
-    public void OcclusionOff_MarksEveryInFrustumReachableChunk()
+    public void OcclusionOff_MarksEveryReachableChunk()
     {
-        // With occlusion disabled, opaque chunks do not block the flood; every
-        // in-frustum chunk connected by adjacency is visible.
         var grid = Grid(2);
-        var graph = new FakeGraph(grid, opaque: new[] { (1, 0, 0) });
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0, useOcclusion: false);
+        var visible = RunGrid(grid, opaque: new[] { (1, 0, 0) }, radius: 3, useOcclusion: false);
 
-        Assert.Equal(new HashSet<(int, int, int)>(grid), graph.Visible);
+        Assert.Equal(new HashSet<(int, int, int)>(grid), visible);
     }
 
     [Fact]
-    public void UndulatingTerrain_UpOverHillThenDownIntoValley_RendersAllReachableChunks()
+    public void UndulatingTerrain_UpOverHill_RendersRidgeWhileHidingChunkDirectlyBehindWall()
     {
-        // Issue #176: In undulating terrain, sight must be able to step UP over a hill or
-        // contour, and then DOWN into a valley behind it. The flawed ancestor-mask "never-go-back"
-        // previously forbade opposite axis movement along the entire traversal history,
-        // prematurely truncating render distance on non-flat terrain.
+        // With monotonic entry-face traversal (matching vanilla raycasts), sight steps UP
+        // over the hill at (0, 1, 2) to reveal (0, 1, 3), while (0, 0, 3) directly behind
+        // the fully opaque hill core at (0, 0, 2) stays occluded because no monotone ray reaches it.
         var grid = Grid(3);
-        // Place opaque chunk at (0, 0, 2) blocking straight horizontal line, but air at (0, 1, 2)
-        // allows light to travel up and over into the valley at (0, 0, 3).
         var opaque = new List<(int, int, int)> { (0, 0, 2) };
-        var graph = new FakeGraph(grid, opaque: opaque);
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
+        var visible = RunGrid(grid, opaque: opaque, radius: 4);
 
-        Assert.Contains((0, 1, 2), graph.Visible);
-        Assert.Contains((0, 0, 3), graph.Visible);
+        Assert.Contains((0, 1, 2), visible);
+        Assert.Contains((0, 1, 3), visible);
+        Assert.DoesNotContain((0, 0, 3), visible);
     }
 
     [Fact]
-    public void DepressionTerrain_DownIntoBasinThenUpToOppositeRidge_RendersAllReachableChunks()
+    public void DepressionTerrain_DownIntoBasin_RendersBasinWhileHidingChunkDirectlyBehindWall()
     {
-        // Issue #176: Stepping DOWN into a depression/valley and then UP to an opposite ridge.
         var grid = Grid(3);
-        // Opaque chunk at (0, 0, 2) blocking straight line, but air at (0, -1, 2) allows passing below.
         var opaque = new List<(int, int, int)> { (0, 0, 2) };
-        var graph = new FakeGraph(grid, opaque: opaque);
-        var bfs = new OptimumChunkVisibilityBfs();
-        bfs.Run(graph, 0, 0, 0);
+        var visible = RunGrid(grid, opaque: opaque, radius: 4);
 
-        Assert.Contains((0, -1, 2), graph.Visible);
-        Assert.Contains((0, 0, 3), graph.Visible);
+        Assert.Contains((0, -1, 2), visible);
+        Assert.Contains((0, -1, 3), visible);
+        Assert.DoesNotContain((0, 0, 3), visible);
     }
 
     [Fact]
-    public void LibInlineBfs_MirrorsTheReferenceInvariants()
+    public void LibAdapter_RunsTheSharedFlatGridCore()
     {
-        // Reconciles the two algorithm copies: the unit-tested reference
-        // OptimumChunkVisibilityBfs (this file) and the inlined runBfsVisibility in
-        // the ChunkCuller patch (which cannot be unit-tested directly because it
-        // needs the live ClientMain/ClientChunk). This pins the Lib copy to the same
-        // load-bearing invariants the reference guarantees, so the two cannot
-        // silently diverge: editing the patch to drop one of these fails this test.
+        // The ChunkCuller patch cannot be unit-tested directly (it needs the live
+        // ClientMain and ClientChunk), so it delegates the walk to OptimumChunkVisibilityGrid,
+        // which OptimumChunkVisibilityGridTests exercises. This pins the delegation and the
+        // lifecycle rules of the adapter, so editing the patch to bring back an inline copy,
+        // a lock around the walk, measurement scaffolding, or a settings-watcher rebuild fails here.
         string patch = PatchReader.ReadPatch(
             "patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs.patch");
 
-        Assert.Contains("OptimumConfig.BfsChunkVisibilityEnabled", patch); // toggle-gated
-        Assert.Contains("runBfsVisibility", patch);
-        Assert.Contains("bfsReachable", patch);                            // reachability check
-        Assert.Contains("for (int from = 0; from < 6; from++)", patch);    // all incoming faces (MC-70850-safe)
-        Assert.Contains("camDist > 1", patch);                             // first-ring exemption (num2>1 mirror)
-        Assert.Contains("bfsRadius", patch);                               // view-distance bound (no sky-flood freeze)
-        Assert.Contains("bfsOppositeOf", patch);                           // never-go-back mask
-        Assert.Contains("bfsQueue = new Queue<long>()", patch);            // lazy init (injected-field initializers don't run)
+        Assert.Contains("OptimumConfig.BfsChunkVisibilityEnabled", patch);  // toggle-gated, off = raycast
+        Assert.Contains("OptimumChunkVisibilityGrid", patch);               // the shared core
+        Assert.Contains("grid.Run(", patch);
+        Assert.Contains("ShouldRecalculate(", patch);                       // throttle decision lives in the core
+        Assert.Contains("bfsPrepareGrid();", patch);                        // sized at the start of a pass
+        Assert.Contains("bfsResetAndFill(chunks);", patch);                 // snapshot under chunksLock
+        Assert.Contains("OptimumChunkVisibilityGrid.EncodeCell(", patch);
+        Assert.Contains("bool fresh = chunk.traversabilityFresh;", patch);  // fresh flag read before the bits
+        Assert.Contains("Array.Clear(chunkGrid, 0, grid.CellCount);", patch); // chunk references dropped after the pass
+        Assert.Contains("runFlatBfsVisibility(ClientSettings.Occlusionculling);", patch);
+
+        // The walk runs outside chunksLock: no lock between the reset and runFlatBfsVisibility.
+        Assert.DoesNotContain("runBfsVisibility", patch);
+        Assert.DoesNotContain("new Queue<long>()", patch);
+        int call = patch.IndexOf("runFlatBfsVisibility(ClientSettings.Occlusionculling);", StringComparison.Ordinal);
+        Assert.True(call > 0);
+        string before = patch.Substring(Math.Max(0, call - 120), 120);
+        Assert.DoesNotContain("lock (game.WorldMap.chunksLock)", before);
+
+        // The toggle is read once per pass into a local; no later branch re-reads the static.
+        Assert.Contains("bool flatBfs = OptimumConfig.BfsChunkVisibilityEnabled;", patch);
+        Assert.Contains("if (flatBfs)", patch);
+        Assert.Equal(2, CountOccurrences(patch, "OptimumConfig.BfsChunkVisibilityEnabled")); // gate + the capture
+        Assert.DoesNotContain("150L, 1000L, 2000, 10", patch);                           // named constants, not literals
+
+        // No temporary measurement scaffold remains in the patch.
+        Assert.DoesNotContain("OPTIMUM_CULL_BFS", patch);
+        Assert.DoesNotContain("OPTIMUM_CULL_SHADOW", patch);
+        Assert.DoesNotContain("bfsModeBits", patch);
+        Assert.DoesNotContain("bfsRunShadowCompare", patch);
+
+        // The grid is never resized from the viewDistance watcher (cross-thread tear).
+        Assert.DoesNotContain("AddWatcher<int>(\"viewDistance\", bfs", patch);
+    }
+
+    private static int CountOccurrences(string text, string needle)
+    {
+        int count = 0;
+        int at = 0;
+        while ((at = text.IndexOf(needle, at, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            at += needle.Length;
+        }
+        return count;
     }
 
     // Brute-force flood over passable (non-opaque) chunks, 6-connected, ignoring
