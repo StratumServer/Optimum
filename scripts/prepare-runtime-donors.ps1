@@ -504,6 +504,9 @@ Copy-Item -Force `
     (Join-Path $repoRoot 'sources/VSEssentials/Systems/OptimumStatus.cs') `
     (Join-Path $runtimeRoot 'VSEssentials/Vintagestory/GameContent/OptimumStatusModSystem.cs')
 Copy-Item -Force `
+    (Join-Path $repoRoot 'sources/VSEssentials/Entity/Behavior/SelectionBoxRayBounds.cs') `
+    (Join-Path $runtimeRoot 'VSEssentials/Vintagestory/GameContent/SelectionBoxRayBounds.cs')
+Copy-Item -Force `
     (Join-Path $repoRoot 'sources/VSSurvivalMod/BlockEntityRenderer/CrucibleInFirepitRenderer.cs') `
     (Join-Path $runtimeRoot 'VSSurvivalMod/Vintagestory/GameContent/CrucibleInFirepitRenderer.cs')
 Copy-Item -Force `

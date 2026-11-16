@@ -1,0 +1,71 @@
+diff --git a/VSEssentials/Entity/Behavior/BehaviorSelectionBoxes.cs b/VSEssentials/Entity/Behavior/BehaviorSelectionBoxes.cs
+index 75cb94b..bd9c914 100644
+--- a/VSEssentials/Entity/Behavior/BehaviorSelectionBoxes.cs
++++ b/VSEssentials/Entity/Behavior/BehaviorSelectionBoxes.cs
+@@ -121,23 +121,38 @@ namespace Vintagestory.GameContent
+             if (!rendererRegistered)
+             {
+                 if (capi != null)
+                 {
+                     capi.Event.RegisterRenderer(this, EnumRenderStage.AfterFinalComposition, "selectionboxesbhdebug");
+-                    BoxWireframe = WireframeCube.CreateUnitCube(capi, ColorUtil.WhiteArgb);
+                 }
+                 rendererRegistered = true;
+             }
+         }
+ 
+         public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
+         {
+             if (capi.HideGuis) return;
+ 
++            var player = capi.World.Player;
++            var eplr = player.Entity;
++            var currentSelection = player.CurrentEntitySelection;
++            if (!debug && currentSelection?.Entity != entity && eplr.MountedOn?.Entity != entity)
++            {
++                var eyeOffset = eplr.LocalEyePos;
++                var playerPosition = eplr.Pos;
++                var entityPosition = entity.Pos;
++                if (SelectionBoxRayBounds.IsEntityBeyondRayRange(
++                    playerPosition.X + eyeOffset.X, playerPosition.InternalY + eyeOffset.Y, playerPosition.Z + eyeOffset.Z,
++                    entityPosition.X, entityPosition.InternalY, entityPosition.Z,
++                    entity.SelectionBox, player.WorldData.PickingRange))
++                {
++                    return;
++                }
++            }
++
+             int hitindex = getHitIndex();
+-            if (hitindex < 0 && capi.World.Player.CurrentEntitySelection?.Entity != this.entity) return;
+-            var eplr = capi.World.Player.Entity;
++            if (hitindex < 0 && currentSelection?.Entity != this.entity) return;
+ 
+             if (debug)
+             {
+                 for (int i = 0; i < selectionBoxes.Length; i++)
+                 {
+@@ -179,10 +194,11 @@ namespace Vintagestory.GameContent
+                 mvmat.Translate(pos.X - eplr.CameraPos.X, pos.InternalY - eplr.CameraPos.Y, pos.Z - eplr.CameraPos.Z);
+             }
+ 
+             applyBoxTransform(mvmat, apap);
+ 
++            BoxWireframe ??= WireframeCube.CreateUnitCube(capi, ColorUtil.WhiteArgb);
+             BoxWireframe.Render(capi, mvmat, 1.6f, color);
+         }
+ 
+         private int getHitIndex()
+         {
+@@ -260,10 +276,12 @@ namespace Vintagestory.GameContent
+             {
+                 var apap = selectionBoxes[i];
+ 
+                 mvmat.Identity();
+                 applyBoxTransform(mvmat, apap);
++                if (SelectionBoxRayBounds.IsBeyondRayLength(mvmat, pickingray.origin, rayLengthSq)) continue;
++
+                 mvMatInv.Set(mvmat.Values).Invert();
+ 
+                 var obbSpaceOrigin = mvMatInv.TransformVector(rayOrigin);
+                 var obbSpaceDirection = mvMatInv.TransformVector(rayDirection);
+                 Ray obbSpaceRay = new Ray(obbSpaceOrigin.XYZ, obbSpaceDirection.XYZ);
