@@ -50,6 +50,7 @@ public class OptimumDiagnosticsCountersTests
             "PreciseFramePacing",
             "HudEntityNameTags",
             "ShadowFarVegetation",
+            "ShadowFarReuse",
             "RepulseAgents",
             "WeatherWindThrottle",
             "AnimBlockLodNear",

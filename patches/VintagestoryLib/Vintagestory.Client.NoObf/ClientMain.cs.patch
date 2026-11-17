@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 6d5300a..247a368
+index 6d5300a..86ed984 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -15,7 +15,7 @@ index 6d5300a..247a368
  	public TerrainIlluminator terrainIlluminator;
  
  	public ClientWorldMap WorldMap;
-@@ -240,10 +242,36 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -240,10 +242,38 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public IColorPresets ColorPreset;
  
@@ -29,6 +29,8 @@ index 6d5300a..247a368
 +	// Created lazily by RegisterTesselationThread (main thread, from Start) and
 +	// read null-safely everywhere else, so worker threads never race on creation.
 +	private OptimumTesselationWorkerRegistry tesselationWorkers;
++
++	internal SystemRenderShadowMap optimumShadowMapSystem;
 +
 +	public bool IsTesselationThread(int threadId)
 +	{
@@ -52,7 +54,7 @@ index 6d5300a..247a368
  	private ClientSystemStartup csStartup;
  
  	private bool ungrabbedFromDefocus;
-@@ -314,11 +342,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -314,11 +344,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	private int lastWidth;
  
@@ -65,7 +67,7 @@ index 6d5300a..247a368
  
  	public Queue<ClientTask> MainThreadTasks;
  
-@@ -344,11 +372,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -344,11 +374,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public object chunkPositionsLock = new object();
  
@@ -78,7 +80,7 @@ index 6d5300a..247a368
  
  	public object EntityLoadQueueLock = new object();
  
-@@ -378,11 +406,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -378,11 +408,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal PickingRayUtil pickingRayUtil = new PickingRayUtil();
  
@@ -91,7 +93,7 @@ index 6d5300a..247a368
  
  	internal List<IPointLight> pointlights = new List<IPointLight>();
  
-@@ -402,27 +430,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -402,27 +432,27 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	internal int frameSeed;
  
@@ -124,7 +126,7 @@ index 6d5300a..247a368
  
  	internal ServerInformation ServerInfo;
  
-@@ -874,14 +902,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -874,14 +904,19 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		disconnectMissingMods = null;
  		quadModel = Platform.UploadMesh(QuadMeshUtilExt.GetQuadModelData());
  		FrustumCulling frustumCulling = new FrustumCulling();
@@ -147,7 +149,7 @@ index 6d5300a..247a368
  		_clientThreadsCts = new CancellationTokenSource();
  		ClientSystem clientSystem = new SystemCompressChunks(this);
  		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
-@@ -899,17 +932,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -899,17 +934,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
  		thread3.IsBackground = true;
  		thread3.Start();
@@ -171,7 +173,20 @@ index 6d5300a..247a368
  		thread5.IsBackground = true;
  		thread5.Start();
  		thread5.Name = "chunkvis";
-@@ -1032,11 +1069,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -961,11 +1000,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			new SystemRenderSkyColor(this),
+ 			new SystemRenderNightSky(this),
+ 			new SystemRenderSunMoon(this),
+ 			new SystemCinematicCamera(this),
+ 			new SystemRenderOITLayers(this),
+-			new SystemRenderShadowMap(this),
++			(optimumShadowMapSystem = new SystemRenderShadowMap(this)),
+ 			new SystemRenderDebugWireframes(this),
+ 			clientSystem6,
+ 			new SystemRenderRiftTest(this),
+ 			new SystemRenderEntities(this),
+ 			(decalSystem = new SystemRenderDecals(this)),
+@@ -1032,11 +1071,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public void ExecuteMainThreadTasks(float deltaTime)
  	{
  		ScreenManager.FrameProfiler.Mark("beginMTT");
@@ -205,7 +220,35 @@ index 6d5300a..247a368
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -2123,12 +2181,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1128,18 +1188,25 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		Platform.GlEnableDepthTest();
+ 		Platform.GlDepthMask(flag: true);
+ 		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
+ 		if (AmbientManager.ShadowQuality > 0 && (double)AmbientManager.DropShadowIntensity > 0.01)
+ 		{
+-			TriggerRenderStage(EnumRenderStage.ShadowFar, dt);
+-			TriggerRenderStage(EnumRenderStage.ShadowFarDone, dt);
++			if (optimumShadowMapSystem == null || !optimumShadowMapSystem.TryReuseOptimumShadowFar())
++			{
++				TriggerRenderStage(EnumRenderStage.ShadowFar, dt);
++				TriggerRenderStage(EnumRenderStage.ShadowFarDone, dt);
++			}
+ 			if (AmbientManager.ShadowQuality > 1)
+ 			{
+ 				TriggerRenderStage(EnumRenderStage.ShadowNear, dt);
+ 				TriggerRenderStage(EnumRenderStage.ShadowNearDone, dt);
+ 			}
+ 		}
++		else
++		{
++			optimumShadowMapSystem?.InvalidateOptimumShadowFar();
++		}
+ 		ScreenManager.FrameProfiler.Mark("rendOpaque-3shadows");
+ 		GlMatrixModeModelView();
+ 		GlLoadMatrix(MainCamera.CameraMatrix);
+ 		double[] top = api.Render.PMatrix.Top;
+ 		double[] top2 = api.Render.MvMatrix.Top;
+@@ -2123,12 +2190,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -230,7 +273,7 @@ index 6d5300a..247a368
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2328,40 +2396,41 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2328,40 +2405,41 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		return value.TextureId;
  	}
  
@@ -282,7 +325,7 @@ index 6d5300a..247a368
  		intoTexture.Width = value.Width;
  		intoTexture.Height = value.Height;
  	}
-@@ -3394,14 +3463,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3394,14 +3472,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  				SoundType = soundType
  			};
  		}
@@ -300,7 +343,7 @@ index 6d5300a..247a368
  				return num;
  			}
  			return 500;
-@@ -3451,11 +3521,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3451,11 +3530,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			throw new InvalidOperationException("Cannot call LoadSound outside the main thread, it is not thread safe");
  		}
  		ArgumentNullException.ThrowIfNull(sound.Location, "sound.Location");
@@ -313,7 +356,7 @@ index 6d5300a..247a368
  			Platform.Logger.Warning("Audio File not found: {0}", sound.Location);
  			return null;
  		}
-@@ -3530,6 +3600,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3530,6 +3609,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

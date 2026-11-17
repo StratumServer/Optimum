@@ -321,6 +321,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "edgePoolLocationsScratch",
         "optimumTextureLodBias",
         "ApplyOptimumTextureLodBias",
+        "optimumTerrainShadowGen",
     },
     // ChunkTesselatorManager: skip RecalcPriority+Sort when the player hasn't moved
     // (_lastSortPlayerPos/_lastSortYaw), plus the multi-tesselator worker pool and
@@ -423,6 +424,19 @@ var membersToInject = new Dictionary<string, List<string>>
         "ChunkTesselatorManager",
         "InvokeStartPlaying",
         "AssignCachedTexture",
+        "optimumShadowMapSystem",
+    },
+    // Issue #608: ShadowFar map caching and camera-delta reprojection
+    ["Vintagestory.Client.NoObf.SystemRenderShadowMap"] = new()
+    {
+        "optimumShadowFarReuse",
+        "optimumShadowBoxWidth",
+        "optimumShadowBoxHeight",
+        "InvalidateOptimumShadowFar",
+        "TryReuseOptimumShadowFar",
+        "OptimumIsExternalShadowRendererActive",
+        "OptimumShouldTrackShadowEntity",
+        "OptimumCommitShadowFarSnapshot",
     },
     // Issue #603: audio lifecycle synchronization, PCM retention cleanup, and intro music disposal
     ["Vintagestory.Client.NoObf.AudioMetaData"] = new()
@@ -698,6 +712,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "PrepareForShadowRendering", 3),
     // Issue #285: skip solar shadow cascades when deep underground with hysteresis
     new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "OnRenderBefore", 1),
+    // Issue #608: ShadowFar reuse with camera-delta reprojection
+    new("Vintagestory.Client.NoObf.SystemRenderShadowMap", "OnRenderShadowFar", 1),
     // HudEntityNameTags: IsRendered reuse (vanilla fields only)
     new("Vintagestory.Client.NoObf.HudEntityNameTags", "OnRenderGUI", 1),
     // Issue #572: rebuild the debug graph mesh when the frame size changes instead of on a 2 s timer.
@@ -715,6 +731,9 @@ var targets = new List<MethodTarget>
     // FSR mip bias: refresh block atlas texture state after scale or atlas changes.
     new("Vintagestory.Client.NoObf.ChunkRenderer", "OnBeforeRenderOpaque", 1),
     new("Vintagestory.Client.NoObf.ChunkRenderer", "RuntimeAddBlockTextureAtlas", 1),
+    // Issue #608: invalidate ShadowFar cache when terrain pools or visibility change
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "SwapVisibleBuffers", 0),
+    new("Vintagestory.Client.NoObf.ChunkRenderer", "RemoveDataPoolLocations", 1),
     // ClientMain: mouse wheel fix (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "OnMouseWheel", 1),
     // Issue #132: cache selection filters and avoid per-frame closure allocations.
@@ -751,6 +770,7 @@ var targets = new List<MethodTarget>
     // the tesselation worker thread. See
     // docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md.
     new("Vintagestory.Client.NoObf.ClientMain", "Start", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "MainRenderLoop", 1),
     // SystemRenderPlayerEffects: dynamic light radius (lambda-free rewrite)
     new("Vintagestory.Client.NoObf.SystemRenderPlayerEffects", "onBeforeRender", 1),
     // ClientPlatformWindows: persistent mapped VBO and index uploads. ParameterTypes

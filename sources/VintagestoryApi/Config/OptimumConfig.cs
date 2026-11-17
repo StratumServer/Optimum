@@ -394,6 +394,7 @@ public static class OptimumConfig
     public static bool BackgroundFpsLimit = true;
     public static bool PreciseFramePacing = true;
     public static bool ShadowFarVegetation = true;
+    public static bool ShadowFarReuseEnabled = true;
 
     /// <summary>
     /// T3: Reduce position-packet send frequency for distant entities (IsTracked==1,
@@ -1261,6 +1262,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.AnimBlockLod), AnimBlockLodEnabled.ToString()),
         (nameof(OptimumConfigData.AnimBlockLodFrameBudget), AnimBlockLodFrameBudget.ToString()),
         (nameof(OptimumConfigData.ShadowFarVegetation), ShadowFarVegetation.ToString()),
+        (nameof(OptimumConfigData.ShadowFarReuse), ShadowFarReuseEnabled.ToString()),
         (nameof(OptimumConfigData.WeatherWindThrottle), WeatherWindThrottleEnabled.ToString()),
         (nameof(OptimumConfigData.ParticleDistanceGate), ParticleDistanceGateEnabled.ToString()),
         (nameof(OptimumConfigData.ChiselLod), ChiselLodEnabled.ToString()),
@@ -1367,6 +1369,7 @@ public static class OptimumConfig
             AnimBlockLodEnabled = data.AnimBlockLod;
             AnimBlockLodFrameBudget = data.AnimBlockLodFrameBudget;
             ShadowFarVegetation = data.ShadowFarVegetation;
+            ShadowFarReuseEnabled = data.ShadowFarReuse;
             WeatherWindThrottleEnabled = data.WeatherWindThrottle;
             ParticleDistanceGateEnabled = data.ParticleDistanceGate;
             ChiselLodEnabled = data.ChiselLod;
@@ -1467,6 +1470,7 @@ public static class OptimumConfig
             AnimBlockLod = AnimBlockLodEnabled,
             AnimBlockLodFrameBudget = AnimBlockLodFrameBudget,
             ShadowFarVegetation = ShadowFarVegetation,
+            ShadowFarReuse = ShadowFarReuseEnabled,
             WeatherWindThrottle = WeatherWindThrottleEnabled,
             ParticleDistanceGate = ParticleDistanceGateEnabled,
             ChiselLod = ChiselLodEnabled,
@@ -1576,6 +1580,7 @@ internal sealed class OptimumConfigData
     public bool AnimBlockLod { get; set; } = true;
     public int AnimBlockLodFrameBudget { get; set; } = 256;
     public bool ShadowFarVegetation { get; set; } = true;
+    public bool ShadowFarReuse { get; set; } = true;
     public bool WeatherWindThrottle { get; set; } = true;
     public bool ParticleDistanceGate { get; set; } = true;
     public bool ChiselLod { get; set; } = true;
@@ -2499,6 +2504,8 @@ public static class OptimumDiagnostics
     public static readonly HitSkipCounter PreciseFramePacing = new();
     public static readonly HitSkipCounter HudEntityNameTags = new();
     public static readonly HitSkipCounter ShadowFarVegetation = new();
+    // Issue #608: hit = cached ShadowFar map reused via reprojection, skip = full ShadowFar render pass.
+    public static readonly HitSkipCounter ShadowFarReuse = new();
     public static readonly HitSkipCounter RepulseAgents = new();
     public static readonly HitSkipCounter WeatherWindThrottle = new();
     public static readonly HitSkipCounter AnimBlockLodNear = new();
@@ -2533,6 +2540,7 @@ public static class OptimumDiagnostics
         [nameof(PreciseFramePacing)] = PreciseFramePacing,
         [nameof(HudEntityNameTags)] = HudEntityNameTags,
         [nameof(ShadowFarVegetation)] = ShadowFarVegetation,
+        [nameof(ShadowFarReuse)] = ShadowFarReuse,
         [nameof(RepulseAgents)] = RepulseAgents,
         [nameof(WeatherWindThrottle)] = WeatherWindThrottle,
         [nameof(AnimBlockLodNear)] = AnimBlockLodNear,
@@ -3418,6 +3426,12 @@ public static class OptimumDiagnostics
     {
         double savedMb = SsaoGPositionSavedBytes / (1024.0 * 1024.0);
         return $"Optimum SSAO depth position: enabled={OptimumConfig.SsaoDepthPositionEnabled}, active={OptimumConfig.EffectiveSsaoDepthPosition}, gPositionDropped={SsaoDepthPositionDropped}, savedEstMB={savedMb:0.00}";
+    }
+
+    public static string GetShadowFarReuseSummary()
+    {
+        (long hits, long skips) = ShadowFarReuse.Snapshot();
+        return $"Optimum ShadowFar reuse: enabled={OptimumConfig.ShadowFarReuseEnabled}, reused={hits}, rendered={skips}";
     }
 }
 

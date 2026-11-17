@@ -1,8 +1,21 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
-index f8183c3..89f02b6 100644
+index f8183c3..afff0d6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
-@@ -25,10 +25,14 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -1,8 +1,12 @@
+ using System;
++using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class SystemRenderShadowMap : ClientSystem
+@@ -25,10 +29,21 @@ public class SystemRenderShadowMap : ClientSystem
  
  	private double[] up = new double[3] { 0.0, 1.0, 0.0 };
  
@@ -12,12 +25,19 @@ index f8183c3..89f02b6 100644
 +
 +	private BlockPos optimumShadowBlockPosScratch;
 +
++	// Bare Cecil-injected fields (no initializers): initialized lazily on demand.
++	internal OptimumShadowFarReuse optimumShadowFarReuse;
++
++	private double optimumShadowBoxWidth;
++
++	private double optimumShadowBoxHeight;
++
  	public override string Name => "res";
  
  	public SystemRenderShadowMap(ClientMain game)
  		: base(game)
  	{
-@@ -40,10 +44,34 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -40,10 +55,34 @@ public class SystemRenderShadowMap : ClientSystem
  		shadowBox = new ShadowBox(lightViewMatrix, game);
  	}
  
@@ -52,10 +72,290 @@ index f8183c3..89f02b6 100644
  		AmbientModifier ambientModifier = game.AmbientManager.CurrentModifiers["weather"];
  		double num = -0.1;
  		if (ambientModifier != null)
-@@ -112,10 +140,19 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -82,25 +121,258 @@ public class SystemRenderShadowMap : ClientSystem
+ 			}
+ 			game.shUniforms.ToShadowMapSpaceMatrixNear = game.toShadowMapSpaceMatrixNear;
+ 		}
+ 	}
+ 
++	internal void InvalidateOptimumShadowFar()
++	{
++		optimumShadowFarReuse?.Invalidate();
++	}
++
++	internal bool TryReuseOptimumShadowFar()
++	{
++		OptimumShadowFarReuse cache = optimumShadowFarReuse;
++		if (cache == null || !cache.IsValid)
++		{
++			return false;
++		}
++		if (!OptimumConfig.ShadowFarReuseEnabled || ClientSettings.ShadowMapQuality <= 1 || game.AmbientManager.ShadowQuality <= 1)
++		{
++			cache.Invalidate();
++			return false;
++		}
++		if (optimumUndergroundShadowSuppressed || (double)game.AmbientManager.DropShadowIntensity <= 0.01)
++		{
++			cache.Invalidate();
++			return false;
++		}
++		EntityPlayer entityPlayer = game.EntityPlayer;
++		if (entityPlayer == null || entityPlayer.Pos == null || game.MainCamera == null || game.chunkRenderer == null)
++		{
++			cache.Invalidate();
++			return false;
++		}
++		if (OptimumIsExternalShadowRendererActive())
++		{
++			return false;
++		}
++
++		FrameBufferRef farFb = (game.Platform.FrameBuffers != null && (int)EnumFrameBuffer.ShadowmapFar < game.Platform.FrameBuffers.Count)
++			? game.Platform.FrameBuffers[(int)EnumFrameBuffer.ShadowmapFar]
++			: null;
++		int fboId = farFb != null ? farFb.FboId : 0;
++		int depthTexId = farFb != null ? farFb.DepthTextureId : 0;
++		int fboWidth = farFb != null ? farFb.Width : 0;
++		int fboHeight = farFb != null ? farFb.Height : 0;
++
++		bool usingMoon = game.Calendar.MoonLightStrength > game.Calendar.SunLightStrength;
++		Vec3f lightVec = usingMoon ? game.Calendar.MoonPosition : game.Calendar.SunPosition;
++		double zExtend = 100f + 60f * Math.Abs(1f - game.Calendar.SunPositionNormalized.Y);
++		Vec3d camPos = entityPlayer.CameraPos;
++		int terrainGen = Volatile.Read(ref game.chunkRenderer.optimumTerrainShadowGen);
++
++		if (!cache.CanReuseMetadata(
++			camPos.X, camPos.Y, camPos.Z,
++			entityPlayer.Pos.Dimension,
++			ClientSettings.ShadowMapQuality,
++			game.Width, game.Height,
++			fboId, depthTexId, fboWidth, fboHeight,
++			ClientSettings.FieldOfView, game.MainCamera.ZNear,
++			lightVec.X, lightVec.Y, lightVec.Z,
++			usingMoon, zExtend,
++			ClientSettings.OptimumShadowFarVegetation,
++			ClientSettings.OptimumChiselLod,
++			ClientSettings.OptimumChiselLodDistance,
++			ClientSettings.OptimumEntityShadowCull,
++			ClientSettings.OptimumShadowCullDistance,
++			terrainGen,
++			game.MiniDimensions != null ? game.MiniDimensions.Count : 0))
++		{
++			return false;
++		}
++
++		int shadowMapQuality = ClientSettings.ShadowMapQuality;
++		double nearRange = 30.0 + 3.0 * (shadowMapQuality - 1);
++		double minTrackDistSq = Math.Min(12.0, nearRange * 0.35);
++		minTrackDistSq *= minTrackDistSq;
++		bool cullEnabled = ClientSettings.OptimumEntityShadowCull;
++		double shadowRangeFar = cache.CachedShadowRangeFar;
++
++		cache.BeginEntityCheck();
++		foreach (KeyValuePair<long, EntityRenderer> entry in game.EntityRenderers)
++		{
++			Entity entity = entry.Value.entity;
++			if (!OptimumShouldTrackShadowEntity(entity, entityPlayer, camPos, minTrackDistSq, cullEnabled, shadowRangeFar))
++			{
++				continue;
++			}
++			if (!cache.CheckEntity(entry.Key, entity.Pos.X, entity.Pos.InternalY, entity.Pos.Z))
++			{
++				return false;
++			}
++		}
++		if (!cache.FinishEntityCheck())
++		{
++			return false;
++		}
++
++		cache.Reproject(camPos.X, camPos.Y, camPos.Z, game.toShadowMapSpaceMatrixFar);
++		game.shUniforms.ShadowRangeFar = cache.CachedShadowRangeFar;
++		game.shUniforms.ToShadowMapSpaceMatrixFar = game.toShadowMapSpaceMatrixFar;
++		OptimumDiagnostics.ShadowFarReuse.Hit();
++		return true;
++	}
++
++	private bool OptimumIsExternalShadowRendererActive()
++	{
++		List<RenderHandler> list = game.eventManager?.renderersByStage?[(int)EnumRenderStage.ShadowFar];
++		if (list == null)
++		{
++			return false;
++		}
++		for (int i = 0; i < list.Count; i++)
++		{
++			RenderHandler handler = list[i];
++			string name = handler.ProfilingName;
++			if (name == "res" || name == "ret-sf" || name == "ree" || name == "mechnetwork")
++			{
++				continue;
++			}
++			if (handler.Renderer is AnimatableRenderer anim)
++			{
++				if (anim.ShouldRender)
++				{
++					return true;
++				}
++				continue;
++			}
++			return true;
++		}
++		return false;
++	}
++
++	private bool OptimumShouldTrackShadowEntity(
++		Entity entity,
++		EntityPlayer player,
++		Vec3d camPos,
++		double minTrackDistSq,
++		bool cullEnabled,
++		double shadowRangeFar)
++	{
++		if (entity == null || entity.Pos == null || entity.Pos.Dimension != player.Pos.Dimension)
++		{
++			return false;
++		}
++		if (entity == player && (game.MainCamera.CameraMode == EnumCameraMode.FirstPerson || game.MainCamera.Tppcameradistance < 5f))
++		{
++			return false;
++		}
++		double dx = entity.Pos.X - camPos.X;
++		double dz = entity.Pos.Z - camPos.Z;
++		double distSq = dx * dx + dz * dz;
++		double radius = Math.Max(3.0, (double)entity.FrustumSphereRadius);
++		double maxDist = cullEnabled ? ClientSettings.OptimumShadowCullDistance * (radius / 3.0) * 1.15 : shadowRangeFar;
++		if (distSq > maxDist * maxDist)
++		{
++			return false;
++		}
++		if (distSq < minTrackDistSq && radius < OptimumShadowFarReuse.LargeEntityMinRadius)
++		{
++			return false;
++		}
++		if (entity == player || entity.IsShadowRendered)
++		{
++			return true;
++		}
++		return game.WorldMap != null && game.WorldMap.IsValidPos((int)entity.Pos.X, (int)entity.Pos.InternalY, (int)entity.Pos.Z) && game.WorldMap.IsChunkRendered(entity.Pos);
++	}
++
++	private void OptimumCommitShadowFarSnapshot(int shadowMapQuality, float shadowRangeFar, double shadowDistance, double zExtend)
++	{
++		OptimumShadowFarReuse cache = optimumShadowFarReuse ??= new OptimumShadowFarReuse();
++		EntityPlayer entityPlayer = game.EntityPlayer;
++		if (entityPlayer == null || entityPlayer.Pos == null || game.MainCamera == null || game.chunkRenderer == null)
++		{
++			cache.Invalidate();
++			return;
++		}
++		FrameBufferRef farFb = (game.Platform.FrameBuffers != null && (int)EnumFrameBuffer.ShadowmapFar < game.Platform.FrameBuffers.Count)
++			? game.Platform.FrameBuffers[(int)EnumFrameBuffer.ShadowmapFar]
++			: null;
++		int fboId = farFb != null ? farFb.FboId : 0;
++		int depthTexId = farFb != null ? farFb.DepthTextureId : 0;
++		int fboWidth = farFb != null ? farFb.Width : 0;
++		int fboHeight = farFb != null ? farFb.Height : 0;
++
++		bool usingMoon = game.Calendar.MoonLightStrength > game.Calendar.SunLightStrength;
++		Vec3f lightVec = usingMoon ? game.Calendar.MoonPosition : game.Calendar.SunPosition;
++		Vec3d camPos = entityPlayer.CameraPos;
++		int terrainGen = Volatile.Read(ref game.chunkRenderer.optimumTerrainShadowGen);
++
++		cache.BeginSnapshotRecording();
++		double nearRange = 30.0 + 3.0 * (shadowMapQuality - 1);
++		double minTrackDistSq = Math.Min(12.0, nearRange * 0.35);
++		minTrackDistSq *= minTrackDistSq;
++		bool cullEnabled = ClientSettings.OptimumEntityShadowCull;
++
++		foreach (KeyValuePair<long, EntityRenderer> entry in game.EntityRenderers)
++		{
++			Entity entity = entry.Value.entity;
++			if (OptimumShouldTrackShadowEntity(entity, entityPlayer, camPos, minTrackDistSq, cullEnabled, shadowRangeFar))
++			{
++				cache.RecordEntity(entry.Key, entity.Pos.X, entity.Pos.InternalY, entity.Pos.Z);
++			}
++		}
++
++		cache.CommitFreshRender(
++			projectionViewMatrix,
++			camPos.X, camPos.Y, camPos.Z,
++			entityPlayer.Pos.Dimension,
++			shadowMapQuality,
++			game.Width, game.Height,
++			fboId, depthTexId, fboWidth, fboHeight,
++			ClientSettings.FieldOfView, game.MainCamera.ZNear,
++			shadowRangeFar, shadowDistance,
++			optimumShadowBoxWidth, optimumShadowBoxHeight,
++			lightVec.X, lightVec.Y, lightVec.Z,
++			usingMoon, zExtend,
++			ClientSettings.OptimumShadowFarVegetation,
++			ClientSettings.OptimumChiselLod,
++			ClientSettings.OptimumChiselLodDistance,
++			ClientSettings.OptimumEntityShadowCull,
++			ClientSettings.OptimumShadowCullDistance,
++			terrainGen);
++		OptimumDiagnostics.ShadowFarReuse.Skip();
++	}
++
+ 	private void OnRenderShadowFar(float dt)
+ 	{
+ 		if (!((double)game.AmbientManager.DropShadowIntensity <= 0.01))
+ 		{
+ 			int shadowMapQuality = ClientSettings.ShadowMapQuality;
+ 			double num = ((shadowMapQuality != 1) ? ((double)(150 + 120 * (shadowMapQuality - 1))) : 60.0);
+-			ShadowBox.ShadowBoxZExtend = 100f + 60f * Math.Abs(1f - game.Calendar.SunPositionNormalized.Y);
++			double shadowDistance = (shadowMapQuality > 1) ? (num / 2.0) : num;
++			bool reuseEnabled = shadowMapQuality > 1 && OptimumConfig.ShadowFarReuseEnabled;
++			float cullExtraRange = reuseEnabled ? (float)OptimumShadowFarReuse.GuardMarginBlocks : 0f;
++			double zExtend = 100f + 60f * Math.Abs(1f - game.Calendar.SunPositionNormalized.Y);
++			ShadowBox.ShadowBoxZExtend = zExtend;
+ 			game.shUniforms.ShadowRangeFar = (float)num;
+-			PrepareForShadowRendering((shadowMapQuality > 1) ? (num / 2.0) : num, EnumFrameBuffer.ShadowmapFar, 0f);
++			PrepareForShadowRendering(shadowDistance, EnumFrameBuffer.ShadowmapFar, cullExtraRange);
+ 			Mat4d.Mul(tmp, offset, projectionViewMatrix);
+ 			for (int i = 0; i < 16; i++)
+ 			{
+ 				game.toShadowMapSpaceMatrixFar[i] = (float)tmp[i];
+ 			}
+ 			game.shUniforms.ToShadowMapSpaceMatrixFar = game.toShadowMapSpaceMatrixFar;
++			if (reuseEnabled)
++			{
++				OptimumCommitShadowFarSnapshot(shadowMapQuality, (float)num, shadowDistance, zExtend);
++			}
++			else
++			{
++				optimumShadowFarReuse?.Invalidate();
++			}
+ 		}
+ 	}
+ 
+ 	private void PrepareForShadowRendering(double shadowDistance, EnumFrameBuffer fb, float cullExtraRange)
+ 	{
+@@ -109,13 +381,37 @@ public class SystemRenderShadowMap : ClientSystem
+ 		shadowBox.calculateWidthsAndHeights();
+ 		shadowBox.update();
+ 		game.frustumCuller.shadowRangeX = shadowDistance + ShadowBox.ShadowBoxZExtend + (double)cullExtraRange;
  		game.frustumCuller.shadowRangeZ = shadowDistance + (double)cullExtraRange;
  		Vec3f vec3f = ((game.Calendar.MoonLightStrength > game.Calendar.SunLightStrength) ? game.Calendar.MoonPosition : game.Calendar.SunPosition);
- 		loadOrthoModeMatrix(projectionMatrix, shadowBox.Width, shadowBox.Height, shadowBox.Length);
+-		loadOrthoModeMatrix(projectionMatrix, shadowBox.Width, shadowBox.Height, shadowBox.Length);
++		double boxWidth = shadowBox.Width;
++		double boxHeight = shadowBox.Height;
++		double boxLength = shadowBox.Length;
++		if (fb == EnumFrameBuffer.ShadowmapFar)
++		{
++			if (ClientSettings.ShadowMapQuality > 1 && OptimumConfig.ShadowFarReuseEnabled)
++			{
++				const double pad = OptimumShadowFarReuse.GuardMarginBlocks * 2.0;
++				boxWidth += pad;
++				boxHeight += pad;
++				boxLength += pad;
++			}
++			optimumShadowBoxWidth = boxWidth;
++			optimumShadowBoxHeight = boxHeight;
++		}
++		loadOrthoModeMatrix(projectionMatrix, boxWidth, boxHeight, boxLength);
  		Mat4d.LookAt(lightViewMatrix, vec3f.ToDoubleArray(), new double[4], new double[3] { 0.0, 1.0, 0.0 });
  		Mat4d.Mul(projectionViewMatrix, projectionMatrix, lightViewMatrix);
 +		double shadowMapResolution = (double)(Math.Max(4, ClientSettings.ShadowMapQuality + 2) * 1024);
