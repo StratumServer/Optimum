@@ -1,8 +1,61 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..12b6383 100644
+index dae3e90..bd0a31b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-@@ -231,11 +231,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -3,10 +3,11 @@ using System.Collections.Generic;
+ using System.Diagnostics;
+ using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.API.Util;
+ using Vintagestory.Server;
+@@ -60,10 +61,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 
+ 	private Dictionary<AssetLocation, UnloadableShape> shapes4;
+ 
+ 	private Dictionary<AssetLocation, UnloadableShape> itemshapes;
+ 
++	// Optimum issue #611: lazily-initialized scratch list tracking unloaded shapes reloaded
++	// under OptimizeRamMode == 2 during lazy inventory tessellation so finally re-unloads them.
++	private List<UnloadableShape> lazyReloadedShapes;
++
+ 	public ShapeTesselator Tesselator => TLTesselator ?? (TLTesselator = new ShapeTesselator(game, shapes, objs, gltfs));
+ 
+ 	public MeshData GetDefaultBlockMesh(Block block)
+ 	{
+ 		if (blockModelDatas[block.BlockId] == null)
+@@ -101,15 +106,23 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		TesselateBlocks_Pre();
+ 		TyronThreadPool.QueueTask(delegate
+ 		{
+ 			TesselateBlocks_Async(game.Blocks);
+ 		}, "TesselateBlocks_Async");
+-		for (int num = 0; num < game.Blocks.Count; num = TesselateBlocksForInventory(game.Blocks, num, game.Blocks.Count))
++		if (OptimumConfig.LazyInventoryMeshesEnabled)
+ 		{
++			BlockTesselationHalfCompleted();
++			ResetLazyItemInventoryMeshes(game.Items);
+ 		}
+-		for (int num = 0; num < game.Items.Count; num = TesselateItems(game.Items, num, game.Items.Count))
++		else
+ 		{
++			for (int num = 0; num < game.Blocks.Count; num = TesselateBlocksForInventory(game.Blocks, num, game.Blocks.Count))
++			{
++			}
++			for (int num = 0; num < game.Items.Count; num = TesselateItems(game.Items, num, game.Items.Count))
++			{
++			}
+ 		}
+ 		while (finishedAsyncBlockTesselation != 2 && !game.disposed)
+ 		{
+ 			Thread.Sleep(30);
+ 		}
+@@ -231,11 +244,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			Base = new AssetLocation("block/basic/cube")
  		};
  		int val = Environment.ProcessorCount / 2 - 3;
@@ -15,7 +68,417 @@ index dae3e90..12b6383 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -1140,11 +1140,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +736,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		return i;
+ 	}
+ 
+ 	public void TesselateBlocksForInventory_ASync(IList<Block> blocks)
+ 	{
++		if (OptimumConfig.LazyInventoryMeshesEnabled && ReferenceEquals(blocks, game.Blocks))
++		{
++			BlockTesselationHalfCompleted();
++			return;
++		}
+ 		if (TLTesselator != null)
+ 		{
+ 			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
+ 		}
+ 		MeshData[] meshes = new MeshData[blocks.Count];
+@@ -856,31 +874,48 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 			}
+ 		}
+ 	}
+ 
+ 	public void TesselateItems_Pre(IList<Item> itemtypes)
++	{
++		EnsureUnknownItemModelRef();
++		if (itemModelRefsInventory == null)
++		{
++			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
++		}
++		if (altItemModelRefsInventory == null)
++		{
++			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++		}
++	}
++
++	private void EnsureUnknownItemModelRef()
+ 	{
+ 		if (unknownItemModelRef == null)
+ 		{
+ 			CompositeTexture compositeTexture = new CompositeTexture(new AssetLocation("unknown"));
+ 			compositeTexture.Bake(game.Platform.AssetManager);
+ 			BakedBitmap bakedBitmap = TextureAtlasManager.LoadCompositeBitmap(game, new AssetLocationAndSource(compositeTexture.Baked.BakedName));
+ 			unknownItemModelData = ShapeTesselator.VoxelizeTextureStatic(bakedBitmap.TexturePixels, bakedBitmap.Width, bakedBitmap.Height, game.BlockAtlasManager.UnknownTexturePos);
+ 			unknownItemModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownItemModelData);
+ 		}
+-		if (itemModelRefsInventory == null)
+-		{
+-			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
+-		}
+-		if (altItemModelRefsInventory == null)
++	}
++
++	private void EnsureUnknownBlockModelRef()
++	{
++		if (unknownBlockModelRef == null)
+ 		{
+-			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++			unknownBlockModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownBlockModelData);
+ 		}
+ 	}
+ 
+ 	public int TesselateItems(IList<Item> itemtypes, int offset, int maxCount)
+ 	{
++		if (OptimumConfig.LazyInventoryMeshesEnabled && offset == 0 && ReferenceEquals(itemtypes, game.Items) && maxCount == itemtypes.Count)
++		{
++			return maxCount;
++		}
+ 		Stopwatch stopwatch = new Stopwatch();
+ 		stopwatch.Start();
+ 		int num = 0;
+ 		int i;
+ 		for (i = offset; i < maxCount; i++)
+@@ -1110,16 +1145,336 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		}
+ 	}
+ 
+ 	public MultiTextureMeshRef GetDefaultBlockMeshRef(Block block)
+ 	{
+-		return blockModelRefsInventory[block.Id];
++		if (block == null)
++		{
++			return null;
++		}
++		int blockId = block.Id;
++		if (blockModelRefsInventory == null || (uint)blockId >= (uint)blockModelRefsInventory.Length)
++		{
++			return null;
++		}
++		MultiTextureMeshRef cached = Volatile.Read(ref blockModelRefsInventory[blockId]);
++		if (cached != null)
++		{
++			return cached;
++		}
++		if (!OptimumConfig.LazyInventoryMeshesEnabled)
++		{
++			return null;
++		}
++		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
++		{
++			OptimumLazyInventoryMeshRequest request = new OptimumLazyInventoryMeshRequest(this, block);
++			game.EnqueueMainThreadTask(new Action(request.ExecuteOnMainThread), "lazyInventoryBlockMesh");
++			return request.Wait(game);
++		}
++		return EnsureBlockInventoryMeshRefOnMainThread(block);
+ 	}
+ 
+ 	public MultiTextureMeshRef GetDefaultItemMeshRef(Item item)
+ 	{
+-		return itemModelRefsInventory[item.Id];
++		return GetInventoryItemMeshRef(item, 0);
++	}
++
++	internal bool HasItemRenderVariant(Item item, int renderVariant)
++	{
++		if (renderVariant == 0)
++		{
++			return true;
++		}
++		if (item == null || renderVariant < 0)
++		{
++			return false;
++		}
++		int itemId = item.ItemId;
++		MultiTextureMeshRef[] existing = (altItemModelRefsInventory != null && (uint)itemId < (uint)altItemModelRefsInventory.Length)
++			? altItemModelRefsInventory[itemId]
++			: null;
++		int maxAlternates = existing != null ? existing.Length : (item.Shape?.BakedAlternates?.Length ?? 0);
++		return renderVariant <= maxAlternates;
++	}
++
++	internal MultiTextureMeshRef GetInventoryItemMeshRef(Item item, int renderVariant)
++	{
++		if (item == null || renderVariant < 0)
++		{
++			return null;
++		}
++		int itemId = item.ItemId;
++		if (renderVariant == 0)
++		{
++			if (itemModelRefsInventory == null || (uint)itemId >= (uint)itemModelRefsInventory.Length)
++			{
++				return null;
++			}
++			MultiTextureMeshRef cached = Volatile.Read(ref itemModelRefsInventory[itemId]);
++			if (cached != null)
++			{
++				return cached;
++			}
++		}
++		else
++		{
++			if (altItemModelRefsInventory == null || (uint)itemId >= (uint)altItemModelRefsInventory.Length)
++			{
++				return null;
++			}
++			MultiTextureMeshRef[] altRefs = Volatile.Read(ref altItemModelRefsInventory[itemId]);
++			int altIdx = renderVariant - 1;
++			if (altRefs != null && (uint)altIdx < (uint)altRefs.Length)
++			{
++				MultiTextureMeshRef cachedAlt = Volatile.Read(ref altRefs[altIdx]);
++				if (cachedAlt != null)
++				{
++					return cachedAlt;
++				}
++			}
++		}
++		if (!OptimumConfig.LazyInventoryMeshesEnabled)
++		{
++			return null;
++		}
++		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
++		{
++			OptimumLazyInventoryMeshRequest request = new OptimumLazyInventoryMeshRequest(this, item, renderVariant);
++			game.EnqueueMainThreadTask(new Action(request.ExecuteOnMainThread), "lazyInventoryItemMesh");
++			return request.Wait(game);
++		}
++		return EnsureItemInventoryMeshRefOnMainThread(item, renderVariant);
++	}
++
++	internal MultiTextureMeshRef EnsureBlockInventoryMeshRefOnMainThread(Block block)
++	{
++		if (block == null || blockModelRefsInventory == null)
++		{
++			return null;
++		}
++		int blockId = block.BlockId;
++		if ((uint)blockId >= (uint)blockModelRefsInventory.Length)
++		{
++			return null;
++		}
++		MultiTextureMeshRef cached = Volatile.Read(ref blockModelRefsInventory[blockId]);
++		if (cached != null)
++		{
++			return cached;
++		}
++		if (block.Code == null || blockId == 0)
++		{
++			return null;
++		}
++		EnsureUnknownBlockModelRef();
++		if (block.IsMissing)
++		{
++			Volatile.Write(ref blockModelRefsInventory[blockId], unknownBlockModelRef);
++			return unknownBlockModelRef;
++		}
++		List<UnloadableShape> reloaded = null;
++		try
++		{
++			if (ClientSettings.OptimizeRamMode == 2)
++			{
++				reloaded = lazyReloadedShapes ??= new List<UnloadableShape>(4);
++				reloaded.Clear();
++				EnsureCompositeShapeLoaded(block.ShapeInventory ?? block.Shape, reloaded);
++			}
++			MeshData data = TesselateBlockForInventory(block);
++			MultiTextureMeshRef uploaded = (data == null || data == unknownBlockModelData)
++				? unknownBlockModelRef
++				: game.api.renderapi.UploadMultiTextureMesh(data);
++			Volatile.Write(ref blockModelRefsInventory[blockId], uploaded);
++			return uploaded;
++		}
++		catch (Exception ex)
++		{
++			game.Platform.Logger.Error("Exception thrown during lazy inventory tesselation for block {0}:", block.Code);
++			game.Platform.Logger.Error(ex);
++			Volatile.Write(ref blockModelRefsInventory[blockId], unknownBlockModelRef);
++			return unknownBlockModelRef;
++		}
++		finally
++		{
++			ReUnloadTemporaryShapes(reloaded);
++		}
++	}
++
++	internal MultiTextureMeshRef EnsureItemInventoryMeshRefOnMainThread(Item item, int renderVariant)
++	{
++		if (item == null || itemModelRefsInventory == null)
++		{
++			return null;
++		}
++		int itemId = item.ItemId;
++		if ((uint)itemId >= (uint)itemModelRefsInventory.Length)
++		{
++			return null;
++		}
++		EnsureUnknownItemModelRef();
++		if (renderVariant == 0)
++		{
++			MultiTextureMeshRef cached = Volatile.Read(ref itemModelRefsInventory[itemId]);
++			if (cached != null)
++			{
++				return cached;
++			}
++			if (item.Code == null || ((item.FirstTexture == null || item.FirstTexture.Base.Path == "unknown") && item.Shape == null))
++			{
++				Volatile.Write(ref itemModelRefsInventory[itemId], unknownItemModelRef);
++				return unknownItemModelRef;
++			}
++			List<UnloadableShape> reloaded = null;
++			try
++			{
++				if (ClientSettings.OptimizeRamMode == 2)
++				{
++					reloaded = lazyReloadedShapes ??= new List<UnloadableShape>(4);
++					reloaded.Clear();
++					EnsureCompositeShapeLoaded(item.Shape, reloaded);
++				}
++				Tesselator.TesselateItem(item, item.Shape, out var modeldata);
++				MultiTextureMeshRef uploaded = (modeldata == null || modeldata == unknownItemModelData)
++					? unknownItemModelRef
++					: game.api.renderapi.UploadMultiTextureMesh(modeldata);
++				Volatile.Write(ref itemModelRefsInventory[itemId], uploaded);
++				return uploaded;
++			}
++			catch (Exception ex)
++			{
++				game.Platform.Logger.Error("Exception thrown during lazy inventory tesselation for item {0}:", item.Code);
++				game.Platform.Logger.Error(ex);
++				Volatile.Write(ref itemModelRefsInventory[itemId], unknownItemModelRef);
++				return unknownItemModelRef;
++			}
++			finally
++			{
++				ReUnloadTemporaryShapes(reloaded);
++			}
++		}
++		CompositeShape[] alternates = item.Shape?.BakedAlternates;
++		if (alternates == null || altItemModelRefsInventory == null || (uint)itemId >= (uint)altItemModelRefsInventory.Length)
++		{
++			return null;
++		}
++		int altIdx = renderVariant - 1;
++		if ((uint)altIdx >= (uint)alternates.Length)
++		{
++			return null;
++		}
++		MultiTextureMeshRef[] altRefs = Volatile.Read(ref altItemModelRefsInventory[itemId]);
++		if (altRefs == null)
++		{
++			altRefs = new MultiTextureMeshRef[alternates.Length];
++			Volatile.Write(ref altItemModelRefsInventory[itemId], altRefs);
++		}
++		MultiTextureMeshRef cachedAlt = Volatile.Read(ref altRefs[altIdx]);
++		if (cachedAlt != null)
++		{
++			return cachedAlt;
++		}
++		List<UnloadableShape> reloadedAlt = null;
++		try
++		{
++			CompositeShape altShape = alternates[altIdx];
++			if (ClientSettings.OptimizeRamMode == 2)
++			{
++				reloadedAlt = lazyReloadedShapes ??= new List<UnloadableShape>(4);
++				reloadedAlt.Clear();
++				EnsureCompositeShapeLoaded(altShape, reloadedAlt);
++			}
++			Tesselator.TesselateItem(item, altShape, out var altModeldata);
++			MultiTextureMeshRef uploadedAlt = (altModeldata == null || altModeldata == unknownItemModelData)
++				? unknownItemModelRef
++				: game.api.renderapi.UploadMultiTextureMesh(altModeldata);
++			Volatile.Write(ref altRefs[altIdx], uploadedAlt);
++			return uploadedAlt;
++		}
++		catch (Exception ex)
++		{
++			game.Platform.Logger.Error("Exception thrown during lazy inventory tesselation for item {0} variant {1}:", item.Code, renderVariant);
++			game.Platform.Logger.Error(ex);
++			Volatile.Write(ref altRefs[altIdx], unknownItemModelRef);
++			return unknownItemModelRef;
++		}
++		finally
++		{
++			ReUnloadTemporaryShapes(reloadedAlt);
++		}
++	}
++
++	private void ResetLazyItemInventoryMeshes(IList<Item> itemtypes)
++	{
++		EnsureUnknownItemModelRef();
++		DisposeArray(itemModelRefsInventory);
++		itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
++		if (altItemModelRefsInventory != null)
++		{
++			for (int i = 0; i < altItemModelRefsInventory.Length; i++)
++			{
++				DisposeArray(altItemModelRefsInventory[i]);
++			}
++		}
++		altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++	}
++
++	private void EnsureCompositeShapeLoaded(CompositeShape cshape, List<UnloadableShape> reloaded)
++	{
++		if (cshape == null || cshape.Format != EnumShapeFormat.VintageStory)
++		{
++			return;
++		}
++		if (!cshape.VoxelizeTexture && cshape.Base != null)
++		{
++			EnsureLoadedForLazy(cshape.Base, reloaded);
++		}
++		if (cshape.Overlays != null)
++		{
++			for (int i = 0; i < cshape.Overlays.Length; i++)
++			{
++				CompositeShape overlay = cshape.Overlays[i];
++				if (overlay != null && overlay.Format == EnumShapeFormat.VintageStory && !overlay.VoxelizeTexture && overlay.Base != null)
++				{
++					EnsureLoadedForLazy(overlay.Base, reloaded);
++				}
++			}
++		}
++	}
++
++	private void EnsureLoadedForLazy(AssetLocation shapeLoc, List<UnloadableShape> reloaded)
++	{
++		if (shapes == null || shapeLoc == null)
++		{
++			return;
++		}
++		if (shapes.TryGetValue(shapeLoc, out UnloadableShape shape) && shape != null && !shape.Loaded)
++		{
++			shape.Load(game, new AssetLocationAndSource(shapeLoc));
++			if (!shape.keepLoaded && ClientSettings.OptimizeRamMode == 2)
++			{
++				reloaded.Add(shape);
++			}
++		}
++	}
++
++	private static void ReUnloadTemporaryShapes(List<UnloadableShape> reloaded)
++	{
++		if (reloaded == null || reloaded.Count == 0)
++		{
++			return;
++		}
++		for (int i = 0; i < reloaded.Count; i++)
++		{
++			UnloadableShape shape = reloaded[i];
++			if (!shape.keepLoaded)
++			{
++				shape.Unload();
++			}
++		}
++		reloaded.Clear();
+ 	}
+ 
+ 	public Shape GetCachedShape(AssetLocation location)
+ 	{
+ 		shapes.TryGetValue(location, out var value);
+@@ -1140,11 +1495,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  		if (texSource == null)
  		{

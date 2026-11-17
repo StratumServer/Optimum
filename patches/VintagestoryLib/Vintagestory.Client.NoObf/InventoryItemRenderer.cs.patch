@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
-index 35bb9ac..8193b14 100644
+index 35bb9ac..3cfb6a3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/InventoryItemRenderer.cs
 @@ -13,10 +13,16 @@ namespace Vintagestory.Client.NoObf;
@@ -88,7 +88,40 @@ index 35bb9ac..8193b14 100644
  		{
  		case EnumItemRenderTarget.Ground:
  			renderinfo.Transform = itemstack.Collectible.GroundTransform;
-@@ -431,10 +473,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+@@ -381,29 +423,22 @@ public class InventoryItemRenderer : IRenderer, IDisposable
+ 		{
+ 			renderinfo.ModelRef = ((itemstack.Block == null) ? game.TesselatorManager.unknownItemModelRef : game.TesselatorManager.unknownBlockModelRef);
+ 		}
+ 		else if (itemstack.Class == EnumItemClass.Block)
+ 		{
+-			renderinfo.ModelRef = game.TesselatorManager.blockModelRefsInventory[itemstack.Id];
++			renderinfo.ModelRef = game.TesselatorManager.GetDefaultBlockMeshRef(itemstack.Block);
+ 		}
+ 		else
+ 		{
+ 			int num = (itemstack.TempAttributes.HasAttribute("renderVariant") ? itemstack.TempAttributes.GetInt("renderVariant") : itemstack.Attributes.GetInt("renderVariant"));
+-			if (num != 0 && (num < 0 || game.TesselatorManager.altItemModelRefsInventory[itemstack.Id] == null || game.TesselatorManager.altItemModelRefsInventory[itemstack.Id].Length < num - 1))
++			if (num != 0 && !game.TesselatorManager.HasItemRenderVariant(itemstack.Item, num))
+ 			{
+ 				game.Logger.Warning("Itemstack {0} has an invalid renderVariant {1}. No such model variant exists. Will reset to 0", itemstack.GetName(), num);
+ 				itemstack.TempAttributes.SetInt("renderVariant", 0);
+ 				num = 0;
+ 			}
+-			if (num == 0)
+-			{
+-				renderinfo.ModelRef = game.TesselatorManager.itemModelRefsInventory[itemstack.Id];
+-			}
+-			else
+-			{
+-				renderinfo.ModelRef = game.TesselatorManager.altItemModelRefsInventory[itemstack.Id][num - 1];
+-			}
++			renderinfo.ModelRef = game.TesselatorManager.GetInventoryItemMeshRef(itemstack.Item, num);
+ 		}
+ 		ItemRenderInfo itemRenderInfo = renderinfo;
+ 		int normalShaded;
+ 		if (itemstack.Class != EnumItemClass.Block)
+ 		{
+@@ -431,10 +466,33 @@ public class InventoryItemRenderer : IRenderer, IDisposable
  		inSlot.OnBeforeRender(renderinfo);
  		itemstack.Collectible.OnBeforeRender(game.api, itemstack, target, ref renderinfo);
  		return renderinfo;
