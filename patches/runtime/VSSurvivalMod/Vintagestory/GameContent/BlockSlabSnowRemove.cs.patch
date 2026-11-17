@@ -1,0 +1,99 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockSlabSnowRemove.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockSlabSnowRemove.cs
+index 4fd63f4..7c40a78 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockSlabSnowRemove.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockSlabSnowRemove.cs
+@@ -1,5 +1,6 @@
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ 
+@@ -9,10 +10,23 @@ public class BlockSlabSnowRemove : Block, ITexPositionSource
+ {
+ 	private MeshData groundSnowLessMesh;
+ 
+ 	private MeshData groundSnowedMesh;
+ 
++	private object optimumSnowMeshLock;
++
++	private object GetSnowMeshLock()
++	{
++		object obj = Volatile.Read(ref optimumSnowMeshLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref optimumSnowMeshLock, new object(), null);
++		return Volatile.Read(ref optimumSnowMeshLock);
++	}
++
+ 	private bool testGroundSnowRemoval;
+ 
+ 	private bool testGroundSnowAdd;
+ 
+ 	private BlockFacing rot;
+@@ -75,33 +89,51 @@ public class BlockSlabSnowRemove : Block, ITexPositionSource
+ 
+ 	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+ 	{
+ 		if (testGroundSnowRemoval && !SolidBlockBelow(chunkExtBlocks, extIndex3d, pos))
+ 		{
+-			if (groundSnowLessMesh == null)
++			MeshData meshData = Volatile.Read(ref groundSnowLessMesh);
++			if (meshData == null)
+ 			{
+-				groundSnowLessMesh = sourceMesh.Clone();
+-				groundSnowLessMesh.RemoveVertices(24);
+-				groundSnowLessMesh.XyzFacesCount -= 6;
++				lock (GetSnowMeshLock())
++				{
++					meshData = Volatile.Read(ref groundSnowLessMesh);
++					if (meshData == null)
++					{
++						meshData = sourceMesh.Clone();
++						meshData.RemoveVertices(24);
++						meshData.XyzFacesCount -= 6;
++						Volatile.Write(ref groundSnowLessMesh, meshData);
++					}
++				}
+ 			}
+-			sourceMesh = groundSnowLessMesh;
++			sourceMesh = meshData;
+ 		}
+ 		if (!testGroundSnowAdd || chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[rot.Opposite.Index]].BlockMaterial != EnumBlockMaterial.Snow || !SolidBlockBelow(chunkExtBlocks, extIndex3d, pos))
+ 		{
+ 			return;
+ 		}
+-		if (groundSnowedMesh == null)
++		MeshData meshData2 = Volatile.Read(ref groundSnowedMesh);
++		if (meshData2 == null)
+ 		{
+-			Shape shapeBase = Vintagestory.API.Common.Shape.TryGet(api, "shapes/block/basic/slab/snow-" + Variant["rot"] + ".json");
+-			(api as ICoreClientAPI).Tesselator.TesselateShape("slab snow cover", shapeBase, out groundSnowedMesh, this, null, 0, 0, 0);
+-			for (int i = 0; i < groundSnowedMesh.RenderPassCount; i++)
++			lock (GetSnowMeshLock())
+ 			{
+-				groundSnowedMesh.RenderPassesAndExtraBits[i] = 0;
++				meshData2 = Volatile.Read(ref groundSnowedMesh);
++				if (meshData2 == null)
++				{
++					Shape shapeBase = Vintagestory.API.Common.Shape.TryGet(api, "shapes/block/basic/slab/snow-" + Variant["rot"] + ".json");
++					(api as ICoreClientAPI).Tesselator.TesselateShape("slab snow cover", shapeBase, out meshData2, this, null, 0, 0, 0);
++					for (int i = 0; i < meshData2.RenderPassCount; i++)
++					{
++						meshData2.RenderPassesAndExtraBits[i] = 0;
++					}
++					meshData2.AddMeshData(sourceMesh);
++					Volatile.Write(ref groundSnowedMesh, meshData2);
++				}
+ 			}
+-			groundSnowedMesh.AddMeshData(sourceMesh);
+ 		}
+-		sourceMesh = groundSnowedMesh;
++		sourceMesh = meshData2;
+ 	}
+ 
+ 	private bool SolidBlockBelow(Block[] chunkExtBlocks, int extIndex3d, BlockPos pos)
+ 	{
+ 		if (chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[5]].SideSolid[BlockFacing.UP.Index])

@@ -1,0 +1,113 @@
+diff --git a/VSSurvivalMod/Block/BlockCrate.cs b/VSSurvivalMod/Block/BlockCrate.cs
+index e4ed98c..e87d543 100644
+--- a/VSSurvivalMod/Block/BlockCrate.cs
++++ b/VSSurvivalMod/Block/BlockCrate.cs
+@@ -502,28 +502,31 @@ namespace Vintagestory.GameContent
+ 
+ 
+         public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+         {
+             string cacheKey = "crateMeshRefs" + FirstCodePart() + SubtypeInventory;
+-            var meshrefs = ObjectCacheUtil.GetOrCreate(capi, cacheKey, () => new Dictionary<string, MultiTextureMeshRef>());
++            var meshrefs = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, cacheKey);
+ 
+             string key = GetKey(itemstack);
+ 
+-            if (!meshrefs.TryGetValue(key, out renderinfo.ModelRef))
++            lock (meshrefs)
+             {
+-                string type = itemstack.Attributes.GetString("type", Props.DefaultType);
+-                string label = itemstack.Attributes.GetString("label");
+-                string lidState = itemstack.Attributes.GetString("lidState", "closed");
++                if (!meshrefs.TryGetValue(key, out renderinfo.ModelRef))
++                {
++                    string type = itemstack.Attributes.GetString("type", Props.DefaultType);
++                    string label = itemstack.Attributes.GetString("label");
++                    string lidState = itemstack.Attributes.GetString("lidState", "closed");
+ 
+-                CompositeShape cshape = Props[type].Shape;
+-                var rot = ShapeInventory == null ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ);
++                    CompositeShape cshape = Props[type].Shape;
++                    var rot = ShapeInventory == null ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ);
+ 
+-                var contentStacks = GetNonEmptyContents(capi.World, itemstack);
+-                var contentStack = contentStacks == null || contentStacks.Length == 0 ? null : contentStacks[0];
++                    var contentStacks = GetNonEmptyContents(capi.World, itemstack);
++                    var contentStack = contentStacks == null || contentStacks.Length == 0 ? null : contentStacks[0];
+ 
+-                var mesh = GenMesh(capi, contentStack, type, label, lidState, cshape, rot);
+-                meshrefs[key] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(mesh);
++                    var mesh = GenMesh(capi, contentStack, type, label, lidState, cshape, rot);
++                    meshrefs[key] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(mesh);
++                }
+             }
+         }
+ 
+ 
+ 
+@@ -571,30 +574,37 @@ namespace Vintagestory.GameContent
+             {
+                 cshape = cshape.Clone();
+                 cshape.Base.Path = cshape.Base.Path.Replace("closed", "opened");
+             }
+ 
+-            Shape shape = GetShape(capi, type, cshape);
++            if (cshape?.Base == null) return new MeshData();
+             var tesselator = capi.Tesselator;
++            ITexPositionSource localTexSource = tesselator.GetTextureSource(this, 0, true);
++            AssetLocation shapeloc = cshape.Base.WithPathAppendixOnce(".json").WithPathPrefixOnce("shapes/");
++            Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
+             if (shape == null) return new MeshData();
+ 
+-            curType = type;
++            OptimumCrateTexSource texSource = new OptimumCrateTexSource(capi, localTexSource, type, false, null);
+ 
+             Vec3f rot = rotation == null ? new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ) : rotation;
+             string meshkey = cshape.Base + "-" + Code.ToShortString() + "-" + type + "-x" + rot.X + "-y" + rot.Y + "-y" + rot.Z;
+-            var meshCache = ObjectCacheUtil.GetOrCreate(capi, CrateBaseMeshesCache, () => new Dictionary<string, MeshData>());
+-            if (!meshCache.TryGetValue(meshkey, out MeshData mesh))
++            var meshCache = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(capi, CrateBaseMeshesCache);
++            MeshData mesh;
++            lock (meshCache)
+             {
+-                // Only generate the base crate mesh if necessary, otherwise we can simply clone it
+-                tesselator.TesselateShape("crate", shape, out mesh, this, rot);
+-                meshCache[meshkey] = mesh;
++                if (!meshCache.TryGetValue(meshkey, out mesh))
++                {
++                    // Only generate the base crate mesh if necessary, otherwise we can simply clone it
++                    tesselator.TesselateShape("crate", shape, out mesh, texSource, rot);
++                    meshCache[meshkey] = mesh;
++                }
+             }
+ 
+             bool meshcloned = false;
+             if (label != null && Props.Labels.TryGetValue(label, out var labelProps))
+             {
+-                var meshLabel = GenLabelMesh(capi, label, tmpTextureSource[labelProps.Texture], false, rotation);
++                var meshLabel = GenLabelMesh(capi, label, texSource[labelProps.Texture], false, rotation);
+                 mesh = mesh.Clone();
+                 mesh.AddMeshData(meshLabel);
+                 meshcloned = true;
+             }
+ 
+@@ -621,16 +631,14 @@ namespace Vintagestory.GameContent
+             AssetLocation shapeloc = (editableVariant ? labelProps.EditableShape : labelProps.Shape).Base.Clone().WithPathAppendixOnce(".json").WithPathPrefixOnce("shapes/");
+             Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
+ 
+             var rot = rotation == null ? new Vec3f(labelProps.Shape.rotateX, labelProps.Shape.rotateY, labelProps.Shape.rotateZ) : rotation;
+ 
+-            nowTeselatingLabel = labelProps;
+-            labelTexturePos = texPos;
+-            tmpTextureSource = capi.Tesselator.GetTextureSource(this, 0, true);
++            ITexPositionSource localTexSource = capi.Tesselator.GetTextureSource(this, 0, true);
++            OptimumCrateTexSource labelTexSource = new OptimumCrateTexSource(capi, localTexSource, null, true, texPos);
+ 
+-            capi.Tesselator.TesselateShape("cratelabel", shape, out var meshLabel, this, rot);
+-            nowTeselatingLabel = null;
++            capi.Tesselator.TesselateShape("cratelabel", shape, out var meshLabel, labelTexSource, rot);
+ 
+             return meshLabel;
+         }
+ 
+ 

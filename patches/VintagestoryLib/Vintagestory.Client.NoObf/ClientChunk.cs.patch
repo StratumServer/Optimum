@@ -1,8 +1,19 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-index 7be6b24..3916eb8 100644
+index 7be6b24..c1fe8a9 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-@@ -39,10 +39,12 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Diagnostics;
+ using System.IO;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+@@ -39,10 +40,98 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
  
  	internal int quantityOverloads;
  
@@ -10,12 +21,98 @@ index 7be6b24..3916eb8 100644
  
 +	internal int optimumTessRetryCount;
 +
++	internal int optimumTessState;
++
++	internal int optimumFullDirtySeq;
++
++	internal int optimumEdgeDirtySeq;
++
++	internal int optimumUploadedFullSeq;
++
++	internal int optimumUploadedEdgeSeq;
++
++	internal bool OptimumRecordDirty(bool priority, bool edgeOnly)
++	{
++		Interlocked.Increment(ref optimumEdgeDirtySeq);
++		if (!edgeOnly)
++		{
++			Interlocked.Increment(ref optimumFullDirtySeq);
++		}
++		while (true)
++		{
++			int cur = Volatile.Read(ref optimumTessState);
++			if ((cur & 1) != 0)
++			{
++				int next = cur | 2 | (edgeOnly ? 0 : 4) | (priority ? 8 : 0);
++				if (Interlocked.CompareExchange(ref optimumTessState, next, cur) == cur)
++				{
++					return false;
++				}
++			}
++			else
++			{
++				int next = cur | 16;
++				if (Interlocked.CompareExchange(ref optimumTessState, next, cur) == cur)
++				{
++					return true;
++				}
++			}
++		}
++	}
++
++	internal bool OptimumTryBeginWorkerTesselation(bool priority, bool skipChunkCenter, out int fullSeq, out int edgeSeq)
++	{
++		while (true)
++		{
++			int cur = Volatile.Read(ref optimumTessState);
++			if ((cur & 1) != 0)
++			{
++				int next = cur | 2 | (skipChunkCenter ? 0 : 4) | (priority ? 8 : 0);
++				if (Interlocked.CompareExchange(ref optimumTessState, next, cur) == cur)
++				{
++					fullSeq = 0;
++					edgeSeq = 0;
++					return false;
++				}
++			}
++			else
++			{
++				int next = (cur & ~30) | 1;
++				if (Interlocked.CompareExchange(ref optimumTessState, next, cur) == cur)
++				{
++					fullSeq = Volatile.Read(ref optimumFullDirtySeq);
++					edgeSeq = Volatile.Read(ref optimumEdgeDirtySeq);
++					return true;
++				}
++			}
++		}
++	}
++
++	internal void OptimumFinishWorkerTesselation(bool wantRetry, bool retryPriority, bool retryEdgeOnly, out bool shouldEnqueue, out bool outPriority, out bool outEdgeOnly)
++	{
++		while (true)
++		{
++			int cur = Volatile.Read(ref optimumTessState);
++			bool pending = (cur & 2) != 0;
++			bool mergedFull = (cur & 4) != 0 || (wantRetry && !retryEdgeOnly);
++			bool mergedPriority = (cur & 8) != 0 || (wantRetry && retryPriority);
++			shouldEnqueue = pending || wantRetry;
++			int next = shouldEnqueue ? 16 : 0;
++			if (Interlocked.CompareExchange(ref optimumTessState, next, cur) == cur)
++			{
++				outPriority = mergedPriority;
++				outEdgeOnly = !mergedFull;
++				return;
++			}
++		}
++	}
++
  	internal bool shouldSunRelight;
  
  	public ushort traversability;
  
  	public bool traversabilityFresh;
-@@ -215,10 +217,40 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+@@ -215,10 +304,40 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
  			return base.blocksCompressed != null;
  		}
  		return true;

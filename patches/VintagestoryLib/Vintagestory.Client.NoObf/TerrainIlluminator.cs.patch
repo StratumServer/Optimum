@@ -1,0 +1,120 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TerrainIlluminator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TerrainIlluminator.cs
+index 24400c0..3aa5457 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/TerrainIlluminator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/TerrainIlluminator.cs
+@@ -1,5 +1,6 @@
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ using Vintagestory.Common;
+@@ -11,12 +12,25 @@ public class TerrainIlluminator : IChunkProvider
+ {
+ 	private ChunkIlluminator chunkIlluminator;
+ 
+ 	private ClientMain game;
+ 
++	private object relightSyncLock;
++
+ 	public ILogger Logger => game.Logger;
+ 
++	private object GetRelightSyncLock()
++	{
++		object obj = Volatile.Read(ref relightSyncLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref relightSyncLock, new object(), null);
++		return Volatile.Read(ref relightSyncLock);
++	}
++
+ 	public TerrainIlluminator(ClientMain game)
+ 	{
+ 		this.game = game;
+ 		chunkIlluminator = new ChunkIlluminator(this, new BlockAccessorRelaxed(game.WorldMap, game, synchronize: false, relight: false), game.WorldMap.ClientChunkSize);
+ 	}
+@@ -38,25 +52,42 @@ public class TerrainIlluminator : IChunkProvider
+ 		int internalY = pos.InternalY;
+ 		int z = pos.Z;
+ 		ClientChunk[] array = new ClientChunk[game.WorldMap.ChunkMapSizeY];
+ 		for (int i = 0; i < game.WorldMap.ChunkMapSizeY; i++)
+ 		{
+-			array[i] = game.WorldMap.GetClientChunk(x, i + pos.Dimension * 1024, z);
+-			array[i].shouldSunRelight = false;
+-			array[i].quantityRelit++;
+-			array[i].Unpack();
++			ClientChunk colChunk = game.WorldMap.GetClientChunk(x, i + pos.Dimension * 1024, z);
++			if (colChunk == null)
++			{
++				return;
++			}
++			lock (colChunk.packUnpackLock)
++			{
++				if (colChunk.Disposed)
++				{
++					return;
++				}
++				colChunk.Unpack();
++				colChunk.MarkFresh();
++				colChunk.shouldSunRelight = false;
++				colChunk.quantityRelit++;
++			}
++			array[i] = colChunk;
+ 		}
+ 		chunk.Lighting.ClearAllSunlight();
+-		ChunkIlluminator obj = chunkIlluminator;
+-		IWorldChunk[] chunks = array;
+-		obj.Sunlight(chunks, x, internalY, z, 0);
+-		ChunkIlluminator obj2 = chunkIlluminator;
+-		chunks = array;
+-		obj2.SunlightFlood(chunks, x, internalY, z);
+-		ChunkIlluminator obj3 = chunkIlluminator;
+-		chunks = array;
+-		byte b = obj3.SunLightFloodNeighbourChunks(chunks, x, internalY, z, 0);
++		byte b;
++		lock (GetRelightSyncLock())
++		{
++			ChunkIlluminator obj = chunkIlluminator;
++			IWorldChunk[] chunks = array;
++			obj.Sunlight(chunks, x, internalY, z, 0);
++			ChunkIlluminator obj2 = chunkIlluminator;
++			chunks = array;
++			obj2.SunlightFlood(chunks, x, internalY, z);
++			ChunkIlluminator obj3 = chunkIlluminator;
++			chunks = array;
++			b = obj3.SunLightFloodNeighbourChunks(chunks, x, internalY, z, 0);
++		}
+ 		BlockFacing[] aLLFACES = BlockFacing.ALLFACES;
+ 		foreach (BlockFacing blockFacing in aLLFACES)
+ 		{
+ 			if ((blockFacing.Flag & b) > 0)
+ 			{
+@@ -69,12 +100,24 @@ public class TerrainIlluminator : IChunkProvider
+ 	}
+ 
+ 	public IWorldChunk GetChunk(int chunkX, int chunkY, int chunkZ)
+ 	{
+ 		ClientChunk clientChunk = game.WorldMap.GetClientChunk(chunkX, chunkY, chunkZ);
+-		clientChunk?.Unpack();
+-		return clientChunk;
++		if (clientChunk == null)
++		{
++			return null;
++		}
++		lock (clientChunk.packUnpackLock)
++		{
++			if (clientChunk.Disposed)
++			{
++				return null;
++			}
++			clientChunk.Unpack();
++			clientChunk.MarkFresh();
++			return clientChunk;
++		}
+ 	}
+ 
+ 	public IWorldChunk GetUnpackedChunkFast(int chunkX, int chunkY, int chunkZ, bool notRecentlyAccessed = false)
+ 	{
+ 		return ((IChunkProvider)game.WorldMap).GetUnpackedChunkFast(chunkX, chunkY, chunkZ, notRecentlyAccessed);

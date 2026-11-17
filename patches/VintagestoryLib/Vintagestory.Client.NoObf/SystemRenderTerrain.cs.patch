@@ -1,0 +1,41 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderTerrain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderTerrain.cs
+index 11e2578..efe5bb6 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderTerrain.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderTerrain.cs
+@@ -130,19 +130,32 @@ public class SystemRenderTerrain : ClientSystem
+ 	}
+ 
+ 	public void RedrawAllBlocks()
+ 	{
+ 		game.Platform.Logger.Notification("Redrawing all blocks");
+-		UniqueQueue<long> uniqueQueue = new UniqueQueue<long>();
++		List<long> keys;
+ 		lock (game.WorldMap.chunksLock)
+ 		{
+-			foreach (long key in game.WorldMap.chunks.Keys)
++			keys = new List<long>(game.WorldMap.chunks.Keys);
++		}
++		lock (game.dirtyChunksLock)
++		{
++			UniqueQueue<long> queue = game.dirtyChunks;
++			if (queue == null)
++			{
++				queue = new UniqueQueue<long>();
++				game.dirtyChunks = queue;
++			}
++			else
++			{
++				queue.Clear();
++			}
++			for (int i = 0; i < keys.Count; i++)
+ 			{
+-				uniqueQueue.Enqueue(key);
++				queue.Enqueue(keys[i]);
+ 			}
+ 		}
+-		game.dirtyChunks = uniqueQueue;
+ 	}
+ 
+ 	internal void UpdatePerformanceInfo(float dt)
+ 	{
+ 		if ((float)(game.Platform.EllapsedMs - lastPerformanceInfoupdateMilliseconds) * msPerSecond >= 1f)

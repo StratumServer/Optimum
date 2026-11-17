@@ -11,7 +11,6 @@ public class CecilPatchOwnershipTests
     private static readonly HashSet<string> KnownUnownedLibPatches = new(StringComparer.Ordinal)
     {
         "patches/VintagestoryLib/Vintagestory.API.Common/EventHelper.cs.patch",
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch",
 
         // Triaged 2026-08-11 (see docs/todo.md's "CecilPatchOwnershipTests backlog
         // triage" entry for the full audit and the server-side Cecil wiring that
@@ -46,17 +45,12 @@ public class CecilPatchOwnershipTests
         // Group 2: real changes, already documented elsewhere as deliberately not
         // yet Cecil-wired (a lambda/nested-type transplant blocker, or an
         // unconfirmed 1.22.6 vanilla change waiting on the version-pin bump).
-        // ClientSystemStartup: docs/implementation-plans/chunk-tesselator-worker-pool-wiring-plan-2026-08-10.md,
-        //   HandleWorldMetaData's lambda ordinal mismatch (Option A rejected).
-        // TextureAtlasManager: same doc, "IsTesselationThread guard stays inert."
         // AssetManager: GetAssetsDontLoad's Parallel.For lambda compiles to a
         //   <>c__DisplayClass absent from vanilla - the same ordinal hazard class,
         //   not yet worked around with a lambda-free rewrite.
         // ServerConfig/ServerPlayer/ServerProgramArgs/Logger: confirmed real
         //   vanilla version diffs per docs/done.md's 2026-08-05 session,
         //   correctly withheld until the version pin bumps.
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch",
-        "patches/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Common/AssetManager.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Server/ServerConfig.cs.patch",
         "patches/VintagestoryLib/Vintagestory.Server/ServerPlayer.cs.patch",

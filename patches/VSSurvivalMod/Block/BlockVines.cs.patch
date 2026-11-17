@@ -1,0 +1,100 @@
+diff --git a/VSSurvivalMod/Block/BlockVines.cs b/VSSurvivalMod/Block/BlockVines.cs
+index 6b05818..f5ba7b4 100644
+--- a/VSSurvivalMod/Block/BlockVines.cs
++++ b/VSSurvivalMod/Block/BlockVines.cs
+@@ -1,6 +1,7 @@
+ using System;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+@@ -19,10 +20,22 @@ namespace Vintagestory.GameContent
+             VineFacing = BlockFacing.FromCode(Variant["horizontalorientation"]);
+         }
+ 
+         int[] origWindMode;
+         BlockPos tmpPos = new BlockPos(API.Config.Dimensions.WillSetLater);
++        private object optimumWindLock;
++
++        [ThreadStatic]
++        private static BlockPos optimumTmpPos;
++
++        private object GetWindLock()
++        {
++            object obj = Volatile.Read(ref optimumWindLock);
++            if (obj != null) return obj;
++            Interlocked.CompareExchange(ref optimumWindLock, new object(), null);
++            return Volatile.Read(ref optimumWindLock);
++        }
+ 
+         public override void OnDecalTesselation(IWorldAccessor world, MeshData decalMesh, BlockPos pos)
+         {
+             int verticesCount = decalMesh.VerticesCount;
+             var ba = api.World.BlockAccessor;
+@@ -85,23 +98,34 @@ namespace Vintagestory.GameContent
+             otherwiseAllWave(decalMesh, verticesCount, windData, windDatam1);
+         }
+ 
+         public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+         {
+-            if (origWindMode == null)
++            int[] localOrigWindMode = Volatile.Read(ref origWindMode);
++            if (localOrigWindMode == null)
+             {
+-                int cnt = sourceMesh.FlagsCount;
+-                origWindMode = (int[])sourceMesh.Flags.Clone();
+-                for (int i = 0; i < cnt; i++) origWindMode[i] &= VertexFlags.WindModeBitsMask;
++                lock (GetWindLock())
++                {
++                    localOrigWindMode = Volatile.Read(ref origWindMode);
++                    if (localOrigWindMode == null)
++                    {
++                        int cnt = sourceMesh.FlagsCount;
++                        int[] computed = (int[])sourceMesh.Flags.Clone();
++                        for (int i = 0; i < cnt; i++) computed[i] &= VertexFlags.WindModeBitsMask;
++                        Volatile.Write(ref origWindMode, computed);
++                        localOrigWindMode = computed;
++                    }
++                }
+             }
+ 
++            BlockPos checkPos = optimumTmpPos ?? (optimumTmpPos = new BlockPos(API.Config.Dimensions.WillSetLater));
+             int verticesCount = sourceMesh.VerticesCount;
+             bool enableWind = (lightRgbsByCorner[24] >> 24 & 0xff) >= 159;  //corresponds with a sunlight level of less than 14
+ 
+             // Are we fully attached? => No wave
+             Block ablock = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[VineFacing.Opposite.Index]];
+-            if (!enableWind || (ablock.Id != 0 && ablock.CanAttachBlockAt(api.World.BlockAccessor, this, tmpPos.Set(pos, pos.dimension).Add(VineFacing.Opposite), VineFacing) && !(ablock is BlockLeaves)))
++            if (!enableWind || (ablock.Id != 0 && ablock.CanAttachBlockAt(api.World.BlockAccessor, this, checkPos.Set(pos, pos.dimension).Add(VineFacing.Opposite), VineFacing) && !(ablock is BlockLeaves)))
+             {
+                 for (int i = 0; i < verticesCount; i++)
+                 {
+                     sourceMesh.Flags[i] &= VertexFlags.ClearWindModeBitsMask;
+                 }
+@@ -129,22 +153,22 @@ namespace Vintagestory.GameContent
+             // Is there a vine above thats attached? => Wave for the bottom half
+             Block ublock = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[BlockFacing.UP.Index]];
+             if (ublock is BlockVines)
+             {
+                 Block uablock = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[VineFacing.Opposite.Index] + TileSideEnum.MoveIndex[BlockFacing.UP.Index]];
+-                if (uablock.Id != 0 && uablock.CanAttachBlockAt(api.World.BlockAccessor, this, tmpPos.Set(pos, pos.dimension).Up().Add(VineFacing.Opposite), VineFacing) && !(ablock is BlockLeaves))
++                if (uablock.Id != 0 && uablock.CanAttachBlockAt(api.World.BlockAccessor, this, checkPos.Set(pos, pos.dimension).Up().Add(VineFacing.Opposite), VineFacing) && !(ablock is BlockLeaves))
+                 {
+                     for (int i = 0; i < verticesCount; i++)
+                     {
+                         float y = sourceMesh.xyz[i * 3 + 1];
+ 
+                         if (y > 0.5)
+                         {
+                             sourceMesh.Flags[i] &= VertexFlags.ClearWindModeBitsMask;
+                         } else
+                         {
+-                            sourceMesh.Flags[i] = (sourceMesh.Flags[i] & VertexFlags.ClearWindBitsMask) | origWindMode[i] | windData;
++                            sourceMesh.Flags[i] = (sourceMesh.Flags[i] & VertexFlags.ClearWindBitsMask) | localOrigWindMode[i] | windData;
+                         }
+                     }
+                     return;
+                 }
+             }

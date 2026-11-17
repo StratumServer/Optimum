@@ -1,0 +1,105 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockSmoothTextureTransition.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockSmoothTextureTransition.cs
+index b8aca76..1223039 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockSmoothTextureTransition.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockSmoothTextureTransition.cs
+@@ -1,6 +1,7 @@
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ 
+@@ -8,10 +9,23 @@ namespace Vintagestory.GameContent;
+ 
+ public class BlockSmoothTextureTransition : Block
+ {
+ 	private Dictionary<string, MeshData> sludgeMeshByNESWFlag;
+ 
++	private object optimumCoatingMeshLock;
++
++	private object GetCoatingMeshLock()
++	{
++		object obj = Volatile.Read(ref optimumCoatingMeshLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref optimumCoatingMeshLock, new object(), null);
++		return Volatile.Read(ref optimumCoatingMeshLock);
++	}
++
+ 	private ICoreClientAPI capi;
+ 
+ 	public Dictionary<string, HashSet<string>> cornersByNEWSFlag = new Dictionary<string, HashSet<string>>
+ 	{
+ 		{
+@@ -68,24 +82,26 @@ public class BlockSmoothTextureTransition : Block
+ 		base.OnLoaded(api);
+ 	}
+ 
+ 	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+ 	{
+-		if (sludgeMeshByNESWFlag == null)
++		Dictionary<string, MeshData> dictionary = Volatile.Read(ref sludgeMeshByNESWFlag);
++		if (dictionary == null)
+ 		{
+ 			genMeshes();
++			dictionary = Volatile.Read(ref sludgeMeshByNESWFlag);
+ 		}
+ 		string text = getNESWFlag(chunkExtBlocks, extIndex3d);
+ 		if (cornersByNEWSFlag.TryGetValue(text, out var value))
+ 		{
+ 			string cornerFlags = getCornerFlags(value, chunkExtBlocks, extIndex3d);
+ 			if (cornerFlags.Length > 0)
+ 			{
+ 				text = text + "-cornercut-" + cornerFlags;
+ 			}
+ 		}
+-		if (sludgeMeshByNESWFlag.TryGetValue(text, out var value2))
++		if (dictionary.TryGetValue(text, out var value2))
+ 		{
+ 			sourceMesh = value2;
+ 		}
+ 		else
+ 		{
+@@ -106,23 +122,31 @@ public class BlockSmoothTextureTransition : Block
+ 		return text;
+ 	}
+ 
+ 	private void genMeshes()
+ 	{
+-		sludgeMeshByNESWFlag = new Dictionary<string, MeshData>();
+-		foreach (KeyValuePair<string, CompositeShape> item in Attributes["shapeByOrient"].AsObject<Dictionary<string, CompositeShape>>())
++		lock (GetCoatingMeshLock())
+ 		{
+-			Shape shape = capi.Assets.TryGet(item.Value.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
+-			if (shape == null)
++			if (Volatile.Read(ref sludgeMeshByNESWFlag) != null)
+ 			{
+-				api.Logger.Warning("Smooth texture transition shape for block {0}: Shape {1} not found. Block will be invisible.", Code.Path, item.Value.Base);
++				return;
+ 			}
+-			else
++			Dictionary<string, MeshData> dictionary = new Dictionary<string, MeshData>();
++			foreach (KeyValuePair<string, CompositeShape> item in Attributes["shapeByOrient"].AsObject<Dictionary<string, CompositeShape>>())
+ 			{
+-				capi.Tesselator.TesselateShape(this, shape, out var modeldata, new Vec3f(item.Value.rotateX, item.Value.rotateY, item.Value.rotateZ));
+-				sludgeMeshByNESWFlag[item.Key] = modeldata;
++				Shape shape = capi.Assets.TryGet(item.Value.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
++				if (shape == null)
++				{
++					api.Logger.Warning("Smooth texture transition shape for block {0}: Shape {1} not found. Block will be invisible.", Code.Path, item.Value.Base);
++				}
++				else
++				{
++					capi.Tesselator.TesselateShape(this, shape, out var modeldata, new Vec3f(item.Value.rotateX, item.Value.rotateY, item.Value.rotateZ));
++					dictionary[item.Key] = modeldata;
++				}
+ 			}
++			Volatile.Write(ref sludgeMeshByNESWFlag, dictionary);
+ 		}
+ 	}
+ 
+ 	public string getNESWFlag(Block[] chunkExtBlocks, int extIndex3d)
+ 	{

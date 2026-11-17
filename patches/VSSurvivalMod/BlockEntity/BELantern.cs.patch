@@ -1,5 +1,5 @@
 diff --git a/VSSurvivalMod/BlockEntity/BELantern.cs b/VSSurvivalMod/BlockEntity/BELantern.cs
-index 4c38ce3..b4ecea2 100644
+index 4c38ce3..e7eac80 100644
 --- a/VSSurvivalMod/BlockEntity/BELantern.cs
 +++ b/VSSurvivalMod/BlockEntity/BELantern.cs
 @@ -17,10 +17,11 @@ namespace Vintagestory.GameContent
@@ -26,7 +26,37 @@ index 4c38ce3..b4ecea2 100644
              {
                  MarkDirty(true);
              }
-@@ -107,11 +109,18 @@ namespace Vintagestory.GameContent
+@@ -75,20 +77,24 @@ namespace Vintagestory.GameContent
+         private MeshData getMesh(ITesselatorAPI tesselator)
+         {
+             BlockLantern block = Api.World.BlockAccessor.GetBlock(Pos) as BlockLantern;
+             if (block == null) return null;
+ 
+-            Dictionary<string, MeshData> lanternMeshes = ObjectCacheUtil.GetOrCreate(Api, block.baseCacheKey + "meshes", () => new Dictionary<string, MeshData>());
++            Dictionary<string, MeshData> lanternMeshes = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, block.baseCacheKey + "meshes");
+ 
+             string orient = block.LastCodePart();
++            string cacheKey = material + "-" + lining + "-" + orient + "-" + glass;
+ 
+-            if (lanternMeshes.TryGetValue(material + "-" + lining + "-" + orient + "-" + glass, out MeshData mesh))
++            lock (lanternMeshes)
+             {
+-                return mesh;
+-            }
++                if (lanternMeshes.TryGetValue(cacheKey, out MeshData mesh))
++                {
++                    return mesh;
++                }
+ 
+-            return lanternMeshes[material + "-" + lining + "-" + orient + "-" + glass] = block.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
++                return lanternMeshes[cacheKey] = block.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
++            }
+         }
+ 
+         public override void ToTreeAttributes(ITreeAttribute tree)
+         {
+             base.ToTreeAttributes(tree);
+@@ -107,11 +113,18 @@ namespace Vintagestory.GameContent
              if (mesh == null) return false;
  
              string part = Block.LastCodePart();

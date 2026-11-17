@@ -1,0 +1,78 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCrop.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCrop.cs
+index cbbfba0..e4f4aac 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockCrop.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCrop.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Text;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+@@ -69,28 +70,55 @@ public class BlockCrop : Block, IDrawYAdjustable
+ 			return 0f;
+ 		}
+ 		return onFarmlandVerticalOffset;
+ 	}
+ 
++	private object optimumFarmlandMeshLock;
++
++	private object GetFarmlandMeshLock()
++	{
++		object obj = Volatile.Read(ref optimumFarmlandMeshLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref optimumFarmlandMeshLock, new object(), null);
++		return Volatile.Read(ref optimumFarmlandMeshLock);
++	}
++
+ 	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+ 	{
+ 		if (onFarmlandCshape == null)
+ 		{
+ 			return;
+ 		}
+-		if (onFarmLandMesh == null)
++		MeshData meshData = Volatile.Read(ref onFarmLandMesh);
++		if (meshData == null)
+ 		{
+-			Shape shape = api.Assets.TryGet(onFarmlandCshape.Base).ToObject<Shape>();
+-			if (shape == null)
++			lock (GetFarmlandMeshLock())
+ 			{
+-				onFarmlandCshape = null;
+-				return;
++				meshData = Volatile.Read(ref onFarmLandMesh);
++				if (meshData == null)
++				{
++					CompositeShape compositeShape = onFarmlandCshape;
++					if (compositeShape == null)
++					{
++						return;
++					}
++					Shape shape = api.Assets.TryGet(compositeShape.Base).ToObject<Shape>();
++					if (shape == null)
++					{
++						onFarmlandCshape = null;
++						return;
++					}
++					onFarmlandVerticalOffset = 0f;
++					(api as ICoreClientAPI).Tesselator.TesselateShape(this, shape, out meshData);
++					Volatile.Write(ref onFarmLandMesh, meshData);
++				}
+ 			}
+-			onFarmlandVerticalOffset = 0f;
+-			(api as ICoreClientAPI).Tesselator.TesselateShape(this, shape, out onFarmLandMesh);
+ 		}
+-		sourceMesh = onFarmLandMesh;
++		sourceMesh = meshData;
+ 	}
+ 
+ 	public override void OnDecalTesselation(IWorldAccessor world, MeshData decalMesh, BlockPos pos)
+ 	{
+ 		if (world.BlockAccessor.GetLightLevel(pos, EnumLightLevelType.OnlySunLight) >= 14)

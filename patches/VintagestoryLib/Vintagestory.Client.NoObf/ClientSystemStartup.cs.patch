@@ -1,8 +1,41 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..137b0e6 100644
+index f437458..bd6a978 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-@@ -445,15 +445,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -226,23 +226,27 @@ public class ClientSystemStartup : ClientSystem
+ 		{
+ 			game.WorldMap.satLevels[k] = (byte)(32 * k);
+ 		}
+ 		ClientWorldMap.seaLevel = packet.WorldMetaData.SeaLevel;
+ 		ScreenManager.Platform.Logger.VerboseDebug("Received world meta data");
+-		game.TerrainChunkTesselator.LightlevelsReceived();
++		if (game.ChunkTesselatorManager != null)
++		{
++			game.ChunkTesselatorManager.OnLightlevelsReceived();
++		}
++		else
++		{
++			game.TerrainChunkTesselator.LightlevelsReceived();
++		}
+ 		game.WorldMap.OnLightLevelsReceived();
+ 		if (lightLevelsReceived)
+ 		{
+ 			return;
+ 		}
+ 		lightLevelsReceived = true;
+ 		if (pkt_srvrassets != null)
+ 		{
+-			game.EnqueueGameLaunchTask(delegate
+-			{
+-				HandleServerAssets_Initial();
+-			}, "lightlevelsreceived");
++			game.EnqueueGameLaunchTask(new Action(HandleServerAssets_Initial), "lightlevelsreceived");
+ 		}
+ 	}
+ 
+ 	private void HandleServerAssets_Initial()
+ 	{
+@@ -445,15 +449,11 @@ public class ClientSystemStartup : ClientSystem
  		{
  			return;
  		}
@@ -19,7 +52,7 @@ index f437458..137b0e6 100644
  
  	private void loadBlockAtlasManagerAsync(IList<Block> blocks)
  	{
-@@ -578,10 +574,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -578,10 +578,11 @@ public class ClientSystemStartup : ClientSystem
  			{
  				blocks[packet_BlockType.BlockId] = BlockTypeNet.ReadBlockTypePacket(packet_BlockType, game, ClientMain.ClassRegistry);
  				num++;
@@ -31,7 +64,7 @@ index f437458..137b0e6 100644
  
  	private int PopulateItems(List<Item> items, int listSize)
  	{
-@@ -600,10 +597,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -600,10 +601,11 @@ public class ClientSystemStartup : ClientSystem
  			{
  				items[packet_ItemType.ItemId] = ItemTypeNet.ReadItemTypePacket(packet_ItemType, game, ClientMain.ClassRegistry);
  				num++;
@@ -43,7 +76,7 @@ index f437458..137b0e6 100644
  
  	private void LoadEntityTypes()
  	{
-@@ -738,11 +736,14 @@ public class ClientSystemStartup : ClientSystem
+@@ -738,11 +740,14 @@ public class ClientSystemStartup : ClientSystem
  	}
  
  	internal void FinaliseTextureAtlas(TextureAtlasManager manager, string type, Action onCompleted)
@@ -58,7 +91,7 @@ index f437458..137b0e6 100644
  		{
  			TyronThreadPool.QueueTask(delegate
  			{
-@@ -762,17 +763,23 @@ public class ClientSystemStartup : ClientSystem
+@@ -762,17 +767,23 @@ public class ClientSystemStartup : ClientSystem
  		}, "FinaliseTextureAtlas_StageC_" + type);
  	}
  

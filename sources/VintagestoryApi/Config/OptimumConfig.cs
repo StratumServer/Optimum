@@ -366,13 +366,12 @@ public static class OptimumConfig
     public static bool MeshPartPoolEnabled = true;
 
     /// <summary>
-    /// Issue #73: true when the CustomMeshDataPart pool may be used. Requires the
-    /// feature flag AND at most one tessellation worker, so the pool's
-    /// single-thread-owned free lists are never touched by concurrent pulls. If a
-    /// second worker ever registers this returns false and clones fall back to
-    /// fresh allocation (vanilla behavior), which is always correct.
+    /// Issue #73 / #612: true when the per-worker CustomMeshDataPart pool is
+    /// enabled. Each worker owns thread-local pools backed by bounded MPSC
+    /// return queues for main-thread reclamation, so pooling stays active under
+    /// multi-worker chunk meshing.
     /// </summary>
-    public static bool MeshPartPoolActive => MeshPartPoolEnabled && OptimumDiagnostics.TessWorkerCount <= 1;
+    public static bool MeshPartPoolActive => MeshPartPoolEnabled;
 
     /// <summary>
     /// Issue #74: reuse a per-render-thread scratch ItemRenderInfo in the GUI item
@@ -541,6 +540,35 @@ public static class OptimumConfig
     /// thread time; the pool fans the per-Y-level SELECT queries out across
     /// several read-only connections in WAL mode. Default true.
     /// </summary>
+    /// <summary>
+    /// Issue #612: enables parallel chunk meshing across multiple dedicated
+    /// ChunkTesselator worker threads. Disable to force single-worker meshing.
+    /// Default true.
+    /// </summary>
+    public static bool MultiWorkerTesselationEnabled = true;
+
+    /// <summary>
+    /// Issue #612: number of chunk meshing worker threads when
+    /// MultiWorkerTesselationEnabled is true. 0 selects automatic sizing
+    /// (<c>Math.Clamp(Environment.ProcessorCount / 2, 1, 4)</c>); non-zero values
+    /// are clamped to [1, 8] and bounded by TesselationWorkerCap.
+    /// </summary>
+    public static int TesselationWorkers = 0;
+
+    /// <summary>
+    /// Resolves the active chunk meshing worker count for the host processor
+    /// count, respecting MultiWorkerTesselationEnabled and TesselationWorkerCap.
+    /// </summary>
+    public static int GetEffectiveTesselationWorkers(int logicalProcessors)
+    {
+        if (!MultiWorkerTesselationEnabled) return 1;
+        int cap = Math.Max(1, TesselationWorkerCap);
+        int requested = TesselationWorkers > 0
+            ? Math.Clamp(TesselationWorkers, 1, 8)
+            : Math.Clamp(logicalProcessors / 2, 1, 4);
+        return Math.Min(requested, cap);
+    }
+
     public static bool ChunkReadPoolEnabled = true;
 
     /// <summary>
@@ -1323,6 +1351,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.WorldgenWorkStealing), WorldgenWorkStealingEnabled.ToString()),
         (nameof(OptimumConfigData.ChunkReadPoolEnabled), ChunkReadPoolEnabled.ToString()),
         (nameof(OptimumConfigData.ChunkReadPoolWorkers), ChunkReadPoolWorkers.ToString()),
+        (nameof(OptimumConfigData.MultiWorkerTesselation), MultiWorkerTesselationEnabled.ToString()),
+        (nameof(OptimumConfigData.TesselationWorkers), TesselationWorkers.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadius), GetAdaptiveRadiusToggleValue()),
         (nameof(OptimumConfigData.AdaptiveRadiusFloor), AdaptiveRadiusFloor.ToString()),
         (nameof(OptimumConfigData.AdaptiveRadiusHighThreshold), AdaptiveRadiusHighThreshold.ToString()),
@@ -1452,6 +1482,8 @@ public static class OptimumConfig
             WorldgenWorkStealingEnabled = data.WorldgenWorkStealing;
             ChunkReadPoolEnabled = data.ChunkReadPoolEnabled;
             ChunkReadPoolWorkers = Math.Clamp(data.ChunkReadPoolWorkers, 1, 8);
+            MultiWorkerTesselationEnabled = data.MultiWorkerTesselation;
+            TesselationWorkers = data.TesselationWorkers <= 0 ? 0 : Math.Clamp(data.TesselationWorkers, 1, 8);
             ChunkDeserializeParallel = data.ChunkDeserializeParallel;
             ChunkDeserializeParallelMinY = Math.Clamp(data.ChunkDeserializeParallelMinY, 2, 64);
             ShaderPreprocessParallel = data.ShaderPreprocessParallel;
@@ -1544,6 +1576,8 @@ public static class OptimumConfig
             WorldgenWorkStealing = WorldgenWorkStealingEnabled,
             ChunkReadPoolEnabled = ChunkReadPoolEnabled,
             ChunkReadPoolWorkers = ChunkReadPoolWorkers,
+            MultiWorkerTesselation = MultiWorkerTesselationEnabled,
+            TesselationWorkers = TesselationWorkers,
             ChunkDeserializeParallel = ChunkDeserializeParallel,
             ChunkDeserializeParallelMinY = ChunkDeserializeParallelMinY,
             ShaderPreprocessParallel = ShaderPreprocessParallel,
@@ -1660,6 +1694,8 @@ internal sealed class OptimumConfigData
     public bool WorldgenWorkStealing { get; set; } = false;
     public bool ChunkReadPoolEnabled { get; set; } = true;
     public int ChunkReadPoolWorkers { get; set; } = 4;
+    public bool MultiWorkerTesselation { get; set; } = true;
+    public int TesselationWorkers { get; set; } = 0;
     public bool ChunkDeserializeParallel { get; set; } = true;
     public int ChunkDeserializeParallelMinY { get; set; } = 4;
     public bool ShaderPreprocessParallel { get; set; } = true;

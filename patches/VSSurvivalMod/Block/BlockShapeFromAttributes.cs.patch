@@ -1,0 +1,135 @@
+diff --git a/VSSurvivalMod/Block/BlockShapeFromAttributes.cs b/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
+index 90aff3f..33f367e 100644
+--- a/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
++++ b/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
+@@ -568,69 +568,86 @@ namespace Vintagestory.GameContent
+ 
+         public virtual MeshData GetOrCreateMesh(IShapeTypeProps cprops, ITexPositionSource overrideTexturesource = null, string overrideTextureCode = null, bool forLOD2 = false)
+         {
+             var cMeshes = meshDictionary;
+             ICoreClientAPI capi = api as ICoreClientAPI;
++            string dictKey = cprops.Code + "-" + overrideTextureCode;
+ 
+-            if (overrideTexturesource != null || !cMeshes.TryGetValue(cprops.Code + "-" + overrideTextureCode, out var mesh))
++            MeshData mesh;
++            if (overrideTexturesource == null)
+             {
+-                mesh = new MeshData(4, 3);
+-                var shape = cprops.ShapeResolved;
+-                ITexPositionSource texSource = overrideTexturesource;
+-
+-                // Prio 0: Shape textures
+-                if (texSource == null)
++                lock (cMeshes)
+                 {
+-                    var stexSource = new ShapeTextureSource(capi, shape, cprops.ShapePath.ToString());
+-                    texSource = stexSource;
+-
+-                    // Prio 1: Block wide custom textures
+-                    if (blockTextures != null)
++                    if (cMeshes.TryGetValue(dictKey, out mesh))
+                     {
+-                        foreach (var val in blockTextures)
+-                        {
+-                            if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
+-                            stexSource.textures[val.Key] = val.Value;
+-                        }
++                        return mesh;
+                     }
++                }
++            }
+ 
+-                    // Prio 2: Variant textures
+-                    if (cprops.Textures != null)
+-                    {
+-                        foreach (var val in cprops.Textures)
+-                        {
+-                            var ctex = val.Value.Clone();
+-                            ctex.Bake(capi.Assets);
+-                            stexSource.textures[val.Key] = ctex;
+-                        }
+-                    }
++            mesh = new MeshData(4, 3);
++            var shape = cprops.ShapeResolved;
++            ITexPositionSource texSource = overrideTexturesource;
+ 
+-                    // Prio 3: Override texture
+-                    if (overrideTextureCode != null && cprops.TextureFlipCode != null)
++            // Prio 0: Shape textures
++            if (texSource == null)
++            {
++                var stexSource = new ShapeTextureSource(capi, shape, cprops.ShapePath.ToString());
++                texSource = stexSource;
++
++                // Prio 1: Block wide custom textures
++                if (blockTextures != null)
++                {
++                    foreach (var val in blockTextures)
+                     {
+-                        if (OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var ctex))
+-                        {
+-                            ctex.Bake(capi.Assets);
+-                            stexSource.textures[cprops.TextureFlipCode] = ctex;
+-                        }
++                        if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
++                        stexSource.textures[val.Key] = val.Value;
+                     }
+                 }
+ 
+-                if (shape == null) return mesh;
+-
+-
+-                capi.Tesselator.TesselateShape(blockForLogging, shape, out mesh, texSource);
+-                if (cprops.TexPos == null)
++                // Prio 2: Variant textures
++                if (cprops.Textures != null)
+                 {
+-                    api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
+-                    cprops.TexPos = (texSource as ShapeTextureSource)?.firstTexPos;
+-                    cprops.TexPos.RndColors = new int[TextureAtlasPosition.RndColorsLength];
++                    foreach (var val in cprops.Textures)
++                    {
++                        var ctex = val.Value.Clone();
++                        ctex.Bake(capi.Assets);
++                        stexSource.textures[val.Key] = ctex;
++                    }
+                 }
+ 
+-                if (overrideTexturesource == null)
++                // Prio 3: Override texture
++                if (overrideTextureCode != null && cprops.TextureFlipCode != null)
+                 {
+-                    cMeshes[cprops.Code + "-" + overrideTextureCode] = mesh;
++                    if (OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var ctex))
++                    {
++                        ctex.Bake(capi.Assets);
++                        stexSource.textures[cprops.TextureFlipCode] = ctex;
++                    }
++                }
++            }
++
++            if (shape == null) return mesh;
++
++
++            capi.Tesselator.TesselateShape(blockForLogging, shape, out mesh, texSource);
++            if (cprops.TexPos == null)
++            {
++                api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
++                var fallbackTexPos = (texSource as ShapeTextureSource)?.firstTexPos;
++                if (fallbackTexPos != null)
++                {
++                    fallbackTexPos.RndColors = new int[TextureAtlasPosition.RndColorsLength];
++                    cprops.TexPos = fallbackTexPos;
++                }
++            }
++
++            if (overrideTexturesource == null)
++            {
++                lock (cMeshes)
++                {
++                    cMeshes[dictKey] = mesh;
+                 }
+             }
+ 
+             return mesh;
+         }

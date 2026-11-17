@@ -1,0 +1,158 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
+index 2448592..e2f00f5 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
+@@ -85,55 +85,59 @@ public class ShapeTesselator : ITesselatorAPI
+ 			ApplyCompositeShapeModifiers(ref modeldata, compositeShape);
+ 			return;
+ 		case EnumShapeFormat.GltfEmbedded:
+ 		{
+ 			TextureAtlasPosition textureAtlasPosition = ((texSource["gltf"] == game.api.BlockTextureAtlas[new AssetLocation("unknown")]) ? null : texSource["gltf"]);
+-			gltfTesselator.Load(gltfs[compositeShape.Base], out modeldata, textureAtlasPosition, generalGlowLevel, climateColorMapIndex, seasonColorMapIndex, -1, out var bakedTextures);
+-			if (compositeShape.InsertBakedTextures)
++			GltfType gltfType = gltfs[compositeShape.Base];
++			lock (gltfType)
+ 			{
+-				gltfs[compositeShape.Base].BaseTextures = new TextureAtlasPosition[bakedTextures.Length];
+-				gltfs[compositeShape.Base].PBRTextures = new TextureAtlasPosition[bakedTextures.Length];
+-				gltfs[compositeShape.Base].NormalTextures = new TextureAtlasPosition[bakedTextures.Length];
+-				for (int i = 0; i < bakedTextures.Length; i++)
++				gltfTesselator.Load(gltfType, out modeldata, textureAtlasPosition, generalGlowLevel, climateColorMapIndex, seasonColorMapIndex, -1, out var bakedTextures);
++				if (compositeShape.InsertBakedTextures)
+ 				{
+-					byte[][] array = bakedTextures[i];
+-					if (array[0] != null)
++					gltfType.BaseTextures = new TextureAtlasPosition[bakedTextures.Length];
++					gltfType.PBRTextures = new TextureAtlasPosition[bakedTextures.Length];
++					gltfType.NormalTextures = new TextureAtlasPosition[bakedTextures.Length];
++					for (int i = 0; i < bakedTextures.Length; i++)
+ 					{
+-						if (!game.api.BlockTextureAtlas.InsertTexture(array[0], out var _, out var texPos))
++						byte[][] array = bakedTextures[i];
++						if (array[0] != null)
+ 						{
+-							game.Logger.Debug("Failed adding baked in gltf base texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
+-							gltfs[compositeShape.Base].BaseTextures[i] = game.api.BlockTextureAtlas[new AssetLocation("unknown")];
+-						}
+-						else
+-						{
+-							gltfs[compositeShape.Base].BaseTextures[i] = texPos;
+-							if (textureAtlasPosition == null)
++							if (!game.api.BlockTextureAtlas.InsertTexture(array[0], out var _, out var texPos))
+ 							{
+-								modeldata.SetTexPos(texPos);
++								game.Logger.Debug("Failed adding baked in gltf base texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
++								gltfType.BaseTextures[i] = game.api.BlockTextureAtlas[new AssetLocation("unknown")];
++							}
++							else
++							{
++								gltfType.BaseTextures[i] = texPos;
++								if (textureAtlasPosition == null)
++								{
++									modeldata.SetTexPos(texPos);
++								}
+ 							}
+ 						}
+-					}
+-					if (array[1] != null)
+-					{
+-						if (!game.api.BlockTextureAtlas.InsertTexture(array[1], out var _, out var texPos2))
+-						{
+-							game.Logger.Debug("Failed adding baked in gltf pbr texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
+-						}
+-						else
+-						{
+-							gltfs[compositeShape.Base].PBRTextures[i] = texPos2;
+-						}
+-					}
+-					if (array[2] != null)
+-					{
+-						if (!game.api.BlockTextureAtlas.InsertTexture(array[2], out var _, out var texPos3))
++						if (array[1] != null)
+ 						{
+-							game.Logger.Debug("Failed adding baked in gltf normal texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
++							if (!game.api.BlockTextureAtlas.InsertTexture(array[1], out var _, out var texPos2))
++							{
++								game.Logger.Debug("Failed adding baked in gltf pbr texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
++							}
++							else
++							{
++								gltfType.PBRTextures[i] = texPos2;
++							}
+ 						}
+-						else
++						if (array[2] != null)
+ 						{
+-							gltfs[compositeShape.Base].NormalTextures[i] = texPos3;
++							if (!game.api.BlockTextureAtlas.InsertTexture(array[2], out var _, out var texPos3))
++							{
++								game.Logger.Debug("Failed adding baked in gltf normal texture to atlas from: {0}, texture probably too large.", compositeShape.Base);
++							}
++							else
++							{
++								gltfType.NormalTextures[i] = texPos3;
++							}
+ 						}
+ 					}
+ 				}
+ 			}
+ 			ApplyCompositeShapeModifiers(ref modeldata, compositeShape);
+@@ -151,27 +155,48 @@ public class ShapeTesselator : ITesselatorAPI
+ 			{
+ 				game.Logger.Notification(assetLocationAndSource.Source.ToString());
+ 			}
+ 			throw new FileNotFoundException(string.Concat(new string[9] { "Could not find shape file: ", compositeShape.Base, " in ", type, "type ", sourceName, ".  Possibly a broken mod (", sourceName.Domain, ") or different versions of that mod between server and client?" }));
+ 		}
+-		if (!value.Loaded)
++		value.AcquirePin();
++		try
+ 		{
+-			value.Load(game, new AssetLocationAndSource(compositeShape.Base));
++			if (!value.Loaded)
++			{
++				value.Load(game, new AssetLocationAndSource(compositeShape.Base));
++			}
++			rotationVec.Set(compositeShape.rotateX, compositeShape.rotateY, compositeShape.rotateZ);
++			offsetVec.Set(compositeShape.offsetX, compositeShape.offsetY, compositeShape.offsetZ);
++			TesselateShape(value, out modeldata, rotationVec, offsetVec, compositeShape.Scale, meta);
++		}
++		finally
++		{
++			value.ReleasePin();
+ 		}
+-		rotationVec.Set(compositeShape.rotateX, compositeShape.rotateY, compositeShape.rotateZ);
+-		offsetVec.Set(compositeShape.offsetX, compositeShape.offsetY, compositeShape.offsetZ);
+-		TesselateShape(value, out modeldata, rotationVec, offsetVec, compositeShape.Scale, meta);
+ 		if (compositeShape.Overlays != null)
+ 		{
+ 			for (int j = 0; j < compositeShape.Overlays.Length; j++)
+ 			{
+ 				CompositeShape compositeShape2 = compositeShape.Overlays[j];
+-				meta.QuantityElements = quantityElements;
+-				rotationVec.Set(compositeShape2.rotateX, compositeShape2.rotateY, compositeShape2.rotateZ);
+-				offsetVec.Set(compositeShape2.offsetX, compositeShape2.offsetY, compositeShape2.offsetZ);
+-				TesselateShape(shapes[compositeShape2.Base], out var modeldata2, rotationVec, offsetVec, compositeShape2.Scale, meta);
+-				modeldata.AddMeshData(modeldata2);
++				UnloadableShape overlayShape = shapes[compositeShape2.Base];
++				overlayShape.AcquirePin();
++				try
++				{
++					if (!overlayShape.Loaded)
++					{
++						overlayShape.Load(game, new AssetLocationAndSource(compositeShape2.Base));
++					}
++					meta.QuantityElements = quantityElements;
++					rotationVec.Set(compositeShape2.rotateX, compositeShape2.rotateY, compositeShape2.rotateZ);
++					offsetVec.Set(compositeShape2.offsetX, compositeShape2.offsetY, compositeShape2.offsetZ);
++					TesselateShape(overlayShape, out var modeldata2, rotationVec, offsetVec, compositeShape2.Scale, meta);
++					modeldata.AddMeshData(modeldata2);
++				}
++				finally
++				{
++					overlayShape.ReleasePin();
++				}
+ 			}
+ 		}
+ 	}
+ 
+ 	public void TesselateShape(CollectibleObject collObj, Shape shape, out MeshData modeldata, Vec3f rotation = null, int? quantityElements = null, string[] selectiveElements = null)

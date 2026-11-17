@@ -1,0 +1,73 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
+index e3b63b9..fca588f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs
+@@ -1,5 +1,6 @@
++using System;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+@@ -8,10 +9,16 @@ public class CrossTesselator : IBlockTesselator
+ {
+ 	private static Vec3f startRot = new Vec3f();
+ 
+ 	private static Vec3f endRot = new Vec3f();
+ 
++	[ThreadStatic]
++	private static Vec3f optimumStartRot;
++
++	[ThreadStatic]
++	private static Vec3f optimumEndRot;
++
+ 	public void Tesselate(TCTCache vars)
+ 	{
+ 		vars.drawFaceFlags = 3;
+ 		DrawCross(vars, 1.41f);
+ 	}
+@@ -22,12 +29,12 @@ public class CrossTesselator : IBlockTesselator
+ 		TextureAtlasPosition[] textureAtlasPositionsByTextureSubId = vars.textureAtlasPositionsByTextureSubId;
+ 		int[] fastBlockTextureSubidsByFace = vars.fastBlockTextureSubidsByFace;
+ 		bool hasAlternates = block.HasAlternates;
+ 		bool randomizeRotations = block.RandomizeRotations;
+ 		int value = vars.ColorMapData.Value;
+-		int num = block.VertexFlags.All & -503316481;
+-		int all = block.VertexFlags.All;
++		int num = vars.VertexFlags & -503316481;
++		int all = vars.VertexFlags;
+ 		num |= BlockFacing.UP.NormalPackedFlags;
+ 		all |= BlockFacing.UP.NormalPackedFlags;
+ 		int color = vars.tct.currentChunkRgbsExt[vars.extIndex3d];
+ 		BakedCompositeTexture[][] array = null;
+ 		int k = 0;
+@@ -65,19 +72,21 @@ public class CrossTesselator : IBlockTesselator
+ 			float x;
+ 			float y;
+ 			float z;
+ 			if (randomizeRotations)
+ 			{
++				Vec3f sRot = optimumStartRot ?? (optimumStartRot = new Vec3f());
++				Vec3f eRot = optimumEndRot ?? (optimumEndRot = new Vec3f());
+ 				float[] matrix = TesselationMetaData.randomRotMatrices[GameMath.Mod(k, TesselationMetaData.randomRotations.Length)];
+-				Mat4f.MulWithVec3_Position(matrix, num2, 0f, 0f, startRot);
+-				Mat4f.MulWithVec3_Position(matrix, 1f - (float)num2, vScaleY, 1f, endRot);
+-				x = endRot.X + finalX;
+-				finalX += startRot.X;
+-				y = endRot.Y + num5;
+-				num5 += startRot.Y;
+-				z = endRot.Z + num6;
+-				num6 += startRot.Z;
++				Mat4f.MulWithVec3_Position(matrix, num2, 0f, 0f, sRot);
++				Mat4f.MulWithVec3_Position(matrix, 1f - (float)num2, vScaleY, 1f, eRot);
++				x = eRot.X + finalX;
++				finalX += sRot.X;
++				y = eRot.Y + num5;
++				num5 += sRot.Y;
++				z = eRot.Z + num6;
++				num6 += sRot.Z;
+ 			}
+ 			else
+ 			{
+ 				x = finalX + (1f - (float)num2);
+ 				y = num5 + vScaleY;

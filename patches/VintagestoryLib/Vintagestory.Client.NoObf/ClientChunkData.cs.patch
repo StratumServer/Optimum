@@ -1,0 +1,26 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunkData.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunkData.cs
+index 945c986..f7a795a 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunkData.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunkData.cs
+@@ -35,17 +35,18 @@ internal class ClientChunkData : ChunkData
+ 		int paletteCount;
+ 		if (blocksLayer != null && (paletteCount = blocksLayer.paletteCount) > 0)
+ 		{
+ 			int[] palette = blocksLayer.palette;
+ 			GetBlockAsBlock = blocksLayer.SelectDelegateBlockClient(getBlockAir);
+-			if (BlockChunkDataLayer.blocksByPaletteIndex == null || BlockChunkDataLayer.blocksByPaletteIndex.Length < paletteCount)
++			Block[] threadBlocks = BlockChunkDataLayer.optimumThreadBlocksByPaletteIndex;
++			if (threadBlocks == null || threadBlocks.Length < paletteCount)
+ 			{
+-				BlockChunkDataLayer.blocksByPaletteIndex = new Block[paletteCount];
++				threadBlocks = (BlockChunkDataLayer.optimumThreadBlocksByPaletteIndex = new Block[paletteCount]);
+ 			}
+ 			for (int i = 0; i < paletteCount; i++)
+ 			{
+-				BlockChunkDataLayer.blocksByPaletteIndex[i] = blocks[palette[i]];
++				threadBlocks[i] = blocks[palette[i]];
+ 			}
+ 			blocksArrayCount = paletteCount;
+ 		}
+ 		else
+ 		{

@@ -1,0 +1,152 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs b/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
+index b0c3fc4..25aafb0 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.Common;
+ 
+@@ -13,59 +14,106 @@ public class UnloadableShape : Shape
+ 
+ 	public bool keepLoaded;
+ 
+ 	public IDictionary<string, CompositeTexture> TexturesResolved;
+ 
+-	public void Unload()
+-	{
+-		Loaded = false;
+-		Textures = null;
+-		Elements = null;
+-		Animations = null;
+-		AnimationsByCrc32 = null;
+-		JointsById = null;
+-	}
++	private int optimumPinCount;
+ 
+-	public bool Load(ClientMain game, AssetLocationAndSource srcandLoc)
++	private object optimumShapeLock;
++
++	private object GetShapeLock()
+ 	{
+-		Loaded = true;
+-		AssetLocation assetLocation = srcandLoc.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+-		IAsset asset = ScreenManager.Platform.AssetManager.TryGet(assetLocation);
+-		if (asset == null)
++		object obj = Volatile.Read(ref optimumShapeLock);
++		if (obj != null)
+ 		{
+-			game.Platform.Logger.Warning("Did not find required shape {0} anywhere. (defined in {1})", assetLocation, srcandLoc.Source);
+-			return false;
++			return obj;
+ 		}
+-		try
++		Interlocked.CompareExchange(ref optimumShapeLock, new object(), null);
++		return Volatile.Read(ref optimumShapeLock);
++	}
++
++	internal void AcquirePin()
++	{
++		Interlocked.Increment(ref optimumPinCount);
++	}
++
++	internal void ReleasePin()
++	{
++		Interlocked.Decrement(ref optimumPinCount);
++	}
++
++	public void Unload()
++	{
++		lock (GetShapeLock())
+ 		{
+-			ShapeElement.locationForLogging = assetLocation;
+-			JsonUtil.PopulateObject(this, Asset.BytesToString(asset.Data), asset.Location.Domain);
+-			return true;
++			if (Volatile.Read(ref optimumPinCount) > 0 || keepLoaded)
++			{
++				return;
++			}
++			Volatile.Write(ref Loaded, false);
++			Textures = null;
++			Elements = null;
++			Animations = null;
++			AnimationsByCrc32 = null;
++			JointsById = null;
+ 		}
+-		catch (Exception ex)
++	}
++
++	public bool Load(ClientMain game, AssetLocationAndSource srcandLoc)
++	{
++		lock (GetShapeLock())
+ 		{
+-			game.Platform.Logger.Warning("Failed parsing shape model {0}\n{1}", assetLocation, ex.Message);
+-			return false;
++			if (Volatile.Read(ref Loaded))
++			{
++				return true;
++			}
++			AssetLocation assetLocation = srcandLoc.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
++			IAsset asset = ScreenManager.Platform.AssetManager.TryGet(assetLocation);
++			if (asset == null)
++			{
++				game.Platform.Logger.Warning("Did not find required shape {0} anywhere. (defined in {1})", assetLocation, srcandLoc.Source);
++				return false;
++			}
++			try
++			{
++				ShapeElement.locationForLogging = assetLocation;
++				JsonUtil.PopulateObject(this, Asset.BytesToString(asset.Data), asset.Location.Domain);
++				Volatile.Write(ref Loaded, true);
++				return true;
++			}
++			catch (Exception ex)
++			{
++				Volatile.Write(ref Loaded, false);
++				game.Platform.Logger.Warning("Failed parsing shape model {0}\n{1}", assetLocation, ex.Message);
++				return false;
++			}
+ 		}
+ 	}
+ 
+ 	public void ResolveTextures(Dictionary<AssetLocation, CompositeTexture> shapeTexturesCache)
+ 	{
+-		FastSmallDictionary<string, CompositeTexture> fastSmallDictionary = new FastSmallDictionary<string, CompositeTexture>(Textures.Count);
+-		foreach (KeyValuePair<string, AssetLocation> texture in Textures)
++		lock (GetShapeLock())
+ 		{
+-			AssetLocation value = texture.Value;
+-			if (!shapeTexturesCache.TryGetValue(value, out var value2))
++			if (TexturesResolved != null)
++			{
++				return;
++			}
++			FastSmallDictionary<string, CompositeTexture> fastSmallDictionary = new FastSmallDictionary<string, CompositeTexture>(Textures.Count);
++			foreach (KeyValuePair<string, AssetLocation> texture in Textures)
+ 			{
+-				value2 = (shapeTexturesCache[value] = new CompositeTexture
++				AssetLocation value = texture.Value;
++				if (!shapeTexturesCache.TryGetValue(value, out var value2))
+ 				{
+-					Base = value
+-				});
++					value2 = (shapeTexturesCache[value] = new CompositeTexture
++					{
++						Base = value
++					});
++				}
++				fastSmallDictionary.Add(texture.Key, value2);
+ 			}
+-			fastSmallDictionary.Add(texture.Key, value2);
++			TexturesResolved = fastSmallDictionary;
+ 		}
+-		TexturesResolved = fastSmallDictionary;
+ 	}
+ 
+ 	public override void KeepLoaded()
+ 	{
+ 		keepLoaded = true;

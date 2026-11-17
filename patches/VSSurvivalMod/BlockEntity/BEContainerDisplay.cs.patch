@@ -1,0 +1,95 @@
+diff --git a/VSSurvivalMod/BlockEntity/BEContainerDisplay.cs b/VSSurvivalMod/BlockEntity/BEContainerDisplay.cs
+index 558b989..28defc5 100644
+--- a/VSSurvivalMod/BlockEntity/BEContainerDisplay.cs
++++ b/VSSurvivalMod/BlockEntity/BEContainerDisplay.cs
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+ #nullable disable
+@@ -147,16 +148,20 @@ namespace Vintagestory.GameContent
+             // This is only used for doing .tfedit on nearby stuff, it creates a lot of lag if we remesh the entire loaded chunk area
+             var PlayerPos = capi.World.Player.Entity.Pos;
+             if (Pos.DistanceTo(PlayerPos.X, PlayerPos.Y, PlayerPos.Z) > 20) return;
+ 
+             int DisplayedItems = this.DisplayedItems;
+-            for (var i = 0; i < DisplayedItems; i++)
++            var cache = MeshCache;
++            lock (cache)
+             {
+-                ItemStack stack = Inventory[i].Itemstack;
+-                if (stack == null) continue;
+-                var key = getMeshCacheKey(Inventory[i]);
+-                MeshCache.Remove(key);
++                for (var i = 0; i < DisplayedItems; i++)
++                {
++                    ItemStack stack = Inventory[i].Itemstack;
++                    if (stack == null) continue;
++                    var key = getMeshCacheKey(Inventory[i]);
++                    cache.Remove(key);
++                }
+             }
+ 
+             MarkMeshesDirty();
+             Api.World.BlockAccessor.MarkBlockDirty(Pos);   // always redraw on client after updating meshes
+         }
+@@ -219,17 +224,21 @@ namespace Vintagestory.GameContent
+             }
+ 
+             return slot.Itemstack.Collectible.Code.ToString();
+         }
+ 
+-        protected Dictionary<string, MeshData> MeshCache => ObjectCacheUtil.GetOrCreate(Api, "meshesDisplay-" + ClassCode, () => new Dictionary<string, MeshData>());
++        protected Dictionary<string, MeshData> MeshCache => OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "meshesDisplay-" + ClassCode);
+ 
+         protected MeshData getMesh(ItemSlot slot)
+         {
+             string key = getMeshCacheKey(slot);
+-            MeshCache.TryGetValue(key, out var meshdata);
+-            return meshdata;
++            var cache = MeshCache;
++            lock (cache)
++            {
++                cache.TryGetValue(key, out var meshdata);
++                return meshdata;
++            }
+         }
+ 
+         protected virtual MeshData getOrCreateMesh(ItemSlot slot, int index)
+         {
+             MeshData mesh = getMesh(slot);
+@@ -245,10 +254,11 @@ namespace Vintagestory.GameContent
+                         "displayed item shape",
+                         customShape,
+                         (shape, name) => new ContainedTextureSource(capi, capi.BlockTextureAtlas, shape.Textures, string.Format("For displayed item {0}", stack.Collectible.Code)),
+                         null
+                 ));
++                mesh = mesh?.Clone();
+             }
+             else
+             {
+                 IContainedMeshSource meshSource = stack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
+ 
+@@ -264,11 +274,15 @@ namespace Vintagestory.GameContent
+             }
+ 
+             applyDefaultTranforms(stack, mesh);
+ 
+             string key = getMeshCacheKey(slot);
+-            MeshCache[key] = mesh;
++            var cache = MeshCache;
++            lock (cache)
++            {
++                cache[key] = mesh;
++            }
+ 
+             return mesh;
+         }
+ 
+         protected void applyDefaultTranforms(ItemStack stack, MeshData mesh)

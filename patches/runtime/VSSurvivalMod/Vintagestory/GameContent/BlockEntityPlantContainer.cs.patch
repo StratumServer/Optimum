@@ -1,0 +1,184 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityPlantContainer.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityPlantContainer.cs
+index 48e7274..cf01f2a 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityPlantContainer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityPlantContainer.cs
+@@ -193,16 +193,20 @@ public class BlockEntityPlantContainer : BlockEntityContainer, ITexPositionSourc
+ 		tree.SetFloat("meshAngle", MeshAngle);
+ 	}
+ 
+ 	private MeshData GenPotMesh(ITesselatorAPI tesselator)
+ 	{
+-		Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(Api, "plantContainerMeshes", () => new Dictionary<string, MeshData>());
++		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "plantContainerMeshes");
+ 		string key = base.Block.Code.ToString() + (hasSoil ? "soil" : "empty");
+-		if (orCreate.TryGetValue(key, out var value))
++		lock (orCreate)
+ 		{
+-			return value;
++			if (orCreate.TryGetValue(key, out var cached))
++			{
++				return cached;
++			}
+ 		}
++		MeshData value = null;
+ 		if (hasSoil && base.Block.Attributes != null)
+ 		{
+ 			CompositeShape compositeShape = base.Block.Attributes["filledShape"].AsObject<CompositeShape>(null, base.Block.Code.Domain);
+ 			Shape shape = null;
+ 			if (compositeShape != null)
+@@ -218,11 +222,18 @@ public class BlockEntityPlantContainer : BlockEntityContainer, ITexPositionSourc
+ 		}
+ 		else
+ 		{
+ 			value = capi.TesselatorManager.GetDefaultBlockMesh(base.Block);
+ 		}
+-		return orCreate[key] = value;
++		lock (orCreate)
++		{
++			if (orCreate.TryGetValue(key, out var existing))
++			{
++				return existing;
++			}
++			return orCreate[key] = value;
++		}
+ 	}
+ 
+ 	private MeshData GenContentMesh(ITesselatorAPI tesselator)
+ 	{
+ 		ItemStack contents = GetContents();
+@@ -233,77 +244,80 @@ public class BlockEntityPlantContainer : BlockEntityContainer, ITexPositionSourc
+ 		curContProps = PlantContProps;
+ 		if (curContProps == null)
+ 		{
+ 			return null;
+ 		}
+-		Dictionary<string, MeshData[]> orCreate = ObjectCacheUtil.GetOrCreate(Api, "plantContainerContentMeshes", () => new Dictionary<string, MeshData[]>());
++		Dictionary<string, MeshData[]> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData[]>>(Api, "plantContainerContentMeshes");
+ 		float y = ((base.Block.Attributes == null) ? 0.4f : base.Block.Attributes["fillHeight"].AsFloat(0.4f));
+ 		string containerSize = ContainerSize;
+ 		string key = contents?.ToString() + "-" + containerSize + "f" + y;
+-		int num = -1;
+-		if (orCreate.TryGetValue(key, out var value))
++		lock (orCreate)
+ 		{
+-			num = ((value.Length != 1) ? GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, value.Length) : 0);
+-			MeshData meshData = value[num];
+-			if (meshData != null)
++			int num = -1;
++			if (orCreate.TryGetValue(key, out var value))
+ 			{
+-				return meshData;
+-			}
+-		}
+-		CompositeShape compositeShape = curContProps.Shape;
+-		if (compositeShape == null)
+-		{
+-			compositeShape = ((contents.Class == EnumItemClass.Block) ? contents.Block.Shape.Clone() : contents.Item.Shape.Clone());
+-		}
+-		ModelTransform modelTransform = curContProps.Transform;
+-		if (modelTransform == null)
+-		{
+-			modelTransform = new ModelTransform().EnsureDefaultValues();
+-			modelTransform.Translation.Y = y;
+-		}
+-		contentTexSource = ((contents.Class == EnumItemClass.Block) ? capi.Tesselator.GetTextureSource(contents.Block) : capi.Tesselator.GetTextureSource(contents.Item));
+-		List<IAsset> list;
+-		if (compositeShape.Base.Path.EndsWith('*'))
+-		{
+-			list = Api.Assets.GetManyInCategory("shapes", compositeShape.Base.Path.Substring(0, compositeShape.Base.Path.Length - 1), compositeShape.Base.Domain);
+-		}
+-		else
+-		{
+-			list = new List<IAsset>();
+-			list.Add(Api.Assets.TryGet(compositeShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")));
+-		}
+-		if (list != null && list.Count > 0)
+-		{
+-			ShapeElement.locationForLogging = compositeShape.Base;
+-			if (value == null)
+-			{
+-				value = (orCreate[key] = new MeshData[list.Count]);
+ 				num = ((value.Length != 1) ? GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, value.Length) : 0);
++				MeshData meshData = value[num];
++				if (meshData != null)
++				{
++					return meshData;
++				}
+ 			}
+-			Shape shape = list[num].ToObject<Shape>();
+-			shapeTextures = shape.Textures;
+-			MeshData modeldata;
+-			try
++			CompositeShape compositeShape = curContProps.Shape;
++			if (compositeShape == null)
+ 			{
+-				byte climateColorMapId = (byte)((contents.Block?.ClimateColorMapResolved != null) ? ((byte)(contents.Block.ClimateColorMapResolved.RectIndex + 1)) : 0);
+-				byte seasonColorMapId = (byte)((contents.Block?.SeasonColorMapResolved != null) ? ((byte)(contents.Block.SeasonColorMapResolved.RectIndex + 1)) : 0);
+-				tesselator.TesselateShape("plant container content shape", shape, out modeldata, this, null, 0, climateColorMapId, seasonColorMapId);
++				compositeShape = ((contents.Class == EnumItemClass.Block) ? contents.Block.Shape.Clone() : contents.Item.Shape.Clone());
+ 			}
+-			catch (Exception ex)
++			ModelTransform modelTransform = curContProps.Transform;
++			if (modelTransform == null)
+ 			{
+-				Api.Logger.Error(string.Concat(ex.Message, " (when tesselating ", compositeShape.Base.WithPathPrefixOnce("shapes/"), ")"));
+-				Api.Logger.Error(ex);
+-				return null;
++				modelTransform = new ModelTransform().EnsureDefaultValues();
++				modelTransform.Translation.Y = y;
+ 			}
+-			modeldata.ModelTransform(modelTransform);
+-			value[num] = modeldata;
++			contentTexSource = ((contents.Class == EnumItemClass.Block) ? capi.Tesselator.GetTextureSource(contents.Block) : capi.Tesselator.GetTextureSource(contents.Item));
++			List<IAsset> list;
++			if (compositeShape.Base.Path.EndsWith('*'))
++			{
++				list = Api.Assets.GetManyInCategory("shapes", compositeShape.Base.Path.Substring(0, compositeShape.Base.Path.Length - 1), compositeShape.Base.Domain);
++			}
++			else
++			{
++				list = new List<IAsset>();
++				list.Add(Api.Assets.TryGet(compositeShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")));
++			}
++			if (list != null && list.Count > 0)
++			{
++				ShapeElement.locationForLogging = compositeShape.Base;
++				if (value == null)
++				{
++					value = (orCreate[key] = new MeshData[list.Count]);
++					num = ((value.Length != 1) ? GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, value.Length) : 0);
++				}
++				Shape shape = list[num].ToObject<Shape>();
++				shapeTextures = shape.Textures;
++				MeshData modeldata;
++				try
++				{
++					byte climateColorMapId = (byte)((contents.Block?.ClimateColorMapResolved != null) ? ((byte)(contents.Block.ClimateColorMapResolved.RectIndex + 1)) : 0);
++					byte seasonColorMapId = (byte)((contents.Block?.SeasonColorMapResolved != null) ? ((byte)(contents.Block.SeasonColorMapResolved.RectIndex + 1)) : 0);
++					tesselator.TesselateShape("plant container content shape", shape, out modeldata, this, null, 0, climateColorMapId, seasonColorMapId);
++				}
++				catch (Exception ex)
++				{
++					Api.Logger.Error(string.Concat(ex.Message, " (when tesselating ", compositeShape.Base.WithPathPrefixOnce("shapes/"), ")"));
++					Api.Logger.Error(ex);
++					return null;
++				}
++				modeldata.ModelTransform(modelTransform);
++				value[num] = modeldata;
++			}
++			else
++			{
++				Api.World.Logger.Error("Plant container, content asset {0} not found,", compositeShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
++			}
++			return value[num];
+ 		}
+-		else
+-		{
+-			Api.World.Logger.Error("Plant container, content asset {0} not found,", compositeShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
+-		}
+-		return value[num];
+ 	}
+ 
+ 	public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tessThreadTesselator)
+ 	{
+ 		if (potMesh == null)

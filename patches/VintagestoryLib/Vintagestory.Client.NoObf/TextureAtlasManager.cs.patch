@@ -1,8 +1,90 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
-index acb970f..ef51342 100644
+index acb970f..8daa112 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs
-@@ -26,11 +26,11 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+@@ -11,10 +11,81 @@ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ using Vintagestory.Util;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
++internal sealed class OptimumMainThreadTextureUploadTask
++{
++	private readonly TextureAtlasManager owner;
++
++	private readonly IBitmap bmp;
++
++	private readonly TextureAtlasPosition texPos;
++
++	private readonly float alphaTest;
++
++	public OptimumMainThreadTextureUploadTask(TextureAtlasManager owner, IBitmap bmp, TextureAtlasPosition texPos, float alphaTest)
++	{
++		this.owner = owner;
++		this.bmp = bmp;
++		this.texPos = texPos;
++		this.alphaTest = alphaTest;
++	}
++
++	public void Run()
++	{
++		owner.RuntimeUploadTextureToPos(bmp, texPos, alphaTest);
++	}
++}
++
++internal sealed class OptimumMainThreadMipmapTask
++{
++	private readonly TextureAtlasManager owner;
++
++	private readonly int atlasNumber;
++
++	private bool secondPass;
++
++	public OptimumMainThreadMipmapTask(TextureAtlasManager owner, int atlasNumber)
++	{
++		this.owner = owner;
++		this.atlasNumber = atlasNumber;
++	}
++
++	public void Run()
++	{
++		if (!secondPass)
++		{
++			secondPass = true;
++			owner.EnqueueFollowupMipmapTask(Run);
++			return;
++		}
++		owner.FinishMipmapGeneration(atlasNumber);
++	}
++}
++
++internal sealed class OptimumMainThreadDictUpdateTask
++{
++	private readonly TextureAtlasManager owner;
++
++	private readonly AssetLocationAndSource loc;
++
++	private readonly int textureSubId;
++
++	public OptimumMainThreadDictUpdateTask(TextureAtlasManager owner, AssetLocationAndSource loc, int textureSubId)
++	{
++		this.owner = owner;
++		this.loc = loc;
++		this.textureSubId = textureSubId;
++	}
++
++	public void Run()
++	{
++		owner.CommitOffthreadTextureName(loc, textureSubId);
++	}
++}
++
+ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI, ITextureLocationDictionary
+ {
+ 	internal const int UnknownTextureSubId = 0;
+ 
+ 	public static FrameBufferRef atlasFramebuffer;
+@@ -26,11 +97,11 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
  
  	public List<TextureAtlas> Atlasses = new List<TextureAtlas>();
  
@@ -15,7 +97,113 @@ index acb970f..ef51342 100644
  
  	public TextureAtlasPosition UnknownTexturePos;
  
-@@ -146,27 +146,32 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+@@ -56,29 +127,100 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 
+ 	private bool genMipmapsQueued;
+ 
+ 	private bool autoRegenMipMaps = true;
+ 
+-	public int Count => textureNamesDict.Count;
++	private object atlasSyncLock;
++
++	private int optimumGenMipmapsQueued;
++
++	internal void EnqueueFollowupMipmapTask(Action action)
++	{
++		game.EnqueueMainThreadTask(action, "genmipmaps");
++	}
++
++	internal void FinishMipmapGeneration(int atlasNumber)
++	{
++		RegenMipMaps(atlasNumber);
++		genMipmapsQueued = false;
++		Interlocked.Exchange(ref optimumGenMipmapsQueued, 0);
++	}
++
++	internal void CommitOffthreadTextureName(AssetLocationAndSource loc, int textureSubId)
++	{
++		lock (GetAtlasSyncLock())
++		{
++			textureNamesDict[loc] = textureSubId;
++		}
++	}
++
++	internal object GetAtlasSyncLock()
++	{
++		object obj = Volatile.Read(ref atlasSyncLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref atlasSyncLock, new object(), null);
++		return Volatile.Read(ref atlasSyncLock);
++	}
++
++	internal int[] SnapshotAtlasTextureIds()
++	{
++		lock (GetAtlasSyncLock())
++		{
++			int count = Atlasses.Count;
++			int[] ids = new int[count];
++			for (int i = 0; i < count; i++)
++			{
++				ids[i] = Atlasses[i].textureId;
++			}
++			return ids;
++		}
++	}
++
++	public int Count
++	{
++		get
++		{
++			lock (GetAtlasSyncLock())
++			{
++				return textureNamesDict.Count;
++			}
++		}
++	}
+ 
+ 	public TextureAtlasPosition UnknownTexturePosition => UnknownTexturePos;
+ 
+-	public int this[AssetLocationAndSource textureLoc] => textureNamesDict[textureLoc];
++	public int this[AssetLocationAndSource textureLoc]
++	{
++		get
++		{
++			lock (GetAtlasSyncLock())
++			{
++				return textureNamesDict[textureLoc];
++			}
++		}
++	}
+ 
+ 	public Size2i Size { get; set; }
+ 
+ 	public Vec2f SizeAsVec2f { get; set; }
+ 
+ 	public TextureAtlasPosition this[AssetLocation textureLocation]
+ 	{
+ 		get
+ 		{
+-			if (textureNamesDict.TryGetValue(textureLocation, out var value))
++			int value;
++			lock (GetAtlasSyncLock())
+ 			{
+-				return TextureAtlasPositionsByTextureSubId[value];
++				if (!textureNamesDict.TryGetValue(textureLocation, out value))
++				{
++					return null;
++				}
+ 			}
+-			return null;
++			return Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[value];
+ 		}
+ 	}
+ 
+ 	public float SubPixelPaddingX
+ 	{
+@@ -146,27 +288,35 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
  
  	public virtual TextureAtlas RuntimeCreateNewAtlas(string itemclass)
  	{
@@ -41,10 +229,13 @@ index acb970f..ef51342 100644
 -		return textureAtlas;
 +		try
 +		{
-+			TextureAtlas textureAtlas = CreateNewAtlas(itemclass);
-+			LoadedTexture item = textureAtlas.Upload(game);
-+			AtlasTextures.Add(item);
-+			return textureAtlas;
++			lock (GetAtlasSyncLock())
++			{
++				TextureAtlas textureAtlas = CreateNewAtlas(itemclass);
++				LoadedTexture item = textureAtlas.Upload(game);
++				AtlasTextures.Add(item);
++				return textureAtlas;
++			}
 +		}
 +		finally
 +		{
@@ -55,7 +246,248 @@ index acb970f..ef51342 100644
  	private void addCommonTextures()
  	{
  		foreach (KeyValuePair<AssetLocation, int> item in textureNamesDict)
-@@ -412,10 +417,15 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+@@ -195,21 +345,27 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 		textureNamesDict[loc] = Interlocked.Increment(ref textureSubId) - 1;
+ 	}
+ 
+ 	public int GetOrAddTextureLocation(AssetLocationAndSource loc)
+ 	{
+-		if (!textureNamesDict.TryGetValue(loc, out var value))
++		lock (GetAtlasSyncLock())
+ 		{
+-			value = Interlocked.Increment(ref textureSubId) - 1;
+-			textureNamesDict[loc] = value;
++			if (!textureNamesDict.TryGetValue(loc, out var value))
++			{
++				value = Interlocked.Increment(ref textureSubId) - 1;
++				textureNamesDict[loc] = value;
++			}
++			return value;
+ 		}
+-		return value;
+ 	}
+ 
+ 	public bool ContainsKey(AssetLocation loc)
+ 	{
+-		return textureNamesDict.ContainsKey(loc);
++		lock (GetAtlasSyncLock())
++		{
++			return textureNamesDict.ContainsKey(loc);
++		}
+ 	}
+ 
+ 	public void GenFramebuffer()
+ 	{
+ 		DisposeFrameBuffer();
+@@ -243,82 +399,100 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 	public bool GetOrInsertTexture(AssetLocation path, out int textureSubId, out TextureAtlasPosition texPos, CreateTextureDelegate onCreate = null, float alphaTest = 0f)
+ 	{
+ 		return GetOrInsertTexture(new AssetLocationAndSource(path), out textureSubId, out texPos, onCreate, alphaTest);
+ 	}
+ 
++	private IBitmap LoadDefaultCompositeBitmap(AssetLocationAndSource loc)
++	{
++		IBitmap bitmap = LoadCompositeBitmap(loc);
++		if (bitmap.Width == 0 && bitmap.Height == 0)
++		{
++			game.Logger.Warning("GetOrInsertTexture() on path {0}: Bitmap width and height is 0! Either missing or corrupt image file. Will use unknown texture.", loc);
++		}
++		return bitmap;
++	}
++
+ 	public bool GetOrInsertTexture(AssetLocationAndSource loc, out int textureSubId, out TextureAtlasPosition texPos, CreateTextureDelegate onCreate = null, float alphaTest = 0f)
+ 	{
+-		if (onCreate == null)
++		bool found;
++		lock (GetAtlasSyncLock())
+ 		{
+-			onCreate = delegate
++			found = textureNamesDict.TryGetValue(loc, out textureSubId) || (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId && offthreadTextureNamesDict.TryGetValue(loc, out textureSubId));
++			if (found)
+ 			{
+-				IBitmap bitmap3 = LoadCompositeBitmap(loc);
+-				if (bitmap3.Width == 0 && bitmap3.Height == 0)
+-				{
+-					game.Logger.Warning("GetOrInsertTexture() on path {0}: Bitmap width and height is 0! Either missing or corrupt image file. Will use unknown texture.", loc);
+-				}
+-				return bitmap3;
+-			};
++				texPos = Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId];
++			}
++			else
++			{
++				texPos = null;
++			}
+ 		}
+-		if (textureNamesDict.TryGetValue(loc, out textureSubId) || (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId && offthreadTextureNamesDict.TryGetValue(loc, out textureSubId)))
++		if (found)
+ 		{
+-			texPos = TextureAtlasPositionsByTextureSubId[textureSubId];
+ 			if (texPos.reloadIteration != reloadIteration)
+ 			{
+-				IBitmap bitmap = onCreate();
++				IBitmap bitmap = ((onCreate != null) ? onCreate() : LoadDefaultCompositeBitmap(loc));
+ 				if (bitmap == null)
+ 				{
+ 					return false;
+ 				}
+ 				runtimeUpdateTexture(bitmap, texPos, alphaTest);
+ 			}
+ 			return true;
+ 		}
+ 		texPos = null;
+ 		textureSubId = 0;
+-		IBitmap bitmap2 = onCreate();
++		IBitmap bitmap2 = ((onCreate != null) ? onCreate() : LoadDefaultCompositeBitmap(loc));
+ 		if (bitmap2 == null)
+ 		{
+ 			return false;
+ 		}
+-		bool num = InsertTexture(bitmap2, out textureSubId, out texPos, alphaTest);
+-		if (num)
++		bool num;
++		lock (GetAtlasSyncLock())
+ 		{
+-			if (Environment.CurrentManagedThreadId == RuntimeEnv.MainThreadId)
++			if (textureNamesDict.TryGetValue(loc, out textureSubId) || (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId && offthreadTextureNamesDict.TryGetValue(loc, out textureSubId)))
+ 			{
+-				textureNamesDict[loc] = textureSubId;
+-				return num;
++				texPos = Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId];
++				return true;
+ 			}
+-			offthreadTextureNamesDict[loc] = textureSubId;
+-			int textureSubIdMT = textureSubId;
+-			game.EnqueueMainThreadTask(delegate
++			num = InsertTexture(bitmap2, out textureSubId, out texPos, alphaTest);
++			if (num)
+ 			{
+-				textureNamesDict[loc] = textureSubIdMT;
+-			}, "updateTextureNamesDict");
++				if (Environment.CurrentManagedThreadId == RuntimeEnv.MainThreadId)
++				{
++					textureNamesDict[loc] = textureSubId;
++					return num;
++				}
++				offthreadTextureNamesDict[loc] = textureSubId;
++				game.EnqueueMainThreadTask(new OptimumMainThreadDictUpdateTask(this, loc, textureSubId).Run, "updateTextureNamesDict");
++			}
+ 		}
+ 		return num;
+ 	}
+ 
+ 	[Obsolete("Use GetOrInsertTexture() instead. It's more efficient to load the bmp only if the texture was not found in the cache")]
+ 	public bool InsertTextureCached(AssetLocation path, IBitmap bmp, out int textureSubId, out TextureAtlasPosition texPos, float alphaTest = 0f)
+ 	{
+ 		AssetLocationAndSource key = new AssetLocationAndSource(path);
+-		if (textureNamesDict.TryGetValue(key, out textureSubId))
++		lock (GetAtlasSyncLock())
+ 		{
+-			texPos = TextureAtlasPositionsByTextureSubId[textureSubId];
+-			if (texPos.reloadIteration != reloadIteration)
++			if (textureNamesDict.TryGetValue(key, out textureSubId))
+ 			{
+-				runtimeUpdateTexture(bmp, texPos, alphaTest);
++				texPos = Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId];
++				if (texPos.reloadIteration != reloadIteration)
++				{
++					runtimeUpdateTexture(bmp, texPos, alphaTest);
++				}
++				return true;
+ 			}
+-			return true;
+-		}
+-		bool num = InsertTexture(bmp, out textureSubId, out texPos, alphaTest);
+-		if (num)
+-		{
+-			textureNamesDict[key] = textureSubId;
++			bool num = InsertTexture(bmp, out textureSubId, out texPos, alphaTest);
++			if (num)
++			{
++				textureNamesDict[key] = textureSubId;
++			}
++			return num;
+ 		}
+-		return num;
+ 	}
+ 
+ 	public bool InsertTexture(IBitmap bmp, out int textureSubId, out TextureAtlasPosition texPos, float alphaTest = 0f)
+ 	{
+ 		if (!AllocateTextureSpace(bmp.Width, bmp.Height, out textureSubId, out texPos))
+@@ -349,61 +523,44 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 			if (glScissorFlagEnabled)
+ 			{
+ 				game.Platform.GlScissorFlag(enable: true);
+ 			}
+ 		}
+-		if (!autoRegenMipMaps || genMipmapsQueued)
++		if (!autoRegenMipMaps || genMipmapsQueued || Interlocked.CompareExchange(ref optimumGenMipmapsQueued, 1, 0) != 0)
+ 		{
+ 			return;
+ 		}
+ 		genMipmapsQueued = true;
+-		game.EnqueueMainThreadTask(delegate
+-		{
+-			game.EnqueueMainThreadTask(delegate
+-			{
+-				RegenMipMaps(texPos.atlasNumber);
+-				genMipmapsQueued = false;
+-			}, "genmipmaps");
+-		}, "genmipmaps");
++		game.EnqueueMainThreadTask(new OptimumMainThreadMipmapTask(this, texPos.atlasNumber).Run, "genmipmaps");
+ 	}
+ 
+ 	private void runtimeUpdateTexture(IBitmap bmp, TextureAtlasPosition texPos, float alphaTest = 0f)
+ 	{
+-		//IL_00ac: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_00d5: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_00fe: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_0127: Unknown result type (might be due to invalid IL or missing references)
+-		//IL_018b: Unknown result type (might be due to invalid IL or missing references)
+ 		if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+ 		{
+-			game.EnqueueMainThreadTask(delegate
+-			{
+-				RuntimeUploadTextureToPos(bmp, texPos, alphaTest);
+-			}, "textureupload");
++			game.EnqueueMainThreadTask(new OptimumMainThreadTextureUploadTask(this, bmp, texPos, alphaTest).Run, "textureupload");
+ 		}
+ 		else
+ 		{
+ 			RuntimeUploadTextureToPos(bmp, texPos, alphaTest);
+ 		}
+ 		int width = bmp.Width;
+ 		int height = bmp.Height;
+-		if (pixelsTmp == null)
+-		{
+-			pixelsTmp = new int[4];
+-		}
+-		pixelsTmp[0] = bmp.GetPixel((int)(0.35f * (float)width), (int)(0.35f * (float)height)).ToArgb();
+-		pixelsTmp[1] = bmp.GetPixel((int)(0.65f * (float)width), (int)(0.35f * (float)height)).ToArgb();
+-		pixelsTmp[2] = bmp.GetPixel((int)(0.35f * (float)width), (int)(0.65f * (float)height)).ToArgb();
+-		pixelsTmp[3] = bmp.GetPixel((int)(0.65f * (float)width), (int)(0.65f * (float)height)).ToArgb();
+-		texPos.AvgColor = ColorUtil.ReverseColorBytes(ColorUtil.ColorAverage(pixelsTmp, equalWeight));
++		int[] localPixelsTmp = new int[4];
++		localPixelsTmp[0] = bmp.GetPixel((int)(0.35f * (float)width), (int)(0.35f * (float)height)).ToArgb();
++		localPixelsTmp[1] = bmp.GetPixel((int)(0.65f * (float)width), (int)(0.35f * (float)height)).ToArgb();
++		localPixelsTmp[2] = bmp.GetPixel((int)(0.35f * (float)width), (int)(0.65f * (float)height)).ToArgb();
++		localPixelsTmp[3] = bmp.GetPixel((int)(0.65f * (float)width), (int)(0.65f * (float)height)).ToArgb();
++		texPos.AvgColor = ColorUtil.ReverseColorBytes(ColorUtil.ColorAverage(localPixelsTmp, equalWeight));
+ 		int[] array = GC.AllocateUninitializedArray<int>(30);
++		Random sharedRand = Random.Shared;
+ 		for (int num = 0; num < array.Length; num++)
+ 		{
+ 			int num2 = 0;
+ 			for (int num3 = 0; num3 < 15; num3++)
+ 			{
+-				num2 = bmp.GetPixel((int)(rand.NextDouble() * (double)width), (int)(rand.NextDouble() * (double)height)).ToArgb();
++				num2 = bmp.GetPixel((int)(sharedRand.NextDouble() * (double)width), (int)(sharedRand.NextDouble() * (double)height)).ToArgb();
+ 				if (((num2 >> 24) & 0xFF) > 5)
+ 				{
+ 					break;
+ 				}
+ 			}
+@@ -412,92 +569,117 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
  		texPos.RndColors = array;
  	}
  
@@ -71,7 +503,122 @@ index acb970f..ef51342 100644
  
  	public bool InsertTexture(BitmapRef bmp, AssetLocationAndSource loc, out int textureSubIdOut)
  	{
-@@ -490,14 +500,19 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 		if (bmp.Width > Size.Width || bmp.Height > Size.Height)
+ 		{
+ 			throw new InvalidOperationException("Cannot insert texture larger than the atlas itself");
+ 		}
+-		textureSubIdOut = GetOrAddTextureLocation(loc);
+-		bool flag = currentAtlas.InsertTexture(textureSubIdOut, bmp.Width, bmp.Height, bmp.Pixels);
+-		if (!flag)
++		lock (GetAtlasSyncLock())
+ 		{
+-			RuntimeCreateNewAtlas(itemclass);
+-			return currentAtlas.InsertTexture(textureSubIdOut, bmp.Width, bmp.Height, bmp.Pixels);
++			textureSubIdOut = GetOrAddTextureLocation(loc);
++			bool flag = currentAtlas.InsertTexture(textureSubIdOut, bmp.Width, bmp.Height, bmp.Pixels);
++			if (!flag)
++			{
++				RuntimeCreateNewAtlas(itemclass);
++				return currentAtlas.InsertTexture(textureSubIdOut, bmp.Width, bmp.Height, bmp.Pixels);
++			}
++			return flag;
+ 		}
+-		return flag;
+ 	}
+ 
+ 	public bool AllocateTextureSpace(int width, int height, out int textureSubId, out TextureAtlasPosition texPos, AssetLocationAndSource loc = null)
+ 	{
+ 		if (width > Size.Width || height > Size.Height)
+ 		{
+ 			throw new InvalidOperationException("Cannot create allocate texture space larger than the atlas itself");
+ 		}
+-		textureSubId = ((loc == null) ? (Interlocked.Increment(ref this.textureSubId) - 1) : GetOrAddTextureLocation(loc));
+-		TextureAtlasPosition textureAtlasPosition = null;
+-		int i;
+-		for (i = 0; i < Atlasses.Count; i++)
++		lock (GetAtlasSyncLock())
+ 		{
+-			textureAtlasPosition = Atlasses[i].AllocateTextureSpace(textureSubId, width, height);
+-			if (textureAtlasPosition != null)
++			textureSubId = ((loc == null) ? (Interlocked.Increment(ref this.textureSubId) - 1) : GetOrAddTextureLocation(loc));
++			TextureAtlasPosition textureAtlasPosition = null;
++			int i;
++			for (i = 0; i < Atlasses.Count; i++)
++			{
++				textureAtlasPosition = Atlasses[i].AllocateTextureSpace(textureSubId, width, height);
++				if (textureAtlasPosition != null)
++				{
++					break;
++				}
++			}
++			if (textureAtlasPosition == null)
+ 			{
+-				break;
++				textureAtlasPosition = RuntimeCreateNewAtlas(itemclass).AllocateTextureSpace(textureSubId, width, height);
+ 			}
+-		}
+-		if (textureAtlasPosition == null)
+-		{
+-			textureAtlasPosition = RuntimeCreateNewAtlas(itemclass).AllocateTextureSpace(textureSubId, width, height);
+-		}
+-		textureAtlasPosition.atlasNumber = (byte)i;
+-		textureAtlasPosition.atlasTextureId = AtlasTextures[i].TextureId;
+-		texPos = textureAtlasPosition;
+-		lock (TextureAtlasPositionsByTextureSubId)
+-		{
+-			if (textureSubId >= TextureAtlasPositionsByTextureSubId.Length)
++			textureAtlasPosition.atlasNumber = (byte)i;
++			textureAtlasPosition.atlasTextureId = AtlasTextures[i].TextureId;
++			texPos = textureAtlasPosition;
++			TextureAtlasPosition[] positions = Volatile.Read(ref TextureAtlasPositionsByTextureSubId);
++			if (textureSubId >= positions.Length)
++			{
++				int newLen = Math.Max(positions.Length + 128, textureSubId + 1);
++				TextureAtlasPosition[] array = new TextureAtlasPosition[newLen];
++				Array.Copy(positions, array, positions.Length);
++				array[textureSubId] = texPos;
++				Volatile.Write(ref TextureAtlasPositionsByTextureSubId, array);
++			}
++			else
+ 			{
+-				TextureAtlasPosition[] array = new TextureAtlasPosition[TextureAtlasPositionsByTextureSubId.Length + 128];
+-				Array.Copy(TextureAtlasPositionsByTextureSubId, array, TextureAtlasPositionsByTextureSubId.Length);
+-				TextureAtlasPositionsByTextureSubId = array;
++				positions[textureSubId] = texPos;
+ 			}
+-			TextureAtlasPositionsByTextureSubId[textureSubId] = texPos;
++			return true;
+ 		}
+-		return true;
+ 	}
+ 
+ 	public void FreeTextureSpace(int textureSubId)
+ 	{
+-		for (int i = 0; i < Atlasses.Count && !Atlasses[i].FreeTextureSpace(textureSubId); i++)
++		lock (GetAtlasSyncLock())
+ 		{
++			for (int i = 0; i < Atlasses.Count && !Atlasses[i].FreeTextureSpace(textureSubId); i++)
++			{
++			}
+ 		}
+ 	}
+ 
+ 	public void FreeTextureSpace(AssetLocationAndSource loc)
+ 	{
+-		if (textureNamesDict.TryGetValue(loc, out var value))
++		lock (GetAtlasSyncLock())
+ 		{
+-			textureNamesDict.Remove(loc);
+-			FreeTextureSpace(value);
++			if (textureNamesDict.TryGetValue(loc, out var value))
++			{
++				textureNamesDict.Remove(loc);
++				FreeTextureSpace(value);
++			}
+ 		}
+ 	}
+ 
+ 	public virtual void PopulateTextureAtlassesFromTextures()
  	{
  		TextureAtlasPositionsByTextureSubId = new TextureAtlasPosition[textureNamesDict.Count];
  		BakedBitmap[] bitmaps = new BakedBitmap[textureNamesDict.Count];
@@ -94,3 +641,44 @@ index acb970f..ef51342 100644
  		while (WorkerThreadsInProgress() && !game.disposed)
  		{
  			Thread.Sleep(10);
+@@ -952,24 +1134,24 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 		atlasFramebuffer = null;
+ 	}
+ 
+ 	public int GetRandomColor(int textureSubId)
+ 	{
+-		return TextureAtlasPositionsByTextureSubId[textureSubId].RndColors[rand.Next(30)];
++		return Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId].RndColors[Random.Shared.Next(30)];
+ 	}
+ 
+ 	public int GetRandomColor(int textureSubId, int rndIndex)
+ 	{
+-		TextureAtlasPosition texPos = TextureAtlasPositionsByTextureSubId[textureSubId];
++		TextureAtlasPosition texPos = Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId];
+ 		return GetRandomColor(texPos, rndIndex);
+ 	}
+ 
+ 	public int GetRandomColor(TextureAtlasPosition texPos, int rndIndex)
+ 	{
+ 		if (rndIndex < 0)
+ 		{
+-			rndIndex = rand.Next(30);
++			rndIndex = Random.Shared.Next(30);
+ 		}
+ 		return texPos.RndColors[rndIndex];
+ 	}
+ 
+ 	public int[] GetRandomColors(TextureAtlasPosition texPos)
+@@ -977,11 +1159,11 @@ public class TextureAtlasManager : AsyncHelper.Multithreaded, ITextureAtlasAPI,
+ 		return texPos.RndColors;
+ 	}
+ 
+ 	public int GetAverageColor(int textureSubId)
+ 	{
+-		return TextureAtlasPositionsByTextureSubId[textureSubId].AvgColor;
++		return Volatile.Read(ref TextureAtlasPositionsByTextureSubId)[textureSubId].AvgColor;
+ 	}
+ 
+ 	public bool InsertTexture(byte[] bytes, out int textureSubId, out TextureAtlasPosition texPos, float alphaTest = 0f)
+ 	{
+ 		BitmapExternal bmp = game.api.Render.BitmapCreateFromPng(bytes);

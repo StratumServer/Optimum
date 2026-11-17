@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 42fad1f..3c536eb 100644
+index 42fad1f..52090a4 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -35,7 +35,108 @@ index 42fad1f..3c536eb 100644
  	private TesselatedChunkPart[] ret;
  
  	private TesselatedChunkPart[] emptyParts = Array.Empty<TesselatedChunkPart>();
-@@ -262,20 +269,45 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -98,10 +105,16 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 
+ 	public BleedingJsonTesselator bleedingJsonTesselator;
+ 
+ 	internal bool reloadTesselatorOnTesselationThread = true;
+ 
++	internal ChunkTesselatorManager optimumManager;
++
++	internal int optimumWorkerAtlasEpoch;
++
++	internal int optimumWorkerShapeEpoch;
++
+ 	internal readonly ClientChunk[] chunksNearby;
+ 
+ 	internal readonly ClientChunkData[] chunkdatasNearby;
+ 
+ 	public object ReloadLock = new object();
+@@ -154,11 +167,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		SetUpDecorRotationMatrices();
+ 	}
+ 
+ 	private void OnSmoothShadowsChanged(bool newValue)
+ 	{
+-		AoAndSmoothShadows = ClientSettings.SmoothShadows;
++		Volatile.Write(ref AoAndSmoothShadows, newValue);
+ 	}
+ 
+ 	public void LightlevelsReceived()
+ 	{
+ 		lightsGo = true;
+@@ -221,23 +234,36 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		{
+ 			Block block = game.Blocks[k];
+ 			isPartiallyTransparent[k] = !block.AllSidesOpaque;
+ 			isLiquidBlock[k] = block.MatterState == EnumMatterState.Liquid;
+ 		}
+-		ClientEventManager eventManager = game.eventManager;
+-		if (eventManager != null)
++		if (optimumManager == null || this == optimumManager.PrimaryTesselator)
+ 		{
+-			eventManager.OnReloadTextures += ReloadTextures;
+-			eventManager.OnReloadShapes += OnReloadShapes;
++			ClientEventManager eventManager = game.eventManager;
++			if (eventManager != null)
++			{
++				eventManager.OnReloadTextures += ReloadTextures;
++				eventManager.OnReloadShapes += OnReloadShapes;
++			}
+ 		}
+ 		started = true;
+ 	}
+ 
+ 	public int[] RuntimeCreateNewBlockTextureAtlas(int textureId)
+ 	{
+-		UpdateForAtlasses(TextureIdToReturnNum.Append(textureId));
+-		return TextureIdToReturnNum;
++		int[] updatedIds = TextureIdToReturnNum.Append(textureId);
++		if (optimumManager != null)
++		{
++			optimumManager.OnRuntimeAtlasAdded(updatedIds);
++			UpdateForAtlasses(updatedIds);
++			optimumWorkerAtlasEpoch = Volatile.Read(ref optimumManager.optimumAtlasEpoch);
++		}
++		else
++		{
++			UpdateForAtlasses(updatedIds);
++		}
++		return updatedIds;
+ 	}
+ 
+ 	public void ReloadTextures()
+ 	{
+ 		List<LoadedTexture> atlasTextures = game.BlockAtlasManager.AtlasTextures;
+@@ -245,15 +271,27 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		int[] array = new int[count];
+ 		for (int i = 0; i < count; i++)
+ 		{
+ 			array[i] = atlasTextures[i].TextureId;
+ 		}
++		if (optimumManager != null)
++		{
++			optimumManager.OnRuntimeAtlasAdded(array);
++		}
+ 		UpdateForAtlasses(array);
++		if (optimumManager != null)
++		{
++			optimumWorkerAtlasEpoch = Volatile.Read(ref optimumManager.optimumAtlasEpoch);
++		}
+ 	}
+ 
+ 	private void OnReloadShapes()
+ 	{
++		if (optimumManager != null)
++		{
++			Interlocked.Increment(ref optimumManager.optimumShapeReloadEpoch);
++		}
+ 		reloadTesselatorOnTesselationThread = true;
+ 	}
+ 
+ 	private void UpdateForAtlasses(int[] textureIDs)
+ 	{
+@@ -262,20 +300,45 @@ public class ChunkTesselator : IMeshPoolSupplier
  			quantityAtlasses = textureIDs.Length;
  			TextureIdToReturnNum = textureIDs;
  			fastBlockTextureSubidsByBlockAndFace = game.FastBlockTextureSubidsByBlockAndFace;
@@ -81,7 +182,83 @@ index 42fad1f..3c536eb 100644
  		}
  	}
  
-@@ -395,27 +427,35 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -309,43 +372,63 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 	{
+ 		if (!started)
+ 		{
+ 			throw new Exception("not started");
+ 		}
+-		vars.aoAndSmoothShadows = AoAndSmoothShadows;
++		ChunkTesselatorManager mgr = optimumManager;
++		if (mgr != null)
++		{
++			int atlasEpoch = Volatile.Read(ref mgr.optimumAtlasEpoch);
++			if (atlasEpoch != optimumWorkerAtlasEpoch)
++			{
++				int[] texIds = Volatile.Read(ref mgr.optimumAtlasTextureIds);
++				if (texIds != null)
++				{
++					UpdateForAtlasses(texIds);
++				}
++				optimumWorkerAtlasEpoch = atlasEpoch;
++			}
++			int shapeEpoch = Volatile.Read(ref mgr.optimumShapeReloadEpoch);
++			if (shapeEpoch != optimumWorkerShapeEpoch)
++			{
++				game.TesselatorManager.ReloadTesselator();
++				optimumWorkerShapeEpoch = shapeEpoch;
++				reloadTesselatorOnTesselationThread = false;
++			}
++		}
++		else if (reloadTesselatorOnTesselationThread)
++		{
++			game.TesselatorManager.ReloadTesselator();
++			reloadTesselatorOnTesselationThread = false;
++		}
++		vars.aoAndSmoothShadows = Volatile.Read(ref AoAndSmoothShadows);
+ 		vars.xMin = 32f;
+ 		vars.xMax = 0f;
+ 		vars.yMin = 32f;
+ 		vars.yMax = 0f;
+ 		vars.zMin = 32f;
+ 		vars.zMax = 0f;
+ 		vars.SetDimension(chunkY / 1024);
+-		if (reloadTesselatorOnTesselationThread)
+-		{
+-			game.TesselatorManager.ReloadTesselator();
+-			reloadTesselatorOnTesselationThread = false;
+-		}
+ 		try
+ 		{
+ 			BuildExtendedChunkData(chunk, chunkX, chunkY, chunkZ, chunkX < 1 || chunkZ < 1 || chunkX >= game.WorldMap.ChunkMapSizeX - 1 || chunkZ >= game.WorldMap.ChunkMapSizeZ - 1, skipChunkCenter);
+ 		}
+ 		catch (ThreadAbortException)
+ 		{
+ 			throw;
+ 		}
++		catch (RetryTesselationException)
++		{
++			throw;
++		}
+ 		catch (Exception ex2)
+ 		{
+ 			if (game.Platform.IsShuttingDown)
+ 			{
+ 				return false;
+ 			}
+-			global::_003C_003Ey__InlineArray4<object> buffer = default(global::_003C_003Ey__InlineArray4<object>);
+-			buffer[0] = chunkX;
+-			buffer[1] = chunkY;
+-			buffer[2] = chunkZ;
+-			buffer[3] = ex2;
+-			throw new Exception(string.Format("Exception thrown when trying to tesselate chunk {0}/{1}/{2}. Exception: {3}", (ReadOnlySpan<object?>)buffer));
++			throw new Exception(string.Format("Exception thrown when trying to tesselate chunk {0}/{1}/{2}. Exception: {3}", new object[] { chunkX, chunkY, chunkZ, ex2 }));
+ 		}
+ 		bool num = CalculateVisibleFaces_Fluids(skipChunkCenter, chunkX * 32, chunkY * 32, chunkZ * 32) | CalculateVisibleFaces(skipChunkCenter, chunkX * 32, chunkY * 32, chunkZ * 32);
+ 		if (num)
+ 		{
+ 			currentClimateRegionMap = game.WorldMap.LoadOrCreateLerpedClimateMapOffthread(chunkX, chunkZ);
+@@ -395,27 +478,35 @@ public class ChunkTesselator : IMeshPoolSupplier
  				for (int j = 0; j < quantityAtlasses; j++)
  				{
  					for (int k = 0; k < 4; k++)
@@ -117,7 +294,7 @@ index 42fad1f..3c536eb 100644
  			{
  				throw;
  			}
-@@ -426,21 +466,68 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -426,21 +517,68 @@ public class ChunkTesselator : IMeshPoolSupplier
  			if (dictionary != null)
  			{
  				BuildDecorPolygons(chunkX, chunkY, chunkZ, dictionary, skipChunkCenter);
@@ -161,8 +338,7 @@ index 42fad1f..3c536eb 100644
 +		}
 +		return src.CloneUsingRecycler();
 +	}
- 
--	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
++
 +
 +	private TesselatedChunkPart[] MergeTesselatedChunkParts(TesselatedChunkPart[] first, TesselatedChunkPart[] second)
 +	{
@@ -180,14 +356,15 @@ index 42fad1f..3c536eb 100644
 +		Array.Copy(second, 0, merged, first.Length, second.Length);
 +		return merged;
 +	}
-+
+ 
+-	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
 +	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts, bool optimumUseChiselLodDistance = false)
  	{
  		int num = 0;
  		int num2 = 0;
  		MeshData.Recycler.DoRecycling();
  		EnumChunkRenderPass[] array = passes;
-@@ -456,18 +543,34 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -456,18 +594,34 @@ public class ChunkTesselator : IMeshPoolSupplier
  				int verticesCount2 = meshData2.VerticesCount;
  				int verticesCount3 = meshData3.VerticesCount;
  				int verticesCount4 = meshData4.VerticesCount;
@@ -227,7 +404,7 @@ index 42fad1f..3c536eb 100644
  				}
  			}
  		}
-@@ -489,20 +592,26 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -489,20 +643,26 @@ public class ChunkTesselator : IMeshPoolSupplier
  	public bool CalculateVisibleFaces(bool skipChunkCenter, int baseX, int baseY, int baseZ)
  	{
  		byte[] array = currentChunkDraw32;
@@ -255,7 +432,7 @@ index 42fad1f..3c536eb 100644
  						array[num2 + k] = 0;
  					}
  					else
-@@ -715,12 +824,22 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -715,12 +875,22 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				currentChunkDraw32[i] &= 223;
  				currentChunkDrawFluids[i] &= 223;
@@ -278,7 +455,7 @@ index 42fad1f..3c536eb 100644
  		{
  			int num5 = (j + 1) * 34 + 1;
  			tCTCache.posY = num + j;
-@@ -731,20 +850,23 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -731,20 +901,23 @@ public class ChunkTesselator : IMeshPoolSupplier
  			do
  			{
  				tCTCache.lz = num7;
@@ -302,7 +479,7 @@ index 42fad1f..3c536eb 100644
  			while (++num7 < 32);
  		}
  	}
-@@ -761,10 +883,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -761,10 +934,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				currentChunkDraw32[i] &= 223;
  			}
@@ -314,7 +491,7 @@ index 42fad1f..3c536eb 100644
  		for (int j = 0; j < 32; j++)
  		{
  			int num5 = (j + 1) * 34 + 1;
-@@ -838,18 +961,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -838,18 +1012,20 @@ public class ChunkTesselator : IMeshPoolSupplier
  			int num7 = num5 / 32 / 32;
  			int num8 = num5 / 32 % 32;
  			if (num6 * (num6 ^ num) * num7 * (num7 ^ num) * num8 * (num8 ^ num) == 0)
@@ -335,7 +512,7 @@ index 42fad1f..3c536eb 100644
  			tCTCache.index3d = num5;
  			Vec3i normali = blockFacing.Normali;
  			num7 += normali.Y;
-@@ -859,11 +984,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -859,11 +1035,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  			tCTCache.posY = num3 + num7;
  			tCTCache.posZ = num4 + num8;
  			tCTCache.finalY = num7;
@@ -348,7 +525,45 @@ index 42fad1f..3c536eb 100644
  			tCTCache.lz = num8;
  			int faceflags = 63 - blockFacing.Opposite.Flag;
  			tCTCache.decorSubPosition = DecorBits.SubpositionFromIndex(key);
-@@ -1013,11 +1138,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -927,20 +1103,31 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				tCTCache.preRotationMatrix = null;
+ 			}
+ 			if ((value.decorBehaviorFlags & 4) != 0 && ((num8 & 1) ^ (num6 & 1)) == 1)
+ 			{
+-				byte zOffset = value.VertexFlags.ZOffset;
+-				value.VertexFlags.ZOffset = (byte)(zOffset + 2);
+-				TesselateBlock(value, num6, faceflags, num2 + num6, num4 + num8, num9);
+-				value.VertexFlags.ZOffset = zOffset;
++				tCTCache.optimumDecorZOffsetActive = true;
++				try
++				{
++					TesselateBlock(value, num6, faceflags, num2 + num6, num4 + num8, num9);
++				}
++				finally
++				{
++					tCTCache.optimumDecorZOffsetActive = false;
++				}
+ 			}
+ 			else
+ 			{
+ 				tCTCache.isDecorTesselate = true;
+-				TesselateBlock(value, num6, faceflags, num2 + num6, num4 + num8, num9);
+-				tCTCache.isDecorTesselate = false;
++				try
++				{
++					TesselateBlock(value, num6, faceflags, num2 + num6, num4 + num8, num9);
++				}
++				finally
++				{
++					tCTCache.isDecorTesselate = false;
++				}
+ 			}
+ 			tCTCache.decorSubPosition = 0;
+ 			tCTCache.decorRotationData = 0;
+ 			tCTCache.preRotationMatrix = null;
+ 		}
+@@ -1013,16 +1200,21 @@ public class ChunkTesselator : IMeshPoolSupplier
  		vars.lx = lX;
  		vars.finalX = lX;
  		vars.finalY = vars.ly;
@@ -360,8 +575,243 @@ index 42fad1f..3c536eb 100644
  		vars.finalZ = vars.lz;
  		int num = (vars.blockId = block.BlockId);
  		vars.textureSubId = 0;
- 		vars.VertexFlags = block.VertexFlags.All;
-@@ -1194,16 +1319,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+-		vars.VertexFlags = block.VertexFlags.All;
++		int rawFlags = block.VertexFlags.All;
++		if (vars.optimumDecorZOffsetActive)
++		{
++			rawFlags = (rawFlags & -1793) | (((((rawFlags >> 8) & 7) + 2) & 7) << 8);
++		}
++		vars.VertexFlags = rawFlags;
+ 		vars.RenderPass = block.RenderPass;
+ 		vars.fastBlockTextureSubidsByFace = fastBlockTextureSubidsByBlockAndFace[num];
+ 		if (block.RandomDrawOffset != 0)
+ 		{
+ 			vars.finalX += (float)(GameMath.oaatHash(posX, 0, posZ) % 12) / (24f + 12f * (float)block.RandomDrawOffset);
+@@ -1097,93 +1289,169 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		}
+ 	}
+ 
+ 	private void BuildExtendedChunkData(ClientChunk curChunk, int chunkX, int chunkY, int chunkZ, bool atMapEdge, bool skipChunkCenter)
+ 	{
++		if (curChunk == null)
++		{
++			throw new RetryTesselationException("Null center chunk during tessellation");
++		}
+ 		int num = 34;
+ 		int count = game.Blocks.Count;
+ 		game.WorldMap.GetNeighbouringChunks(chunksNearby, chunkX, chunkY, chunkZ);
+ 		for (int num2 = 26; num2 >= 0; num2--)
+ 		{
+-			chunksNearby[num2].Unpack();
+-			chunkdatasNearby[num2] = (ClientChunkData)chunksNearby[num2].Data;
+-			chunkdatasNearby[num2].blocksLayer?.ClearPaletteOutsideMaxValue(count);
++			ClientChunk neighbor = chunksNearby[num2];
++			if (neighbor == null)
++			{
++				throw new RetryTesselationException("Null neighbor chunk during tessellation");
++			}
++			lock (neighbor.packUnpackLock)
++			{
++				if (neighbor.Disposed)
++				{
++					throw new RetryTesselationException("Neighbor chunk disposed during tessellation");
++				}
++				neighbor.Unpack();
++				neighbor.MarkFresh();
++				ClientChunkData ccd = (ClientChunkData)neighbor.Data;
++				if (ccd == null)
++				{
++					throw new RetryTesselationException("Neighbor chunk data null during tessellation");
++				}
++				ccd.blocksLayer?.ClearPaletteOutsideMaxValue(count);
++				chunkdatasNearby[num2] = ccd;
++			}
+ 		}
+-		chunkdatasNearby[13].BuildFastBlockAccessArray(blocksFast);
+ 		int num3 = num - 1;
+-		ClientChunkData clientChunkData = (ClientChunkData)curChunk.Data;
+ 		int num4 = 0;
+ 		int num5 = 1190;
+ 		int num6;
+-		if (skipChunkCenter)
++		lock (curChunk.packUnpackLock)
+ 		{
+-			for (int i = 0; i < 32; i++)
++			if (curChunk.Disposed)
++			{
++				throw new RetryTesselationException("Center chunk disposed during tessellation");
++			}
++			curChunk.Unpack();
++			curChunk.MarkFresh();
++			ClientChunkData clientChunkData = (ClientChunkData)curChunk.Data;
++			if (clientChunkData == null)
++			{
++				throw new RetryTesselationException("Center chunk data null during tessellation");
++			}
++			clientChunkData.BuildFastBlockAccessArray(blocksFast);
++			chunkdatasNearby[13] = clientChunkData;
++			if (skipChunkCenter)
+ 			{
+-				for (int j = 0; j < 32; j++)
++				for (int i = 0; i < 32; i++)
+ 				{
+-					num6 = (i * 34 + j) * 34 + num5;
+-					if ((i + 2) % 32 <= 3 || (j + 2) % 32 <= 3)
++					for (int j = 0; j < 32; j++)
+ 					{
+-						clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 32, blocksFast, lightConverter);
+-						num4 += 32;
+-						continue;
++						num6 = (i * 34 + j) * 34 + num5;
++						if ((i + 2) % 32 <= 3 || (j + 2) % 32 <= 3)
++						{
++							clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 32, blocksFast, lightConverter);
++							num4 += 32;
++							continue;
++						}
++						clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 2, blocksFast, lightConverter);
++						num6 += 30;
++						num4 += 30;
++						clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 2, blocksFast, lightConverter);
++						num4 += 2;
+ 					}
+-					clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 2, blocksFast, lightConverter);
+-					num6 += 30;
+-					num4 += 30;
+-					clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 2, blocksFast, lightConverter);
+-					num4 += 2;
+ 				}
+ 			}
+-		}
+-		else
+-		{
+-			for (int k = 0; k < 32; k++)
++			else
+ 			{
+-				for (int l = 0; l < 32; l++)
++				for (int k = 0; k < 32; k++)
+ 				{
+-					num6 = (k * 34 + l) * 34 + num5;
+-					clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 32, blocksFast, lightConverter);
+-					num4 += 32;
++					for (int l = 0; l < 32; l++)
++					{
++						num6 = (k * 34 + l) * 34 + num5;
++						clientChunkData.GetRange_Faster(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 32, blocksFast, lightConverter);
++						num4 += 32;
++					}
+ 				}
+ 			}
+ 		}
+-		num6 = -1;
+-		for (int m = 0; m < num; m++)
++		for (int chunkIdx = 0; chunkIdx < 27; chunkIdx++)
+ 		{
+-			bool flag = m == 0 || m == num3;
+-			for (int n = 0; n < num; n++)
++			if (chunkIdx == 13)
++			{
++				continue;
++			}
++			int xBand = chunkIdx / 9;
++			int yBand = (chunkIdx / 3) % 3;
++			int zBand = chunkIdx % 3;
++			int mStart = ((yBand == 0) ? 0 : ((yBand == 1) ? 1 : num3));
++			int mEnd = ((yBand == 1) ? num3 : (mStart + 1));
++			int nStart = ((zBand == 0) ? 0 : ((zBand == 1) ? 1 : num3));
++			int nEnd = ((zBand == 1) ? num3 : (nStart + 1));
++			ClientChunk nbChunk = chunksNearby[chunkIdx];
++			lock (nbChunk.packUnpackLock)
+ 			{
+-				bool num7 = n == 0 || n == num3;
+-				int num8 = ((!flag) ? 1 : ((m != 0) ? 2 : 0));
+-				int num9 = ((!num7) ? 1 : ((n != 0) ? 2 : 0));
+-				int num10 = (m - 1) & 0x1F;
+-				int num11 = (n - 1) & 0x1F;
+-				num4 = (num10 * 32 + num11) * 32;
+-				int num12 = num8 * 3 + num9;
+-				clientChunkData = chunkdatasNearby[num12];
+-				int one = clientChunkData.GetOne(out var lightOut, out var lightSatOut, out var fluidBlockId, num4 + 31);
+-				currentChunkBlocksExt[++num6] = blocksFast[one];
+-				currentChunkFluidBlocksExt[num6] = blocksFast[fluidBlockId];
+-				currentChunkRgbsExt[num6] = lightConverter.ToRgba(lightOut, lightSatOut);
+-				num12 += 9;
+-				if (num12 == 13)
++				if (nbChunk.Disposed)
++				{
++					throw new RetryTesselationException("Neighbor chunk disposed during border copy");
++				}
++				nbChunk.Unpack();
++				nbChunk.MarkFresh();
++				ClientChunkData nbData = (ClientChunkData)nbChunk.Data;
++				if (nbData == null)
+ 				{
+-					num6 += 32;
++					throw new RetryTesselationException("Neighbor chunk data null during border copy");
++				}
++				if (xBand == 0)
++				{
++					for (int m = mStart; m < mEnd; m++)
++					{
++						int num10 = (m - 1) & 0x1F;
++						for (int n = nStart; n < nEnd; n++)
++						{
++							int num11 = (n - 1) & 0x1F;
++							num4 = (num10 * 32 + num11) * 32;
++							int extIdx = (m * 34 + n) * 34;
++							int one = nbData.GetOne(out var lightOut, out var lightSatOut, out var fluidBlockId, num4 + 31);
++							currentChunkBlocksExt[extIdx] = blocksFast[one];
++							currentChunkFluidBlocksExt[extIdx] = blocksFast[fluidBlockId];
++							currentChunkRgbsExt[extIdx] = lightConverter.ToRgba(lightOut, lightSatOut);
++						}
++					}
++				}
++				else if (xBand == 1)
++				{
++					for (int m = mStart; m < mEnd; m++)
++					{
++						int num10 = (m - 1) & 0x1F;
++						for (int n = nStart; n < nEnd; n++)
++						{
++							int num11 = (n - 1) & 0x1F;
++							num4 = (num10 * 32 + num11) * 32;
++							int extBase = (m * 34 + n) * 34;
++							nbData.GetRange(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, extBase, num4, num4 + 32, blocksFast, lightConverter);
++						}
++					}
+ 				}
+ 				else
+ 				{
+-					clientChunkData = chunkdatasNearby[num12];
+-					clientChunkData.GetRange(currentChunkBlocksExt, currentChunkFluidBlocksExt, currentChunkRgbsExt, num6, num4, num4 + 32, blocksFast, lightConverter);
+-					num6 += 32;
++					for (int m = mStart; m < mEnd; m++)
++					{
++						int num10 = (m - 1) & 0x1F;
++						for (int n = nStart; n < nEnd; n++)
++						{
++							int num11 = (n - 1) & 0x1F;
++							num4 = (num10 * 32 + num11) * 32;
++							int extIdx = (m * 34 + n) * 34 + 33;
++							int one = nbData.GetOne(out var lightOut, out var lightSatOut, out var fluidBlockId, num4);
++							currentChunkBlocksExt[extIdx] = blocksFast[one];
++							currentChunkFluidBlocksExt[extIdx] = blocksFast[fluidBlockId];
++							currentChunkRgbsExt[extIdx] = lightConverter.ToRgba(lightOut, lightSatOut);
++						}
++					}
+ 				}
+-				num12 += 9;
+-				clientChunkData = chunkdatasNearby[num12];
+-				one = clientChunkData.GetOne(out lightOut, out lightSatOut, out fluidBlockId, num4);
+-				currentChunkBlocksExt[++num6] = blocksFast[one];
+-				currentChunkFluidBlocksExt[num6] = blocksFast[fluidBlockId];
+-				currentChunkRgbsExt[num6] = lightConverter.ToRgba(lightOut, lightSatOut);
+ 			}
+ 		}
+ 		for (int num13 = 0; num13 < currentChunkBlocksExt.Length; num13++)
+ 		{
+ 			if (currentChunkBlocksExt[num13] == null)
+@@ -1194,16 +1462,17 @@ public class ChunkTesselator : IMeshPoolSupplier
  	}
  
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]

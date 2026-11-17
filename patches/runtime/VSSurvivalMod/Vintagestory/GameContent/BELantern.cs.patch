@@ -1,0 +1,30 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs b/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
+index e9bdf82..cdcfec3 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
+@@ -71,17 +71,21 @@ public class BELantern : BlockEntity
+ 	{
+ 		if (!(Api.World.BlockAccessor.GetBlock(Pos) is BlockLantern blockLantern))
+ 		{
+ 			return null;
+ 		}
+-		Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(Api, blockLantern.baseCacheKey + "meshes", () => new Dictionary<string, MeshData>());
++		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, blockLantern.baseCacheKey + "meshes");
+ 		string text = blockLantern.LastCodePart();
+-		if (orCreate.TryGetValue(material + "-" + lining + "-" + text + "-" + glass, out var value))
++		string key = material + "-" + lining + "-" + text + "-" + glass;
++		lock (orCreate)
+ 		{
+-			return value;
++			if (orCreate.TryGetValue(key, out var value))
++			{
++				return value;
++			}
++			return orCreate[key] = blockLantern.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
+ 		}
+-		return orCreate[material + "-" + lining + "-" + text + "-" + glass] = blockLantern.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
+ 	}
+ 
+ 	public override void ToTreeAttributes(ITreeAttribute tree)
+ 	{
+ 		base.ToTreeAttributes(tree);

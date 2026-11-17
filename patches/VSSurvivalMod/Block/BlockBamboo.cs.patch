@@ -1,0 +1,59 @@
+diff --git a/VSSurvivalMod/Block/BlockBamboo.cs b/VSSurvivalMod/Block/BlockBamboo.cs
+index 659a658..c408d3c 100644
+--- a/VSSurvivalMod/Block/BlockBamboo.cs
++++ b/VSSurvivalMod/Block/BlockBamboo.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+@@ -227,29 +228,38 @@ namespace Vintagestory.GameContent
+             applyWindSwayToMesh(decalMesh, enableWind, pos, windDir);
+ 
+             base.OnDecalTesselation(world, decalMesh, pos);
+         }
+ 
++        [ThreadStatic]
++        private static Vec3i optimumWindDir;
++
+         Vec3i windDir = new Vec3i();
+ 
+         public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+         {
+             bool enableWind = (lightRgbsByCorner[24] >> 24 & 0xff) >= 159;  // corresponds with a sunlight level of less than 14
+-            windDir.X = Math.Sign(GlobalConstants.CurrentWindSpeedClient.X);
+-            windDir.Z = 0;// Math.Sign(GlobalConstants.CurrentWindSpeedClient.Z);
++            Vec3i localWindDir = optimumWindDir ?? (optimumWindDir = new Vec3i());
++            localWindDir.X = Math.Sign(GlobalConstants.CurrentWindSpeedClient.X);
++            localWindDir.Z = 0;// Math.Sign(GlobalConstants.CurrentWindSpeedClient.Z);
+ 
+-            applyWindSwayToMesh(sourceMesh, enableWind, pos, windDir);
++            applyWindSwayToMesh(sourceMesh, enableWind, pos, localWindDir);
+         }
+ 
+         private void applyWindSwayToMesh(MeshData sourceMesh, bool enableWind, BlockPos pos, Vec3i windDir)
+         {
+             if (lockFreeBa == null) return;
+ 
+-            if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out int[]? origFlags))
++            int[]? origFlags;
++            lock (windModeByFlagCount)
+             {
+-                origFlags = windModeByFlagCount[sourceMesh.FlagsCount] = new int[sourceMesh.FlagsCount];
+-                for (int i = 0; i < origFlags.Length; i++) origFlags[i] = sourceMesh.Flags[i] & VertexFlags.WindModeBitsMask;
++                if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out origFlags))
++                {
++                    int[] computed = new int[sourceMesh.FlagsCount];
++                    for (int i = 0; i < computed.Length; i++) computed[i] = sourceMesh.Flags[i] & VertexFlags.WindModeBitsMask;
++                    windModeByFlagCount[sourceMesh.FlagsCount] = origFlags = computed;
++                }
+             }
+ 
+             bool sideDisableWindWaveDown = false;
+ 
+             // For bamboo poles, only check the block below - unlike leaves, these don't attach to solid blocks on all sides

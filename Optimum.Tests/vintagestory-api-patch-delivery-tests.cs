@@ -20,6 +20,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
         {
             ["Client/API/ICoreClientAPI.cs.patch"] = ["PatchClientApiThreadContract"],
             ["Client/MeshPool/MeshDataPoolMasterManager.cs.patch"] = ["PatchMeshDataPoolLifecycle"],
+            ["Client/MeshPool/MeshDataRecycler.cs.patch"] = ["PatchMeshDataRecycler"],
             ["Client/Render/FrustumCulling.cs.patch"] = ["PatchFrustumCulling"],
             ["Client/Texture/LoadedTexture.cs.patch"] = ["PatchLoadedTextureDisposal"],
             ["Client/UI/CairoFont.cs.patch"] = ["PatchFontMeasurementMetrics"],
@@ -45,6 +46,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Math/ColorUtil.cs.patch"] = ["PatchColorUtil"],
             ["Math/EvolvingNatFloat.cs.patch"] = ["PatchEvolvingNatFloat"],
             ["Math/Matrix/Mat4f.cs.patch"] = ["PatchMat4fInlining"],
+            ["Util/ObjectCacheUtil.cs.patch"] = ["PatchObjectCacheUtil"],
             ["Util/WildcardUtil.cs.patch"] = ["PatchWildcardUtil"],
         };
 
@@ -70,7 +72,6 @@ public sealed class VintagestoryApiPatchDeliveryTests
         {
             ["Client/MeshPool/MeshDataPool.cs.patch"] = "Legacy unshipped hunks (#539/#542/#547 pool bounds/cullData/telemetry); #613 TryAdd/Dispose and #606 front-to-back sort shipped via ApiPatcher.",
             ["Client/MeshPool/MeshDataPoolManager.cs.patch"] = "Legacy unshipped hunks (render pass diagnostics); #613 manager binding and #606 front-to-back sort shipped via ApiPatcher.",
-            ["Client/MeshPool/MeshDataRecycler.cs.patch"] = "Legacy unshipped patch (#489 TTL eviction).",
             ["Client/Model/Mesh/MeshData.cs.patch"] = "Legacy unshipped patch (#494 custom attribute stride/indexing).",
             ["Client/UI/Dialog/GuiDialog.cs.patch"] = "Legacy unshipped patch (skip disabled composers).",
             ["Client/UI/Elements/Impl/Interactive/Controls/GuiElementHorizontalTabs.cs.patch"] = "Legacy unshipped patch (Font.GetTextExtents migration).",

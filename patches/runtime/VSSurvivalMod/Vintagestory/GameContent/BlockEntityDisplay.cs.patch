@@ -1,0 +1,101 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityDisplay.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityDisplay.cs
+index 00fbb8a..64a51d5 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityDisplay.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityDisplay.cs
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+@@ -63,11 +64,11 @@ public abstract class BlockEntityDisplay : BlockEntityContainer, ITexPositionSou
+ 		}
+ 	}
+ 
+ 	protected virtual string slotType => "default";
+ 
+-	protected Dictionary<string, MeshData> MeshCache => ObjectCacheUtil.GetOrCreate(Api, "meshesDisplay-" + ClassCode, () => new Dictionary<string, MeshData>());
++	protected Dictionary<string, MeshData> MeshCache => OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "meshesDisplay-" + ClassCode);
+ 
+ 	protected TextureAtlasPosition getOrCreateTexPos(AssetLocation texturePath)
+ 	{
+ 		TextureAtlasPosition texPos = capi.BlockTextureAtlas[texturePath];
+ 		if (texPos == null && !capi.BlockTextureAtlas.GetOrInsertTexture(texturePath, out var _, out texPos))
+@@ -99,16 +100,20 @@ public abstract class BlockEntityDisplay : BlockEntityContainer, ITexPositionSou
+ 		if (Pos.DistanceTo(pos.X, pos.Y, pos.Z) > 20f)
+ 		{
+ 			return;
+ 		}
+ 		int displayedItems = DisplayedItems;
+-		for (int i = 0; i < displayedItems; i++)
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		lock (meshCache)
+ 		{
+-			if (Inventory[i].Itemstack != null)
++			for (int i = 0; i < displayedItems; i++)
+ 			{
+-				string meshCacheKey = getMeshCacheKey(Inventory[i]);
+-				MeshCache.Remove(meshCacheKey);
++				if (Inventory[i].Itemstack != null)
++				{
++					string meshCacheKey = getMeshCacheKey(Inventory[i]);
++					meshCache.Remove(meshCacheKey);
++				}
+ 			}
+ 		}
+ 		MarkMeshesDirty();
+ 		Api.World.BlockAccessor.MarkBlockDirty(Pos);
+ 	}
+@@ -167,12 +172,16 @@ public abstract class BlockEntityDisplay : BlockEntityContainer, ITexPositionSou
+ 	}
+ 
+ 	protected MeshData getMesh(ItemSlot slot)
+ 	{
+ 		string meshCacheKey = getMeshCacheKey(slot);
+-		MeshCache.TryGetValue(meshCacheKey, out var value);
+-		return value;
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		lock (meshCache)
++		{
++			meshCache.TryGetValue(meshCacheKey, out var value);
++			return value;
++		}
+ 	}
+ 
+ 	protected virtual MeshData getOrCreateMesh(ItemSlot slot, int index)
+ 	{
+ 		MeshData meshData = getMesh(slot);
+@@ -184,10 +193,11 @@ public abstract class BlockEntityDisplay : BlockEntityContainer, ITexPositionSou
+ 		CompositeShape customShape = stack.Collectible.Attributes?["displayedShape"].AsObject<CompositeShape>(null, stack.Collectible.Code.Domain);
+ 		if (customShape != null)
+ 		{
+ 			string key = "displayedShape-" + customShape.ToString();
+ 			meshData = ObjectCacheUtil.GetOrCreate(capi, key, () => capi.TesselatorManager.CreateMesh("displayed item shape", customShape, (Shape shape, string name) => new ContainedTextureSource(capi, capi.BlockTextureAtlas, shape.Textures, $"For displayed item {stack.Collectible.Code}")));
++			meshData = meshData?.Clone();
+ 		}
+ 		else
+ 		{
+ 			IContainedMeshSource containedMeshSource = stack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
+ 			if (containedMeshSource != null)
+@@ -199,11 +209,15 @@ public abstract class BlockEntityDisplay : BlockEntityContainer, ITexPositionSou
+ 		{
+ 			meshData = getDefaultMesh(stack);
+ 		}
+ 		applyDefaultTranforms(stack, meshData);
+ 		string meshCacheKey = getMeshCacheKey(slot);
+-		MeshCache[meshCacheKey] = meshData;
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		lock (meshCache)
++		{
++			meshCache[meshCacheKey] = meshData;
++		}
+ 		return meshData;
+ 	}
+ 
+ 	protected void applyDefaultTranforms(ItemStack stack, MeshData mesh)
+ 	{

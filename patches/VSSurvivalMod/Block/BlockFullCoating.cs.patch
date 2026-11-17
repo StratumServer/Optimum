@@ -1,0 +1,100 @@
+diff --git a/VSSurvivalMod/Block/BlockFullCoating.cs b/VSSurvivalMod/Block/BlockFullCoating.cs
+index f83fdb9..a9a7bed 100644
+--- a/VSSurvivalMod/Block/BlockFullCoating.cs
++++ b/VSSurvivalMod/Block/BlockFullCoating.cs
+@@ -1,7 +1,8 @@
+ ﻿using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+@@ -42,23 +43,38 @@ namespace Vintagestory.GameContent
+         {
+             capi = api as ICoreClientAPI;
+             base.OnLoaded(api);
+         }
+ 
++        private object optimumCoatingMeshLock;
++
++        private object GetCoatingMeshLock()
++        {
++            object obj = Volatile.Read(ref optimumCoatingMeshLock);
++            if (obj != null) return obj;
++            Interlocked.CompareExchange(ref optimumCoatingMeshLock, new object(), null);
++            return Volatile.Read(ref optimumCoatingMeshLock);
++        }
++
+         public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+         {
+-            if (sludgeMeshByNESWFlag == null) genMeshes();
++            var dict = Volatile.Read(ref sludgeMeshByNESWFlag);
++            if (dict == null)
++            {
++                genMeshes();
++                dict = Volatile.Read(ref sludgeMeshByNESWFlag);
++            }
+ 
+             string flags = getNESWFlag(chunkExtBlocks, extIndex3d);
+ 
+             if (cornersByNEWSFlag.TryGetValue(flags, out var corners))
+             {
+                 string cornerFlags = getCornerFlags(corners, chunkExtBlocks, extIndex3d);
+                 if (cornerFlags.Length > 0) flags += "-cornercut-" + cornerFlags;
+             }
+ 
+-            if (sludgeMeshByNESWFlag.TryGetValue(flags, out var mesh))
++            if (dict.TryGetValue(flags, out var mesh))
+             {
+                 sourceMesh = mesh;
+                 return;
+             }
+ 
+@@ -82,25 +98,34 @@ namespace Vintagestory.GameContent
+             return cornerflags;
+         }
+ 
+         private void genMeshes()
+         {
+-            sludgeMeshByNESWFlag = new Dictionary<string, MeshData>();
+-
+-            var sludgeShapeByNESWFlag = Attributes["shapeByOrient"].AsObject<Dictionary<string, CompositeShape>>();
+-
+-            foreach (var val in sludgeShapeByNESWFlag)
++            lock (GetCoatingMeshLock())
+             {
+-                var shape = capi.Assets.TryGet(val.Value.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
+-                if (shape == null)
++                if (Volatile.Read(ref sludgeMeshByNESWFlag) != null)
+                 {
+-                    api.Logger.Warning("Smooth texture transition shape for block {0}: Shape {1} not found. Block will be invisible.", Code.Path, val.Value.Base);
+-                    continue;
++                    return;
++                }
++                var dict = new Dictionary<string, MeshData>();
++
++                var sludgeShapeByNESWFlag = Attributes["shapeByOrient"].AsObject<Dictionary<string, CompositeShape>>();
++
++                foreach (var val in sludgeShapeByNESWFlag)
++                {
++                    var shape = capi.Assets.TryGet(val.Value.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
++                    if (shape == null)
++                    {
++                        api.Logger.Warning("Smooth texture transition shape for block {0}: Shape {1} not found. Block will be invisible.", Code.Path, val.Value.Base);
++                        continue;
++                    }
++
++                    capi.Tesselator.TesselateShape(this, shape, out var mesh, new Vec3f(val.Value.rotateX, val.Value.rotateY, val.Value.rotateZ));
++                    dict[val.Key] = mesh;
+                 }
+ 
+-                capi.Tesselator.TesselateShape(this, shape, out var mesh, new Vec3f(val.Value.rotateX, val.Value.rotateY, val.Value.rotateZ));
+-                sludgeMeshByNESWFlag[val.Key] = mesh;
++                Volatile.Write(ref sludgeMeshByNESWFlag, dict);
+             }
+         }
+ 
+         public string getNESWFlag(Block[] chunkExtBlocks, int extIndex3d)
+         {

@@ -1,0 +1,84 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockShapeMaterialFromAttributes.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockShapeMaterialFromAttributes.cs
+index db79e63..6f63703 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockShapeMaterialFromAttributes.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockShapeMaterialFromAttributes.cs
+@@ -101,37 +101,73 @@ public class BlockShapeMaterialFromAttributes : Block, IHandbookGrouping
+ 		};
+ 	}
+ 
+ 	public virtual MeshData GetOrCreateMesh(string? type, string? material, string? cachekeyextra = null, ITexPositionSource? overrideTexturesource = null)
+ 	{
+-		Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(api, MeshKey, () => new Dictionary<string, MeshData>());
++		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(api, MeshKey);
+ 		ICoreClientAPI capi = (ICoreClientAPI)api;
+ 		string key = type + "-" + material + cachekeyextra;
+-		if (overrideTexturesource != null || !orCreate.TryGetValue(key, out var value))
++		MeshData value = null;
++		bool flag = false;
++		if (overrideTexturesource == null)
++		{
++			lock (orCreate)
++			{
++				flag = orCreate.TryGetValue(key, out value);
++			}
++		}
++		if (!flag)
+ 		{
+ 			CompositeShape compositeShape = Cshape.Clone();
+ 			compositeShape.Base.Path = compositeShape.Base.Path.Replace("{type}", type).Replace("{material}", material);
+ 			value = capi.TesselatorManager.CreateMesh(string.Concat(Code, " block"), compositeShape, (Shape shape, string name) => new ShapeTextureSource(capi, shape, name, TexturesBSMFA, (string p) => p.Replace("{type}", type).Replace("{material}", material)), overrideTexturesource);
+ 			if (overrideTexturesource == null)
+ 			{
+-				orCreate[key] = value;
++				lock (orCreate)
++				{
++					if (!orCreate.TryGetValue(key, out var existing))
++					{
++						orCreate[key] = value;
++					}
++					else
++					{
++						value = existing;
++					}
++				}
+ 			}
+ 		}
+ 		return value;
+ 	}
+ 
+ 	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+ 	{
+ 		base.OnBeforeRender(capi, itemstack, target, ref renderinfo);
+-		Dictionary<string, MultiTextureMeshRef> orCreate = ObjectCacheUtil.GetOrCreate(capi, MeshKeyInventory, () => new Dictionary<string, MultiTextureMeshRef>());
++		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, MeshKeyInventory);
+ 		string text = itemstack.Attributes.GetString("type", "");
+ 		string text2 = itemstack.Attributes.GetString("material", "");
+ 		string key = text + "-" + text2;
+-		if (!orCreate.TryGetValue(key, out var value))
++		MultiTextureMeshRef value;
++		lock (orCreate)
++		{
++			orCreate.TryGetValue(key, out value);
++		}
++		if (value == null)
+ 		{
+ 			MeshData orCreateMesh = GetOrCreateMesh(text, text2);
+-			value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(orCreateMesh));
++			value = capi.Render.UploadMultiTextureMesh(orCreateMesh);
++			lock (orCreate)
++			{
++				if (!orCreate.TryGetValue(key, out var existing))
++				{
++					orCreate[key] = value;
++				}
++				else
++				{
++					value.Dispose();
++					value = existing;
++				}
++			}
+ 		}
+ 		renderinfo.ModelRef = value;
+ 	}
+ 
+ 	public override bool DoPlaceBlock(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ItemStack byItemStack)

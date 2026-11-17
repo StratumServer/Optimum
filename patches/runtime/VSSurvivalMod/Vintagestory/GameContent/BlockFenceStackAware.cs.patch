@@ -1,0 +1,38 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
+index 9f882ee..ee90b8f 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
+@@ -26,14 +26,19 @@ public class BlockFenceStackAware : BlockFence
+ 		}
+ 	}
+ 
+ 	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+ 	{
+-		if (chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[4]] is BlockFence)
++		if (!(chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[4]] is BlockFence) || continousFenceMeches == null)
+ 		{
+-			int num = GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, 8) + 1;
+-			if (!continousFenceMeches.TryGetValue(cntCode + num, out var value))
++			return;
++		}
++		int num = GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, 8) + 1;
++		MeshData value;
++		lock (continousFenceMeches)
++		{
++			if (!continousFenceMeches.TryGetValue(cntCode + num, out value))
+ 			{
+ 				AssetLocation assetLocation = Shape.Base.Clone();
+ 				assetLocation.Path = assetLocation.Path.Replace("-top", "");
+ 				assetLocation.WithPathAppendixOnce(".json");
+ 				assetLocation.WithPathPrefixOnce("shapes/");
+@@ -43,9 +48,9 @@ public class BlockFenceStackAware : BlockFence
+ 				compositeTexture.Baked.TextureSubId = compositeTexture.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, compositeTexture.Alternates.Length)].TextureSubId;
+ 				capi.Tesselator.TesselateShape(this, shape, out value, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), Shape.QuantityElements, Shape.SelectiveElements);
+ 				compositeTexture.Baked.TextureSubId = textureSubId;
+ 				continousFenceMeches[cntCode] = value;
+ 			}
+-			sourceMesh = value;
+ 		}
++		sourceMesh = value;
+ 	}
+ }

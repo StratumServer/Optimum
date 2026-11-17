@@ -1,0 +1,83 @@
+diff --git a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorDisplay.cs b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorDisplay.cs
+index b34d6ef..a8580b5 100644
+--- a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorDisplay.cs
++++ b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorDisplay.cs
+@@ -37,11 +37,11 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+     public ItemStack DisplayStack => displayStack;
+ 
+     public InventoryInfinite InventoryInv => inventory;
+ 
+     protected bool meshesGenerated = false;
+-    protected Dictionary<string, MeshData> MeshCache => ObjectCacheUtil.GetOrCreate(Api, "meshesDisplay-" + ClassCode, () => new Dictionary<string, MeshData>());
++    protected Dictionary<string, MeshData> MeshCache => OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "meshesDisplay-" + ClassCode);
+ 
+     public Dictionary<string, float[]> TfMatrices = new Dictionary<string, float[]>();
+     public Dictionary<string, float> customRotationDegBySlot = null;
+     public float MeshAngleRad { get; set; }
+ 
+@@ -133,11 +133,15 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+         {
+             if (collObj.Attributes == null) collObj.Attributes = new JsonObject(new JObject());
+             collObj.Attributes.Token["displayable"]["shelf"]["transform"] = JToken.FromObject(ModelTransform.CreateFromTreeAttribute(data as TreeAttribute));
+         }
+ 
+-        MeshCache.Clear();
++        var cache = MeshCache;
++        lock (cache)
++        {
++            cache.Clear();
++        }
+         MarkMeshesDirty(Api.World);
+         Api.World.BlockAccessor.MarkBlockDirty(Pos);   // always redraw on client after updating meshes
+     }
+ 
+ 
+@@ -620,10 +624,11 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+                         }
+                         return new ContainedTextureSource(capi, capi.BlockTextureAtlas, textures, string.Format("For displayed item {0}", collObj.Code));
+                     },
+                     null
+             ));
++            mesh = mesh?.Clone();
+         }
+         else
+         {
+             var meshSource = collObj?.GetCollectibleInterface<IContainedMeshSource>();
+             mesh = meshSource?.GenMesh(slot, capi.BlockTextureAtlas, Pos);
+@@ -633,11 +638,16 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+         {
+             mesh = getDefaultMesh(slot);
+         }
+ 
+         applyDefaultTranforms(slot, mesh);
+-        MeshCache[getMeshCacheKey(slot)] = mesh;
++        var cache = MeshCache;
++        string cacheKey = getMeshCacheKey(slot);
++        lock (cache)
++        {
++            cache[cacheKey] = mesh;
++        }
+         return mesh;
+     }
+ 
+     protected void applyDefaultTranforms(ItemSlotDisplay slot, MeshData mesh)
+     {
+@@ -685,12 +695,16 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+     }
+ 
+     protected MeshData getCachedMesh(ItemSlot slot)
+     {
+         string key = getMeshCacheKey(slot);
+-        MeshCache.TryGetValue(key, out var meshdata);
+-        return meshdata;
++        var cache = MeshCache;
++        lock (cache)
++        {
++            cache.TryGetValue(key, out var meshdata);
++            return meshdata;
++        }
+     }
+ 
+     protected virtual string getMeshCacheKey(ItemSlot slot)
+     {
+         var meshSource = slot.Itemstack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();

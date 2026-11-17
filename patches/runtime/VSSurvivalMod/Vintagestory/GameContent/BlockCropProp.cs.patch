@@ -1,0 +1,38 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
+index 772364b..2191873 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
+@@ -47,21 +47,24 @@ public class BlockCropProp : Block, ITexPositionSource
+ 		base.OnUnloaded(api);
+ 	}
+ 
+ 	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+ 	{
+-		Dictionary<string, MultiTextureMeshRef> orCreate = ObjectCacheUtil.GetOrCreate(capi, "croprop-meshes", () => new Dictionary<string, MultiTextureMeshRef>());
++		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, "croprop-meshes");
+ 		string key = itemstack.Attributes.GetString("type", "unknown");
+-		if (orCreate.TryGetValue(key, out var value))
++		lock (orCreate)
+ 		{
+-			renderinfo.ModelRef = value;
+-		}
+-		else
+-		{
+-			nowTesselatingType = key;
+-			capi.Tesselator.TesselateShape("croppropinv", Code, Shape, out var modeldata, this, 0, 0, 0);
+-			orCreate[key] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(modeldata));
++			if (orCreate.TryGetValue(key, out var value))
++			{
++				renderinfo.ModelRef = value;
++			}
++			else
++			{
++				OptimumCropPropInvTexSource texSource = new OptimumCropPropInvTexSource(capi, key);
++				capi.Tesselator.TesselateShape("croppropinv", Code, Shape, out var modeldata, texSource, 0, 0, 0);
++				orCreate[key] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(modeldata));
++			}
+ 		}
+ 		base.OnBeforeRender(capi, itemstack, target, ref renderinfo);
+ 	}
+ 
+ 	public override string GetPlacedBlockName(IWorldAccessor world, BlockPos pos)
