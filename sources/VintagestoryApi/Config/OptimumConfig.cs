@@ -275,6 +275,7 @@ public static class OptimumConfig
     public static bool GlFinalizerReclaimEnabled = true;
     public static bool MeshPoolReclaimEnabled = true;
     public static bool FrontToBackChunkSortEnabled = true;
+    public static bool ChunkFaceBucketCullEnabled = true;
     public static bool SsaoDepthPositionEnabled = true;
 
     public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
@@ -1338,6 +1339,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GlFinalizerReclaim), GlFinalizerReclaimEnabled.ToString()),
         (nameof(OptimumConfigData.MeshPoolReclaim), MeshPoolReclaimEnabled.ToString()),
         (nameof(OptimumConfigData.FrontToBackChunkSort), FrontToBackChunkSortEnabled.ToString()),
+        (nameof(OptimumConfigData.ChunkFaceBucketCull), ChunkFaceBucketCullEnabled.ToString()),
         (nameof(OptimumConfigData.SsaoDepthPosition), SsaoDepthPositionEnabled.ToString()),
     };
 
@@ -1466,6 +1468,7 @@ public static class OptimumConfig
             GlFinalizerReclaimEnabled = data.GlFinalizerReclaim;
             MeshPoolReclaimEnabled = data.MeshPoolReclaim;
             FrontToBackChunkSortEnabled = data.FrontToBackChunkSort;
+            ChunkFaceBucketCullEnabled = data.ChunkFaceBucketCull;
             SsaoDepthPositionEnabled = data.SsaoDepthPosition;
         }
         catch (Exception)
@@ -1557,6 +1560,7 @@ public static class OptimumConfig
             GlFinalizerReclaim = GlFinalizerReclaimEnabled,
             MeshPoolReclaim = MeshPoolReclaimEnabled,
             FrontToBackChunkSort = FrontToBackChunkSortEnabled,
+            ChunkFaceBucketCull = ChunkFaceBucketCullEnabled,
             SsaoDepthPosition = SsaoDepthPositionEnabled,
         };
 
@@ -1672,6 +1676,7 @@ internal sealed class OptimumConfigData
     public bool GlFinalizerReclaim { get; set; } = true;
     public bool MeshPoolReclaim { get; set; } = true;
     public bool FrontToBackChunkSort { get; set; } = true;
+    public bool ChunkFaceBucketCull { get; set; } = true;
     public bool SsaoDepthPosition { get; set; } = true;
 }
 
@@ -2618,6 +2623,7 @@ public static class OptimumDiagnostics
         ResetWorldgenPassTiming();
         ResetMeshPoolReclaimCounters();
         ResetChunkDrawSortCounters();
+        ResetChunkFaceBucketCullCounters();
         ResetSsaoDepthPositionDiagnostics();
         ResetDynamicRenderScaleDiagnostics();
     }
@@ -3445,6 +3451,48 @@ public static class OptimumDiagnostics
     public static string GetFrontToBackSortSummary()
     {
         return $"Optimum front-to-back chunk sort: enabled={OptimumConfig.FrontToBackChunkSortEnabled}, calls={ChunkSortCalls}, poolsOrdered={ChunkSortPoolsOrdered}, spansSorted={ChunkSortSpansSorted}";
+    }
+
+    private static long _chunkFaceBucketTrisKept;
+    private static long _chunkFaceBucketTrisCulled;
+    private static long _chunkFaceBucketSpansEmitted;
+
+    public static long ChunkFaceBucketTrisKept => Interlocked.Read(ref _chunkFaceBucketTrisKept);
+    public static long ChunkFaceBucketTrisCulled => Interlocked.Read(ref _chunkFaceBucketTrisCulled);
+    public static long ChunkFaceBucketSpansEmitted => Interlocked.Read(ref _chunkFaceBucketSpansEmitted);
+
+    public static void RecordChunkFaceBucketCull(long keptTris, long culledTris, int spansEmitted)
+    {
+        if (keptTris > 0)
+        {
+            Interlocked.Add(ref _chunkFaceBucketTrisKept, keptTris);
+        }
+        if (culledTris > 0)
+        {
+            Interlocked.Add(ref _chunkFaceBucketTrisCulled, culledTris);
+        }
+        if (spansEmitted > 0)
+        {
+            Interlocked.Add(ref _chunkFaceBucketSpansEmitted, spansEmitted);
+        }
+    }
+
+    public static void ResetChunkFaceBucketCullCounters()
+    {
+        Interlocked.Exchange(ref _chunkFaceBucketTrisKept, 0);
+        Interlocked.Exchange(ref _chunkFaceBucketTrisCulled, 0);
+        Interlocked.Exchange(ref _chunkFaceBucketSpansEmitted, 0);
+    }
+
+    public static string GetChunkFaceBucketCullSummary()
+    {
+        long kept = ChunkFaceBucketTrisKept;
+        long culled = ChunkFaceBucketTrisCulled;
+        long total = kept + culled;
+        double cullPct = total > 0 ? (culled * 100.0) / total : 0.0;
+        return string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"Optimum chunk face bucket cull: enabled={OptimumConfig.ChunkFaceBucketCullEnabled}, keptTris={kept}, culledTris={culled}, cullPct={cullPct:0.0}%, spansEmitted={ChunkFaceBucketSpansEmitted}");
     }
 
     private static int _ssaoDepthPositionDropped;

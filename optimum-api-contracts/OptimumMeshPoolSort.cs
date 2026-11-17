@@ -62,6 +62,7 @@ public static class OptimumMeshPoolSort
     [ThreadStatic] private static ulong[]? t_spanSortKeys;
     [ThreadStatic] private static int[]? t_spanStartsScratch;
     [ThreadStatic] private static int[]? t_spanSizesScratch;
+    [ThreadStatic] private static int[]? t_visibleIndicesScratch;
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "pools")]
     private static extern ref List<MeshDataPool> GetManagerPools(MeshDataPoolManager manager);
@@ -276,7 +277,8 @@ public static class OptimumMeshPoolSort
         string originUniformName,
         EnumFrustumCullMode frustumCullMode)
     {
-        if (frustumCullMode != EnumFrustumCullMode.CullNormal || !IsOpaqueEarlyZSortActive)
+        if (frustumCullMode != EnumFrustumCullMode.CullNormal ||
+            (!IsOpaqueEarlyZSortActive && !OptimumChunkFaceBuckets.IsOpaqueFaceCullActive))
         {
             return false;
         }
@@ -405,15 +407,23 @@ public static class OptimumMeshPoolSort
 
     /// <summary>
     /// Vanilla API IL-patched entry point for <see cref="MeshDataPool.FrustumCull"/>.
-    /// Returns <see langword="false"/> for non-opaque or non-<see cref="EnumFrustumCullMode.CullNormal"/> calls.
+    /// Returns <see langword="false"/> for non-<see cref="EnumFrustumCullMode.CullNormal"/> calls
+    /// when neither front-to-back sort nor chunk face bucket culling is active.
     /// </summary>
     public static bool TryFrustumCullSortedOpaque(
         MeshDataPool pool,
         FrustumCulling? frustumCuller,
         EnumFrustumCullMode frustumCullMode)
     {
-        if (frustumCullMode != EnumFrustumCullMode.CullNormal ||
-            !TryGetCameraPosition(frustumCuller, out float camX, out float camY, out float camZ))
+        if (frustumCullMode != EnumFrustumCullMode.CullNormal)
+        {
+            return false;
+        }
+
+        bool doSort = TryGetCameraPosition(frustumCuller, out float camX, out float camY, out float camZ);
+        bool doBucketCull = OptimumChunkFaceBuckets.TryGetActiveCullCamera(
+            GetPoolDimensionId(pool), out double cullCamX, out double cullCamY, out double cullCamZ);
+        if (!doSort && !doBucketCull)
         {
             return false;
         }
@@ -429,11 +439,9 @@ public static class OptimumMeshPoolSort
             return true;
         }
 
-        float[] spanDistSq = EnsureSpanDistanceScratch(count);
-        int[] startsByte = pool.indicesStartsByte;
-        int[] sizes = pool.indicesSizes;
+        float[]? spanDistSq = doSort ? EnsureSpanDistanceScratch(count) : null;
+        int[] visibleIndices = EnsureVisibleIndicesScratch(count);
         int visibleCount = 0;
-        int renderedTris = 0;
         int allocatedTris = 0;
 
         for (int i = 0; i < count; i++)
@@ -444,27 +452,62 @@ public static class OptimumMeshPoolSort
 
             if (location.IsVisible(EnumFrustumCullMode.CullNormal, frustumCuller))
             {
-                startsByte[visibleCount * 2] = location.IndicesStart * 4;
-                sizes[visibleCount] = size;
-
-                Sphere sphere = location.FrustumCullSphere;
-                float dx = sphere.x - camX;
-                float dy = sphere.y - camY;
-                float dz = sphere.z - camZ;
-                spanDistSq[visibleCount] = dx * dx + dy * dy + dz * dz;
-
-                renderedTris += size / 3;
+                visibleIndices[visibleCount] = i;
+                if (doSort)
+                {
+                    Sphere sphere = location.FrustumCullSphere;
+                    float dx = sphere.x - camX;
+                    float dy = sphere.y - camY;
+                    float dz = sphere.z - camZ;
+                    spanDistSq![visibleCount] = dx * dx + dy * dy + dz * dz;
+                }
                 visibleCount++;
             }
         }
 
-        pool.indicesGroupsCount = visibleCount;
+        if (doSort && visibleCount > 1)
+        {
+            ulong[] keys = EnsureSpanKeyScratch(visibleCount);
+            for (int k = 0; k < visibleCount; k++)
+            {
+                keys[k] = ((ulong)SingleToSortableUInt(spanDistSq![k]) << 32) | (uint)visibleIndices[k];
+            }
+            SortKeys(keys, visibleCount);
+            for (int k = 0; k < visibleCount; k++)
+            {
+                visibleIndices[k] = (int)(uint)keys[k];
+            }
+            OptimumDiagnostics.RecordChunkDrawSort(0, visibleCount);
+        }
+
+        int emittedGroups = 0;
+        int renderedTris = 0;
+        long keptTrisAcc = 0;
+        long culledTrisAcc = 0;
+
+        for (int k = 0; k < visibleCount; k++)
+        {
+            ModelDataPoolLocation location = poolLocations[visibleIndices[k]];
+            OptimumChunkFaceBuckets.EmitLocationSpans(
+                pool,
+                location,
+                doBucketCull,
+                cullCamX,
+                cullCamY,
+                cullCamZ,
+                ref emittedGroups,
+                ref renderedTris,
+                ref keptTrisAcc,
+                ref culledTrisAcc);
+        }
+
+        pool.indicesGroupsCount = emittedGroups;
         pool.RenderedTriangles = renderedTris;
         pool.AllocatedTris = allocatedTris;
 
-        if (visibleCount > 1)
+        if (doBucketCull && (keptTrisAcc > 0 || culledTrisAcc > 0))
         {
-            SortVisibleSpans(startsByte, sizes, spanDistSq, visibleCount);
+            OptimumDiagnostics.RecordChunkFaceBucketCull(keptTrisAcc, culledTrisAcc, emittedGroups);
         }
 
         return true;
@@ -638,5 +681,14 @@ public static class OptimumMeshPoolSort
             t_spanSizesScratch = new int[Math.Max(n, 256)];
         }
         return t_spanSizesScratch;
+    }
+
+    private static int[] EnsureVisibleIndicesScratch(int n)
+    {
+        if (t_visibleIndicesScratch == null || t_visibleIndicesScratch.Length < n)
+        {
+            t_visibleIndicesScratch = new int[Math.Max(n, 256)];
+        }
+        return t_visibleIndicesScratch;
     }
 }

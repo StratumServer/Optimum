@@ -97,6 +97,7 @@ public class OptimumDiagnosticsCountersTests
         OptimumDiagnostics.RecordDynamicRenderScaleStep(isDownscale: true);
         OptimumDiagnostics.RecordDynamicRenderScaleCacheHit();
         OptimumDiagnostics.RecordDynamicRenderScaleFsrFallback();
+        OptimumDiagnostics.RecordChunkFaceBucketCull(42, 18, 3);
         OptimumDiagnostics.ResetAllCounters();
 
         string summary = OptimumDiagnostics.GetDynamicRenderScaleSummary();
@@ -104,6 +105,12 @@ public class OptimumDiagnosticsCountersTests
         Assert.Contains("downscales=0", summary);
         Assert.Contains("cacheHits=0", summary);
         Assert.Contains("fsrFallbacks=0", summary);
+
+        string bucketSummary = OptimumDiagnostics.GetChunkFaceBucketCullSummary();
+        Assert.Contains("keptTris=0", bucketSummary);
+        Assert.Contains("culledTris=0", bucketSummary);
+        Assert.Contains("cullPct=0.0%", bucketSummary);
+        Assert.Contains("spansEmitted=0", bucketSummary);
     }
 
     // Step 6 of the worker-pool wiring plan: OptimumTesselationWorkerRegistry.Register
