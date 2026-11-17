@@ -254,6 +254,7 @@ public static class OptimumChunkStreamStats
 
     private static long chunksSent;
     private static long poolAllocations;
+    private static long poolReclamations;
     private static long uploadedChunks;
     private static long tessBaseline;
     private static long framesOver33;
@@ -272,6 +273,8 @@ public static class OptimumChunkStreamStats
     public static long ChunksSent => Interlocked.Read(ref chunksSent);
 
     public static long PoolAllocations => Interlocked.Read(ref poolAllocations);
+
+    public static long PoolReclamations => Interlocked.Read(ref poolReclamations);
 
     public static long UploadedChunks => Interlocked.Read(ref uploadedChunks);
 
@@ -387,6 +390,14 @@ public static class OptimumChunkStreamStats
         if (Enabled)
         {
             Interlocked.Increment(ref poolAllocations);
+        }
+    }
+
+    public static void RecordPoolReclamation()
+    {
+        if (Enabled)
+        {
+            Interlocked.Increment(ref poolReclamations);
         }
     }
 
@@ -547,6 +558,7 @@ public static class OptimumChunkStreamStats
         ChunksSentPerCall.Reset();
         Interlocked.Exchange(ref chunksSent, 0);
         Interlocked.Exchange(ref poolAllocations, 0);
+        Interlocked.Exchange(ref poolReclamations, 0);
         Interlocked.Exchange(ref uploadedChunks, 0);
         Interlocked.Exchange(ref tessBaseline, OptimumDiagnostics.TessChunksProcessed);
         Interlocked.Exchange(ref framesOver33, 0);
@@ -641,6 +653,7 @@ public static class OptimumChunkStreamStats
             .Append(", tessellated=").Append(tessellated)
             .Append(", tessPerSent=").Append(ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture))
             .Append(", poolAllocs=").Append(PoolAllocations)
+            .Append(", poolReclaims=").Append(PoolReclamations)
             .Append(", pacerBudget=").Append(OptimumInflowPacer.Shared.Budget)
             .Append(", pacerPhase=").Append(OptimumInflowPacer.Shared.Phase)
             .Append(", pacerCuts=").Append(OptimumInflowPacer.Shared.Decreases)
@@ -693,6 +706,7 @@ public static class OptimumChunkStreamStats
         values["stream.chunksSent.count"] = ChunksSent;
         values["stream.chunksUploaded.count"] = UploadedChunks;
         values["stream.poolAllocations.count"] = PoolAllocations;
+        values["stream.poolReclamations.count"] = PoolReclamations;
         values["stream.pacer.budget.count"] = OptimumInflowPacer.Shared.Budget;
         values["stream.pacer.decreases.count"] = OptimumInflowPacer.Shared.Decreases;
         values["stream.pacer.increases.count"] = OptimumInflowPacer.Shared.Increases;

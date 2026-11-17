@@ -461,6 +461,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
         sb.AppendLine(OptimumDiagnostics.GetGcPauseSummary());
         sb.AppendLine(OptimumDiagnostics.GetGlReclaimSummary());
+        sb.AppendLine(OptimumDiagnostics.GetMeshPoolReclaimSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }

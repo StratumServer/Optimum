@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..9786c31 100644
+index f9128b4..48fc331 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -1,7 +1,8 @@
@@ -51,6 +51,19 @@ index f9128b4..9786c31 100644
              // 
              pool.indicesStartsByte = new int[maxPartsPerPool * 2];
              
+@@ -161,11 +173,11 @@ namespace Vintagestory.API.Client
+         /// <param name="dimension"></param>
+         /// <param name="frustumCullSphere">The culling sphere.</param>
+         /// <returns>The location of the model (and the data) in the pool.</returns>
+         public ModelDataPoolLocation TryAdd(ICoreClientAPI capi, MeshData modeldata, Vec3i modelOrigin, int dimension, Sphere frustumCullSphere)
+         {
+-            if (poolLocations.Count >= MaxPartsPerPool || dimension != this.dimensionId) return null;
++            if (!Vintagestory.API.Config.OptimumMeshPoolLifecycle.CanAcceptAndPrepareDimension(this, dimension)) return null;
+ 
+             // Can't add a model data to far away from our baseposition, otherwise our floating point positions
+             // become too inaccurate
+             if (poolOrigin != null)
+             {
 @@ -280,11 +292,15 @@ namespace Vintagestory.API.Client
              {
                  modeldata.CustomInts.BaseOffset = vertexPosition * modeldata.CustomInts.InterleaveStride;
@@ -504,6 +517,19 @@ index f9128b4..9786c31 100644
                  ModelDataPoolLocation location = poolLocations[i];
  
                  int size = location.IndicesEnd - location.IndicesStart;
+@@ -423,11 +771,11 @@ namespace Vintagestory.API.Client
+         /// Disposes of the current mesh pool.
+         /// </summary>
+         /// <param name="capi">The core client API</param>
+         public void Dispose(ICoreClientAPI capi)
+         {
+-            capi.Render.DeleteMesh(modelRef);
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.DisposePool(this, capi);
+         }
+ 
+         /// <summary>
+         /// Calculates the current fragmentation of the mesh.
+         /// </summary>
 @@ -462,11 +810,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }

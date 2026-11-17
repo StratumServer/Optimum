@@ -19,6 +19,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
         new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
             ["Client/API/ICoreClientAPI.cs.patch"] = ["PatchClientApiThreadContract"],
+            ["Client/MeshPool/MeshDataPoolMasterManager.cs.patch"] = ["PatchMeshDataPoolLifecycle"],
             ["Client/Render/FrustumCulling.cs.patch"] = ["PatchFrustumCulling"],
             ["Client/Texture/LoadedTexture.cs.patch"] = ["PatchLoadedTextureDisposal"],
             ["Client/UI/CairoFont.cs.patch"] = ["PatchFontMeasurementMetrics"],
@@ -67,9 +68,8 @@ public sealed class VintagestoryApiPatchDeliveryTests
     private static readonly IReadOnlyDictionary<string, string> AuditedLegacyUnshippedGaps =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Client/MeshPool/MeshDataPool.cs.patch"] = "Legacy unshipped patch (#539/#542/#547 pool bounds/cullData/telemetry).",
-            ["Client/MeshPool/MeshDataPoolManager.cs.patch"] = "Legacy unshipped patch (render pass diagnostics).",
-            ["Client/MeshPool/MeshDataPoolMasterManager.cs.patch"] = "Legacy unshipped patch (frame diagnostics).",
+            ["Client/MeshPool/MeshDataPool.cs.patch"] = "Legacy unshipped hunks (#539/#542/#547 pool bounds/cullData/telemetry); #613 TryAdd/Dispose fixes shipped via PatchMeshDataPoolLifecycle.",
+            ["Client/MeshPool/MeshDataPoolManager.cs.patch"] = "Legacy unshipped hunks (render pass diagnostics); #613 manager binding shipped via PatchMeshDataPoolLifecycle.",
             ["Client/MeshPool/MeshDataRecycler.cs.patch"] = "Legacy unshipped patch (#489 TTL eviction).",
             ["Client/Model/Mesh/MeshData.cs.patch"] = "Legacy unshipped patch (#494 custom attribute stride/indexing).",
             ["Client/UI/Dialog/GuiDialog.cs.patch"] = "Legacy unshipped patch (skip disabled composers).",

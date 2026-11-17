@@ -211,6 +211,12 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 LoadedTexture disposal/finalizer patches, applied {loadedTextureDisposals}.");
         }
+        int meshPoolLifecyclePatches = PatchMeshDataPoolLifecycle(vanilla.MainModule, contracts.MainModule);
+        if (meshPoolLifecyclePatches != 10)
+        {
+            throw new InvalidOperationException(
+                $"Expected 10 MeshDataPool lifecycle patches, applied {meshPoolLifecyclePatches}.");
+        }
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int inventorySearchPatches = PatchInventorySearch(
             vanilla.MainModule,
@@ -407,6 +413,7 @@ public static class ApiPatcher
                 $"{colorUtilMethods} ColorUtil scalar incandescence + RGBA methods, " +
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{guiTextureDisposals} GUI texture disposals, " +
+                $"{meshPoolLifecyclePatches} MeshDataPool lifecycle hooks, " +
                 $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
                 $"{inventorySearchPatches} inventory search optimizations, " +
                 $"{guiHoverTextPatches} hover text same-text skips, " +
@@ -1274,6 +1281,261 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {textureTypeName}.Dispose + Finalize -> OptimumApiBridge");
         return 2;
+    }
+
+    internal static int PatchMeshDataPoolLifecycle(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string lifecycleTypeName = "Vintagestory.API.Config.OptimumMeshPoolLifecycle";
+        const string masterTypeName = "Vintagestory.API.Client.MeshDataPoolMasterManager";
+        const string managerTypeName = "Vintagestory.API.Client.MeshDataPoolManager";
+        const string poolTypeName = "Vintagestory.API.Client.MeshDataPool";
+
+        var lifecycle = contracts.GetType(lifecycleTypeName)
+            ?? throw new InvalidOperationException($"{lifecycleTypeName} is missing from the contracts assembly.");
+        var masterType = module.GetType(masterTypeName)
+            ?? throw new InvalidOperationException($"{masterTypeName} is missing from the vanilla API.");
+        var managerType = module.GetType(managerTypeName)
+            ?? throw new InvalidOperationException($"{managerTypeName} is missing from the vanilla API.");
+        var poolType = module.GetType(poolTypeName)
+            ?? throw new InvalidOperationException($"{poolTypeName} is missing from the vanilla API.");
+
+        int patched = 0;
+
+        string[] masterForwarders =
+        [
+            "AddModelDataPool",
+            "RemoveDataPoolLocations",
+            "OnFrame",
+            "RemoveLocationsNow",
+            "DisposeAllPools",
+            "CalcFragmentation",
+            "QuantityModelDataPools",
+        ];
+
+        foreach (string methodName in masterForwarders)
+        {
+            var targetMethod = masterType.Methods.SingleOrDefault(m => m.Name == methodName)
+                ?? throw new InvalidOperationException($"{masterTypeName}.{methodName} is missing from the vanilla API.");
+            var bridgeMethod = lifecycle.Methods.SingleOrDefault(m =>
+                m.IsStatic && m.Name == methodName && m.Parameters.Count == targetMethod.Parameters.Count + 1)
+                ?? throw new InvalidOperationException($"{lifecycleTypeName}.{methodName} helper is missing.");
+            if (methodName == "OnFrame")
+            {
+                var diagnosticsType = contracts.GetType("Vintagestory.API.Config.OptimumDiagnostics")
+                    ?? throw new InvalidOperationException("Vintagestory.API.Config.OptimumDiagnostics is missing from the contracts assembly.");
+                var recordFrame = diagnosticsType.Methods.SingleOrDefault(m =>
+                    m.IsStatic && m.Name == "RecordChunkRenderFrame" && m.Parameters.Count == 0)
+                    ?? throw new InvalidOperationException("OptimumDiagnostics.RecordChunkRenderFrame() helper is missing.");
+                RewriteInstanceForwarder(targetMethod, module.ImportReference(bridgeMethod), module.ImportReference(recordFrame));
+            }
+            else
+            {
+                RewriteInstanceForwarder(targetMethod, module.ImportReference(bridgeMethod));
+            }
+            patched++;
+        }
+
+        // MeshDataPool.Dispose(ICoreClientAPI) -> OptimumMeshPoolLifecycle.DisposePool
+        var poolDispose = poolType.Methods.SingleOrDefault(m => m.Name == "Dispose" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{poolTypeName}.Dispose(ICoreClientAPI) is missing from the vanilla API.");
+        var disposeBridge = lifecycle.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "DisposePool" && m.Parameters.Count == 2)
+            ?? throw new InvalidOperationException($"{lifecycleTypeName}.DisposePool helper is missing.");
+        RewriteInstanceForwarder(poolDispose, module.ImportReference(disposeBridge));
+        patched++;
+
+        // MeshDataPool.TryAdd(capi, modeldata, modelOrigin, dimension, frustumCullSphere)
+        var tryAdd = poolType.Methods.SingleOrDefault(m => m.Name == "TryAdd" && m.Parameters.Count == 5)
+            ?? throw new InvalidOperationException($"{poolTypeName}.TryAdd is missing from the vanilla API.");
+        var canAcceptBridge = module.ImportReference(lifecycle.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "CanAcceptAndPrepareDimension" && m.Parameters.Count == 2)
+            ?? throw new InvalidOperationException($"{lifecycleTypeName}.CanAcceptAndPrepareDimension helper is missing."));
+        patched += PatchMeshDataPoolTryAdd(tryAdd, canAcceptBridge);
+
+        // MeshDataPoolManager.AddModel -> BindPoolManager after pools.Add(pool)
+        var addModel = managerType.Methods.SingleOrDefault(m => m.Name == "AddModel" && m.Parameters.Count == 4)
+            ?? throw new InvalidOperationException($"{managerTypeName}.AddModel is missing from the vanilla API.");
+        var masterPoolField = managerType.Fields.SingleOrDefault(f => f.Name == "masterPool")
+            ?? throw new InvalidOperationException($"{managerTypeName}.masterPool field is missing.");
+        var bindPoolBridge = module.ImportReference(lifecycle.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "BindPoolManager" && m.Parameters.Count == 3)
+            ?? throw new InvalidOperationException($"{lifecycleTypeName}.BindPoolManager helper is missing."));
+        patched += PatchMeshDataPoolManagerAddModel(addModel, masterPoolField, bindPoolBridge);
+
+        Console.WriteLine(
+            $"  API PATCHED: {masterTypeName}/{managerTypeName}/{poolTypeName} lifecycle ({patched} patches) -> OptimumMeshPoolLifecycle");
+        return patched;
+    }
+
+    private static void RewriteInstanceForwarder(
+        MethodDefinition target,
+        MethodReference bridgeMethod,
+        MethodReference? prologueCall = null)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(target);
+        var body = new MethodBody(target)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        if (prologueCall != null)
+        {
+            processor.Append(Instruction.Create(OpCodes.Call, prologueCall));
+        }
+        processor.Append(Instruction.Create(OpCodes.Ldarg_0));
+        for (int i = 0; i < target.Parameters.Count; i++)
+        {
+            processor.Append(Instruction.Create(OpCodes.Ldarg, target.Parameters[i]));
+        }
+        processor.Append(Instruction.Create(OpCodes.Call, bridgeMethod));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        target.Body = body;
+    }
+
+    private static int PatchMeshDataPoolTryAdd(MethodDefinition tryAdd, MethodReference canAcceptBridge)
+    {
+        if (!tryAdd.HasBody)
+        {
+            throw new InvalidOperationException($"{tryAdd.FullName} has no method body.");
+        }
+
+        var instructions = tryAdd.Body.Instructions;
+        if (instructions.Any(ins =>
+                ins.OpCode == OpCodes.Call &&
+                ins.Operand is MethodReference callee &&
+                callee.Name == canAcceptBridge.Name &&
+                callee.DeclaringType.FullName == canAcceptBridge.DeclaringType.FullName))
+        {
+            return 1;
+        }
+
+        ClearDebugInformation(tryAdd);
+
+        int beqIndex = -1;
+        for (int i = 1; i + 2 < instructions.Count; i++)
+        {
+            if ((instructions[i].OpCode == OpCodes.Beq || instructions[i].OpCode == OpCodes.Beq_S) &&
+                instructions[i - 1].OpCode == OpCodes.Ldfld &&
+                instructions[i - 1].Operand is FieldReference dimField &&
+                dimField.Name == "dimensionId" &&
+                instructions[i + 1].OpCode == OpCodes.Ldnull &&
+                instructions[i + 2].OpCode == OpCodes.Ret)
+            {
+                beqIndex = i;
+                break;
+            }
+        }
+
+        if (beqIndex < 0 || instructions[beqIndex].Operand is not Instruction continueTarget)
+        {
+            throw new InvalidOperationException(
+                $"{tryAdd.FullName}: could not locate initial poolLocations/dimensionId guard.");
+        }
+
+        var dimensionParam = tryAdd.Parameters[3];
+        if (dimensionParam.ParameterType.MetadataType != MetadataType.Int32)
+        {
+            throw new InvalidOperationException(
+                $"{tryAdd.FullName}: expected int32 dimension parameter at index 3, found {dimensionParam.ParameterType.FullName}.");
+        }
+
+        var toRemove = new Instruction[beqIndex + 1];
+        for (int i = 0; i <= beqIndex; i++)
+        {
+            toRemove[i] = instructions[i];
+        }
+
+        var processor = tryAdd.Body.GetILProcessor();
+        var anchor = toRemove[0];
+        processor.InsertBefore(anchor, Instruction.Create(OpCodes.Ldarg_0));
+        processor.InsertBefore(anchor, Instruction.Create(OpCodes.Ldarg, dimensionParam));
+        processor.InsertBefore(anchor, Instruction.Create(OpCodes.Call, canAcceptBridge));
+        processor.InsertBefore(anchor, Instruction.Create(OpCodes.Brtrue, continueTarget));
+
+        foreach (var ins in toRemove)
+        {
+            processor.Remove(ins);
+        }
+
+        return 1;
+    }
+
+    private static int PatchMeshDataPoolManagerAddModel(
+        MethodDefinition addModel,
+        FieldDefinition masterPoolField,
+        MethodReference bindPoolBridge)
+    {
+        if (!addModel.HasBody)
+        {
+            throw new InvalidOperationException($"{addModel.FullName} has no method body.");
+        }
+
+        var instructions = addModel.Body.Instructions;
+        if (instructions.Any(ins =>
+                ins.OpCode == OpCodes.Call &&
+                ins.Operand is MethodReference callee &&
+                callee.Name == bindPoolBridge.Name &&
+                callee.DeclaringType.FullName == bindPoolBridge.DeclaringType.FullName))
+        {
+            return 1;
+        }
+
+        ClearDebugInformation(addModel);
+
+        int poolsAddIndex = -1;
+        VariableDefinition? poolLocal = null;
+        for (int i = 2; i < instructions.Count; i++)
+        {
+            if (instructions[i].OpCode == OpCodes.Callvirt &&
+                instructions[i].Operand is MethodReference callee &&
+                callee.Name == "Add" &&
+                callee.DeclaringType.FullName.Contains("List`1<Vintagestory.API.Client.MeshDataPool>", StringComparison.Ordinal) &&
+                TryReadLdloc(instructions[i - 1], addModel, out var localVar))
+            {
+                poolsAddIndex = i;
+                poolLocal = localVar;
+                break;
+            }
+        }
+
+        if (poolsAddIndex < 0 || poolLocal == null)
+        {
+            throw new InvalidOperationException(
+                $"{addModel.FullName}: could not locate pools.Add(MeshDataPool) site.");
+        }
+
+        var processor = addModel.Body.GetILProcessor();
+        var addInstruction = instructions[poolsAddIndex];
+        var callBind = Instruction.Create(OpCodes.Call, bindPoolBridge);
+        processor.InsertAfter(addInstruction, callBind);
+        processor.InsertBefore(callBind, Instruction.Create(OpCodes.Ldarg_0));
+        processor.InsertBefore(callBind, Instruction.Create(OpCodes.Ldfld, masterPoolField));
+        processor.InsertBefore(callBind, Instruction.Create(OpCodes.Ldloc, poolLocal));
+        processor.InsertBefore(callBind, Instruction.Create(OpCodes.Ldarg_0));
+
+        return 1;
+    }
+
+    private static bool TryReadLdloc(Instruction instruction, MethodDefinition method, out VariableDefinition? variable)
+    {
+        var vars = method.Body.Variables;
+        if (instruction.OpCode == OpCodes.Ldloc_0 && vars.Count > 0) { variable = vars[0]; return true; }
+        if (instruction.OpCode == OpCodes.Ldloc_1 && vars.Count > 1) { variable = vars[1]; return true; }
+        if (instruction.OpCode == OpCodes.Ldloc_2 && vars.Count > 2) { variable = vars[2]; return true; }
+        if (instruction.OpCode == OpCodes.Ldloc_3 && vars.Count > 3) { variable = vars[3]; return true; }
+        if ((instruction.OpCode == OpCodes.Ldloc || instruction.OpCode == OpCodes.Ldloc_S) &&
+            instruction.Operand is VariableDefinition def)
+        {
+            variable = def;
+            return true;
+        }
+        variable = null;
+        return false;
     }
 
     internal static int PatchGuiTextureDisposal(
