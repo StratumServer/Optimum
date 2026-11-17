@@ -186,6 +186,9 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
         "RegisterOptimumShaderProgram",
+        "VerifyOptimumSsaoDepthContracts",
+        "HasOptimumSsaoDepthContract",
+        "DowngradeOptimumSsaoDepthPrefixes",
     },
     ["Vintagestory.Client.NoObf.SystemRenderOITLayers"] = new()
     {
@@ -768,6 +771,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "DisableOptimumFsr", 1),
     // R4: pass the configured god-rays sample limit to the post-process shader.
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderPostprocessingEffects", 1),
+    // Issue #609: skip dropped gPosition attachment on clear, blend, and fbdeb preview.
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "ClearFrameBuffer", 1,
+        new[] { "Vintagestory.API.Client.EnumFrameBuffer" }),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "GlToggleBlend", 2,
+        new[] { "System.Boolean", "Vintagestory.API.Client.EnumBlendMode" }),
+    new("Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug", "OnRenderFrame2DOverlay", 1),
     // Issue #75 Tier 1: GPU indirect draw submission (glMultiDrawElementsIndirect)
     new("Vintagestory.Client.NoObf.ClientPlatformWindows", "RenderMesh", 5,
         new[] { "Vintagestory.API.Client.MeshRef", "System.Int32[]", "System.Int32[]", "System.Int32", "System.Boolean" }),

@@ -22,7 +22,16 @@ public static class ShaderCompatibilityScanner
     private static readonly string[] ShaderFeatures =
     [
         "GreedyMesh", "RenderScale", "GodRaysSampleCap", "EntityLightBatch",
-        "EntityShaderStateCache", "Oit", "MapPageCache", "ShaderPreprocessParallel"
+        "EntityShaderStateCache", "Oit", "MapPageCache", "ShaderPreprocessParallel",
+        "SsaoDepthPosition"
+    ];
+
+    private static readonly string[] SsaoDepthShaders =
+    [
+        "ssao.fsh", "chunkopaque.fsh", "chunktopsoil.fsh", "standard.fsh",
+        "entityanimated.fsh", "instanced.fsh", "particlescube.fsh",
+        "celestialobject.fsh", "helditem.fsh", "sky.fsh", "nightsky.fsh",
+        "transparentcompose.fsh"
     ];
 
     private static readonly (string Token, string Name)[] IndicatorTokens =
@@ -416,6 +425,11 @@ public static class ShaderCompatibilityScanner
             GetMods(report, HasShaderHooks).Concat(GetShaderMods(report, "cloudvolumetric.fsh")));
         AddFeatureDecision(report, "MapPageCache", externalShaderAssets || externalShaderHooks,
             "external shader assets or shader hooks can dispose registered programs during reload", GetSources(report, HasShaderAssetsOrHooks), GetMods(report, HasShaderAssetsOrHooks));
+        bool ssaoShaderOverride = SsaoDepthShaders.Any(name => HasExternalShader(report, name));
+        AddFeatureDecision(report, "SsaoDepthPosition", externalShaderHooks || ssaoShaderOverride,
+            "SSAO depth position reconstruction requires compatible G-buffer and SSAO shader contracts",
+            GetSources(report, HasShaderHooks).Concat(GetShaderSources(report, SsaoDepthShaders)),
+            GetMods(report, HasShaderHooks).Concat(GetShaderMods(report, SsaoDepthShaders)));
 
         if (report.ScanFailed)
         {
@@ -514,9 +528,11 @@ public static class ShaderCompatibilityScanner
         indicator is "ShaderRegistry" or "LoadShader" or "ShaderProgram" or "Harmony" or "RenderHook";
 
     private static bool IsOptimumShader(string shader) =>
-        shader is "assets/game/shaders/chunkliquid.fsh" or "assets/game/shaders/chunkopaque.fsh" or
+        shader is "assets/game/shaders/chunkliquid.fsh" or
         "assets/game/shaders/chunkopaque.vsh" or "assets/game/shaders/final.fsh" or
-        "assets/game/shaders/godrays.fsh" or "assets/game/shaders/cloudvolumetric.fsh";
+        "assets/game/shaders/godrays.fsh" or "assets/game/shaders/cloudvolumetric.fsh" ||
+        (shader.StartsWith("assets/game/shaders/", StringComparison.Ordinal) &&
+         SsaoDepthShaders.Contains(shader["assets/game/shaders/".Length..], StringComparer.Ordinal));
 
     private static bool IsOptimumSource(string path, string gameDir)
     {
