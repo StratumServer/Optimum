@@ -149,8 +149,10 @@ public static class Program
             return AbortLaunch(gameDir, cache, ex.Message);
         }
 
+        CacheManifest? activeManifest = null;
         if (validationResult.IsValid && validationResult.Manifest is not null)
         {
+            activeManifest = validationResult.Manifest;
             // Cache hit - fast path
             var elapsed = sw.ElapsedMilliseconds;
             Logger.Log($"[Optimum] Cache valid ({elapsed}ms). Launching...");
@@ -175,7 +177,7 @@ public static class Program
             try
             {
                 patchExitCode = RunPatching(
-                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly);
+                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly, out activeManifest);
             }
             catch (Exception ex)
             {
@@ -251,7 +253,7 @@ public static class Program
 
         try
         {
-            return LaunchGame(args, cacheDir, gameDir, cache, dataPath);
+            return LaunchGame(args, cacheDir, gameDir, cache, dataPath, activeManifest);
         }
         catch (Exception ex)
         {
@@ -279,8 +281,10 @@ public static class Program
         string cacheDir,
         CacheManager cache,
         Stopwatch sw,
-        bool showSplash)
+        bool showSplash,
+        out CacheManifest? rebuiltManifest)
     {
+        rebuiltManifest = null;
         Logger.Log($"[Optimum] Optimum v{Version}");
         Logger.Log($"[Optimum] Applying optimizations...");
         Logger.Log();
@@ -426,15 +430,23 @@ public static class Program
             return AbortLaunch(gameDir, cache, failureReason);
         }
 
-        cache.CreateManifest(patchedTargets);
+        rebuiltManifest = cache.CreateManifest(patchedTargets);
         Logger.Log();
         Logger.Log($"[Optimum] Done in {sw.ElapsedMilliseconds}ms. Cached for next launch.");
         Logger.Log();
         return null;
     }
 
-    private static int LaunchGame(string[] args, string cacheDir, string gameDir, CacheManager cache, string dataPath)
+    private static int LaunchGame(
+        string[] args,
+        string cacheDir,
+        string gameDir,
+        CacheManager cache,
+        string dataPath,
+        CacheManifest? manifest = null)
     {
+        using var jitProfile = JitProfileManager.TryStart(gameDir, dataPath, Version, manifest, args);
+
         // --- Load patched assemblies and launch the game ---
         using var loader = new AssemblyLoader(cacheDir, gameDir);
         loader.Register();
