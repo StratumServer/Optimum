@@ -470,10 +470,12 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "tmpPos",
     },
-    // TesselatedChunkPart: carry chisel LOD distance choice into pool locations
+    // TesselatedChunkPart: carry chisel LOD distance choice into pool locations + mirrored edge LOD upload
     ["Vintagestory.Client.NoObf.TesselatedChunkPart"] = new()
     {
         "optimumUseChiselLodDistance",
+        "AddToPools",
+        "UploadLodSlot",
     },
     // ICoreClientAPI.IsTesselationThread implementations (patches/VintagestoryApi/Client/API/
     // ICoreClientAPI.cs.patch adds the interface member; every implementer needs a body or the
@@ -1226,6 +1228,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SurfaceLayerTesselator", "Tesselate", 1),
     new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "Tesselate", 1),
     new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "DoMeshWithBleeding", 3),
+    new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddToPools", 6),
     new("Vintagestory.Client.NoObf.TesselatedChunkPart", "AddModelAndStoreLocation", 8),
     // Eco Machina anchors its tapered-tree transpiler on this method's local slots.
     new("Vintagestory.Client.NoObf.ChunkTesselator", "CalculateVisibleFaces", 4),
