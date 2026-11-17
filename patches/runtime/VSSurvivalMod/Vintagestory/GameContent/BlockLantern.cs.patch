@@ -1,0 +1,66 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
+index a7c0784..50400c0 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
+@@ -167,21 +167,25 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
+ 		return base.GetLightHsv(blockAccessor, pos, stack);
+ 	}
+ 
+ 	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+ 	{
+-		Dictionary<string, MultiTextureMeshRef> orCreate = ObjectCacheUtil.GetOrCreate(capi, baseCacheKey + "GuiMeshRefs", () => new Dictionary<string, MultiTextureMeshRef>());
++		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, baseCacheKey + "GuiMeshRefs");
+ 		string text = itemstack.Attributes.GetString("material");
+ 		string text2 = itemstack.Attributes.GetString("lining");
+ 		string text3 = itemstack.Attributes.GetString("glass", "quartz");
+ 		string key = text + "-" + text2 + "-" + text3;
+-		if (!orCreate.TryGetValue(key, out var value))
++		MultiTextureMeshRef value;
++		lock (orCreate)
+ 		{
+-			AssetLocation shapePath = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+-			Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
+-			MeshData data = GenMesh(capi, text, text2, text3, shape);
+-			value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(data));
++			if (!orCreate.TryGetValue(key, out value))
++			{
++				AssetLocation shapePath = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
++				Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
++				MeshData data = GenMesh(capi, text, text2, text3, shape);
++				value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(data));
++			}
+ 		}
+ 		renderinfo.ModelRef = value;
+ 		renderinfo.CullFaces = false;
+ 	}
+ 
+@@ -202,25 +206,23 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
+ 	{
+ 		if (tesselator == null)
+ 		{
+ 			tesselator = capi.Tesselator;
+ 		}
+-		tmpTextureSource = tesselator.GetTextureSource(this);
++		ITexPositionSource textureSource = tesselator.GetTextureSource(this);
+ 		if (shape == null)
+ 		{
+ 			shape = Vintagestory.API.Common.Shape.TryGet(capi, "shapes/" + Shape.Base.Path + ".json");
+ 		}
+ 		if (shape == null)
+ 		{
+ 			return null;
+ 		}
+-		AtlasSize = capi.BlockTextureAtlas.Size;
+-		curMat = material;
+-		curLining = lining;
+ 		Block block = capi.World.GetBlock(new AssetLocation("glass-" + glassMaterial));
+-		glassTextureSource = tesselator.GetTextureSource(block);
+-		tesselator.TesselateShape("blocklantern", shape, out var modeldata, this, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), 0, 0, 0);
++		ITexPositionSource textureSource2 = tesselator.GetTextureSource(block);
++		OptimumLanternTexSource texSource = new OptimumLanternTexSource(capi.BlockTextureAtlas.Size, textureSource, textureSource2, material, lining);
++		tesselator.TesselateShape("blocklantern", shape, out var modeldata, texSource, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), 0, 0, 0);
+ 		return modeldata;
+ 	}
+ 
+ 	public override bool DoPlaceBlock(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ItemStack byItemStack)
+ 	{

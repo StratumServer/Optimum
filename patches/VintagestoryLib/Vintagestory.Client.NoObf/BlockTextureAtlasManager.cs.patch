@@ -1,0 +1,18 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/BlockTextureAtlasManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/BlockTextureAtlasManager.cs
+index 8279657..0d27c0b 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/BlockTextureAtlasManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/BlockTextureAtlasManager.cs
+@@ -298,10 +298,11 @@ public class BlockTextureAtlasManager(ClientMain game) : TextureAtlasManager(gam
+ 	}
+ 
+ 	public override TextureAtlas RuntimeCreateNewAtlas(string itemclass)
+ 	{
+ 		TextureAtlas textureAtlas = base.RuntimeCreateNewAtlas(itemclass);
+-		int[] textureIds = game.TerrainChunkTesselator.RuntimeCreateNewBlockTextureAtlas(textureAtlas.textureId);
+-		game.chunkRenderer.RuntimeAddBlockTextureAtlas(textureIds);
++		int[] textureIds = SnapshotAtlasTextureIds();
++		game.chunkRenderer?.RuntimeAddBlockTextureAtlas(textureIds);
++		game.ChunkTesselatorManager?.OnRuntimeAtlasAdded(textureIds);
+ 		return textureAtlas;
+ 	}
+ }

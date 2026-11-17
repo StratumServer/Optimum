@@ -1,0 +1,82 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
+index 5212420..48d013d 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Common.Entities;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+@@ -305,16 +306,18 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 			_ = chunkX * ClientChunkSize / ServerChunkSize / MapRegionSizeInChunks;
+ 			_ = chunkZ * ClientChunkSize / ServerChunkSize / MapRegionSizeInChunks;
+ 			game.WorldMap.MapRegions.TryGetValue(key, out var value);
+ 			if (value == null || value.ClimateMap == null || value.ClimateMap.InnerSize <= 0)
+ 			{
+-				if (placeHolderClimateMap == null)
++				int[] placeholder = Volatile.Read(ref placeHolderClimateMap);
++				if (placeholder == null)
+ 				{
+-					placeHolderClimateMap = GC.AllocateUninitializedArray<int>(RegionSize * RegionSize);
+-					placeHolderClimateMap.Fill(11842740);
++					placeholder = GC.AllocateUninitializedArray<int>(RegionSize * RegionSize);
++					placeholder.Fill(11842740);
++					Volatile.Write(ref placeHolderClimateMap, placeholder);
+ 				}
+-				return placeHolderClimateMap;
++				return placeholder;
+ 			}
+ 			array = GameMath.BiLerpColorMap(value.ClimateMap, RegionSize / value.ClimateMap.InnerSize);
+ 			lock (LerpedClimateMapsLock)
+ 			{
+ 				LerpedClimateMaps[key] = array;
+@@ -721,10 +724,14 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 		value.shouldSunRelight |= relight;
+ 		if (!relight)
+ 		{
+ 			value.FinishLightDoubleBuffering();
+ 		}
++		if (!value.OptimumRecordDirty(priority, edgeOnly))
++		{
++			return;
++		}
+ 		if (priority)
+ 		{
+ 			lock (game.dirtyChunksPriorityLock)
+ 			{
+ 				if (edgeOnly)
+@@ -772,11 +779,16 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 		if (value == null)
+ 		{
+ 			return;
+ 		}
+ 		int quantityDrawn = value.quantityDrawn;
+-		if (value.enquedForRedraw)
++		if (sunRelight)
++		{
++			value.shouldSunRelight = true;
++		}
++		bool enqueueNow = value.OptimumRecordDirty(priority, edgeOnly);
++		if (value.enquedForRedraw || !enqueueNow)
+ 		{
+ 			if (OnRetesselated != null)
+ 			{
+ 				game.eventManager?.RegisterOnChunkRetesselated(new Vec3i(cx, cy, cz), quantityDrawn, OnRetesselated);
+ 			}
+@@ -784,11 +796,10 @@ public sealed class ClientWorldMap : WorldMap, IChunkProvider, ILandClaimAPI
+ 			{
+ 				game.api.eventapi.TriggerChunkDirty(new Vec3i(cx, cy, cz), value, EnumChunkDirtyReason.MarkedDirty);
+ 			}
+ 			return;
+ 		}
+-		value.shouldSunRelight = sunRelight;
+ 		if (fireEvent)
+ 		{
+ 			game.api.eventapi.TriggerChunkDirty(new Vec3i(cx, cy, cz), value, EnumChunkDirtyReason.MarkedDirty);
+ 		}
+ 		int num2 = Math.Max(Math.Abs(cx - game.player.Entity.Pos.XInt / 32), Math.Abs(cz - game.player.Entity.Pos.ZInt / 32));

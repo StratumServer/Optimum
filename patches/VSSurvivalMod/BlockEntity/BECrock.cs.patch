@@ -1,0 +1,53 @@
+diff --git a/VSSurvivalMod/BlockEntity/BECrock.cs b/VSSurvivalMod/BlockEntity/BECrock.cs
+index 9b5ec22..e52544d 100644
+--- a/VSSurvivalMod/BlockEntity/BECrock.cs
++++ b/VSSurvivalMod/BlockEntity/BECrock.cs
+@@ -1,10 +1,11 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Linq;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+ #nullable disable
+@@ -76,11 +77,11 @@ namespace Vintagestory.GameContent
+         }
+ 
+ 
+         public static MeshData GetMesh(ITesselatorAPI tesselator, ICoreAPI api, BlockCrock block, ItemStack[] stacks, string recipeCode, Vec3f rot)
+         {
+-            Dictionary<string, MeshData> meshes = ObjectCacheUtil.GetOrCreate(api, "blockCrockMeshes", () => new Dictionary<string, MeshData>());
++            Dictionary<string, MeshData> meshes = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(api, "blockCrockMeshes");
+ 
+ 
+ 
+             AssetLocation labelLoc = block.LabelForContents(recipeCode, stacks);
+ 
+@@ -88,16 +89,19 @@ namespace Vintagestory.GameContent
+             {
+                 return null;
+             }
+ 
+             string key = labelLoc.ToShortString() + block.Code.ToShortString() + "/" + rot.Y + "/" + rot.X + "/" + rot.Z;
+-            if (meshes.TryGetValue(key, out MeshData mesh))
++            lock (meshes)
+             {
+-                return mesh;
+-            }
++                if (meshes.TryGetValue(key, out MeshData mesh))
++                {
++                    return mesh;
++                }
+ 
+-            return meshes[key] = block.GenMesh(api as ICoreClientAPI, labelLoc, rot);
++                return meshes[key] = block.GenMesh(api as ICoreClientAPI, labelLoc, rot);
++            }
+         }
+ 
+ 
+         public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldForResolving)
+         {

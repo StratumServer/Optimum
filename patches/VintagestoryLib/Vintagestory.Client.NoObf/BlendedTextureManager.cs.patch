@@ -1,0 +1,304 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/BlendedTextureManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/BlendedTextureManager.cs
+index ac449f0..10bccbf 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/BlendedTextureManager.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/BlendedTextureManager.cs
+@@ -1,12 +1,74 @@
+ using System;
+ using System.Collections.Generic;
+ using System.Text;
++using System.Threading;
+ using Vintagestory.API.Client;
++using Vintagestory.API.Config;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
++internal sealed class OptimumComposeTask
++{
++	private readonly BlendedTextureManager owner;
++
++	private readonly TextureAtlasManager atlasManager;
++
++	private readonly TextureAtlasPosition basePos;
++
++	private readonly TextureAtlasPosition targetPos;
++
++	private readonly List<(int dir, int priority)> activeBlends;
++
++	private readonly int[] overlaySubIds;
++
++	private readonly int rotationSteps;
++
++	public OptimumComposeTask(
++		BlendedTextureManager owner,
++		TextureAtlasManager atlasManager,
++		TextureAtlasPosition basePos,
++		TextureAtlasPosition targetPos,
++		List<(int dir, int priority)> activeBlends,
++		int[] overlaySubIds,
++		int rotationSteps)
++	{
++		this.owner = owner;
++		this.atlasManager = atlasManager;
++		this.basePos = basePos;
++		this.targetPos = targetPos;
++		this.activeBlends = activeBlends;
++		this.overlaySubIds = overlaySubIds;
++		this.rotationSteps = rotationSteps;
++	}
++
++	public void Run()
++	{
++		owner.ComposeOnGPU(atlasManager, basePos, targetPos, activeBlends, overlaySubIds, rotationSteps);
++	}
++}
++
++internal sealed class OptimumRefreshScheduleTask
++{
++	private readonly BlendedTextureManager owner;
++
++	public OptimumRefreshScheduleTask(BlendedTextureManager owner)
++	{
++		this.owner = owner;
++	}
++
++	public void RunOnMainThread()
++	{
++		owner.RegisterRefreshTickOnMainThread();
++	}
++
++	public void OnTick(float dt)
++	{
++		owner.OnRefreshTick(dt);
++	}
++}
++
+ public class BlendedTextureManager
+ {
+ 	public const int DirN = 0;
+ 
+ 	public const int DirS = 1;
+@@ -80,11 +142,35 @@ public class BlendedTextureManager
+ 
+ 	private bool refreshScheduled;
+ 
+ 	private long refreshListenerId;
+ 
+-	public int CacheCount => cache.Count;
++	private object cacheSyncLock;
++
++	private int optimumRefreshQueued;
++
++	private object GetCacheLock()
++	{
++		object obj = Volatile.Read(ref cacheSyncLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref cacheSyncLock, new object(), null);
++		return Volatile.Read(ref cacheSyncLock);
++	}
++
++	public int CacheCount
++	{
++		get
++		{
++			lock (GetCacheLock())
++			{
++				return cache.Count;
++			}
++		}
++	}
+ 
+ 	public BlendedTextureManager(ClientMain game)
+ 	{
+ 		this.game = game;
+ 		InitRotatedQuads();
+@@ -114,36 +200,48 @@ public class BlendedTextureManager
+ 		}
+ 	}
+ 
+ 	public bool IsBlendedTexture(int textureSubId)
+ 	{
+-		return blendedSubIds.Contains(textureSubId);
++		lock (GetCacheLock())
++		{
++			return blendedSubIds.Contains(textureSubId);
++		}
+ 	}
+ 
+ 	public bool TryGetCached(string key, out int textureSubId)
+ 	{
+-		return cache.TryGetValue(key, out textureSubId);
++		lock (GetCacheLock())
++		{
++			return cache.TryGetValue(key, out textureSubId);
++		}
+ 	}
+ 
+ 	public void ClearCache()
+ 	{
+-		cache.Clear();
+-		blendedSubIds.Clear();
++		lock (GetCacheLock())
++		{
++			cache.Clear();
++			blendedSubIds.Clear();
++		}
+ 	}
+ 
+ 	public int GetOrCreateBlendedTexture(int baseSubId, int[] bleedSubIds, int[] priorities, int[] overlaySubIds, TextureAtlasManager atlasManager, int rotationSteps = 0)
+ 	{
+ 		string key = BuildCacheKey(baseSubId, bleedSubIds, priorities, overlaySubIds, rotationSteps);
+-		if (cache.TryGetValue(key, out var value))
++		lock (GetCacheLock())
+ 		{
+-			return value;
++			if (cache.TryGetValue(key, out var existing))
++			{
++				return existing;
++			}
+ 		}
+ 		if (!HasAnyOverlayBlend(bleedSubIds, priorities, overlaySubIds))
+ 		{
+ 			return baseSubId;
+ 		}
+-		TextureAtlasPosition[] textureAtlasPositionsByTextureSubId = atlasManager.TextureAtlasPositionsByTextureSubId;
++		TextureAtlasPosition[] textureAtlasPositionsByTextureSubId = Volatile.Read(ref atlasManager.TextureAtlasPositionsByTextureSubId);
+ 		if (textureAtlasPositionsByTextureSubId == null || baseSubId < 0 || baseSubId >= textureAtlasPositionsByTextureSubId.Length)
+ 		{
+ 			return baseSubId;
+ 		}
+ 		TextureAtlasPosition basePos = textureAtlasPositionsByTextureSubId[baseSubId];
+@@ -163,22 +261,27 @@ public class BlendedTextureManager
+ 		{
+ 			return baseSubId;
+ 		}
+ 		newTexPos.AvgColor = basePos.AvgColor;
+ 		newTexPos.RndColors = basePos.RndColors;
+-		blendedSubIds.Add(textureSubId);
+-		cache[key] = textureSubId;
+-		List<(int dir, int priority)> activeBlends = CollectActiveOverlayBlends(bleedSubIds, priorities, overlaySubIds);
+-		game.EnqueueMainThreadTask(delegate
++		lock (GetCacheLock())
+ 		{
+-			ComposeOnGPU(atlasManager, basePos, newTexPos, activeBlends, overlaySubIds, rotationSteps);
+-		}, "blendedtexture-compose");
++			if (cache.TryGetValue(key, out var raceWinner))
++			{
++				atlasManager.FreeTextureSpace(textureSubId);
++				return raceWinner;
++			}
++			blendedSubIds.Add(textureSubId);
++			cache[key] = textureSubId;
++		}
++		List<(int dir, int priority)> activeBlends = CollectActiveOverlayBlends(bleedSubIds, priorities, overlaySubIds);
++		game.EnqueueMainThreadTask(new OptimumComposeTask(this, atlasManager, basePos, newTexPos, activeBlends, overlaySubIds, rotationSteps).Run, "blendedtexture-compose");
+ 		ScheduleChunkRefresh();
+ 		return textureSubId;
+ 	}
+ 
+-	private void ComposeOnGPU(TextureAtlasManager atlasManager, TextureAtlasPosition basePos, TextureAtlasPosition targetPos, List<(int dir, int priority)> activeBlends, int[] overlaySubIds, int rotationSteps)
++	internal void ComposeOnGPU(TextureAtlasManager atlasManager, TextureAtlasPosition basePos, TextureAtlasPosition targetPos, List<(int dir, int priority)> activeBlends, int[] overlaySubIds, int rotationSteps)
+ 	{
+ 		if (game.disposed)
+ 		{
+ 			return;
+ 		}
+@@ -305,10 +408,15 @@ public class BlendedTextureManager
+ 			}
+ 		}
+ 		return false;
+ 	}
+ 
++	private static int CompareBlendPriority((int dir, int priority) a, (int dir, int priority) b)
++	{
++		return (a.priority == b.priority) ? a.dir.CompareTo(b.dir) : a.priority.CompareTo(b.priority);
++	}
++
+ 	private static List<(int dir, int priority)> CollectActiveOverlayBlends(int[] bleedSubIds, int[] priorities, int[] overlaySubIds)
+ 	{
+ 		List<(int, int)> list = new List<(int, int)>(8);
+ 		for (int i = 0; i < 8; i++)
+ 		{
+@@ -319,11 +427,11 @@ public class BlendedTextureManager
+ 				list.Add((i, arrayValue2));
+ 			}
+ 		}
+ 		if (list.Count > 1)
+ 		{
+-			list.Sort(((int, int) a, (int, int) b) => (a.Item2 == b.Item2) ? a.Item1.CompareTo(b.Item1) : a.Item2.CompareTo(b.Item2));
++			list.Sort(CompareBlendPriority);
+ 		}
+ 		return list;
+ 	}
+ 
+ 	private static T GetArrayValue<T>(T[] arr, int index, T defaultValue)
+@@ -335,30 +443,59 @@ public class BlendedTextureManager
+ 		return arr[index];
+ 	}
+ 
+ 	private void ScheduleChunkRefresh()
+ 	{
+-		if (!refreshScheduled)
++		if (Interlocked.CompareExchange(ref optimumRefreshQueued, 1, 0) != 0)
+ 		{
+-			refreshScheduled = true;
+-			refreshListenerId = game.RegisterGameTickListener(delegate
+-			{
+-				RefreshAllChunks();
+-				game.UnregisterGameTickListener(refreshListenerId);
+-			}, 50, 2000);
++			return;
++		}
++		refreshScheduled = true;
++		if (Environment.CurrentManagedThreadId == RuntimeEnv.MainThreadId)
++		{
++			RegisterRefreshTickOnMainThread();
++		}
++		else
++		{
++			game.EnqueueMainThreadTask(new OptimumRefreshScheduleTask(this).RunOnMainThread, "blendedtexture-refresh");
++		}
++	}
++
++	internal void RegisterRefreshTickOnMainThread()
++	{
++		if (game.disposed)
++		{
++			Interlocked.Exchange(ref optimumRefreshQueued, 0);
++			refreshScheduled = false;
++			return;
+ 		}
++		refreshListenerId = game.RegisterGameTickListener(new OptimumRefreshScheduleTask(this).OnTick, 50, 2000);
++	}
++
++	internal void OnRefreshTick(float dt)
++	{
++		RefreshAllChunks();
++		game.UnregisterGameTickListener(refreshListenerId);
++		refreshScheduled = false;
++		Interlocked.Exchange(ref optimumRefreshQueued, 0);
+ 	}
+ 
+ 	public void RefreshAllChunks()
+ 	{
+ 		ClientWorldMap worldMap = game.WorldMap;
+ 		if (worldMap?.chunks == null)
+ 		{
+ 			return;
+ 		}
+-		foreach (long key in worldMap.chunks.Keys)
++		List<long> keys;
++		lock (worldMap.chunksLock)
++		{
++			keys = new List<long>(worldMap.chunks.Keys);
++		}
++		for (int i = 0; i < keys.Count; i++)
+ 		{
++			long key = keys[i];
+ 			int chunkX = (int)(key % worldMap.index3dMulX);
+ 			int chunkY = (int)(key / worldMap.index3dMulX % worldMap.index3dMulZ);
+ 			int chunkZ = (int)(key / worldMap.index3dMulX / worldMap.index3dMulZ);
+ 			worldMap.MarkChunkDirty(chunkX, chunkY, chunkZ, false, false, null, false);
+ 		}

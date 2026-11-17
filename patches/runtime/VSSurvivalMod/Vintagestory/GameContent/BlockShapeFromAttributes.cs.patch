@@ -1,0 +1,115 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockShapeFromAttributes.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockShapeFromAttributes.cs
+index 83091f5..4368e7e 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockShapeFromAttributes.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockShapeFromAttributes.cs
+@@ -456,59 +456,75 @@ public abstract class BlockShapeFromAttributes : Block, IWrenchOrientable, IText
+ 
+ 	public virtual MeshData GetOrCreateMesh(IShapeTypeProps cprops, ITexPositionSource overrideTexturesource = null, string overrideTextureCode = null, bool forLOD2 = false)
+ 	{
+ 		Dictionary<string, MeshData> dictionary = meshDictionary;
+ 		ICoreClientAPI coreClientAPI = api as ICoreClientAPI;
+-		if (overrideTexturesource != null || !dictionary.TryGetValue(cprops.Code + "-" + overrideTextureCode, out var modeldata))
++		string key = cprops.Code + "-" + overrideTextureCode;
++		MeshData modeldata;
++		if (overrideTexturesource == null)
+ 		{
+-			modeldata = new MeshData(4, 3);
+-			Shape shapeResolved = cprops.ShapeResolved;
+-			ITexPositionSource texPositionSource = overrideTexturesource;
+-			if (texPositionSource == null)
++			lock (dictionary)
+ 			{
+-				ShapeTextureSource shapeTextureSource = new ShapeTextureSource(coreClientAPI, shapeResolved, cprops.ShapePath.ToString());
+-				texPositionSource = shapeTextureSource;
+-				if (blockTextures != null)
++				if (dictionary.TryGetValue(key, out modeldata))
+ 				{
+-					foreach (KeyValuePair<string, CompositeTexture> blockTexture in blockTextures)
++					return modeldata;
++				}
++			}
++		}
++		modeldata = new MeshData(4, 3);
++		Shape shapeResolved = cprops.ShapeResolved;
++		ITexPositionSource texPositionSource = overrideTexturesource;
++		if (texPositionSource == null)
++		{
++			ShapeTextureSource shapeTextureSource = new ShapeTextureSource(coreClientAPI, shapeResolved, cprops.ShapePath.ToString());
++			texPositionSource = shapeTextureSource;
++			if (blockTextures != null)
++			{
++				foreach (KeyValuePair<string, CompositeTexture> blockTexture in blockTextures)
++				{
++					if (blockTexture.Value.Baked == null)
+ 					{
+-						if (blockTexture.Value.Baked == null)
+-						{
+-							blockTexture.Value.Bake(coreClientAPI.Assets);
+-						}
+-						shapeTextureSource.textures[blockTexture.Key] = blockTexture.Value;
++						blockTexture.Value.Bake(coreClientAPI.Assets);
+ 					}
++					shapeTextureSource.textures[blockTexture.Key] = blockTexture.Value;
+ 				}
+-				if (cprops.Textures != null)
++			}
++			if (cprops.Textures != null)
++			{
++				foreach (KeyValuePair<string, CompositeTexture> texture in cprops.Textures)
+ 				{
+-					foreach (KeyValuePair<string, CompositeTexture> texture in cprops.Textures)
+-					{
+-						CompositeTexture compositeTexture = texture.Value.Clone();
+-						compositeTexture.Bake(coreClientAPI.Assets);
+-						shapeTextureSource.textures[texture.Key] = compositeTexture;
+-					}
+-				}
+-				if (overrideTextureCode != null && cprops.TextureFlipCode != null && OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var value))
+-				{
+-					value.Bake(coreClientAPI.Assets);
+-					shapeTextureSource.textures[cprops.TextureFlipCode] = value;
++					CompositeTexture compositeTexture = texture.Value.Clone();
++					compositeTexture.Bake(coreClientAPI.Assets);
++					shapeTextureSource.textures[texture.Key] = compositeTexture;
+ 				}
+ 			}
+-			if (shapeResolved == null)
++			if (overrideTextureCode != null && cprops.TextureFlipCode != null && OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var value))
+ 			{
+-				return modeldata;
++				value.Bake(coreClientAPI.Assets);
++				shapeTextureSource.textures[cprops.TextureFlipCode] = value;
+ 			}
+-			coreClientAPI.Tesselator.TesselateShape(blockForLogging, shapeResolved, out modeldata, texPositionSource, null, 0, 0, 0);
+-			if (cprops.TexPos == null)
++		}
++		if (shapeResolved == null)
++		{
++			return modeldata;
++		}
++		coreClientAPI.Tesselator.TesselateShape(blockForLogging, shapeResolved, out modeldata, texPositionSource, null, 0, 0, 0);
++		if (cprops.TexPos == null)
++		{
++			api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
++			TextureAtlasPosition firstTexPos = (texPositionSource as ShapeTextureSource)?.firstTexPos;
++			if (firstTexPos != null)
+ 			{
+-				api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
+-				cprops.TexPos = (texPositionSource as ShapeTextureSource)?.firstTexPos;
+-				cprops.TexPos.RndColors = new int[30];
++				firstTexPos.RndColors = new int[30];
++				cprops.TexPos = firstTexPos;
+ 			}
+-			if (overrideTexturesource == null)
++		}
++		if (overrideTexturesource == null)
++		{
++			lock (dictionary)
+ 			{
+-				dictionary[cprops.Code + "-" + overrideTextureCode] = modeldata;
++				dictionary[key] = modeldata;
+ 			}
+ 		}
+ 		return modeldata;
+ 	}
+ 

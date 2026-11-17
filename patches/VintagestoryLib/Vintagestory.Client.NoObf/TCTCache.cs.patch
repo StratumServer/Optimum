@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TCTCache.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TCTCache.cs
+index 908ed84..49e252f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/TCTCache.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/TCTCache.cs
+@@ -116,10 +116,12 @@ public class TCTCache : IGeometryTester
+ 
+ 	public int OceanityFlagBL;
+ 
+ 	public int OceanityFlagBR;
+ 
++	public bool optimumDecorZOffsetActive;
++
+ 	public bool IsDecorOnJson => OverlayTextureFace != null;
+ 
+ 	public TCTCache(ChunkTesselator tct)
+ 	{
+ 		this.tct = tct;

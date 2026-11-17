@@ -1,0 +1,53 @@
+diff --git a/VSSurvivalMod/Block/BlockFenceStackAware.cs b/VSSurvivalMod/Block/BlockFenceStackAware.cs
+index d22675f..f1f2ca2 100644
+--- a/VSSurvivalMod/Block/BlockFenceStackAware.cs
++++ b/VSSurvivalMod/Block/BlockFenceStackAware.cs
+@@ -32,31 +32,34 @@ namespace Vintagestory.GameContent
+         }
+ 
+         public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+         {
+             Block upBlock = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[TileSideEnum.Up]];
+-            if (upBlock is BlockFence)
++            if (upBlock is BlockFence && continousFenceMeches != null)
+             {
+                 int var = (GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, 8) + 1);
+-
+-                if (!continousFenceMeches.TryGetValue(cntCode + var, out MeshData mesh))
++                MeshData mesh;
++                lock (continousFenceMeches)
+                 {
+-                    AssetLocation loc = Shape.Base.Clone();
+-                    loc.Path = loc.Path.Replace("-top", "");
+-                    loc.WithPathAppendixOnce(".json");
+-                    loc.WithPathPrefixOnce("shapes/");
+-                    Shape shape = API.Common.Shape.TryGet(capi, loc);
++                    if (!continousFenceMeches.TryGetValue(cntCode + var, out mesh))
++                    {
++                        AssetLocation loc = Shape.Base.Clone();
++                        loc.Path = loc.Path.Replace("-top", "");
++                        loc.WithPathAppendixOnce(".json");
++                        loc.WithPathPrefixOnce("shapes/");
++                        Shape shape = API.Common.Shape.TryGet(capi, loc);
+ 
+-                    CompositeTexture ct = Textures["wall"];
+-                    int prevSubid = ct.Baked.TextureSubId;
+-                    ct.Baked.TextureSubId = ct.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, ct.Alternates.Length)].TextureSubId;
++                        CompositeTexture ct = Textures["wall"];
++                        int prevSubid = ct.Baked.TextureSubId;
++                        ct.Baked.TextureSubId = ct.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, ct.Alternates.Length)].TextureSubId;
+ 
+-                    capi.Tesselator.TesselateShape(this, shape, out mesh, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), Shape.QuantityElements, Shape.SelectiveElements);
++                        capi.Tesselator.TesselateShape(this, shape, out mesh, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), Shape.QuantityElements, Shape.SelectiveElements);
+ 
+-                    ct.Baked.TextureSubId = prevSubid;
++                        ct.Baked.TextureSubId = prevSubid;
+ 
+-                    continousFenceMeches[cntCode] = mesh;
++                        continousFenceMeches[cntCode] = mesh;
++                    }
+                 }
+ 
+                 sourceMesh = mesh;
+             }
+ 

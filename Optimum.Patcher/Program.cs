@@ -81,6 +81,13 @@ var typesToInject = new List<string>
     "Vintagestory.Client.NoObf.OptimumPendingPlaySound",
     // Issue #611: lambda-free main-thread marshal request for lazy inventory meshes
     "Vintagestory.Client.NoObf.OptimumLazyInventoryMeshRequest",
+    // Issue #612: lambda-free main-thread tasks & worker wrapper for multi-worker meshing
+    "Vintagestory.Client.NoObf.OptimumMainThreadTextureUploadTask",
+    "Vintagestory.Client.NoObf.OptimumMainThreadMipmapTask",
+    "Vintagestory.Client.NoObf.OptimumMainThreadDictUpdateTask",
+    "Vintagestory.Client.NoObf.OptimumComposeTask",
+    "Vintagestory.Client.NoObf.OptimumRefreshScheduleTask",
+    "Vintagestory.Client.NoObf.OptimumTessWorkerSystem",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -135,6 +142,14 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Client.NoObf.ClientChunk"] = new()
     {
         "OptimumReadLightBatch",
+        "optimumTessState",
+        "optimumFullDirtySeq",
+        "optimumEdgeDirtySeq",
+        "optimumUploadedFullSeq",
+        "optimumUploadedEdgeSeq",
+        "OptimumRecordDirty",
+        "OptimumTryBeginWorkerTesselation",
+        "OptimumFinishWorkerTesselation",
     },
     // Issue #72: flat-grid BFS visibility walk state reused per pass by CullInvisibleChunks.
     ["Vintagestory.Client.NoObf.ChunkCuller"] = new()
@@ -422,6 +437,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumRecordVisibilityFrame",
         "OptimumFlushPendingVisibilityFrame",
         "OnOptimumLeaveWorld",
+        "tlChunkPos",
+        "optimumAtlasEpoch",
+        "optimumAtlasTextureIds",
+        "optimumShapeReloadEpoch",
+        "get_WorkerCount",
+        "CreateWorkerTesselator",
+        "CreateWorkerSystem",
+        "WakeWorkersForShutdown",
+        "DrainUploadQueues",
+        "OnLightlevelsReceived",
+        "OnRuntimeAtlasAdded",
     },
     // ChunkTesselator: chisel LOD pool routing helpers and fields
     ["Vintagestory.Client.NoObf.ChunkTesselator"] = new()
@@ -432,6 +458,9 @@ var membersToInject = new Dictionary<string, List<string>>
         "MergeTesselatedChunkParts",
         "populateTesselatedChunkPart",
         "OptimumCloneChunkMesh",
+        "optimumManager",
+        "optimumWorkerAtlasEpoch",
+        "optimumWorkerShapeEpoch",
     },
     ["Vintagestory.Client.NoObf.SurfaceLayerTesselator"] = new()
     {
@@ -567,6 +596,8 @@ var membersToInject = new Dictionary<string, List<string>>
         "EnsureCompositeShapeLoaded",
         "EnsureLoadedForLazy",
         "ReUnloadTemporaryShapes",
+        "defaultBlockMeshLock",
+        "GetDefaultBlockMeshLock",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -728,6 +759,65 @@ var membersToInject = new Dictionary<string, List<string>>
         "compressionLock",
         "isCompressedCached",
         "Invalidate",
+    },
+    // Issue #612: multi-worker chunk meshing thread-safety members
+    ["Vintagestory.Common.BlockChunkDataLayer"] = new()
+    {
+        "optimumThreadBlocksByPaletteIndex",
+    },
+    ["Vintagestory.Client.NoObf.CrossTesselator"] = new()
+    {
+        "optimumStartRot",
+        "optimumEndRot",
+    },
+    ["Vintagestory.Client.NoObf.TCTCache"] = new()
+    {
+        "optimumDecorZOffsetActive",
+    },
+    ["Vintagestory.Client.NoObf.TesselatedChunk"] = new()
+    {
+        "fullSeq",
+        "edgeSeq",
+        "DisposeCenterParts",
+        "DisposeEdgeParts",
+    },
+    ["Vintagestory.Client.NoObf.JsonTesselator"] = new()
+    {
+        "optimumMeshShadowCache",
+        "PrepareWorkerSourceMeshShadow",
+    },
+    ["Vintagestory.Client.NoObf.TextureAtlasManager"] = new()
+    {
+        "atlasSyncLock",
+        "optimumGenMipmapsQueued",
+        "GetAtlasSyncLock",
+        "SnapshotAtlasTextureIds",
+        "LoadDefaultCompositeBitmap",
+        "EnqueueFollowupMipmapTask",
+        "FinishMipmapGeneration",
+        "CommitOffthreadTextureName",
+    },
+    ["Vintagestory.Client.NoObf.BlendedTextureManager"] = new()
+    {
+        "cacheSyncLock",
+        "optimumRefreshQueued",
+        "GetCacheLock",
+        "CompareBlendPriority",
+        "RegisterRefreshTickOnMainThread",
+        "OnRefreshTick",
+    },
+    ["Vintagestory.Client.NoObf.TerrainIlluminator"] = new()
+    {
+        "relightSyncLock",
+        "GetRelightSyncLock",
+    },
+    ["Vintagestory.Client.NoObf.UnloadableShape"] = new()
+    {
+        "optimumPinCount",
+        "optimumShapeLock",
+        "GetShapeLock",
+        "AcquirePin",
+        "ReleasePin",
     },
 };
 
@@ -1026,6 +1116,9 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBeforeFrame", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnSeperateThreadGameTick", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "TesselateChunk", 6),
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "Dispose", 1),
+    new("Vintagestory.Client.NoObf.ClientMain", "DestroyGameSession", 2),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleWorldMetaData", 1),
     // Issue #482: pass SelectiveElements and QuantityElements in CreateMesh
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "CreateMesh", 4),
     // Issue #467: restore multi-threaded TargetSet partitioning in LoadBlockShapes
@@ -1037,9 +1130,68 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateItems", 3),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultBlockMeshRef", 1),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultItemMeshRef", 1),
-    // Texture atlas overflow recovery and decode worker scaling.
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultBlockMesh", 1),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateBlock", 2),
+    // Texture atlas overflow recovery, decode worker scaling, and multi-worker synchronization.
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeCreateNewAtlas", 1),
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "PopulateTextureAtlassesFromTextures", 0),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "get_Count", 0),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "get_Item", 1,
+        new[] { "Vintagestory.API.Common.AssetLocationAndSource" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "get_Item", 1,
+        new[] { "Vintagestory.API.Common.AssetLocation" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetOrAddTextureLocation", 1),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "ContainsKey", 1),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetOrInsertTexture", 5,
+        new[] { "Vintagestory.API.Common.AssetLocationAndSource", "System.Int32&", "Vintagestory.API.Client.TextureAtlasPosition&", "Vintagestory.API.Client.CreateTextureDelegate", "System.Single" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "InsertTextureCached", 5,
+        new[] { "Vintagestory.API.Common.AssetLocation", "Vintagestory.API.Common.IBitmap", "System.Int32&", "Vintagestory.API.Client.TextureAtlasPosition&", "System.Single" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeUploadTextureToPos", 3),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "runtimeUpdateTexture", 3),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "InsertTexture", 3,
+        new[] { "Vintagestory.API.Common.BitmapRef", "Vintagestory.API.Common.AssetLocationAndSource", "System.Int32&" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "AllocateTextureSpace", 5),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "FreeTextureSpace", 1,
+        new[] { "System.Int32" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "FreeTextureSpace", 1,
+        new[] { "Vintagestory.API.Common.AssetLocationAndSource" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetRandomColor", 1),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetRandomColor", 2,
+        new[] { "System.Int32", "System.Int32" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetRandomColor", 2,
+        new[] { "Vintagestory.API.Client.TextureAtlasPosition", "System.Int32" }),
+    new("Vintagestory.Client.NoObf.TextureAtlasManager", "GetAverageColor", 1),
+    new("Vintagestory.Client.NoObf.BlockTextureAtlasManager", "RuntimeCreateNewAtlas", 1),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "get_CacheCount", 0),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "IsBlendedTexture", 1),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "TryGetCached", 2),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "ClearCache", 0),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "GetOrCreateBlendedTexture", 6),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "CollectActiveOverlayBlends", 3),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "ScheduleChunkRefresh", 0),
+    new("Vintagestory.Client.NoObf.BlendedTextureManager", "RefreshAllChunks", 0),
+    new("Vintagestory.Client.NoObf.TerrainIlluminator", "SunRelightChunk", 2,
+        new[] { "Vintagestory.Client.NoObf.ClientChunk", "Vintagestory.Common.Database.ChunkPos" }),
+    new("Vintagestory.Client.NoObf.TerrainIlluminator", "GetChunk", 3),
+    new("Vintagestory.Client.NoObf.UnloadableShape", "Unload", 0),
+    new("Vintagestory.Client.NoObf.UnloadableShape", "Load", 2),
+    new("Vintagestory.Client.NoObf.UnloadableShape", "ResolveTextures", 1),
+    new("Vintagestory.Client.NoObf.ShapeTesselator", "TesselateShape", 10,
+        new[] { "System.String", "Vintagestory.API.Common.AssetLocation", "Vintagestory.API.Common.CompositeShape", "Vintagestory.API.Client.MeshData&", "Vintagestory.API.Client.ITexPositionSource", "System.Int32", "System.Byte", "System.Byte", "System.Nullable`1<System.Int32>", "System.String[]" }),
+    new("Vintagestory.Client.NoObf.CrossTesselator", "DrawCross", 2),
+    new("Vintagestory.Client.NoObf.SystemRenderInsideBlock", "OnRenderFrame3D", 1),
+    new("Vintagestory.Client.NoObf.SystemRenderTerrain", "RedrawAllBlocks", 0),
+    new("Vintagestory.Client.NoObf.JsonTesselator", "Tesselate", 1),
+    new("Vintagestory.Client.NoObf.JsonTesselator", "doMesh", 3),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockOne", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockTwo", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockThree", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockFour", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockFive", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "getBlockGeneralCase", 1),
+    new("Vintagestory.Common.BlockChunkDataLayer", "Dispose", 0),
+    new("Vintagestory.Client.NoObf.ClientChunkData", "BuildFastBlockAccessArray", 1),
+    new("Vintagestory.Client.NoObf.ClientWorldMap", "LoadOrCreateLerpedClimateMapOffthread", 2),
     // Step 8's collateral: the complete non-ctor, non-ChunkTesselatorManager reader
     // set of the 3 dirtyChunks*Lock fields retyped above (fieldsToRetype) - verified
     // by an IL scan of the real vanilla module (no other reader exists). Left
@@ -1064,6 +1216,13 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildDecorPolygons", 5),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "TesselateBlock", 6),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "GetMeshPoolForPass", 3),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "OnSmoothShadowsChanged", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "Start", 0),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "RuntimeCreateNewBlockTextureAtlas", 1),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "ReloadTextures", 0),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "OnReloadShapes", 0),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "BeginProcessChunk", 5),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildExtendedChunkData", 6),
     new("Vintagestory.Client.NoObf.SurfaceLayerTesselator", "Tesselate", 1),
     new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "Tesselate", 1),
     new("Vintagestory.Client.NoObf.BleedingJsonTesselator", "DoMeshWithBleeding", 3),

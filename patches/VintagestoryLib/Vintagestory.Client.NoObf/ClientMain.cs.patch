@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 6d5300a..86ed984 100644
+index 6d5300a..148cbc3 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -149,7 +149,7 @@ index 6d5300a..86ed984 100644
  		_clientThreadsCts = new CancellationTokenSource();
  		ClientSystem clientSystem = new SystemCompressChunks(this);
  		Thread thread = new Thread(new ClientThread(this, "compresschunks", new ClientSystem[1] { clientSystem }, _clientThreadsCts.Token).Process);
-@@ -899,17 +934,21 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -899,17 +934,33 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Thread thread3 = new Thread(new ClientThread(this, "relight", new ClientSystem[1] { clientSystem3 }, _clientThreadsCts.Token).Process);
  		thread3.IsBackground = true;
  		thread3.Start();
@@ -164,16 +164,29 @@ index 6d5300a..86ed984 100644
 +		TesselationThreadId = thread4.ManagedThreadId;
 +		RegisterTesselationThread(TesselationThreadId);
  		thread4.IsBackground = true;
- 		thread4.Start();
+-		thread4.Start();
  		thread4.Name = "tesselateterrain";
++		thread4.Start();
  		clientThreads.Add(thread4);
 -		TesselationThreadId = thread4.ManagedThreadId;
++		int tessWorkerCount = terrainChunkTesselatorManager.WorkerCount;
++		for (int w = 1; w < tessWorkerCount; w++)
++		{
++			string wName = "tesselateterrain-" + w;
++			ClientSystem workerSys = terrainChunkTesselatorManager.CreateWorkerSystem();
++			Thread workerThread = new Thread(new ClientThread(this, wName, new ClientSystem[1] { workerSys }, _clientThreadsCts.Token).Process);
++			RegisterTesselationThread(workerThread.ManagedThreadId);
++			workerThread.IsBackground = true;
++			workerThread.Name = wName;
++			workerThread.Start();
++			clientThreads.Add(workerThread);
++		}
  		ClientSystem clientSystem5 = new SystemChunkVisibilityCalc(this);
  		Thread thread5 = new Thread(new ClientThread(this, "chunkvis", new ClientSystem[1] { clientSystem5 }, _clientThreadsCts.Token).Process);
  		thread5.IsBackground = true;
  		thread5.Start();
  		thread5.Name = "chunkvis";
-@@ -961,11 +1000,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -961,11 +1012,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			new SystemRenderSkyColor(this),
  			new SystemRenderNightSky(this),
  			new SystemRenderSunMoon(this),
@@ -186,7 +199,7 @@ index 6d5300a..86ed984 100644
  			new SystemRenderRiftTest(this),
  			new SystemRenderEntities(this),
  			(decalSystem = new SystemRenderDecals(this)),
-@@ -1032,11 +1071,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1032,11 +1083,32 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  	public void ExecuteMainThreadTasks(float deltaTime)
  	{
  		ScreenManager.FrameProfiler.Mark("beginMTT");
@@ -220,7 +233,7 @@ index 6d5300a..86ed984 100644
  		{
  			if (SuspendMainThreadTasks)
  			{
-@@ -1128,18 +1188,25 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -1128,18 +1200,25 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		Platform.GlEnableDepthTest();
  		Platform.GlDepthMask(flag: true);
  		ScreenManager.FrameProfiler.Mark("rendOpaque-12before");
@@ -248,7 +261,7 @@ index 6d5300a..86ed984 100644
  		GlLoadMatrix(MainCamera.CameraMatrix);
  		double[] top = api.Render.PMatrix.Top;
  		double[] top2 = api.Render.MvMatrix.Top;
-@@ -2123,12 +2190,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2123,12 +2202,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
  	public void UpdateFreeMouse()
  	{
@@ -273,7 +286,7 @@ index 6d5300a..86ed984 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -2328,40 +2405,41 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2328,40 +2417,41 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		return value.TextureId;
  	}
  
@@ -325,7 +338,38 @@ index 6d5300a..86ed984 100644
  		intoTexture.Width = value.Width;
  		intoTexture.Height = value.Height;
  	}
-@@ -3394,14 +3472,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2576,11 +2666,14 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		}
+ 		Platform.ShaderUniforms = new DefaultShaderUniforms();
+ 		Logger.Notification("Destroying game session, waiting up to 200ms for client threads to exit");
+ 		api.eventapi.TriggerLeaveWorld();
+ 		threadsShouldExit = true;
+-		int num = 2;
++		ShouldTesselateTerrain = false;
++		ChunkTesselatorManager?.WakeWorkersForShutdown();
++		_clientThreadsCts.Cancel();
++		int num = 20;
+ 		while (num-- > 0)
+ 		{
+ 			bool flag = true;
+ 			foreach (Thread clientThread in clientThreads)
+ 			{
+@@ -2588,13 +2681,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			}
+ 			if (flag)
+ 			{
+ 				break;
+ 			}
+-			Thread.Sleep(100);
++			Thread.Sleep(50);
+ 		}
+-		_clientThreadsCts.Cancel();
+ 		if (IsSingleplayer && ScreenManager.Platform.IsServerRunning)
+ 		{
+ 			Logger.Notification("Stopping single player server");
+ 			Platform.ExitSinglePlayerServer(exitMode);
+ 		}
+@@ -3394,14 +3486,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  				SoundType = soundType
  			};
  		}
@@ -343,7 +387,7 @@ index 6d5300a..86ed984 100644
  				return num;
  			}
  			return 500;
-@@ -3451,11 +3530,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3451,11 +3544,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			throw new InvalidOperationException("Cannot call LoadSound outside the main thread, it is not thread safe");
  		}
  		ArgumentNullException.ThrowIfNull(sound.Location, "sound.Location");
@@ -356,7 +400,7 @@ index 6d5300a..86ed984 100644
  			Platform.Logger.Warning("Audio File not found: {0}", sound.Location);
  			return null;
  		}
-@@ -3530,6 +3609,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3530,6 +3623,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

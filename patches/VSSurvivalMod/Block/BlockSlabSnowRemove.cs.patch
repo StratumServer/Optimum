@@ -1,0 +1,104 @@
+diff --git a/VSSurvivalMod/Block/BlockSlabSnowRemove.cs b/VSSurvivalMod/Block/BlockSlabSnowRemove.cs
+index c5584ab..690badd 100644
+--- a/VSSurvivalMod/Block/BlockSlabSnowRemove.cs
++++ b/VSSurvivalMod/Block/BlockSlabSnowRemove.cs
+@@ -1,6 +1,7 @@
+ ﻿using Vintagestory.API.Client;
++using System.Threading;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ 
+ #nullable disable
+@@ -9,10 +10,19 @@ namespace Vintagestory.GameContent
+ {
+     public class BlockSlabSnowRemove : Block, ITexPositionSource
+     {
+         MeshData groundSnowLessMesh;
+         MeshData groundSnowedMesh;
++        private object optimumSnowMeshLock;
++
++        private object GetSnowMeshLock()
++        {
++            object obj = Volatile.Read(ref optimumSnowMeshLock);
++            if (obj != null) return obj;
++            Interlocked.CompareExchange(ref optimumSnowMeshLock, new object(), null);
++            return Volatile.Read(ref optimumSnowMeshLock);
++        }
+ 
+         bool testGroundSnowRemoval;
+         bool testGroundSnowAdd;
+ 
+         BlockFacing rot;
+@@ -47,38 +57,56 @@ namespace Vintagestory.GameContent
+         {
+             if (testGroundSnowRemoval)
+             {
+                 if (!SolidBlockBelow(chunkExtBlocks, extIndex3d, pos))
+                 {
+-                    if (groundSnowLessMesh == null)
++                    MeshData snowLess = Volatile.Read(ref groundSnowLessMesh);
++                    if (snowLess == null)
+                     {
+-                        groundSnowLessMesh = sourceMesh.Clone();
+-                        groundSnowLessMesh.RemoveVertices(24);
+-                        groundSnowLessMesh.XyzFacesCount -= 6;
++                        lock (GetSnowMeshLock())
++                        {
++                            snowLess = Volatile.Read(ref groundSnowLessMesh);
++                            if (snowLess == null)
++                            {
++                                snowLess = sourceMesh.Clone();
++                                snowLess.RemoveVertices(24);
++                                snowLess.XyzFacesCount -= 6;
++                                Volatile.Write(ref groundSnowLessMesh, snowLess);
++                            }
++                        }
+                     }
+ 
+-                    sourceMesh = groundSnowLessMesh;
++                    sourceMesh = snowLess;
+                 }
+             }
+ 
+             if (testGroundSnowAdd && chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[rot.Opposite.Index]].BlockMaterial == EnumBlockMaterial.Snow && SolidBlockBelow(chunkExtBlocks, extIndex3d, pos))
+             {
+-                if (groundSnowedMesh == null)
++                MeshData snowed = Volatile.Read(ref groundSnowedMesh);
++                if (snowed == null)
+                 {
+-                    Shape shape = API.Common.Shape.TryGet(api, "shapes/block/basic/slab/snow-" + Variant["rot"] + ".json");
+-                    (api as ICoreClientAPI).Tesselator.TesselateShape("slab snow cover", shape, out groundSnowedMesh, this);
+-
+-                    // No idea why this is needed
+-                    for (int i = 0; i < groundSnowedMesh.RenderPassCount; i++)
++                    lock (GetSnowMeshLock())
+                     {
+-                        groundSnowedMesh.RenderPassesAndExtraBits[i] = 0;
+-                    }
++                        snowed = Volatile.Read(ref groundSnowedMesh);
++                        if (snowed == null)
++                        {
++                            Shape shape = API.Common.Shape.TryGet(api, "shapes/block/basic/slab/snow-" + Variant["rot"] + ".json");
++                            (api as ICoreClientAPI).Tesselator.TesselateShape("slab snow cover", shape, out snowed, this);
+ 
+-                    groundSnowedMesh.AddMeshData(sourceMesh);
++                            // No idea why this is needed
++                            for (int i = 0; i < snowed.RenderPassCount; i++)
++                            {
++                                snowed.RenderPassesAndExtraBits[i] = 0;
++                            }
++
++                            snowed.AddMeshData(sourceMesh);
++                            Volatile.Write(ref groundSnowedMesh, snowed);
++                        }
++                    }
+                 }
+ 
+-                sourceMesh = groundSnowedMesh;
++                sourceMesh = snowed;
+             }
+         }
+ 
+         private bool SolidBlockBelow(Block[] chunkExtBlocks, int extIndex3d, BlockPos pos)
+         {

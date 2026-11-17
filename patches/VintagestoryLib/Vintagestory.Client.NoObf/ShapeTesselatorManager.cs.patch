@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..bd0a31b 100644
+index dae3e90..cd5a56e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -14,7 +14,7 @@ index dae3e90..bd0a31b 100644
  using Vintagestory.API.Server;
  using Vintagestory.API.Util;
  using Vintagestory.Server;
-@@ -60,10 +61,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -60,19 +61,47 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  
  	private Dictionary<AssetLocation, UnloadableShape> shapes4;
  
@@ -26,10 +26,46 @@ index dae3e90..bd0a31b 100644
 +
  	public ShapeTesselator Tesselator => TLTesselator ?? (TLTesselator = new ShapeTesselator(game, shapes, objs, gltfs));
  
++	private object defaultBlockMeshLock;
++
++	private object GetDefaultBlockMeshLock()
++	{
++		object obj = Volatile.Read(ref defaultBlockMeshLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref defaultBlockMeshLock, new object(), null);
++		return Volatile.Read(ref defaultBlockMeshLock);
++	}
++
  	public MeshData GetDefaultBlockMesh(Block block)
  	{
- 		if (blockModelDatas[block.BlockId] == null)
-@@ -101,15 +106,23 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+-		if (blockModelDatas[block.BlockId] == null)
++		int blockId = block.BlockId;
++		MeshData cached = Volatile.Read(ref blockModelDatas[blockId]);
++		if (cached != null)
+ 		{
+-			TesselateBlock(block, lazyLoad: false);
++			return cached;
++		}
++		lock (GetDefaultBlockMeshLock())
++		{
++			cached = Volatile.Read(ref blockModelDatas[blockId]);
++			if (cached == null)
++			{
++				TesselateBlock(block, lazyLoad: false);
++				cached = Volatile.Read(ref blockModelDatas[blockId]);
++			}
++			return cached;
+ 		}
+-		return blockModelDatas[block.BlockId];
+ 	}
+ 
+ 	internal void ReloadTesselator()
+ 	{
+ 		TLTesselator = null;
+@@ -101,15 +130,23 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		TesselateBlocks_Pre();
  		TyronThreadPool.QueueTask(delegate
  		{
@@ -55,7 +91,7 @@ index dae3e90..bd0a31b 100644
  		{
  			Thread.Sleep(30);
  		}
-@@ -231,11 +244,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -231,11 +268,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			Base = new AssetLocation("block/basic/cube")
  		};
  		int val = Environment.ProcessorCount / 2 - 3;
@@ -68,7 +104,7 @@ index dae3e90..bd0a31b 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -723,10 +736,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +760,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		return i;
  	}
  
@@ -84,7 +120,7 @@ index dae3e90..bd0a31b 100644
  			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
  		}
  		MeshData[] meshes = new MeshData[blocks.Count];
-@@ -856,31 +874,48 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -856,31 +898,48 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			}
  		}
  	}
@@ -139,7 +175,25 @@ index dae3e90..bd0a31b 100644
  		int num = 0;
  		int i;
  		for (i = offset; i < maxCount; i++)
-@@ -1110,16 +1145,336 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -953,15 +1012,16 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 			{
+ 				setLod0Flag(array[num3]);
+ 				num3++;
+ 			}
+ 		}
+-		blockModelDatas[block.BlockId] = Tesselate(texSource, block, block.Shape, altblockModelDatasLod1, num, num2);
++		MeshData mainMesh = Tesselate(texSource, block, block.Shape, altblockModelDatasLod1, num, num2);
+ 		if (block.Lod2Shape != null)
+ 		{
+ 			block.Lod2Mesh = Tesselate(texSource, block, block.Lod2Shape, altblockModelDatasLod2, num, num2);
+ 		}
++		Volatile.Write(ref blockModelDatas[block.BlockId], mainMesh);
+ 	}
+ 
+ 	private MeshData TesselateBlockForInventory(Block block)
+ 	{
+ 		if (block.IsMissing)
+@@ -1110,16 +1170,336 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -478,7 +532,7 @@ index dae3e90..bd0a31b 100644
  	public Shape GetCachedShape(AssetLocation location)
  	{
  		shapes.TryGetValue(location, out var value);
-@@ -1140,11 +1495,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1140,11 +1520,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  		if (texSource == null)
  		{

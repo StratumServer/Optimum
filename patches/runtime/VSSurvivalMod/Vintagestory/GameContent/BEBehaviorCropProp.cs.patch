@@ -1,0 +1,37 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
+index c778ff6..5e457f7 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
+@@ -1,8 +1,9 @@
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+ namespace Vintagestory.GameContent;
+@@ -105,15 +106,19 @@ public class BEBehaviorCropProp : BlockEntityBehavior, ITexPositionSource
+ 		if (Api == null || Api.Side != EnumAppSide.Client)
+ 		{
+ 			return;
+ 		}
+ 		capi = Api as ICoreClientAPI;
+-		if (Type != null)
++		if (Type == null)
++		{
++			return;
++		}
++		cropBlock = Api.World.GetBlock(new AssetLocation("crop-" + Type + "-" + Stage));
++		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "croppropmeshes");
++		lock (orCreate)
+ 		{
+-			cropBlock = Api.World.GetBlock(new AssetLocation("crop-" + Type + "-" + Stage));
+ 			string cacheKey = getCacheKey();
+-			Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(Api, "croppropmeshes", () => new Dictionary<string, MeshData>());
+ 			if (orCreate.TryGetValue(cacheKey, out var value))
+ 			{
+ 				mesh = value;
+ 				return;
+ 			}

@@ -1,234 +1,575 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using Vintagestory.API.Config;
 
 namespace Vintagestory.API.Client;
 
 /// <summary>
-/// Issue #73: recycles the per-clone <see cref="CustomMeshDataPart{T}"/> buffers
-/// that chunk mesh finalization allocates. Profiling (200 chunks, greedy meshing
-/// off, VD256) showed ~45 KB/chunk of allocation, 99.4% of it in the clone step,
-/// and a per-clone extra-array dump attributed all of it to CustomInts (always),
-/// CustomShorts (TopSoil) and CustomFloats (Liquid) - the CustomMeshDataPart&lt;T&gt;
-/// clones. The big xyz/uv/rgba/flags/indices arrays are already pooled by
-/// MeshDataRecycler; these were the last unpooled per-chunk buffers.
+/// Issue #73 / #612: Per-worker pool for the CustomMeshDataPart&lt;T&gt; buffers
+/// allocated when chunk tesselation finalizes meshes via
+/// ChunkTesselator.populateTesselatedChunkPart -> OptimumCloneChunkMesh.
 ///
-/// This type is Cecil-injected into the game API assembly (it cannot add methods
-/// to the sealed vanilla MeshData; instead ChunkTesselator, which is fully
-/// transplanted, calls OptimumMeshPartPool.CloneChunkMesh and OptimumMeshPartPool
-/// reclaims the parts after upload). It touches only public MeshData /
-/// CustomMeshDataPart members.
-///
-/// Lifecycle (verified against the decompiled 1.22.7 client, not assumed):
-///  - CloneChunkMesh runs on the single "tesselateterrain" thread in
-///    ChunkTesselator.populateTesselatedChunkPart (the only caller of the chunk
-///    clone; entity/item/GUI meshes never touch this pool).
-///  - The cloned mesh's Custom* buffers are consumed read-only on the render
-///    thread in MeshDataPool.AddModel (upload), then reclaimed via Reclaim right
-///    after upload in TesselatedChunkPart.AddToPools. Same lifecycle as the basic
-///    arrays MeshDataRecycler already pools.
-///
-/// Threading discipline mirrors MeshDataRecycler exactly: the only cross-thread
-/// operation is Reclaim (render thread enqueues to a ConcurrentQueue). Pulls and
-/// draining that queue happen only on the tessellation thread, so the
-/// size-bucketed free lists are single-thread-owned and lock-free. Gated on
-/// OptimumConfig.MeshPartPoolActive, which additionally requires a single
-/// tessellation worker; with more than one worker the pool is bypassed (fresh
-/// clone) so raising the worker count can never race the free lists.
+/// Ownership and multi-worker safety:
+/// - Each tessellation worker owns a private WorkerSlotPool via [ThreadStatic],
+///   eliminating cross-worker locks on Rent/Clone.
+/// - TesselatedChunkPart.AddModelAndStoreLocation calls Reclaim on the main
+///   render thread. Pooled arrays track their originating WorkerSlotPool via a
+///   ConditionalWeakTable so Reclaim enqueues returns ONLY into the originating
+///   worker's bounded MPSC queue (never mutating another thread's free lists).
+/// - Return queues are drained solely by the owning worker on Rent or TestDrain.
+/// - InterleaveSizes and InterleaveOffsets avoid allocating new int[] arrays when
+///   a recycled part already carries matching metadata.
 /// </summary>
 public static class OptimumMeshPartPool
 {
-    private static readonly ConcurrentQueue<CustomMeshDataPartInt> _returnInt = new();
-    private static readonly ConcurrentQueue<CustomMeshDataPartShort> _returnShort = new();
-    private static readonly ConcurrentQueue<CustomMeshDataPartFloat> _returnFloat = new();
+    private const int MaxPerTypePerWorker = 128;
 
-    private const int MaxPerType = 512;
-    private static readonly List<CustomMeshDataPartInt> _freeInt = new();
-    private static readonly List<CustomMeshDataPartShort> _freeShort = new();
-    private static readonly List<CustomMeshDataPartFloat> _freeFloat = new();
+    private static readonly Lock RegistryLock = new();
+    private static readonly List<WorkerSlotPool> AllSlots = new();
+    private static readonly ConditionalWeakTable<Array, WorkerSlotPool> ArrayOrigins = new();
 
-    // ---- Render thread: offer parts back (enqueue only, never touch free lists). ----
-    public static void Reclaim(MeshData mesh)
+    [ThreadStatic]
+    private static WorkerSlotPool? t_slot;
+
+    private sealed class WorkerSlotPool
     {
-        if (mesh == null) return;
-        if (mesh.CustomInts != null) _returnInt.Enqueue(mesh.CustomInts);
-        if (mesh.CustomShorts != null) _returnShort.Enqueue(mesh.CustomShorts);
-        if (mesh.CustomFloats != null) _returnFloat.Enqueue(mesh.CustomFloats);
+        private long _pad0, _pad1, _pad2, _pad3, _pad4, _pad5, _pad6, _pad7;
+        public readonly List<CustomMeshDataPartInt> FreeInt = new(32);
+        public readonly List<CustomMeshDataPartShort> FreeShort = new(32);
+        public readonly List<CustomMeshDataPartFloat> FreeFloat = new(32);
+        public readonly List<CustomMeshDataPartByte> FreeByte = new(32);
+
+        public readonly ConcurrentQueue<CustomMeshDataPartInt> ReclaimInt = new();
+        public readonly ConcurrentQueue<CustomMeshDataPartShort> ReclaimShort = new();
+        public readonly ConcurrentQueue<CustomMeshDataPartFloat> ReclaimFloat = new();
+        public readonly ConcurrentQueue<CustomMeshDataPartByte> ReclaimByte = new();
+
+        private int _reclaimIntCount;
+        private int _reclaimShortCount;
+        private int _reclaimFloatCount;
+        private int _reclaimByteCount;
+
+        public WorkerSlotPool()
+        {
+            _ = _pad0 + _pad1 + _pad2 + _pad3 + _pad4 + _pad5 + _pad6 + _pad7;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void DrainReturns()
+        {
+            while (ReclaimInt.TryDequeue(out var p))
+            {
+                Interlocked.Decrement(ref _reclaimIntCount);
+                if (FreeInt.Count < MaxPerTypePerWorker) FreeInt.Add(p);
+            }
+            while (ReclaimShort.TryDequeue(out var p))
+            {
+                Interlocked.Decrement(ref _reclaimShortCount);
+                if (FreeShort.Count < MaxPerTypePerWorker) FreeShort.Add(p);
+            }
+            while (ReclaimFloat.TryDequeue(out var p))
+            {
+                Interlocked.Decrement(ref _reclaimFloatCount);
+                if (FreeFloat.Count < MaxPerTypePerWorker) FreeFloat.Add(p);
+            }
+            while (ReclaimByte.TryDequeue(out var p))
+            {
+                Interlocked.Decrement(ref _reclaimByteCount);
+                if (FreeByte.Count < MaxPerTypePerWorker) FreeByte.Add(p);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void EnqueueInt(CustomMeshDataPartInt part)
+        {
+            if (FreeInt.Count + _reclaimIntCount >= MaxPerTypePerWorker) return;
+            if (Interlocked.Increment(ref _reclaimIntCount) <= MaxPerTypePerWorker)
+            {
+                ReclaimInt.Enqueue(part);
+            }
+            else
+            {
+                Interlocked.Decrement(ref _reclaimIntCount);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void EnqueueShort(CustomMeshDataPartShort part)
+        {
+            if (FreeShort.Count + _reclaimShortCount >= MaxPerTypePerWorker) return;
+            if (Interlocked.Increment(ref _reclaimShortCount) <= MaxPerTypePerWorker)
+            {
+                ReclaimShort.Enqueue(part);
+            }
+            else
+            {
+                Interlocked.Decrement(ref _reclaimShortCount);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void EnqueueFloat(CustomMeshDataPartFloat part)
+        {
+            if (FreeFloat.Count + _reclaimFloatCount >= MaxPerTypePerWorker) return;
+            if (Interlocked.Increment(ref _reclaimFloatCount) <= MaxPerTypePerWorker)
+            {
+                ReclaimFloat.Enqueue(part);
+            }
+            else
+            {
+                Interlocked.Decrement(ref _reclaimFloatCount);
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void EnqueueByte(CustomMeshDataPartByte part)
+        {
+            if (FreeByte.Count + _reclaimByteCount >= MaxPerTypePerWorker) return;
+            if (Interlocked.Increment(ref _reclaimByteCount) <= MaxPerTypePerWorker)
+            {
+                ReclaimByte.Enqueue(part);
+            }
+            else
+            {
+                Interlocked.Decrement(ref _reclaimByteCount);
+            }
+        }
+
+        public void ClearAll()
+        {
+            while (ReclaimInt.TryDequeue(out _)) Interlocked.Decrement(ref _reclaimIntCount);
+            while (ReclaimShort.TryDequeue(out _)) Interlocked.Decrement(ref _reclaimShortCount);
+            while (ReclaimFloat.TryDequeue(out _)) Interlocked.Decrement(ref _reclaimFloatCount);
+            while (ReclaimByte.TryDequeue(out _)) Interlocked.Decrement(ref _reclaimByteCount);
+            FreeInt.Clear();
+            FreeShort.Clear();
+            FreeFloat.Clear();
+            FreeByte.Clear();
+        }
     }
 
-    private static void Drain()
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static WorkerSlotPool GetCurrentSlot()
     {
-        while (_returnInt.TryDequeue(out var p)) { if (_freeInt.Count < MaxPerType) _freeInt.Add(p); }
-        while (_returnShort.TryDequeue(out var p)) { if (_freeShort.Count < MaxPerType) _freeShort.Add(p); }
-        while (_returnFloat.TryDequeue(out var p)) { if (_freeFloat.Count < MaxPerType) _freeFloat.Add(p); }
+        WorkerSlotPool? slot = t_slot;
+        if (slot != null) return slot;
+        lock (RegistryLock)
+        {
+            slot = t_slot;
+            if (slot != null) return slot;
+            slot = new WorkerSlotPool();
+            t_slot = slot;
+            AllSlots.Add(slot);
+            return slot;
+        }
     }
 
     /// <summary>
-    /// Tess thread only. Clones a chunk mesh the same way MeshData.CloneUsingRecycler
-    /// does (recycled basic arrays via MeshDataRecycler, fresh extra arrays), but
-    /// pulls the CustomMeshDataPart clones from the pool. Returns null when the mesh
-    /// does not qualify for recycling (caller falls back to src.CloneUsingRecycler()).
-    /// Output renders identically to CloneUsingRecycler: same counts, same copied
-    /// Values[0..Count), same interleave metadata.
+    /// Clears all per-worker pooled buffers and return queues. Intended for
+    /// tests and session teardown.
     /// </summary>
-    public static MeshData CloneChunkMesh(MeshData src)
+    public static void Clear()
     {
-        // Same qualification test as MeshData.CloneUsingRecycler.
-        int recyclableSizeInBytes = src.VerticesCount * MeshData.BaseSizeInBytes;
+        lock (RegistryLock)
+        {
+            for (int i = 0; i < AllSlots.Count; i++)
+            {
+                AllSlots[i].ClearAll();
+            }
+        }
+        ArrayOrigins.Clear();
+    }
+
+    /// <summary>
+    /// Clones a chunk mesh using the calling worker's MeshData.Recycler and
+    /// CustomMeshDataPart pool, preserving exact field parity with
+    /// MeshData.CloneUsingRecycler().
+    /// </summary>
+    public static MeshData? CloneChunkMesh(MeshData? src)
+    {
+        if (src == null) return null;
+
+        int recyclableSizeInBytes = src.VerticesCount * 28;
         if (recyclableSizeInBytes < MeshDataRecycler.MinimumSizeForRecycling ||
             src.Uv == null || src.Rgba == null || src.Flags == null ||
-            src.VerticesPerFace != MeshData.StandardVerticesPerFace ||
-            src.IndicesPerFace != MeshData.StandardIndicesPerFace)
-        {
-            return null;
-        }
-        int requiredSize = Math.Max(src.VerticesCount,
-            ((src.IndicesCount + MeshData.StandardIndicesPerFace - 1) / MeshData.StandardIndicesPerFace) * MeshData.StandardVerticesPerFace);
-        if (requiredSize > src.VerticesCount * 1.05f ||
-            requiredSize * MeshData.StandardIndicesPerFace / MeshData.StandardVerticesPerFace > src.IndicesCount * 1.2f)
+            src.VerticesPerFace != 4 ||
+            src.IndicesPerFace != 6)
         {
             return null;
         }
 
-        Drain();
+        int requiredSize = Math.Max(src.VerticesCount, ((src.IndicesCount + 5) / 6) * 4);
+        if (requiredSize > src.VerticesCount * 1.05f || requiredSize * 6 / 4 > src.IndicesCount * 1.2f)
+        {
+            return null;
+        }
+
+        WorkerSlotPool slot = GetCurrentSlot();
+        slot.DrainReturns();
 
         MeshData dst = MeshData.Recycler.GetOrCreateMesh(requiredSize);
 
-        // --- basic data (mirrors CopyBasicData; dst arrays sized by recycler) ---
-        dst.VerticesPerFace = src.VerticesPerFace;
-        dst.IndicesPerFace = src.IndicesPerFace;
         dst.SetVerticesCount(src.VerticesCount);
         dst.SetIndicesCount(src.IndicesCount);
-        Array.Copy(src.xyz, dst.xyz, src.VerticesCount * 3);
-        Array.Copy(src.Uv, dst.Uv, src.VerticesCount * 2);
-        Array.Copy(src.Rgba, dst.Rgba, src.VerticesCount * 4);
-        Array.Copy(src.Flags, dst.Flags, src.VerticesCount);
+        Array.Copy(src.xyz, dst.xyz, src.XyzCount);
+        Array.Copy(src.Uv, dst.Uv, src.UvCount);
+        Array.Copy(src.Rgba, dst.Rgba, src.RgbaCount);
+        Array.Copy(src.Flags, dst.Flags, src.FlagsCount);
         Array.Copy(src.Indices, dst.Indices, src.IndicesCount);
 
-        // --- extra data (mirrors CloneExtraData; Custom* routed through the pool) ---
-        if (src.Normals != null) dst.Normals = FastCopyInt(src.Normals, src.NormalsCount);
-        if (src.XyzFaces != null) { dst.XyzFaces = FastCopyByte(src.XyzFaces, src.XyzFacesCount); dst.XyzFacesCount = src.XyzFacesCount; }
-        if (src.TextureIndices != null) { dst.TextureIndices = FastCopyByte(src.TextureIndices, src.TextureIndicesCount); dst.TextureIndicesCount = src.TextureIndicesCount; dst.TextureIds = (int[])src.TextureIds.Clone(); }
-        if (src.ClimateColorMapIds != null) { dst.ClimateColorMapIds = FastCopyByte(src.ClimateColorMapIds, src.ColorMapIdsCount); dst.ColorMapIdsCount = src.ColorMapIdsCount; }
-        if (src.SeasonColorMapIds != null) { dst.SeasonColorMapIds = FastCopyByte(src.SeasonColorMapIds, src.ColorMapIdsCount); dst.ColorMapIdsCount = src.ColorMapIdsCount; }
-        if (src.RenderPassesAndExtraBits != null) { dst.RenderPassesAndExtraBits = FastCopyShort(src.RenderPassesAndExtraBits, src.RenderPassCount); dst.RenderPassCount = src.RenderPassCount; }
+        if (src.Normals != null)
+        {
+            dst.Normals = CopyIntArray(src.Normals, src.NormalsCount);
+            dst.NormalsCount = src.NormalsCount;
+        }
+        if (src.XyzFaces != null)
+        {
+            dst.XyzFaces = CopyByteArray(src.XyzFaces, src.XyzFacesCount);
+            dst.XyzFacesCount = src.XyzFacesCount;
+        }
+        if (src.TextureIndices != null)
+        {
+            dst.TextureIndices = CopyByteArray(src.TextureIndices, src.TextureIndicesCount);
+            dst.TextureIndicesCount = src.TextureIndicesCount;
+            dst.TextureIds = src.TextureIds != null ? (int[])src.TextureIds.Clone() : Array.Empty<int>();
+        }
+        if (src.ClimateColorMapIds != null)
+        {
+            dst.ClimateColorMapIds = CopyByteArray(src.ClimateColorMapIds, src.ColorMapIdsCount);
+            dst.ColorMapIdsCount = src.ColorMapIdsCount;
+        }
+        if (src.SeasonColorMapIds != null)
+        {
+            dst.SeasonColorMapIds = CopyByteArray(src.SeasonColorMapIds, src.ColorMapIdsCount);
+            dst.ColorMapIdsCount = src.ColorMapIdsCount;
+        }
+        if (src.RenderPassesAndExtraBits != null)
+        {
+            dst.RenderPassesAndExtraBits = CopyShortArray(src.RenderPassesAndExtraBits, src.RenderPassCount);
+            dst.RenderPassCount = src.RenderPassCount;
+        }
 
-        dst.CustomFloats = src.CustomFloats == null ? null : ClonePartFloat(src.CustomFloats);
-        dst.CustomShorts = src.CustomShorts == null ? null : ClonePartShort(src.CustomShorts);
-        dst.CustomBytes = src.CustomBytes == null ? null : src.CustomBytes.Clone();
-        dst.CustomInts = src.CustomInts == null ? null : ClonePartInt(src.CustomInts);
+        if (src.CustomFloats != null)
+        {
+            dst.CustomFloats = RentFloat(slot, src.CustomFloats);
+        }
+        if (src.CustomShorts != null)
+        {
+            dst.CustomShorts = RentShort(slot, src.CustomShorts);
+        }
+        if (src.CustomBytes != null)
+        {
+            dst.CustomBytes = RentByte(slot, src.CustomBytes);
+        }
+        if (src.CustomInts != null)
+        {
+            dst.CustomInts = RentInt(slot, src.CustomInts);
+        }
 
         return dst;
     }
 
-    // Only pool parts with default (auto) allocation size, so the reused part
-    // reproduces the source exactly (AllocationSize == Count). Chunk-mesh parts
-    // are always auto (never call SetAllocationSize); anything else falls back
-    // to the vanilla per-type Clone(), which is always correct.
-    private static CustomMeshDataPartInt ClonePartInt(CustomMeshDataPartInt src)
+    /// <summary>
+    /// Detaches and returns CustomMeshDataPart buffers from an uploaded chunk mesh
+    /// to the originating worker's bounded MPSC queue before MeshData.Dispose().
+    /// </summary>
+    public static void Reclaim(MeshData? mesh)
     {
-        if (src.AllocationSize != src.Count) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); return src.Clone(); }
-        CustomMeshDataPartInt reuse = TakeFit(_freeInt, src.Count);
-        if (reuse == null) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); reuse = new CustomMeshDataPartInt(); }
-        else Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Hit();
-        CopyInt(src, reuse);
-        return reuse;
-    }
-    private static CustomMeshDataPartShort ClonePartShort(CustomMeshDataPartShort src)
-    {
-        if (src.AllocationSize != src.Count) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); return src.Clone(); }
-        CustomMeshDataPartShort reuse = TakeFit(_freeShort, src.Count);
-        if (reuse == null) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); reuse = new CustomMeshDataPartShort(); }
-        else Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Hit();
-        CopyShort(src, reuse);
-        return reuse;
-    }
-    private static CustomMeshDataPartFloat ClonePartFloat(CustomMeshDataPartFloat src)
-    {
-        if (src.AllocationSize != src.Count) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); return src.Clone(); }
-        CustomMeshDataPartFloat reuse = TakeFit(_freeFloat, src.Count);
-        if (reuse == null) { Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Skip(); reuse = new CustomMeshDataPartFloat(); }
-        else Vintagestory.API.Config.OptimumDiagnostics.MeshPartPool.Hit();
-        CopyFloat(src, reuse);
-        return reuse;
+        if (mesh == null) return;
+
+        if (mesh.CustomInts != null)
+        {
+            var p = mesh.CustomInts;
+            mesh.CustomInts = null;
+            if (IsPoolablePart(p))
+            {
+                EnqueueToOrigin(p, p.Values, static (slot, part) => slot.EnqueueInt(part));
+            }
+        }
+        if (mesh.CustomShorts != null)
+        {
+            var p = mesh.CustomShorts;
+            mesh.CustomShorts = null;
+            if (IsPoolablePart(p))
+            {
+                EnqueueToOrigin(p, p.Values, static (slot, part) => slot.EnqueueShort(part));
+            }
+        }
+        if (mesh.CustomFloats != null)
+        {
+            var p = mesh.CustomFloats;
+            mesh.CustomFloats = null;
+            if (IsPoolablePart(p))
+            {
+                EnqueueToOrigin(p, p.Values, static (slot, part) => slot.EnqueueFloat(part));
+            }
+        }
+        if (mesh.CustomBytes != null)
+        {
+            var p = mesh.CustomBytes;
+            mesh.CustomBytes = null;
+            if (IsPoolablePart(p))
+            {
+                EnqueueToOrigin(p, p.Values, static (slot, part) => slot.EnqueueByte(part));
+            }
+        }
     }
 
-    private static void CopyInt(CustomMeshDataPartInt src, CustomMeshDataPartInt dst)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void EnqueueToOrigin<TPart>(TPart part, Array? values, Action<WorkerSlotPool, TPart> enqueue)
+    {
+        if (values != null && ArrayOrigins.TryGetValue(values, out WorkerSlotPool? origin))
+        {
+            enqueue(origin, part);
+            return;
+        }
+        enqueue(GetCurrentSlot(), part);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static bool IsPoolablePart<T>(CustomMeshDataPart<T> part)
+    {
+        return part.Values != null && part.AllocationSize == part.Count;
+    }
+
+    private static CustomMeshDataPartInt RentInt(WorkerSlotPool slot, CustomMeshDataPartInt src)
+    {
+        if (src.AllocationSize != src.Count)
+        {
+            OptimumDiagnostics.MeshPartPool.Skip();
+            return src.Clone();
+        }
+        int needed = src.Count;
+        var list = slot.FreeInt;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            var candidate = list[i];
+            if (candidate.Values != null && candidate.Values.Length >= needed)
+            {
+                int last = list.Count - 1;
+                list[i] = list[last];
+                list.RemoveAt(last);
+                CopyIntInto(src, candidate);
+                ArrayOrigins.AddOrUpdate(candidate.Values, slot);
+                OptimumDiagnostics.MeshPartPool.Hit();
+                return candidate;
+            }
+        }
+
+        OptimumDiagnostics.MeshPartPool.Skip();
+        var fresh = new CustomMeshDataPartInt(src.BufferSize);
+        CopyIntInto(src, fresh);
+        if (fresh.Values != null) ArrayOrigins.AddOrUpdate(fresh.Values, slot);
+        return fresh;
+    }
+
+    private static CustomMeshDataPartShort RentShort(WorkerSlotPool slot, CustomMeshDataPartShort src)
+    {
+        if (src.AllocationSize != src.Count)
+        {
+            OptimumDiagnostics.MeshPartPool.Skip();
+            return src.Clone();
+        }
+        int needed = src.Count;
+        var list = slot.FreeShort;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            var candidate = list[i];
+            if (candidate.Values != null && candidate.Values.Length >= needed)
+            {
+                int last = list.Count - 1;
+                list[i] = list[last];
+                list.RemoveAt(last);
+                CopyShortInto(src, candidate);
+                ArrayOrigins.AddOrUpdate(candidate.Values, slot);
+                OptimumDiagnostics.MeshPartPool.Hit();
+                return candidate;
+            }
+        }
+
+        OptimumDiagnostics.MeshPartPool.Skip();
+        var fresh = new CustomMeshDataPartShort(src.BufferSize);
+        CopyShortInto(src, fresh);
+        if (fresh.Values != null) ArrayOrigins.AddOrUpdate(fresh.Values, slot);
+        return fresh;
+    }
+
+    private static CustomMeshDataPartFloat RentFloat(WorkerSlotPool slot, CustomMeshDataPartFloat src)
+    {
+        if (src.AllocationSize != src.Count)
+        {
+            OptimumDiagnostics.MeshPartPool.Skip();
+            return src.Clone();
+        }
+        int needed = src.Count;
+        var list = slot.FreeFloat;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            var candidate = list[i];
+            if (candidate.Values != null && candidate.Values.Length >= needed)
+            {
+                int last = list.Count - 1;
+                list[i] = list[last];
+                list.RemoveAt(last);
+                CopyFloatInto(src, candidate);
+                ArrayOrigins.AddOrUpdate(candidate.Values, slot);
+                OptimumDiagnostics.MeshPartPool.Hit();
+                return candidate;
+            }
+        }
+
+        OptimumDiagnostics.MeshPartPool.Skip();
+        var fresh = new CustomMeshDataPartFloat(src.BufferSize);
+        CopyFloatInto(src, fresh);
+        if (fresh.Values != null) ArrayOrigins.AddOrUpdate(fresh.Values, slot);
+        return fresh;
+    }
+
+    private static CustomMeshDataPartByte RentByte(WorkerSlotPool slot, CustomMeshDataPartByte src)
+    {
+        if (src.AllocationSize != src.Count)
+        {
+            OptimumDiagnostics.MeshPartPool.Skip();
+            return src.Clone();
+        }
+        int needed = src.Count;
+        var list = slot.FreeByte;
+        for (int i = list.Count - 1; i >= 0; i--)
+        {
+            var candidate = list[i];
+            if (candidate.Values != null && candidate.Values.Length >= needed)
+            {
+                int last = list.Count - 1;
+                list[i] = list[last];
+                list.RemoveAt(last);
+                CopyByteInto(src, candidate);
+                ArrayOrigins.AddOrUpdate(candidate.Values, slot);
+                OptimumDiagnostics.MeshPartPool.Hit();
+                return candidate;
+            }
+        }
+
+        OptimumDiagnostics.MeshPartPool.Skip();
+        var fresh = new CustomMeshDataPartByte(src.BufferSize);
+        CopyByteInto(src, fresh);
+        if (fresh.Values != null) ArrayOrigins.AddOrUpdate(fresh.Values, slot);
+        return fresh;
+    }
+
+    private static void CopyIntInto(CustomMeshDataPartInt src, CustomMeshDataPartInt dst)
+    {
+        CopyCommonMetadata(src, dst);
+        dst.Conversion = src.Conversion;
+        if (src.Count > 0 && src.Values != null)
+        {
+            Array.Copy(src.Values, 0, dst.Values, 0, src.Count);
+        }
+    }
+
+    private static void CopyShortInto(CustomMeshDataPartShort src, CustomMeshDataPartShort dst)
+    {
+        CopyCommonMetadata(src, dst);
+        dst.Conversion = src.Conversion;
+        if (src.Count > 0 && src.Values != null)
+        {
+            Array.Copy(src.Values, 0, dst.Values, 0, src.Count);
+        }
+    }
+
+    private static void CopyFloatInto(CustomMeshDataPartFloat src, CustomMeshDataPartFloat dst)
+    {
+        CopyCommonMetadata(src, dst);
+        if (src.Count > 0 && src.Values != null)
+        {
+            Array.Copy(src.Values, 0, dst.Values, 0, src.Count);
+        }
+    }
+
+    private static void CopyByteInto(CustomMeshDataPartByte src, CustomMeshDataPartByte dst)
+    {
+        CopyCommonMetadata(src, dst);
+        dst.Conversion = src.Conversion;
+        if (src.Count > 0 && src.Values != null)
+        {
+            Array.Copy(src.Values, 0, dst.Values, 0, src.Count);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void CopyCommonMetadata<T>(CustomMeshDataPart<T> src, CustomMeshDataPart<T> dst)
     {
         dst.Count = src.Count;
-        if (dst.Values == null || dst.Values.Length < src.Count) dst.Values = new int[src.Count];
-        Array.Copy(src.Values, dst.Values, src.Count);
-        CopyInterleave(src, dst);
-    }
-    private static void CopyShort(CustomMeshDataPartShort src, CustomMeshDataPartShort dst)
-    {
-        dst.Count = src.Count;
-        if (dst.Values == null || dst.Values.Length < src.Count) dst.Values = new short[src.Count];
-        Array.Copy(src.Values, dst.Values, src.Count);
-        CopyInterleave(src, dst);
-    }
-    private static void CopyFloat(CustomMeshDataPartFloat src, CustomMeshDataPartFloat dst)
-    {
-        dst.Count = src.Count;
-        if (dst.Values == null || dst.Values.Length < src.Count) dst.Values = new float[src.Count];
-        Array.Copy(src.Values, dst.Values, src.Count);
-        CopyInterleave(src, dst);
-    }
-    private static void CopyInterleave<T>(CustomMeshDataPart<T> src, CustomMeshDataPart<T> dst)
-    {
-        dst.InterleaveSizes = src.InterleaveSizes == null ? null : (int[])src.InterleaveSizes.Clone();
-        dst.InterleaveOffsets = src.InterleaveOffsets == null ? null : (int[])src.InterleaveOffsets.Clone();
         dst.InterleaveStride = src.InterleaveStride;
         dst.Instanced = src.Instanced;
         dst.StaticDraw = src.StaticDraw;
         dst.BaseOffset = src.BaseOffset;
+        dst.InterleaveSizes = CloneIntArrayIfChanged(dst.InterleaveSizes, src.InterleaveSizes);
+        dst.InterleaveOffsets = CloneIntArrayIfChanged(dst.InterleaveOffsets, src.InterleaveOffsets);
     }
 
-    private static T TakeFit<T>(List<T> free, int needCount) where T : class
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int[]? CloneIntArrayIfChanged(int[]? dst, int[]? src)
     {
-        for (int i = free.Count - 1; i >= 0; i--)
+        if (src == null) return null;
+        if (dst != null && dst.Length == src.Length)
         {
-            int len = BufLen(free[i]);
-            if (len >= needCount)
-            {
-                T hit = free[i];
-                free[i] = free[free.Count - 1];
-                free.RemoveAt(free.Count - 1);
-                return hit;
-            }
+            if (src.AsSpan().SequenceEqual(dst.AsSpan())) return dst;
+            Array.Copy(src, dst, src.Length);
+            return dst;
         }
-        return null;
+        return (int[])src.Clone();
     }
 
-    private static int BufLen(object p)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int[] CopyIntArray(int[] src, int count)
     {
-        switch (p)
+        var copy = new int[count];
+        if (count > 0) Array.Copy(src, 0, copy, 0, count);
+        return copy;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static short[] CopyShortArray(short[] src, int count)
+    {
+        var copy = new short[count];
+        if (count > 0) Array.Copy(src, 0, copy, 0, count);
+        return copy;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static byte[] CopyByteArray(byte[] src, int count)
+    {
+        var copy = new byte[count];
+        if (count > 0) Array.Copy(src, 0, copy, 0, count);
+        return copy;
+    }
+
+    // ---- Test seams (preserve existing single-thread and new multi-worker test contracts) ----
+
+    public static CustomMeshDataPartInt TestClonePartInt(CustomMeshDataPartInt src)
+    {
+        WorkerSlotPool slot = GetCurrentSlot();
+        slot.DrainReturns();
+        return RentInt(slot, src);
+    }
+
+    public static void TestReclaimInt(CustomMeshDataPartInt? part)
+    {
+        if (part != null && IsPoolablePart(part))
         {
-            case CustomMeshDataPartInt i: return i.Values?.Length ?? 0;
-            case CustomMeshDataPartShort s: return s.Values?.Length ?? 0;
-            case CustomMeshDataPartFloat f: return f.Values?.Length ?? 0;
-            default: return 0;
+            EnqueueToOrigin(part, part.Values, static (slot, p) => slot.EnqueueInt(p));
         }
     }
 
-    private static int[] FastCopyInt(int[] a, int count) { var b = new int[count]; Array.Copy(a, b, count); return b; }
-    private static byte[] FastCopyByte(byte[] a, int count) { var b = new byte[count]; Array.Copy(a, b, count); return b; }
-    private static short[] FastCopyShort(short[] a, int count) { var b = new short[count]; Array.Copy(a, b, count); return b; }
+    public static void TestDrain() => GetCurrentSlot().DrainReturns();
 
-    /// <summary>Drop all pooled buffers (world unload / recycler reset).</summary>
-    public static void Clear()
+    public static int TestFreeIntCount => GetCurrentSlot().FreeInt.Count;
+
+    public static int TestRegisteredWorkerSlotCount
     {
-        while (_returnInt.TryDequeue(out _)) { }
-        while (_returnShort.TryDequeue(out _)) { }
-        while (_returnFloat.TryDequeue(out _)) { }
-        _freeInt.Clear();
-        _freeShort.Clear();
-        _freeFloat.Clear();
+        get { lock (RegistryLock) { return AllSlots.Count; } }
     }
-
-    // ---- internal test seams (no MeshDataRecycler/game instance needed) ----
-    internal static CustomMeshDataPartInt TestClonePartInt(CustomMeshDataPartInt src) => ClonePartInt(src);
-    internal static int TestFreeIntCount => _freeInt.Count;
-    internal static void TestReclaimInt(CustomMeshDataPartInt p) { _returnInt.Enqueue(p); }
-    internal static void TestDrain() => Drain();
 }

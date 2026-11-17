@@ -1,0 +1,92 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockMaterialFromAttributes.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockMaterialFromAttributes.cs
+index d6e673d..495dfd1 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockMaterialFromAttributes.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockMaterialFromAttributes.cs
+@@ -2,10 +2,11 @@ using System;
+ using System.Collections.Generic;
+ using System.Linq;
+ using Newtonsoft.Json.Linq;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ using Vintagestory.ServerMods;
+ 
+@@ -85,33 +86,69 @@ public class BlockMaterialFromAttributes : Block
+ 		base.OnUnloaded(api);
+ 	}
+ 
+ 	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+ 	{
+-		Dictionary<string, MultiTextureMeshRef> orCreate = ObjectCacheUtil.GetOrCreate(capi, MeshKeyInventory, () => new Dictionary<string, MultiTextureMeshRef>());
++		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, MeshKeyInventory);
+ 		string text = itemstack.Attributes.GetString("material", "");
+ 		string key = Variant["type"] + text;
+-		if (!orCreate.TryGetValue(key, out var value))
++		MultiTextureMeshRef value;
++		lock (orCreate)
++		{
++			orCreate.TryGetValue(key, out value);
++		}
++		if (value == null)
+ 		{
+ 			MeshData orCreateMesh = GetOrCreateMesh(text);
+-			value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(orCreateMesh));
++			value = capi.Render.UploadMultiTextureMesh(orCreateMesh);
++			lock (orCreate)
++			{
++				if (!orCreate.TryGetValue(key, out var existing))
++				{
++					orCreate[key] = value;
++				}
++				else
++				{
++					value.Dispose();
++					value = existing;
++				}
++			}
+ 		}
+ 		renderinfo.ModelRef = value;
+ 	}
+ 
+ 	public virtual MeshData GetOrCreateMesh(string material, ITexPositionSource? overrideTexturesource = null)
+ 	{
+-		Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(api, MeshKey, () => new Dictionary<string, MeshData>());
++		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(api, MeshKey);
+ 		ICoreClientAPI capi = (ICoreClientAPI)api;
+ 		string key = Variant["type"] + material;
+-		if (overrideTexturesource != null || !orCreate.TryGetValue(key, out var value))
++		MeshData value = null;
++		bool flag = false;
++		if (overrideTexturesource == null)
++		{
++			lock (orCreate)
++			{
++				flag = orCreate.TryGetValue(key, out value);
++			}
++		}
++		if (!flag)
+ 		{
+ 			CompositeShape cshape = Shape.Clone();
+ 			value = capi.TesselatorManager.CreateMesh(string.Concat(Code, " block"), cshape, (Shape shape, string name) => new ShapeTextureSource(capi, shape, name, TexturesBMFA, (string p) => p.Replace("{material}", material)), overrideTexturesource);
+ 			if (overrideTexturesource == null)
+ 			{
+-				orCreate[key] = value;
++				lock (orCreate)
++				{
++					if (!orCreate.TryGetValue(key, out var existing))
++					{
++						orCreate[key] = value;
++					}
++					else
++					{
++						value = existing;
++					}
++				}
+ 			}
+ 		}
+ 		return value;
+ 	}
+ 

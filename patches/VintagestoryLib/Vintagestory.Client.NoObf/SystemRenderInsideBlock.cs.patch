@@ -1,0 +1,17 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderInsideBlock.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderInsideBlock.cs
+index 5121431..7a41137 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderInsideBlock.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderInsideBlock.cs
+@@ -84,11 +84,11 @@ public class SystemRenderInsideBlock : ClientSystem
+ 			if (block != null && (block.SideOpaque[0] || block.SideOpaque[1] || block.SideOpaque[2] || block.SideOpaque[3] || block.SideOpaque[4] || block.SideOpaque[5]))
+ 			{
+ 				if (block != insideBlocks[i])
+ 				{
+ 					meshRefs[i]?.Dispose();
+-					MeshData sourceMesh = game.api.TesselatorManager.GetDefaultBlockMesh(block);
++					MeshData sourceMesh = game.api.TesselatorManager.GetDefaultBlockMesh(block)?.Clone();
+ 					int num4 = tmpPos.X % 32;
+ 					int num5 = tmpPos.X % 32;
+ 					int num6 = tmpPos.X % 32;
+ 					int num7 = ((num5 + 1) * extChunkSize + (num6 + 1)) * extChunkSize + (num4 + 1);
+ 					blockExt[num7] = block;

@@ -1,0 +1,75 @@
+diff --git a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
+index 0ce97c3..07e8b5d 100644
+--- a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
++++ b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
+@@ -49,22 +49,26 @@ namespace Vintagestory.GameContent
+             }
+         }
+ 
+         public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+         {
+-            var dict = ObjectCacheUtil.GetOrCreate(capi, "croprop-meshes", ()=>new Dictionary<string, MultiTextureMeshRef>());
++            var dict = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, "croprop-meshes");
+ 
+             string type = itemstack.Attributes.GetString("type", "unknown");
+ 
+-            if (dict.TryGetValue(type, out var meshref))
++            lock (dict)
+             {
+-                renderinfo.ModelRef = meshref;
+-            } else
+-            {
+-                nowTesselatingType = type;
+-                capi.Tesselator.TesselateShape("croppropinv", Code, this.Shape, out var meshdata, this);
+-                dict[type] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(meshdata);
++                if (dict.TryGetValue(type, out var meshref))
++                {
++                    renderinfo.ModelRef = meshref;
++                }
++                else
++                {
++                    OptimumCropPropInvTexSource invTexSource = new OptimumCropPropInvTexSource(capi, type);
++                    capi.Tesselator.TesselateShape("croppropinv", Code, this.Shape, out var meshdata, invTexSource);
++                    dict[type] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(meshdata);
++                }
+             }
+ 
+             base.OnBeforeRender(capi, itemstack, target, ref renderinfo);
+         }
+         public override string GetPlacedBlockName(IWorldAccessor world, BlockPos pos)
+@@ -190,22 +194,25 @@ namespace Vintagestory.GameContent
+             if (Api == null || Api.Side != EnumAppSide.Client) return;
+             capi = Api as ICoreClientAPI;
+             if (Type == null) return;
+ 
+             cropBlock = Api.World.GetBlock(new AssetLocation("crop-" + Type + "-" + Stage));
+-            string key = getCacheKey();
++            var cache = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "croppropmeshes");
+ 
+-            var cache = ObjectCacheUtil.GetOrCreate(Api, "croppropmeshes", () => new Dictionary<string, MeshData>());
+-            if (cache.TryGetValue(key, out var meshData))
++            lock (cache)
+             {
+-                this.mesh = meshData;
+-            }
+-            else
+-            {
+-                var mesh = genMesh(cropBlock);
+-                key = getCacheKey();
+-                this.mesh = cache[key] = mesh;
++                string key = getCacheKey();
++                if (cache.TryGetValue(key, out var meshData))
++                {
++                    this.mesh = meshData;
++                }
++                else
++                {
++                    var built = genMesh(cropBlock);
++                    key = getCacheKey();
++                    this.mesh = cache[key] = built;
++                }
+             }
+         }
+ 
+         private string getCacheKey()
+         {

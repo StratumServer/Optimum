@@ -321,6 +321,31 @@ public static class ModPatcher
                 [
                     "ShiverAnimationNames",
                 ],
+                ["Vintagestory.GameContent.BlockSlabSnowRemove"] =
+                [
+                    "optimumSnowMeshLock",
+                    "GetSnowMeshLock",
+                ],
+                ["Vintagestory.GameContent.BlockCrop"] =
+                [
+                    "optimumFarmlandMeshLock",
+                    "GetFarmlandMeshLock",
+                ],
+                ["Vintagestory.GameContent.BlockSmoothTextureTransition"] =
+                [
+                    "optimumCoatingMeshLock",
+                    "GetCoatingMeshLock",
+                ],
+                ["Vintagestory.GameContent.BlockBamboo"] =
+                [
+                    "optimumWindDir",
+                ],
+                ["Vintagestory.GameContent.BlockVines"] =
+                [
+                    "optimumWindLock",
+                    "optimumTmpPos",
+                    "GetWindLock",
+                ],
             },
             Interfaces: new()
             {
@@ -354,6 +379,40 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.PotInFirepitRenderer", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.EntityBehaviorHideWaterSurface", "OnEntityDespawn", 1),
                 new("Vintagestory.GameContent.EntityBehaviorWritingSurface", "OnEntityDespawn", 1),
+                new("Vintagestory.GameContent.BlockSlabSnowRemove", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockCrop", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockSmoothTextureTransition", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockSmoothTextureTransition", "genMeshes", 0),
+                new("Vintagestory.GameContent.BlockFenceStackAware", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockBamboo", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockBamboo", "applyWindSwayToMesh", 4),
+                new("Vintagestory.GameContent.BlockVines", "OnJsonTesselation", 5),
+                new("Vintagestory.GameContent.BlockCrate", "OnBeforeRender", 4),
+                new("Vintagestory.GameContent.BlockCrate", "GenMesh", 7),
+                new("Vintagestory.GameContent.BlockCrate", "GenLabelMesh", 5),
+                new("Vintagestory.GameContent.BlockLantern", "OnBeforeRender", 4),
+                new("Vintagestory.GameContent.BlockLantern", "GenMesh", 6),
+                new("Vintagestory.GameContent.BlockCropProp", "OnBeforeRender", 4),
+                new("Vintagestory.GameContent.BEBehaviorCropProp", "loadMesh", 0),
+                new("Vintagestory.GameContent.BlockEntityCrate", "loadOrCreateMesh", 0),
+                new("Vintagestory.GameContent.BELantern", "getMesh", 1),
+                new("Vintagestory.GameContent.BlockEntityCrock", "GetMesh", 6),
+                new("Vintagestory.GameContent.BlockEntityGenericTypedContainer", "GenMesh", 1),
+                new("Vintagestory.GameContent.BlockShapeFromAttributes", "GetOrCreateMesh", 4),
+                new("Vintagestory.GameContent.BlockEntityPlantContainer", "GenPotMesh", 1),
+                new("Vintagestory.GameContent.BlockEntityPlantContainer", "GenContentMesh", 1),
+                new("Vintagestory.GameContent.BEBehaviorDisplay", "get_MeshCache", 0),
+                new("Vintagestory.GameContent.BEBehaviorDisplay", "OnSetTransform", 3),
+                new("Vintagestory.GameContent.BEBehaviorDisplay", "getOrCreateMesh", 1),
+                new("Vintagestory.GameContent.BEBehaviorDisplay", "getCachedMesh", 1),
+                new("Vintagestory.GameContent.BlockEntityDisplay", "get_MeshCache", 0),
+                new("Vintagestory.GameContent.BlockEntityDisplay", "OnEventBusEvent", 3),
+                new("Vintagestory.GameContent.BlockEntityDisplay", "getMesh", 1),
+                new("Vintagestory.GameContent.BlockEntityDisplay", "getOrCreateMesh", 2),
+                new("Vintagestory.GameContent.BlockMaterialFromAttributes", "OnBeforeRender", 4),
+                new("Vintagestory.GameContent.BlockMaterialFromAttributes", "GetOrCreateMesh", 2),
+                new("Vintagestory.GameContent.BlockShapeMaterialFromAttributes", "GetOrCreateMesh", 4),
+                new("Vintagestory.GameContent.BlockShapeMaterialFromAttributes", "OnBeforeRender", 4),
             ]);
     }
 

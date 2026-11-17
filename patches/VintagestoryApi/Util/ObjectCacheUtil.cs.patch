@@ -1,0 +1,70 @@
+diff --git a/VintagestoryApi/Util/ObjectCacheUtil.cs b/VintagestoryApi/Util/ObjectCacheUtil.cs
+index 81bd434..8d80fb3 100644
+--- a/VintagestoryApi/Util/ObjectCacheUtil.cs
++++ b/VintagestoryApi/Util/ObjectCacheUtil.cs
+@@ -7,36 +7,55 @@ namespace Vintagestory.API.Util
+ 
+     public static class ObjectCacheUtil
+     {
+         public static T? TryGet<T>(ICoreAPI api, string key)
+         {
+-            if (api.ObjectCache.TryGetValue(key, out object? obj))
++            var cache = api?.ObjectCache;
++            if (cache == null) return default(T);
++            lock (cache)
+             {
+-                return (T)obj;
++                if (cache.TryGetValue(key, out object? obj))
++                {
++                    return (T)obj;
++                }
++                return default(T);
+             }
+-            return default(T);
+         }
+ 
+         public static T GetOrCreate<T>(ICoreAPI api, string key, CreateCachableObjectDelegate<T> onRequireCreate)
+         {
+-            if (!api.ObjectCache.TryGetValue(key, out object? obj) || obj == null)
++            var cache = api?.ObjectCache;
++            if (cache == null) return onRequireCreate();
++            lock (cache)
+             {
+-                T typedObj = onRequireCreate();
+-                api.ObjectCache[key] = typedObj;
+-                return typedObj;
++                if (cache.TryGetValue(key, out object? obj) && obj != null)
++                {
++                    return (T)obj;
++                }
+             }
+-            else
++            T typedObj = onRequireCreate();
++            lock (cache)
+             {
+-                return (T)obj;
++                if (cache.TryGetValue(key, out object? existing) && existing != null)
++                {
++                    return (T)existing;
++                }
++                cache[key] = typedObj!;
++                return typedObj;
+             }
+         }
+ 
+ 
+         public static bool Delete(ICoreAPI api, string key)
+         {
+             if (key == null) return false;
+-            return api.ObjectCache.Remove(key);
++            var cache = api?.ObjectCache;
++            if (cache == null) return false;
++            lock (cache)
++            {
++                return cache.Remove(key);
++            }
+         }
+ 
+ 
+         public static ItemStack[] GetToolStacks(ICoreAPI api, EnumTool tool)
+         {

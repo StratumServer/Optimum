@@ -1,5 +1,5 @@
 diff --git a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
-index e8d9ce57..6b702973 100644
+index e8d9ce5..8de81cd 100644
 --- a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
 +++ b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
 @@ -32,14 +32,16 @@ namespace Vintagestory.GameContent
@@ -31,7 +31,99 @@ index e8d9ce57..6b702973 100644
  
              base.FromTreeAttributes(tree, worldForResolving);
          }
-@@ -429,23 +432,32 @@ namespace Vintagestory.GameContent
+@@ -355,14 +358,11 @@ namespace Vintagestory.GameContent
+             }
+             if (block == null) return null;
+             int rndTexNum = Block.Attributes?["rndTexNum"][type]?.AsInt(0) ?? 0;
+ 
+             string key = "typedContainerMeshes" + Block.Code.ToShortString();
+-            Dictionary<string, MeshData> meshes = ObjectCacheUtil.GetOrCreate(Api, key, () =>
+-            {
+-                return new Dictionary<string, MeshData>();
+-            });
++            Dictionary<string, MeshData> meshes = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, key);
+ 
+             string shapename = Block.Attributes?["shape"][type].AsString();
+             if (shapename == null)
+             {
+                 return null;
+@@ -370,30 +370,34 @@ namespace Vintagestory.GameContent
+ 
+             Shape shape=null;
+             if (animUtil != null)
+             {
+                 string skeydict = "typedContainerShapes";
+-                Dictionary<string, Shape> shapes = ObjectCacheUtil.GetOrCreate(Api, skeydict, () =>
+-                {
+-                    return new Dictionary<string, Shape>();
+-                });
++                Dictionary<string, Shape> shapes = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, Shape>>(Api, skeydict);
+                 string skey = Block.FirstCodePart() + type + block.Subtype + "-" + "-" + shapename + "-" + rndTexNum;
+-                if (!shapes.TryGetValue(skey, out shape))
++                lock (shapes)
+                 {
+-                    shapes[skey] = shape = block.GetShape(Api as ICoreClientAPI, shapename);
++                    if (!shapes.TryGetValue(skey, out shape))
++                    {
++                        shapes[skey] = shape = block.GetShape(Api as ICoreClientAPI, shapename);
++                    }
+                 }
+             }
+ 
+             string meshKey = type + block.Subtype + "-" + rndTexNum;
+-            if (meshes.TryGetValue(meshKey, out MeshData mesh) && mesh != null)
++            MeshData mesh;
++            lock (meshes)
+             {
+-                if (animUtil != null && animUtil.renderer == null)
++                if (meshes.TryGetValue(meshKey, out mesh) && mesh != null)
+                 {
+-                    animUtil.InitializeAnimator(type + "-" + key + "-" + block.Subtype, mesh, shape, rendererRot);
+-                }
++                    if (animUtil != null && animUtil.renderer == null)
++                    {
++                        animUtil.InitializeAnimator(type + "-" + key + "-" + block.Subtype, mesh, shape, rendererRot);
++                    }
+ 
+-                return mesh;
++                    return mesh;
++                }
+             }
+ 
+ 
+             if (rndTexNum > 0) rndTexNum = GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, rndTexNum);
+ 
+@@ -408,16 +412,26 @@ namespace Vintagestory.GameContent
+                     };
+ 
+                     mesh = animUtil.InitializeAnimator(type + "-" + key + "-" + block.Subtype, shape, texSource, rendererRot);
+                 }
+ 
+-                return meshes[meshKey] = mesh;
++                lock (meshes)
++                {
++                    return meshes[meshKey] = mesh;
++                }
+             } else
+             {
+-                mesh = block.GenMesh(Api as ICoreClientAPI, type, shapename, tesselator, new Vec3f(), rndTexNum);
++                lock (meshes)
++                {
++                    if (meshes.TryGetValue(meshKey, out MeshData existing) && existing != null)
++                    {
++                        return existing;
++                    }
++                    mesh = block.GenMesh(Api as ICoreClientAPI, type, shapename, tesselator, new Vec3f(), rndTexNum);
+ 
+-                return meshes[meshKey] = mesh;
++                    return meshes[meshKey] = mesh;
++                }
+             }
+         }
+ 
+ 
+ 
+@@ -429,23 +443,32 @@ namespace Vintagestory.GameContent
              {
                  if (ownMesh == null)
                  {

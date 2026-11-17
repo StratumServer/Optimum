@@ -140,20 +140,22 @@ public class MeshPartPoolTests
 public class MeshPartPoolGateTests
 {
     [Fact]
-    public void MeshPartPoolActive_RequiresSingleWorker()
+    public void MeshPartPoolActive_StaysActiveWithMultipleWorkers()
     {
         OptimumDiagnostics.ResetTessellation();
         bool originalEnabled = OptimumConfig.MeshPartPoolEnabled;
         try
         {
             OptimumConfig.MeshPartPoolEnabled = true;
-            // No workers registered -> count 0 -> active.
             Assert.True(OptimumConfig.MeshPartPoolActive);
 
             var registry = new OptimumTesselationWorkerRegistry();
             registry.Register(11);
             registry.Register(22); // second worker
             Assert.True(OptimumDiagnostics.TessWorkerCount >= 2);
+            Assert.True(OptimumConfig.MeshPartPoolActive);
+
+            OptimumConfig.MeshPartPoolEnabled = false;
             Assert.False(OptimumConfig.MeshPartPoolActive);
         }
         finally
@@ -161,5 +163,44 @@ public class MeshPartPoolGateTests
             OptimumConfig.MeshPartPoolEnabled = originalEnabled;
             OptimumDiagnostics.ResetTessellation();
         }
+    }
+
+    [Fact]
+    public void WorkerSlotsAreIsolatedAndCrossThreadReclaimRoutesToOrigin()
+    {
+        OptimumMeshPartPool.Clear();
+        var srcA = new CustomMeshDataPartInt(4096) { Count = 4096 };
+        srcA.Values[0] = 10;
+        var srcB = new CustomMeshDataPartInt(4096) { Count = 4096 };
+        srcB.Values[0] = 20;
+
+        CustomMeshDataPartInt? rentedA = null;
+        int[]? bufA = null;
+        var workerReady = new System.Threading.ManualResetEventSlim(false);
+        var mainReclaimed = new System.Threading.ManualResetEventSlim(false);
+        int[]? reusedBufA = null;
+
+        var workerA = new System.Threading.Thread(() =>
+        {
+            rentedA = OptimumMeshPartPool.TestClonePartInt(srcA);
+            bufA = rentedA.Values;
+            workerReady.Set();
+            mainReclaimed.Wait();
+            OptimumMeshPartPool.TestDrain();
+            var secondA = OptimumMeshPartPool.TestClonePartInt(srcB);
+            reusedBufA = secondA.Values;
+        });
+        workerA.Start();
+        workerReady.Wait();
+
+        // Main thread reclaims workerA's buffer; another thread must NOT steal it,
+        // while workerA itself must get the exact reclaimed array back.
+        OptimumMeshPartPool.TestReclaimInt(rentedA);
+        OptimumMeshPartPool.TestDrain();
+        Assert.Equal(0, OptimumMeshPartPool.TestFreeIntCount);
+
+        mainReclaimed.Set();
+        workerA.Join();
+        Assert.Same(bufA, reusedBufA);
     }
 }

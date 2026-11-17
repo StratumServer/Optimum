@@ -223,6 +223,18 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 2 MeshDataPool front-to-back sort patches, applied {meshPoolSortPatches}.");
         }
+        int meshRecyclerPatches = PatchMeshDataRecycler(vanilla.MainModule, contracts.MainModule);
+        if (meshRecyclerPatches != 4)
+        {
+            throw new InvalidOperationException(
+                $"Expected 4 MeshDataRecycler thread-safe patches, applied {meshRecyclerPatches}.");
+        }
+        int objectCachePatches = PatchObjectCacheUtil(vanilla.MainModule, contracts.MainModule);
+        if (objectCachePatches != 3)
+        {
+            throw new InvalidOperationException(
+                $"Expected 3 ObjectCacheUtil synchronization patches, applied {objectCachePatches}.");
+        }
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int inventorySearchPatches = PatchInventorySearch(
             vanilla.MainModule,
@@ -1610,6 +1622,95 @@ public static class ApiPatcher
         processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Ret));
 
         return 1;
+    }
+
+    internal static int PatchMeshDataRecycler(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string recyclerTypeName = "Vintagestory.API.Client.MeshDataRecycler";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumMeshRecyclerBridge";
+
+        var recyclerType = module.GetType(recyclerTypeName)
+            ?? throw new InvalidOperationException($"{recyclerTypeName} is missing from the vanilla API.");
+        var bridgeType = contracts.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from the contracts assembly.");
+
+        string[] methodNames = ["GetOrCreateMesh", "DoRecycling", "Recycle", "Dispose"];
+        int patched = 0;
+        foreach (string methodName in methodNames)
+        {
+            var targetMethod = recyclerType.Methods.SingleOrDefault(m => m.Name == methodName && m.HasBody)
+                ?? throw new InvalidOperationException($"{recyclerTypeName}.{methodName} is missing from the vanilla API.");
+            var bridgeMethod = bridgeType.Methods.SingleOrDefault(m =>
+                m.IsStatic && m.Name == methodName && m.Parameters.Count == targetMethod.Parameters.Count + 1)
+                ?? throw new InvalidOperationException($"{bridgeTypeName}.{methodName} helper is missing.");
+            RewriteInstanceForwarder(targetMethod, module.ImportReference(bridgeMethod));
+            patched++;
+        }
+        return patched;
+    }
+
+    internal static int PatchObjectCacheUtil(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string utilTypeName = "Vintagestory.API.Util.ObjectCacheUtil";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumObjectCacheBridge";
+
+        var utilType = module.GetType(utilTypeName)
+            ?? throw new InvalidOperationException($"{utilTypeName} is missing from the vanilla API.");
+        var bridgeType = contracts.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from the contracts assembly.");
+
+        int patched = 0;
+        var targets = new (string Name, int ParamCount, int GenericCount)[]
+        {
+            ("TryGet", 2, 1),
+            ("GetOrCreate", 3, 1),
+            ("Delete", 2, 0),
+        };
+        foreach (var spec in targets)
+        {
+            var targetMethod = utilType.Methods.SingleOrDefault(m =>
+                m.IsStatic
+                && m.Name == spec.Name
+                && m.Parameters.Count == spec.ParamCount
+                && m.GenericParameters.Count == spec.GenericCount
+                && m.HasBody)
+                ?? throw new InvalidOperationException($"{utilTypeName}.{spec.Name} is missing from the vanilla API.");
+            var bridgeMethod = bridgeType.Methods.SingleOrDefault(m =>
+                m.IsStatic
+                && m.Name == spec.Name
+                && m.Parameters.Count == spec.ParamCount
+                && m.GenericParameters.Count == spec.GenericCount)
+                ?? throw new InvalidOperationException($"{bridgeTypeName}.{spec.Name} helper is missing.");
+
+            var imported = module.ImportReference(bridgeMethod);
+            MethodReference callTarget = imported;
+            if (spec.GenericCount > 0)
+            {
+                var genericCall = new GenericInstanceMethod(imported);
+                for (int g = 0; g < spec.GenericCount; g++)
+                {
+                    genericCall.GenericArguments.Add(targetMethod.GenericParameters[g]);
+                }
+                callTarget = genericCall;
+            }
+
+            var body = targetMethod.Body;
+            body.ExceptionHandlers.Clear();
+            body.Variables.Clear();
+            body.InitLocals = false;
+            var processor = body.GetILProcessor();
+            processor.Clear();
+            processor.Emit(OpCodes.Ldarg_0);
+            processor.Emit(OpCodes.Ldarg_1);
+            if (spec.ParamCount >= 3)
+            {
+                processor.Emit(OpCodes.Ldarg_2);
+            }
+            processor.Emit(OpCodes.Call, callTarget);
+            processor.Emit(OpCodes.Ret);
+            patched++;
+        }
+        return patched;
     }
 
     internal static int PatchGuiTextureDisposal(

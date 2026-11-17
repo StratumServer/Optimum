@@ -1,0 +1,101 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
+index c6ec31a..50d9f27 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/JsonTesselator.cs
+@@ -1,10 +1,12 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class JsonTesselator : IBlockTesselator
+@@ -55,10 +57,26 @@ public class JsonTesselator : IBlockTesselator
+ 
+ 	private int[] windFlagsMask = new int[64];
+ 
+ 	private int[] windFlagsSet = new int[64];
+ 
++	private OptimumWorkerMeshShadowCache optimumMeshShadowCache;
++
++	internal MeshData PrepareWorkerSourceMeshShadow(MeshData sourceMesh)
++	{
++		if (sourceMesh == null || sourceMesh.Flags == null)
++		{
++			return sourceMesh;
++		}
++		OptimumWorkerMeshShadowCache cache = optimumMeshShadowCache;
++		if (cache == null)
++		{
++			cache = (optimumMeshShadowCache = new OptimumWorkerMeshShadowCache());
++		}
++		return cache.PrepareShadow(sourceMesh);
++	}
++
+ 	private static int[] faceCoordLookup = new int[6] { 2, 0, 2, 0, 1, 1 };
+ 
+ 	private float[] tmpCoords = new float[3];
+ 
+ 	private static int[][] axesByFacingLookup = new int[6][]
+@@ -469,13 +487,29 @@ public class JsonTesselator : IBlockTesselator
+ 			Dictionary<BlockPos, BlockEntity> blockEntitiesOfChunk = vars.blockEntitiesOfChunk;
+ 			if (blockEntitiesOfChunk != null && blockEntitiesOfChunk.TryGetValue(pos, out var value))
+ 			{
+ 				try
+ 				{
+-					if (value != null && value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator))
++					if (value != null)
+ 					{
+-						return;
++						Lock modLock = OptimumTesselationModBoundary.TryGetModTypeLock(value.GetType());
++						bool handled;
++						if (modLock != null)
++						{
++							lock (modLock)
++							{
++								handled = value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator);
++							}
++						}
++						else
++						{
++							handled = value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator);
++						}
++						if (handled)
++						{
++							return;
++						}
+ 					}
+ 				}
+ 				catch (RetryTesselationException)
+ 				{
+ 					throw;
+@@ -556,11 +590,23 @@ public class JsonTesselator : IBlockTesselator
+ 		if (array != null)
+ 		{
+ 			int num = GameMath.MurmurHash3Mod(vars.posX, (vars.block.RandomizeAxes == EnumRandomizeAxes.XYZ) ? vars.posY : 0, vars.posZ, array.Length);
+ 			sourceMesh = array[num];
+ 		}
+-		vars.block.OnJsonTesselation(ref sourceMesh, ref jsonLightRGB, pos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++		sourceMesh = PrepareWorkerSourceMeshShadow(sourceMesh);
++		Lock blockModLock = OptimumTesselationModBoundary.TryGetModTypeLock(vars.block.GetType());
++		if (blockModLock != null)
++		{
++			lock (blockModLock)
++			{
++				vars.block.OnJsonTesselation(ref sourceMesh, ref jsonLightRGB, pos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++			}
++		}
++		else
++		{
++			vars.block.OnJsonTesselation(ref sourceMesh, ref jsonLightRGB, pos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++		}
+ 		if (vars.preRotationMatrix != null)
+ 		{
+ 			AddJsonModelDataToMesh(sourceMesh, lodLevel, vars, helper, vars.preRotationMatrix);
+ 		}
+ 		else if (vars.block.RandomizeRotations || vars.block.RandomSizeAdjust != 0f)

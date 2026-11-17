@@ -1,6 +1,22 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs
+index e4e8ad8..5545cb2 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/BleedingJsonTesselator.cs
-@@ -18,6 +18,8 @@
+@@ -1,9 +1,11 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+ public class BleedingJsonTesselator : IBlockTesselator, IJsonTesselatorHooks
+@@ -16,10 +18,12 @@ public class BleedingJsonTesselator : IBlockTesselator, IJsonTesselatorHooks
+ 
+ 	private int currentShapeRotationSteps;
  
  	private float[] floatpool = new float[3];
  
@@ -9,7 +25,11 @@
  	public BleedingJsonTesselator(JsonTesselator jsonTesselator)
  	{
  		this.jsonTesselator = jsonTesselator;
-@@ -32,7 +34,7 @@
+ 		helper = new BleedingJsonMeshHelper
+ 		{
+@@ -30,23 +34,39 @@ public class BleedingJsonTesselator : IBlockTesselator, IJsonTesselatorHooks
+ 
+ 	public void Tesselate(TCTCache vars)
  	{
  		helper.vars = vars;
  		currentShapeRotationSteps = 0;
@@ -18,7 +38,41 @@
  		blockPos.SetDimension(vars.dimension);
  		blockPos.Set(vars.posX, vars.posY, vars.posZ);
  		if (!vars.isDecorTesselate)
-@@ -114,7 +116,7 @@
+ 		{
+ 			Dictionary<BlockPos, BlockEntity> blockEntitiesOfChunk = vars.blockEntitiesOfChunk;
+ 			if (blockEntitiesOfChunk != null && blockEntitiesOfChunk.TryGetValue(blockPos, out var value))
+ 			{
+ 				try
+ 				{
+-					if (value != null && value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator))
++					if (value != null)
+ 					{
+-						return;
++						Lock modLock = OptimumTesselationModBoundary.TryGetModTypeLock(value.GetType());
++						bool handled;
++						if (modLock != null)
++						{
++							lock (modLock)
++							{
++								handled = value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator);
++							}
++						}
++						else
++						{
++							handled = value.OnTesselation(helper, vars.tct.game.TesselatorManager.Tesselator);
++						}
++						if (handled)
++						{
++							return;
++						}
+ 					}
+ 				}
+ 				catch (RetryTesselationException)
+ 				{
+ 					throw;
+@@ -112,15 +132,27 @@ public class BleedingJsonTesselator : IBlockTesselator, IJsonTesselatorHooks
+ 			{
+ 				float rotateY = array2[num].rotateY;
  				currentShapeRotationSteps = ((int)Math.Round(rotateY / 90f) % 4 + 4) % 4;
  			}
  		}
@@ -27,3 +81,22 @@
  		blockPos.SetDimension(vars.dimension);
  		blockPos.Set(vars.posX, vars.posY, vars.posZ);
  		int[] lightRgbsByCorner = jsonTesselator.jsonLightRGB;
+-		vars.block.OnJsonTesselation(ref sourceMesh, ref lightRgbsByCorner, blockPos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++		sourceMesh = jsonTesselator.PrepareWorkerSourceMeshShadow(sourceMesh);
++		Lock blockModLock = OptimumTesselationModBoundary.TryGetModTypeLock(vars.block.GetType());
++		if (blockModLock != null)
++		{
++			lock (blockModLock)
++			{
++				vars.block.OnJsonTesselation(ref sourceMesh, ref lightRgbsByCorner, blockPos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++			}
++		}
++		else
++		{
++			vars.block.OnJsonTesselation(ref sourceMesh, ref lightRgbsByCorner, blockPos, vars.tct.currentChunkBlocksExt, vars.extIndex3d);
++		}
+ 		float[] tfMatrix = null;
+ 		if (vars.preRotationMatrix != null)
+ 		{
+ 			tfMatrix = vars.preRotationMatrix;
+ 		}

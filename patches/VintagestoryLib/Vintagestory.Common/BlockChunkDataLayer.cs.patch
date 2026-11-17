@@ -1,0 +1,85 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs b/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs
+index a3423b3..89dfe99 100644
+--- a/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs
++++ b/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs
+@@ -5,10 +5,13 @@ namespace Vintagestory.Common;
+ 
+ public class BlockChunkDataLayer : ChunkDataLayer
+ {
+ 	public static Block[] blocksByPaletteIndex;
+ 
++	[ThreadStatic]
++	public static Block[] optimumThreadBlocksByPaletteIndex;
++
+ 	public BlockChunkDataLayer(ChunkDataPool chunkDataPool)
+ 		: base(chunkDataPool)
+ 	{
+ 	}
+ 
+@@ -133,39 +136,39 @@ public class BlockChunkDataLayer : ChunkDataLayer
+ 
+ 	private Block getBlockOne(int index3d)
+ 	{
+ 		int num = index3d % 32;
+ 		index3d /= 32;
+-		return blocksByPaletteIndex[(dataBit0[index3d] >> num) & 1];
++		return optimumThreadBlocksByPaletteIndex[(dataBit0[index3d] >> num) & 1];
+ 	}
+ 
+ 	private Block getBlockTwo(int index3d)
+ 	{
+ 		int num = index3d % 32;
+ 		index3d /= 32;
+-		return blocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1)];
++		return optimumThreadBlocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1)];
+ 	}
+ 
+ 	private Block getBlockThree(int index3d)
+ 	{
+ 		int num = index3d % 32;
+ 		index3d /= 32;
+-		return blocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1)];
++		return optimumThreadBlocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1)];
+ 	}
+ 
+ 	private Block getBlockFour(int index3d)
+ 	{
+ 		int num = index3d % 32;
+ 		index3d /= 32;
+-		return blocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1) + 8 * ((dataBit3[index3d] >> num) & 1)];
++		return optimumThreadBlocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1) + 8 * ((dataBit3[index3d] >> num) & 1)];
+ 	}
+ 
+ 	private Block getBlockFive(int index3d)
+ 	{
+ 		int num = index3d % 32;
+ 		index3d /= 32;
+-		return blocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1) + 8 * ((dataBit3[index3d] >> num) & 1) + 16 * ((dataBits[4][index3d] >> num) & 1)];
++		return optimumThreadBlocksByPaletteIndex[((dataBit0[index3d] >> num) & 1) + 2 * ((dataBit1[index3d] >> num) & 1) + 4 * ((dataBit2[index3d] >> num) & 1) + 8 * ((dataBit3[index3d] >> num) & 1) + 16 * ((dataBits[4][index3d] >> num) & 1)];
+ 	}
+ 
+ 	private Block getBlockGeneralCase(int index3d)
+ 	{
+ 		int num = index3d % 32;
+@@ -175,11 +178,11 @@ public class BlockChunkDataLayer : ChunkDataLayer
+ 		for (int i = 0; i < bitsize; i++)
+ 		{
+ 			num3 += ((dataBits[i][index3d] >> num) & 1) * num2;
+ 			num2 *= 2;
+ 		}
+-		return blocksByPaletteIndex[num3];
++		return optimumThreadBlocksByPaletteIndex[num3];
+ 	}
+ 
+ 	public System.Func<int, Block> SelectDelegateBlockClient(System.Func<int, Block> getBlockAir)
+ 	{
+ 		return bitsize switch
+@@ -195,7 +198,8 @@ public class BlockChunkDataLayer : ChunkDataLayer
+ 	}
+ 
+ 	public static void Dispose()
+ 	{
+ 		blocksByPaletteIndex = null;
++		optimumThreadBlocksByPaletteIndex = null;
+ 	}
+ }

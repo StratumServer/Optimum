@@ -1,14 +1,18 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-index bdcda35..5530cc6 100644
+index bdcda35..b8bcc1b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-@@ -24,15 +24,17 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -24,43 +24,83 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  
  	internal TesselatedChunkPart[] edgeParts;
  
  	internal int VerticesCount;
  
 +	internal long readyToUploadTimestamp;
++
++	internal int fullSeq;
++
++	internal int edgeSeq;
 +
  	internal Sphere boundingSphere;
  
@@ -21,11 +25,36 @@ index bdcda35..5530cc6 100644
  	public bool MergeIfEqual(TesselatedChunk otc)
  	{
  		if (positionX == otc.positionX && positionYAndDimension == otc.positionYAndDimension && positionZ == otc.positionZ)
-@@ -45,10 +47,11 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 		{
+ 			if (otc.centerParts != null)
+ 			{
+-				Dispose(centerParts);
+-				centerParts = otc.centerParts;
++				if (otc.fullSeq >= fullSeq)
++				{
++					Dispose(centerParts);
++					centerParts = otc.centerParts;
++					fullSeq = otc.fullSeq;
++				}
++				else
++				{
++					Dispose(otc.centerParts);
++				}
+ 			}
  			if (otc.edgeParts != null)
  			{
- 				Dispose(edgeParts);
- 				edgeParts = otc.edgeParts;
+-				Dispose(edgeParts);
+-				edgeParts = otc.edgeParts;
++				if (otc.edgeSeq >= edgeSeq)
++				{
++					Dispose(edgeParts);
++					edgeParts = otc.edgeParts;
++					edgeSeq = otc.edgeSeq;
++				}
++				else
++				{
++					Dispose(otc.edgeParts);
++				}
  			}
 +			readyToUploadTimestamp = otc.readyToUploadTimestamp;
  			return true;
@@ -33,7 +62,19 @@ index bdcda35..5530cc6 100644
  		return false;
  	}
  
-@@ -56,11 +59,16 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
++	internal void DisposeCenterParts()
++	{
++		Dispose(centerParts);
++		centerParts = null;
++	}
++
++	internal void DisposeEdgeParts()
++	{
++		Dispose(edgeParts);
++		edgeParts = null;
++	}
++
+ 	internal bool AddCenterToPools(ChunkRenderer chunkRenderer, Vec3i chunkOrigin, int dimension, Sphere boundingSphere, ClientChunk hostChunk)
  	{
  		if (centerParts != null)
  		{
@@ -51,7 +92,7 @@ index bdcda35..5530cc6 100644
  				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
  			}
  			hostChunk.SetPoolLocations(ref hostChunk.centerModelPoolLocations, list.ToArray(), hiddenState);
-@@ -73,11 +81,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -73,11 +113,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  	{
  		if (edgeParts != null)
  		{

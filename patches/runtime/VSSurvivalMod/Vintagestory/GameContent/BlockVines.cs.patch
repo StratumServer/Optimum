@@ -1,0 +1,104 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockVines.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockVines.cs
+index f975bc5..aabdfe8 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockVines.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockVines.cs
+@@ -1,6 +1,7 @@
+ using System;
++using System.Threading;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+@@ -13,10 +14,26 @@ public class BlockVines : Block
+ 
+ 	private int[] origWindMode;
+ 
+ 	private BlockPos tmpPos = new BlockPos(0);
+ 
++	private object optimumWindLock;
++
++	[ThreadStatic]
++	private static BlockPos optimumTmpPos;
++
++	private object GetWindLock()
++	{
++		object obj = Volatile.Read(ref optimumWindLock);
++		if (obj != null)
++		{
++			return obj;
++		}
++		Interlocked.CompareExchange(ref optimumWindLock, new object(), null);
++		return Volatile.Read(ref optimumWindLock);
++	}
++
+ 	public override void OnLoaded(ICoreAPI api)
+ 	{
+ 		base.OnLoaded(api);
+ 		VineFacing = BlockFacing.FromCode(Variant["horizontalorientation"]);
+ 	}
+@@ -60,23 +77,34 @@ public class BlockVines : Block
+ 		otherwiseAllWave(decalMesh, verticesCount, num, windDatam);
+ 	}
+ 
+ 	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
+ 	{
+-		if (origWindMode == null)
++		int[] array = Volatile.Read(ref origWindMode);
++		if (array == null)
+ 		{
+-			int flagsCount = sourceMesh.FlagsCount;
+-			origWindMode = (int[])sourceMesh.Flags.Clone();
+-			for (int i = 0; i < flagsCount; i++)
++			lock (GetWindLock())
+ 			{
+-				origWindMode[i] &= 503316480;
++				array = Volatile.Read(ref origWindMode);
++				if (array == null)
++				{
++					int flagsCount = sourceMesh.FlagsCount;
++					int[] array2 = (int[])sourceMesh.Flags.Clone();
++					for (int i = 0; i < flagsCount; i++)
++					{
++						array2[i] &= 503316480;
++					}
++					Volatile.Write(ref origWindMode, array2);
++					array = array2;
++				}
+ 			}
+ 		}
++		BlockPos blockPos = optimumTmpPos ?? (optimumTmpPos = new BlockPos(0));
+ 		int verticesCount = sourceMesh.VerticesCount;
+ 		bool num = ((lightRgbsByCorner[24] >> 24) & 0xFF) >= 159;
+ 		Block block = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[VineFacing.Opposite.Index]];
+-		if (!num || (block.Id != 0 && block.CanAttachBlockAt(api.World.BlockAccessor, this, tmpPos.Set(pos, pos.dimension).Add(VineFacing.Opposite), VineFacing) && !(block is BlockLeaves)))
++		if (!num || (block.Id != 0 && block.CanAttachBlockAt(api.World.BlockAccessor, this, blockPos.Set(pos, pos.dimension).Add(VineFacing.Opposite), VineFacing) && !(block is BlockLeaves)))
+ 		{
+ 			for (int j = 0; j < verticesCount; j++)
+ 			{
+ 				sourceMesh.Flags[j] &= -503316481;
+ 			}
+@@ -86,21 +114,21 @@ public class BlockVines : Block
+ 		int windDatam = ((num2 != 3 || !(api.World.BlockAccessor.GetBlockAbove(pos, 4, 1) is BlockVines)) ? (Math.Max(0, num2 - 1) << 29) : (num2 << 29));
+ 		num2 <<= 29;
+ 		if (chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[BlockFacing.UP.Index]] is BlockVines)
+ 		{
+ 			Block block2 = chunkExtBlocks[extIndex3d + TileSideEnum.MoveIndex[VineFacing.Opposite.Index] + TileSideEnum.MoveIndex[BlockFacing.UP.Index]];
+-			if (block2.Id != 0 && block2.CanAttachBlockAt(api.World.BlockAccessor, this, tmpPos.Set(pos, pos.dimension).Up().Add(VineFacing.Opposite), VineFacing) && !(block is BlockLeaves))
++			if (block2.Id != 0 && block2.CanAttachBlockAt(api.World.BlockAccessor, this, blockPos.Set(pos, pos.dimension).Up().Add(VineFacing.Opposite), VineFacing) && !(block is BlockLeaves))
+ 			{
+ 				for (int k = 0; k < verticesCount; k++)
+ 				{
+ 					if ((double)sourceMesh.xyz[k * 3 + 1] > 0.5)
+ 					{
+ 						sourceMesh.Flags[k] &= -503316481;
+ 					}
+ 					else
+ 					{
+-						sourceMesh.Flags[k] = (sourceMesh.Flags[k] & 0x1FFFFFF) | origWindMode[k] | num2;
++						sourceMesh.Flags[k] = (sourceMesh.Flags[k] & 0x1FFFFFF) | array[k] | num2;
+ 					}
+ 				}
+ 				return;
+ 			}
+ 		}

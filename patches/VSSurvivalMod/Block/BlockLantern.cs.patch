@@ -1,0 +1,76 @@
+diff --git a/VSSurvivalMod/Block/BlockLantern.cs b/VSSurvivalMod/Block/BlockLantern.cs
+index 5bc0a13..d6afd30 100644
+--- a/VSSurvivalMod/Block/BlockLantern.cs
++++ b/VSSurvivalMod/Block/BlockLantern.cs
+@@ -149,27 +149,28 @@ namespace Vintagestory.GameContent
+ 
+         public virtual string baseCacheKey => "blockLantern" + Variant["size"];
+ 
+         public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
+         {
+-            Dictionary<string, MultiTextureMeshRef> meshrefs = ObjectCacheUtil.GetOrCreate(capi, baseCacheKey + "GuiMeshRefs", () =>
+-            {
+-                return new Dictionary<string, MultiTextureMeshRef>();
+-            });
++            Dictionary<string, MultiTextureMeshRef> meshrefs = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, baseCacheKey + "GuiMeshRefs");
+ 
+             string material = itemstack.Attributes.GetString("material");
+             string lining = itemstack.Attributes.GetString("lining");
+             string glass = itemstack.Attributes.GetString("glass", "quartz");
+ 
+             string key = material + "-" + lining + "-" + glass;
+-            if (!meshrefs.TryGetValue(key, out MultiTextureMeshRef meshref))
++            MultiTextureMeshRef meshref;
++            lock (meshrefs)
+             {
+-                AssetLocation shapeloc = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+-                Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
++                if (!meshrefs.TryGetValue(key, out meshref))
++                {
++                    AssetLocation shapeloc = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
++                    Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
+ 
+-                MeshData mesh = GenMesh(capi, material, lining, glass, shape);
+-                meshrefs[key] = meshref = capi.Render.UploadMultiTextureMesh(mesh);
++                    MeshData mesh = GenMesh(capi, material, lining, glass, shape);
++                    meshrefs[key] = meshref = capi.Render.UploadMultiTextureMesh(mesh);
++                }
+             }
+ 
+             renderinfo.ModelRef = meshref;
+             renderinfo.CullFaces = false;
+         }
+@@ -195,11 +196,11 @@ namespace Vintagestory.GameContent
+ 
+         public MeshData GenMesh(ICoreClientAPI capi, string material, string lining, string glassMaterial, Shape shape = null, ITesselatorAPI tesselator = null)
+         {
+             if (tesselator == null) tesselator = capi.Tesselator;
+ 
+-            tmpTextureSource = tesselator.GetTextureSource(this);
++            ITexPositionSource localTexSource = tesselator.GetTextureSource(this);
+ 
+             if (shape == null)
+             {
+                 shape = API.Common.Shape.TryGet(capi, "shapes/" + this.Shape.Base.Path + ".json");
+             }
+@@ -207,17 +208,14 @@ namespace Vintagestory.GameContent
+             if (shape == null)
+             {
+                 return null;
+             }
+ 
+-            this.AtlasSize = capi.BlockTextureAtlas.Size;
+-            curMat = material;
+-            curLining = lining;
+-
+             Block glassBlock = capi.World.GetBlock(new AssetLocation("glass-" + glassMaterial));
+-            glassTextureSource = tesselator.GetTextureSource(glassBlock);
+-            tesselator.TesselateShape("blocklantern", shape, out MeshData mesh, this, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ));
++            ITexPositionSource localGlassSource = tesselator.GetTextureSource(glassBlock);
++            OptimumLanternTexSource texSource = new OptimumLanternTexSource(capi.BlockTextureAtlas.Size, localTexSource, localGlassSource, material, lining);
++            tesselator.TesselateShape("blocklantern", shape, out MeshData mesh, texSource, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ));
+             return mesh;
+         }
+ 
+ 
+         public override bool DoPlaceBlock(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ItemStack byItemStack)

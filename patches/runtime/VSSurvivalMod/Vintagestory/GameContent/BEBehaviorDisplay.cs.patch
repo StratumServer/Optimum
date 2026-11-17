@@ -1,0 +1,82 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorDisplay.cs b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorDisplay.cs
+index d4ef99f..5041432 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorDisplay.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorDisplay.cs
+@@ -43,11 +43,11 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+ 
+ 	public ItemStack DisplayStack => displayStack;
+ 
+ 	public InventoryInfinite InventoryInv => inventory;
+ 
+-	protected Dictionary<string, MeshData> MeshCache => ObjectCacheUtil.GetOrCreate(Api, "meshesDisplay-" + ClassCode, () => new Dictionary<string, MeshData>());
++	protected Dictionary<string, MeshData> MeshCache => OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "meshesDisplay-" + ClassCode);
+ 
+ 	public float MeshAngleRad { get; set; }
+ 
+ 	public virtual string ClassCode => InventoryClassName;
+ 
+@@ -140,11 +140,15 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+ 			{
+ 				collectible.Attributes = new JsonObject(new JObject());
+ 			}
+ 			collectible.Attributes.Token["displayable"]["shelf"]["transform"] = JToken.FromObject(ModelTransform.CreateFromTreeAttribute(data as TreeAttribute));
+ 		}
+-		MeshCache.Clear();
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		lock (meshCache)
++		{
++			meshCache.Clear();
++		}
+ 		MarkMeshesDirty(Api.World);
+ 		Api.World.BlockAccessor.MarkBlockDirty(base.Pos);
+ 	}
+ 
+ 	protected float Inv_OnAcquireTransitionSpeed(EnumTransitionType transType, ItemStack stack, float baseMul)
+@@ -584,21 +588,27 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+ 				{
+ 					dictionary[item.Key] = item.Value.Base;
+ 				}
+ 				return new ContainedTextureSource(capi, capi.BlockTextureAtlas, dictionary, $"For displayed item {collObj.Code}");
+ 			}));
++			cachedMesh = cachedMesh?.Clone();
+ 		}
+ 		else
+ 		{
+ 			cachedMesh = (collObj?.GetCollectibleInterface<IContainedMeshSource>())?.GenMesh(slot, capi.BlockTextureAtlas, base.Pos);
+ 		}
+ 		if (cachedMesh == null)
+ 		{
+ 			cachedMesh = getDefaultMesh(slot);
+ 		}
+ 		applyDefaultTranforms(slot, cachedMesh);
+-		MeshCache[getMeshCacheKey(slot)] = cachedMesh;
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		string meshCacheKey = getMeshCacheKey(slot);
++		lock (meshCache)
++		{
++			meshCache[meshCacheKey] = cachedMesh;
++		}
+ 		return cachedMesh;
+ 	}
+ 
+ 	protected void applyDefaultTranforms(ItemSlotDisplay slot, MeshData mesh)
+ 	{
+@@ -637,12 +647,16 @@ public class BEBehaviorDisplay : BEBehaviorContainer, IInteractable, IRotatableP
+ 	}
+ 
+ 	protected MeshData getCachedMesh(ItemSlot slot)
+ 	{
+ 		string meshCacheKey = getMeshCacheKey(slot);
+-		MeshCache.TryGetValue(meshCacheKey, out var value);
+-		return value;
++		Dictionary<string, MeshData> meshCache = MeshCache;
++		lock (meshCache)
++		{
++			meshCache.TryGetValue(meshCacheKey, out var value);
++			return value;
++		}
+ 	}
+ 
+ 	protected virtual string getMeshCacheKey(ItemSlot slot)
+ 	{
+ 		return (slot.Itemstack.Collectible?.GetCollectibleInterface<IContainedMeshSource>())?.GetMeshCacheKey(slot) ?? slot.Itemstack.Collectible.Code.ToString();
