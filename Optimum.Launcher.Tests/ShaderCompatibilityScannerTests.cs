@@ -249,6 +249,44 @@ public sealed class ShaderCompatibilityScannerTests : IDisposable
         Assert.DoesNotContain("EntityLightBatch", report.DisabledFeatures);
     }
 
+    [Fact]
+    public void ExternalWorldOrSsaoShaderOverrideDisablesSsaoDepthPosition()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string archivePath = Path.Combine(dataPath, "Mods", "CustomSsaoShaders.zip");
+        Directory.CreateDirectory(Path.GetDirectoryName(archivePath)!);
+        using (ZipArchive archive = ZipFile.Open(archivePath, ZipArchiveMode.Create))
+        {
+            using StreamWriter writer = new(archive.CreateEntry("assets/game/shaders/standard.fsh").Open());
+            writer.Write("out vec4 outGPosition; void main() { }");
+        }
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.Contains("SsaoDepthPosition", report.DisabledFeatures);
+        Assert.Contains(report.FeatureSources["SsaoDepthPosition"], source => source.Contains("standard.fsh", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void StandardRendererWithoutShadersPreservesSsaoDepthPosition()
+    {
+        string dataPath = Path.Combine(_root, "data");
+        string modsPath = Path.Combine(dataPath, "Mods");
+        Directory.CreateDirectory(modsPath);
+        File.WriteAllBytes(Path.Combine(modsPath, "BogieRenderer.dll"), Encoding.UTF8.GetBytes(
+            "RegisterRenderer OnRenderFrame EnumRenderStage IRenderer"));
+
+        ShaderCompatibilityReport report = ShaderCompatibilityScanner.Scan(
+            dataPath,
+            Path.Combine(_root, "game"),
+            "test");
+
+        Assert.DoesNotContain("SsaoDepthPosition", report.DisabledFeatures);
+    }
+
     private static void WriteHookAssembly(string path)
     {
         File.WriteAllBytes(path, Encoding.UTF8.GetBytes(

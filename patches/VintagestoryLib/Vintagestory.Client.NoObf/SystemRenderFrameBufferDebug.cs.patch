@@ -1,0 +1,24 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
+index cb0a94d..f333c4f 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs
+@@ -110,13 +110,16 @@ internal class SystemRenderFrameBufferDebug : ClientSystem
+ 				game.Render2DTextureFlipped(game.Platform.FrameBuffers[13].ColorTextureIds[0], (float)game.Width - gUIScale * 320f, gUIScale * 10f, gUIScale * 150f, gUIScale * 150f);
+ 				game.Render2DLoadedTexture(labels[12], (float)game.Width - gUIScale * 320f, gUIScale * 10f);
+ 				game.Render2DTextureFlipped(frameBufferRef.ColorTextureIds[2], (float)game.Width - gUIScale * 160f, gUIScale * (float)num, gUIScale * 150f, gUIScale * 150f);
+ 				game.Render2DLoadedTexture(labels[10], (float)game.Width - gUIScale * 160f, gUIScale * (float)num);
+ 				num += 155;
+-				game.Render2DTextureFlipped(frameBufferRef.ColorTextureIds[3], (float)game.Width - gUIScale * 160f, gUIScale * (float)num, gUIScale * 150f, gUIScale * 150f);
+-				game.Render2DLoadedTexture(labels[11], (float)game.Width - gUIScale * 160f, gUIScale * (float)num);
+-				num += 155;
++				if (frameBufferRef.ColorTextureIds.Length > 3)
++				{
++					game.Render2DTextureFlipped(frameBufferRef.ColorTextureIds[3], (float)game.Width - gUIScale * 160f, gUIScale * (float)num, gUIScale * 150f, gUIScale * 150f);
++					game.Render2DLoadedTexture(labels[11], (float)game.Width - gUIScale * 160f, gUIScale * (float)num);
++					num += 155;
++				}
+ 			}
+ 			game.Render2DTextureFlipped(frameBufferRef.DepthTextureId, (float)game.Width - gUIScale * 160f, gUIScale * (float)num, gUIScale * 150f, gUIScale * 150f);
+ 			game.Render2DLoadedTexture(labels[5], (float)game.Width - gUIScale * 160f, gUIScale * (float)num);
+ 			num += 155;
+ 			game.guiShaderProg.Stop();

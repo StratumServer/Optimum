@@ -274,6 +274,7 @@ public static class OptimumConfig
     public static bool GlFinalizerReclaimEnabled = true;
     public static bool MeshPoolReclaimEnabled = true;
     public static bool FrontToBackChunkSortEnabled = true;
+    public static bool SsaoDepthPositionEnabled = true;
 
     public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
 
@@ -678,6 +679,7 @@ public static class OptimumConfig
     private static bool _shaderCompatibilityReportMissing;
     private static bool _greedyMeshVertexShaderReady;
     private static bool _greedyMeshFragmentShaderReady;
+    private static volatile bool _ssaoDepthPositionRuntimeCompatible = true;
     private static string? _shaderCompatibilityFingerprint;
     private static string? _dataPath;
 
@@ -829,6 +831,10 @@ public static class OptimumConfig
     public static bool EffectiveShaderPreprocessParallel => ShaderPreprocessParallel &&
         !IsShaderFeatureDisabled("ShaderPreprocessParallel");
 
+    public static bool EffectiveSsaoDepthPosition => SsaoDepthPositionEnabled &&
+        !IsShaderFeatureDisabled("SsaoDepthPosition") &&
+        _ssaoDepthPositionRuntimeCompatible;
+
     public static bool IsShaderFeatureDisabled(string feature) =>
         _shaderCompatibilityScanFailed || _shaderCompatibilityDisabledFeatures.Contains(feature);
 
@@ -887,9 +893,15 @@ public static class OptimumConfig
         GreedyMeshShadersCompiledOn = vertexShaderReady && fragmentShaderReady;
     }
 
+    public static void SetSsaoDepthPositionRuntimeCompatible(bool compatible)
+    {
+        _ssaoDepthPositionRuntimeCompatible = compatible;
+    }
+
     public static void ResetShaderCompatibilityAfterReload()
     {
         SetGreedyMeshShaderAbi(false, false);
+        _ssaoDepthPositionRuntimeCompatible = true;
     }
 
     public static void ResetShaderCompatibilityForTests()
@@ -1298,6 +1310,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GlFinalizerReclaim), GlFinalizerReclaimEnabled.ToString()),
         (nameof(OptimumConfigData.MeshPoolReclaim), MeshPoolReclaimEnabled.ToString()),
         (nameof(OptimumConfigData.FrontToBackChunkSort), FrontToBackChunkSortEnabled.ToString()),
+        (nameof(OptimumConfigData.SsaoDepthPosition), SsaoDepthPositionEnabled.ToString()),
     };
 
     /// <summary>
@@ -1418,6 +1431,7 @@ public static class OptimumConfig
             GlFinalizerReclaimEnabled = data.GlFinalizerReclaim;
             MeshPoolReclaimEnabled = data.MeshPoolReclaim;
             FrontToBackChunkSortEnabled = data.FrontToBackChunkSort;
+            SsaoDepthPositionEnabled = data.SsaoDepthPosition;
         }
         catch (Exception)
         {
@@ -1502,6 +1516,7 @@ public static class OptimumConfig
             GlFinalizerReclaim = GlFinalizerReclaimEnabled,
             MeshPoolReclaim = MeshPoolReclaimEnabled,
             FrontToBackChunkSort = FrontToBackChunkSortEnabled,
+            SsaoDepthPosition = SsaoDepthPositionEnabled,
         };
 
         try
@@ -1610,6 +1625,7 @@ internal sealed class OptimumConfigData
     public bool GlFinalizerReclaim { get; set; } = true;
     public bool MeshPoolReclaim { get; set; } = true;
     public bool FrontToBackChunkSort { get; set; } = true;
+    public bool SsaoDepthPosition { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2552,6 +2568,7 @@ public static class OptimumDiagnostics
         ResetWorldgenPassTiming();
         ResetMeshPoolReclaimCounters();
         ResetChunkDrawSortCounters();
+        ResetSsaoDepthPositionDiagnostics();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3377,6 +3394,30 @@ public static class OptimumDiagnostics
     public static string GetFrontToBackSortSummary()
     {
         return $"Optimum front-to-back chunk sort: enabled={OptimumConfig.FrontToBackChunkSortEnabled}, calls={ChunkSortCalls}, poolsOrdered={ChunkSortPoolsOrdered}, spansSorted={ChunkSortSpansSorted}";
+    }
+
+    private static int _ssaoDepthPositionDropped;
+    private static long _ssaoGPositionSavedBytes;
+
+    public static bool SsaoDepthPositionDropped => Volatile.Read(ref _ssaoDepthPositionDropped) != 0;
+    public static long SsaoGPositionSavedBytes => Interlocked.Read(ref _ssaoGPositionSavedBytes);
+
+    public static void RecordPrimaryGPositionState(bool dropped, long savedBytes)
+    {
+        Volatile.Write(ref _ssaoDepthPositionDropped, dropped ? 1 : 0);
+        Interlocked.Exchange(ref _ssaoGPositionSavedBytes, Math.Max(0L, savedBytes));
+    }
+
+    public static void ResetSsaoDepthPositionDiagnostics()
+    {
+        Volatile.Write(ref _ssaoDepthPositionDropped, 0);
+        Interlocked.Exchange(ref _ssaoGPositionSavedBytes, 0);
+    }
+
+    public static string GetSsaoDepthPositionSummary()
+    {
+        double savedMb = SsaoGPositionSavedBytes / (1024.0 * 1024.0);
+        return $"Optimum SSAO depth position: enabled={OptimumConfig.SsaoDepthPositionEnabled}, active={OptimumConfig.EffectiveSsaoDepthPosition}, gPositionDropped={SsaoDepthPositionDropped}, savedEstMB={savedMb:0.00}";
     }
 }
 
