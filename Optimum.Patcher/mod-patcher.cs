@@ -238,6 +238,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.EntityBehaviorSelectionBoxes", "OnRenderFrame", 2),
                 new("Vintagestory.GameContent.EntityBehaviorSelectionBoxes", "Render", 3),
                 new("Vintagestory.GameContent.EntityBehaviorSelectionBoxes", "getHitIndex", 1),
+                new("Vintagestory.GameContent.EntityBehaviorTexturedClothing", "reloadSkin", 0),
                 new("Vintagestory.GameContent.CloudRenderer", "UpdateCloudTilesOffThread", 1),
                 new("FluffyClouds.CloudRendererMap", "UpdateCloudTilesOffThread", 1),
                 new("Vintagestory.GameContent.ChunkMapLayer", ".ctor", 2),

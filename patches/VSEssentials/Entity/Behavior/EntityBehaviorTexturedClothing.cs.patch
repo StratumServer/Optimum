@@ -1,0 +1,32 @@
+diff --git a/VSEssentials/Entity/Behavior/EntityBehaviorTexturedClothing.cs b/VSEssentials/Entity/Behavior/EntityBehaviorTexturedClothing.cs
+index 932779e..e6e63f3 100644
+--- a/VSEssentials/Entity/Behavior/EntityBehaviorTexturedClothing.cs
++++ b/VSEssentials/Entity/Behavior/EntityBehaviorTexturedClothing.cs
+@@ -96,11 +96,12 @@ namespace Vintagestory.GameContent
+ 
+             LoadedTexture entityAtlas = new LoadedTexture(null)
+             {
+                 TextureId = origTexPos.atlasTextureId,
+                 Width = capi.EntityTextureAtlas.Size.Width,
+-                Height = capi.EntityTextureAtlas.Size.Height
++                Height = capi.EntityTextureAtlas.Size.Height,
++                IgnoreUndisposed = true
+             };
+ 
+             capi.Render.GlToggleBlend(false);
+             capi.EntityTextureAtlas.RenderTextureIntoAtlas(
+                 skinTexPos.atlasTextureId,
+@@ -151,11 +152,12 @@ namespace Vintagestory.GameContent
+ 
+                 LoadedTexture itemAtlas = new LoadedTexture(null)
+                 {
+                     TextureId = itemTexPos.atlasTextureId,
+                     Width = capi.ItemTextureAtlas.Size.Width,
+-                    Height = capi.ItemTextureAtlas.Size.Height
++                    Height = capi.ItemTextureAtlas.Size.Height,
++                    IgnoreUndisposed = true
+                 };
+ 
+                 capi.EntityTextureAtlas.RenderTextureIntoAtlas(
+                     skinTexPos.atlasTextureId,
+                     itemAtlas,

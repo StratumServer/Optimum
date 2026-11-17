@@ -138,6 +138,10 @@ public static class ApiPatcher
             method.Name == "ItemStackMatchesSearchText" && method.Parameters.Count == 3);
         var filterSlotGridItems = bridge.Methods.Single(method =>
             method.Name == "FilterSlotGridItems" && method.Parameters.Count == 10);
+        var disposeLoadedTexture = bridge.Methods.Single(method =>
+            method.Name == "DisposeLoadedTexture" && method.Parameters.Count == 4);
+        var finalizeLoadedTexture = bridge.Methods.Single(method =>
+            method.Name == "FinalizeLoadedTexture" && method.Parameters.Count == 5);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -198,6 +202,15 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(deleteGuiTextures),
             vanilla.MainModule.ImportReference(deleteGuiTexture));
+        int loadedTextureDisposals = PatchLoadedTextureDisposal(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(disposeLoadedTexture),
+            vanilla.MainModule.ImportReference(finalizeLoadedTexture));
+        if (loadedTextureDisposals != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 LoadedTexture disposal/finalizer patches, applied {loadedTextureDisposals}.");
+        }
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int inventorySearchPatches = PatchInventorySearch(
             vanilla.MainModule,
@@ -1173,6 +1186,96 @@ public static class ApiPatcher
     /// The grid element is reused after Dispose, so its cache is cleared; the config list texture id is reset to 0
     /// because a disposed composer can be disposed or recomposed again.
     /// </summary>
+    internal static int PatchLoadedTextureDisposal(
+        ModuleDefinition module,
+        MethodReference disposeBridge,
+        MethodReference finalizeBridge)
+    {
+        const string textureTypeName = "Vintagestory.API.Client.LoadedTexture";
+        var textureType = module.GetType(textureTypeName)
+            ?? throw new InvalidOperationException($"{textureTypeName} is missing from the vanilla API.");
+        var disposedField = textureType.Fields.SingleOrDefault(field => field.Name == "disposed")
+            ?? throw new InvalidOperationException($"{textureTypeName}.disposed is missing from the vanilla API.");
+        var textureIdField = textureType.Fields.SingleOrDefault(field => field.Name == "TextureId")
+            ?? throw new InvalidOperationException($"{textureTypeName}.TextureId is missing from the vanilla API.");
+        var traceField = textureType.Fields.SingleOrDefault(field => field.Name == "trace")
+            ?? throw new InvalidOperationException($"{textureTypeName}.trace is missing from the vanilla API.");
+        var capiField = textureType.Fields.SingleOrDefault(field => field.Name == "capi")
+            ?? throw new InvalidOperationException($"{textureTypeName}.capi is missing from the vanilla API.");
+        var getIgnoreUndisposed = textureType.Methods.SingleOrDefault(method =>
+            method.Name == "get_IgnoreUndisposed" && method.Parameters.Count == 0)
+            ?? throw new InvalidOperationException($"{textureTypeName}.get_IgnoreUndisposed is missing from the vanilla API.");
+        var disposeMethod = textureType.Methods.SingleOrDefault(method =>
+            method.Name == "Dispose" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{textureTypeName}.Dispose is missing from the vanilla API.");
+        var finalizeMethod = textureType.Methods.SingleOrDefault(method =>
+            method.Name == "Finalize" && method.Parameters.Count == 0 && method.HasBody)
+            ?? throw new InvalidOperationException($"{textureTypeName}.Finalize is missing from the vanilla API.");
+
+        ClearDebugInformation(disposeMethod);
+        var disposeBody = new MethodBody(disposeMethod) { InitLocals = false };
+        var dil = disposeBody.GetILProcessor();
+        dil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        dil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        dil.Append(Instruction.Create(OpCodes.Ldflda, disposedField));
+        dil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        dil.Append(Instruction.Create(OpCodes.Ldflda, textureIdField));
+        dil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        dil.Append(Instruction.Create(OpCodes.Ldfld, capiField));
+        dil.Append(Instruction.Create(OpCodes.Call, disposeBridge));
+        dil.Append(Instruction.Create(OpCodes.Ret));
+        disposeMethod.Body = disposeBody;
+
+        var objectFinalize = finalizeMethod.Body.Instructions
+            .Select(instruction => instruction.Operand)
+            .OfType<MethodReference>()
+            .FirstOrDefault(reference =>
+                reference.Name == "Finalize" &&
+                reference.DeclaringType.FullName == "System.Object")
+            ?? module.ImportReference(
+                typeof(object).GetMethod(
+                    "Finalize",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+                ?? throw new InvalidOperationException("System.Object.Finalize is missing."));
+
+        ClearDebugInformation(finalizeMethod);
+        var finalizeBody = new MethodBody(finalizeMethod) { InitLocals = false };
+        var fil = finalizeBody.GetILProcessor();
+        var tryStart = Instruction.Create(OpCodes.Ldarg_0);
+        var handlerStart = Instruction.Create(OpCodes.Ldarg_0);
+        var handlerEnd = Instruction.Create(OpCodes.Ret);
+
+        fil.Append(tryStart);
+        fil.Append(Instruction.Create(OpCodes.Ldflda, disposedField));
+        fil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        fil.Append(Instruction.Create(OpCodes.Ldflda, textureIdField));
+        fil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        fil.Append(Instruction.Create(OpCodes.Call, getIgnoreUndisposed));
+        fil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        fil.Append(Instruction.Create(OpCodes.Ldfld, traceField));
+        fil.Append(Instruction.Create(OpCodes.Ldarg_0));
+        fil.Append(Instruction.Create(OpCodes.Ldfld, capiField));
+        fil.Append(Instruction.Create(OpCodes.Call, finalizeBridge));
+        fil.Append(Instruction.Create(OpCodes.Leave_S, handlerEnd));
+
+        fil.Append(handlerStart);
+        fil.Append(Instruction.Create(OpCodes.Call, objectFinalize));
+        fil.Append(Instruction.Create(OpCodes.Endfinally));
+        fil.Append(handlerEnd);
+
+        finalizeBody.ExceptionHandlers.Add(new ExceptionHandler(ExceptionHandlerType.Finally)
+        {
+            TryStart = tryStart,
+            TryEnd = handlerStart,
+            HandlerStart = handlerStart,
+            HandlerEnd = handlerEnd,
+        });
+        finalizeMethod.Body = finalizeBody;
+
+        Console.WriteLine($"  API PATCHED: {textureTypeName}.Dispose + Finalize -> OptimumApiBridge");
+        return 2;
+    }
+
     internal static int PatchGuiTextureDisposal(
         ModuleDefinition module,
         MethodReference deleteTexturesBridge,

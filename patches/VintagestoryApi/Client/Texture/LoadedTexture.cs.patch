@@ -1,0 +1,37 @@
+diff --git a/VintagestoryApi/Client/Texture/LoadedTexture.cs b/VintagestoryApi/Client/Texture/LoadedTexture.cs
+index 43e6d48..7073773 100644
+--- a/VintagestoryApi/Client/Texture/LoadedTexture.cs
++++ b/VintagestoryApi/Client/Texture/LoadedTexture.cs
+@@ -74,30 +74,15 @@ namespace Vintagestory.API.Client
+         /// <summary>
+         /// Disposes of the loaded texture safely.
+         /// </summary>
+         public virtual void Dispose()
+         {
+-            this.disposed = true;
+-            if (TextureId != 0)
+-            {
+-                capi.Gui.DeleteTexture(TextureId);
+-                TextureId = 0;
+-            }
++            OptimumApiBridge.DisposeLoadedTexture(this, ref disposed, ref TextureId, capi);
+         }
+ 
+         ~LoadedTexture()
+         {
+-            if (IgnoreUndisposed || TextureId == 0 || disposed || capi?.IsShuttingDown == true) return;
+-
+-            if (trace == null)
+-            {
+-                capi?.Logger.Debug("Texture with texture id {0} is leaking memory, missing call to Dispose. Set env var TEXTURE_DEBUG_DISPOSE to get allocation trace.", TextureId);
+-            }
+-            else
+-            {
+-                capi?.Logger.Debug("Texture with texture id {0} is leaking memory, missing call to Dispose. Allocated at {1}.", TextureId, trace);
+-            }
+-
++            OptimumApiBridge.FinalizeLoadedTexture(ref disposed, ref TextureId, IgnoreUndisposed, trace, capi);
+         }
+     }
+ 
+ }

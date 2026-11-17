@@ -460,6 +460,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetChiselLodSummary());
         sb.AppendLine(OptimumDiagnostics.GetAnimBlockSummary());
         sb.AppendLine(OptimumDiagnostics.GetGcPauseSummary());
+        sb.AppendLine(OptimumDiagnostics.GetGlReclaimSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }

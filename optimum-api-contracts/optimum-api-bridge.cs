@@ -1372,4 +1372,54 @@ public static class OptimumApiBridge
         GetIncandescenceColorFloats(temperature, out float r, out float g, out float b, out float a);
         return new float[] { r, g, b, a };
     }
+
+    public static void DisposeLoadedTexture(
+        object texture,
+        ref bool disposed,
+        ref int textureId,
+        ICoreClientAPI? capi)
+    {
+        disposed = true;
+        int id = textureId;
+        if (id != 0)
+        {
+            textureId = 0;
+            capi?.Gui.DeleteTexture(id);
+        }
+        GC.SuppressFinalize(texture);
+    }
+
+    public static void FinalizeLoadedTexture(
+        ref bool disposed,
+        ref int textureId,
+        bool ignoreUndisposed,
+        string? trace,
+        ICoreClientAPI? capi)
+    {
+        int id = textureId;
+        if (ignoreUndisposed || id == 0 || disposed || capi == null || OptimumGlReclaimQueue.IsGlShuttingDown)
+        {
+            return;
+        }
+
+        disposed = true;
+        textureId = 0;
+
+        if (OptimumConfig.GlFinalizerReclaimActive && !OptimumGlReclaimQueue.LoadedTextureFinalizerPatchedByMod)
+        {
+            OptimumGlReclaimQueue.EnqueueTexture(id);
+        }
+
+        if (OptimumGlReclaimQueue.ShouldLogTextureLeak(trace != null))
+        {
+            if (trace == null)
+            {
+                capi.Logger?.Debug("Texture with texture id {0} is leaking memory, missing call to Dispose. Set env var TEXTURE_DEBUG_DISPOSE to get allocation trace.", id);
+            }
+            else
+            {
+                capi.Logger?.Debug("Texture with texture id {0} is leaking memory, missing call to Dispose. Allocated at {1}.", id, trace);
+            }
+        }
+    }
 }

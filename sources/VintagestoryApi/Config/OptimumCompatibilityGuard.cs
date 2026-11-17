@@ -390,7 +390,29 @@ public static class OptimumCompatibilityGuard
     {
         DetectFromModLoader(modLoader, logger, disabledMods);
         DetectFromAssemblies(logger, disabledMods);
+        RefreshFinalizerPatchGuards(logger);
         LogKometAdvisoryIfUncoordinated(logger);
+    }
+
+    private static void RefreshFinalizerPatchGuards(Action<string>? logger)
+    {
+        Type? vaoType = null;
+        Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+        for (int i = 0; i < assemblies.Length; i++)
+        {
+            vaoType = assemblies[i].GetType("Vintagestory.Client.NoObf.VAO", throwOnError: false);
+            if (vaoType != null)
+            {
+                break;
+            }
+        }
+
+        OptimumGlReclaimQueue.RefreshExternalFinalizerPatchDetection(typeof(LoadedTexture), vaoType);
+        if (logger != null &&
+            (OptimumGlReclaimQueue.LoadedTextureFinalizerPatchedByMod || OptimumGlReclaimQueue.VaoFinalizerPatchedByMod))
+        {
+            logger("[Optimum] External Harmony finalizer patch detected; skipping duplicate GL finalizer reclamation for patched types.");
+        }
     }
 
     /// <summary>
@@ -484,6 +506,8 @@ public static class OptimumCompatibilityGuard
         ResetDetection();
         OptimumConfig.KometGuardEnabled = true;
         OptimumConfig.KometAdaptiveChunkInflowEnabled = false;
+        OptimumConfig.GlFinalizerReclaimEnabled = true;
+        OptimumGlReclaimQueue.SetExternalFinalizerPatchOverridesForTest(false, false);
     }
 
     private static void LogKometAdvisoryOnce(Action<string>? logger)

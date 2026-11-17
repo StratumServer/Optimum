@@ -1,0 +1,181 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
+index 5d4caec..be20460 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/VAO.cs
+@@ -57,10 +57,12 @@ public class VAO : MeshRef
+ 
+ 	public nint indicesPtr;
+ 
+ 	private string trace;
+ 
++	internal bool sharedIndexBuffer;
++
+ 	public override bool Initialized => VaoId != 0;
+ 
+ 	public VAO()
+ 		: base()
+ 	{
+@@ -74,65 +76,158 @@ public class VAO : MeshRef
+ 
+ 	public override void Dispose()
+ 	{
+ 		if (!base.Disposed)
+ 		{
++			if (VaoId != 0)
++			{
++				GL.DeleteVertexArray(VaoId);
++				VaoId = 0;
++			}
+ 			if (xyzVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(xyzVboId);
++				xyzVboId = 0;
+ 			}
+ 			if (normalsVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(normalsVboId);
++				normalsVboId = 0;
+ 			}
+ 			if (uvVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(uvVboId);
++				uvVboId = 0;
+ 			}
+ 			if (rgbaVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(rgbaVboId);
++				rgbaVboId = 0;
+ 			}
+ 			if (customDataFloatVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(customDataFloatVboId);
++				customDataFloatVboId = 0;
+ 			}
+ 			if (customDataShortVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(customDataShortVboId);
++				customDataShortVboId = 0;
+ 			}
+ 			if (customDataIntVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(customDataIntVboId);
++				customDataIntVboId = 0;
+ 			}
+ 			if (customDataByteVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(customDataByteVboId);
++				customDataByteVboId = 0;
+ 			}
+-			if (vboIdIndex != 0 && vboIdIndex != ClientPlatformAbstract.singleIndexBufferId)
++			if (!sharedIndexBuffer && vboIdIndex != 0 && vboIdIndex != ClientPlatformAbstract.singleIndexBufferId)
+ 			{
+ 				GL.DeleteBuffer(vboIdIndex);
+ 			}
++			vboIdIndex = 0;
+ 			if (flagsVboId != 0)
+ 			{
+ 				GL.DeleteBuffer(flagsVboId);
++				flagsVboId = 0;
+ 			}
+-			GL.DeleteVertexArray(VaoId);
++			xyzPtr = 0;
++			normalsPtr = 0;
++			uvPtr = 0;
++			rgbaPtr = 0;
++			flagsPtr = 0;
++			customDataFloatPtr = 0;
++			customDataIntPtr = 0;
++			customDataShortPtr = 0;
++			customDataBytePtr = 0;
++			indicesPtr = 0;
++			Persistent = false;
+ 			base.Dispose();
++			GC.SuppressFinalize(this);
+ 		}
+ 	}
+ 
+ 	~VAO()
+ 	{
+-		if (!base.Disposed && !ScreenManager.Platform.IsShuttingDown)
++		if (base.Disposed || ScreenManager.Platform?.IsShuttingDown == true || OptimumGlReclaimQueue.IsGlShuttingDown)
++		{
++			return;
++		}
++
++		int vaoId = VaoId;
++		int indicesCount = IndicesCount;
++		int xyz = xyzVboId;
++		int normals = normalsVboId;
++		int uv = uvVboId;
++		int rgba = rgbaVboId;
++		int flags = flagsVboId;
++		int customFloat = customDataFloatVboId;
++		int customInt = customDataIntVboId;
++		int customShort = customDataShortVboId;
++		int customByte = customDataByteVboId;
++		int indexVbo = (!sharedIndexBuffer && vboIdIndex != 0 && vboIdIndex != ClientPlatformAbstract.singleIndexBufferId)
++			? vboIdIndex
++			: 0;
++
++		if (vaoId == 0 && xyz == 0 && normals == 0 && uv == 0 && rgba == 0 && flags == 0 &&
++			customFloat == 0 && customInt == 0 && customShort == 0 && customByte == 0 && indexVbo == 0)
++		{
++			base.Disposed = true;
++			return;
++		}
++
++		base.Disposed = true;
++		VaoId = 0;
++		vboIdIndex = 0;
++		xyzVboId = 0;
++		normalsVboId = 0;
++		uvVboId = 0;
++		rgbaVboId = 0;
++		flagsVboId = 0;
++		customDataFloatVboId = 0;
++		customDataIntVboId = 0;
++		customDataShortVboId = 0;
++		customDataByteVboId = 0;
++		xyzPtr = 0;
++		normalsPtr = 0;
++		uvPtr = 0;
++		rgbaPtr = 0;
++		flagsPtr = 0;
++		customDataFloatPtr = 0;
++		customDataIntPtr = 0;
++		customDataShortPtr = 0;
++		customDataBytePtr = 0;
++		indicesPtr = 0;
++		Persistent = false;
++
++		if (OptimumConfig.GlFinalizerReclaimActive && !OptimumGlReclaimQueue.VaoFinalizerPatchedByMod)
++		{
++			OptimumGlReclaimQueue.EnqueueVaoWithBuffers(
++				vaoId,
++				xyz,
++				normals,
++				uv,
++				rgba,
++				flags,
++				customFloat,
++				customInt,
++				customShort,
++				customByte,
++				indexVbo);
++		}
++
++		if (OptimumGlReclaimQueue.ShouldLogVaoLeak(RuntimeEnv.DebugVAODispose))
+ 		{
+ 			if (!RuntimeEnv.DebugVAODispose)
+ 			{
+-				ScreenManager.Platform.Logger.Debug("MeshRef with vao id {0} with {1} indices is leaking memory, missing call to Dispose. Set env var VAO_DEBUG_DISPOSE to get allocation trace.", VaoId, IndicesCount);
++				ScreenManager.Platform?.Logger?.Debug("MeshRef with vao id {0} with {1} indices is leaking memory, missing call to Dispose. Set env var VAO_DEBUG_DISPOSE to get allocation trace.", vaoId, indicesCount);
+ 			}
+ 			else
+ 			{
+-				ScreenManager.Platform.Logger.Debug("MeshRef with vao id {0} with {1} indices is leaking memory, missing call to Dispose. Allocated at {2}.", VaoId, IndicesCount, trace);
++				ScreenManager.Platform?.Logger?.Debug("MeshRef with vao id {0} with {1} indices is leaking memory, missing call to Dispose. Allocated at {2}.", vaoId, indicesCount, trace);
+ 			}
+ 		}
+ 	}
+ }

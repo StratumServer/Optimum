@@ -1,0 +1,32 @@
+diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorTexturedClothing.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorTexturedClothing.cs
+index 684a4ec..aeab6e0 100644
+--- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorTexturedClothing.cs
++++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorTexturedClothing.cs
+@@ -93,11 +93,12 @@ public abstract class EntityBehaviorTexturedClothing : EntityBehaviorContainer
+ 		}
+ 		LoadedTexture loadedTexture = new LoadedTexture(null)
+ 		{
+ 			TextureId = textureAtlasPosition.atlasTextureId,
+ 			Width = capi.EntityTextureAtlas.Size.Width,
+-			Height = capi.EntityTextureAtlas.Size.Height
++			Height = capi.EntityTextureAtlas.Size.Height,
++			IgnoreUndisposed = true
+ 		};
+ 		capi.Render.GlToggleBlend(blend: false);
+ 		capi.EntityTextureAtlas.RenderTextureIntoAtlas(skinTexPos.atlasTextureId, loadedTexture, (int)(textureAtlasPosition.x1 * (float)AtlasSize.Width), (int)(textureAtlasPosition.y1 * (float)AtlasSize.Height), (int)((textureAtlasPosition.x2 - textureAtlasPosition.x1) * (float)AtlasSize.Width), (int)((textureAtlasPosition.y2 - textureAtlasPosition.y1) * (float)AtlasSize.Height), skinTexPos.x1 * (float)capi.EntityTextureAtlas.Size.Width, skinTexPos.y1 * (float)capi.EntityTextureAtlas.Size.Height, -1f);
+ 		capi.Render.GlToggleBlend(blend: true, EnumBlendMode.Overlay);
+ 		OnReloadSkin?.Invoke(loadedTexture, skinTexPos, skinTextureSubId);
+@@ -118,11 +119,12 @@ public abstract class EntityBehaviorTexturedClothing : EntityBehaviorContainer
+ 					TextureAtlasPosition textureAtlasPosition2 = capi.ItemTextureAtlas.Positions[textureSubId];
+ 					LoadedTexture fromTexture = new LoadedTexture(null)
+ 					{
+ 						TextureId = textureAtlasPosition2.atlasTextureId,
+ 						Width = capi.ItemTextureAtlas.Size.Width,
+-						Height = capi.ItemTextureAtlas.Size.Height
++						Height = capi.ItemTextureAtlas.Size.Height,
++						IgnoreUndisposed = true
+ 					};
+ 					capi.EntityTextureAtlas.RenderTextureIntoAtlas(skinTexPos.atlasTextureId, fromTexture, textureAtlasPosition2.x1 * (float)capi.ItemTextureAtlas.Size.Width, textureAtlasPosition2.y1 * (float)capi.ItemTextureAtlas.Size.Height, (textureAtlasPosition2.x2 - textureAtlasPosition2.x1) * (float)capi.ItemTextureAtlas.Size.Width, (textureAtlasPosition2.y2 - textureAtlasPosition2.y1) * (float)capi.ItemTextureAtlas.Size.Height, skinTexPos.x1 * (float)capi.EntityTextureAtlas.Size.Width, skinTexPos.y1 * (float)capi.EntityTextureAtlas.Size.Height);
+ 				}
+ 			}
+ 		}

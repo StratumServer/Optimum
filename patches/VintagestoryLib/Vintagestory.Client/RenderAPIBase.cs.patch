@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
-index bfae02c..2f624fb 100644
+index bfae02c..eb25ca3 100644
 --- a/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
 +++ b/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs
 @@ -290,13 +290,21 @@ public abstract class RenderAPIBase : IRenderAPI
@@ -24,3 +24,20 @@ index bfae02c..2f624fb 100644
  		}
  	}
  
+@@ -745,13 +753,14 @@ public abstract class RenderAPIBase : IRenderAPI
+ 	}
+ 
+ 	public void LoadTexture(IBitmap bmp, ref LoadedTexture intoTexture, bool linearMag = false, int clampMode = 0, bool generateMipmaps = false)
+ 	{
+ 		int num = plat.LoadTexture(bmp, linearMag, clampMode, generateMipmaps);
+-		if (num != intoTexture.TextureId && intoTexture.TextureId != 0)
++		int oldTextureId = intoTexture.TextureId;
++		if (num != oldTextureId && oldTextureId != 0 && !intoTexture.IgnoreUndisposed)
+ 		{
+-			intoTexture.Dispose();
++			plat.GLDeleteTexture(oldTextureId);
+ 		}
+ 		intoTexture.TextureId = num;
+ 		intoTexture.Width = bmp.Width;
+ 		intoTexture.Height = bmp.Height;
+ 	}
