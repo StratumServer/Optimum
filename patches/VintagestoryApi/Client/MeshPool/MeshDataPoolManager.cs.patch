@@ -1,8 +1,20 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
-index c56f6af..131de3a 100644
+index c56f6af..93af075 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
-@@ -110,10 +110,12 @@ namespace Vintagestory.API.Client
+@@ -89,10 +89,11 @@ namespace Vintagestory.API.Client
+                 pool.poolOrigin = modelOrigin.Clone();
+                 pool.dimensionId = dimension;
+ 
+                 masterPool.AddModelDataPool(pool);
+                 pools.Add(pool);
++                Vintagestory.API.Config.OptimumMeshPoolLifecycle.BindPoolManager(masterPool, pool, this);
+                 location = pool.TryAdd(capi, modeldata, modelOrigin, dimension, frustumCullSphere);
+             }
+ 
+             if (location == null)
+             {
+@@ -110,10 +111,12 @@ namespace Vintagestory.API.Client
          /// <param name="originUniformName"></param>
          /// <param name="frustumCullMode">The culling mode.  Default is CulHideDelay.</param>
          public void Render(Vec3d playerpos, string originUniformName, EnumFrustumCullMode frustumCullMode = EnumFrustumCullMode.CullNormal)
@@ -15,7 +27,7 @@ index c56f6af..131de3a 100644
                  MeshDataPool pool = pools[i];
                  if (pool.dimensionId == Dimensions.MiniDimensions)
                  {
-@@ -155,10 +157,11 @@ namespace Vintagestory.API.Client
+@@ -155,10 +158,11 @@ namespace Vintagestory.API.Client
                          (float)(pool.poolOrigin.Z + renderOffset.Z - playerpos.Z)
                      ));
  
@@ -27,7 +39,7 @@ index c56f6af..131de3a 100644
                      finally
                      {
                          if (revertModelviewMatrix)
-@@ -169,26 +172,31 @@ namespace Vintagestory.API.Client
+@@ -169,26 +173,31 @@ namespace Vintagestory.API.Client
                              capi.Render.CurrentActiveShader.Uniform("forcedTransparency", 0f);
                      }
                  }

@@ -272,6 +272,7 @@ public static class OptimumConfig
     /// </summary>
     public static bool KometGuardEnabled = true;
     public static bool GlFinalizerReclaimEnabled = true;
+    public static bool MeshPoolReclaimEnabled = true;
 
     public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
 
@@ -1294,6 +1295,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
         (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
         (nameof(OptimumConfigData.GlFinalizerReclaim), GlFinalizerReclaimEnabled.ToString()),
+        (nameof(OptimumConfigData.MeshPoolReclaim), MeshPoolReclaimEnabled.ToString()),
     };
 
     /// <summary>
@@ -1412,6 +1414,7 @@ public static class OptimumConfig
             SimdCullingEnabled = data.SimdCulling;
             KometGuardEnabled = data.KometGuard;
             GlFinalizerReclaimEnabled = data.GlFinalizerReclaim;
+            MeshPoolReclaimEnabled = data.MeshPoolReclaim;
         }
         catch (Exception)
         {
@@ -1494,6 +1497,7 @@ public static class OptimumConfig
             SimdCulling = SimdCullingEnabled,
             KometGuard = KometGuardEnabled,
             GlFinalizerReclaim = GlFinalizerReclaimEnabled,
+            MeshPoolReclaim = MeshPoolReclaimEnabled,
         };
 
         try
@@ -1600,6 +1604,7 @@ internal sealed class OptimumConfigData
     public bool SimdCulling { get; set; } = true;
     public bool KometGuard { get; set; } = true;
     public bool GlFinalizerReclaim { get; set; } = true;
+    public bool MeshPoolReclaim { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2540,6 +2545,7 @@ public static class OptimumDiagnostics
         ResetEntityAnimation();
         ResetGameLaunchTasks();
         ResetWorldgenPassTiming();
+        ResetMeshPoolReclaimCounters();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3291,9 +3297,47 @@ public static class OptimumDiagnostics
         return OptimumCompatibilityGuard.GetPerformanceModsSummary();
     }
 
+    private static long _meshPoolsAllocated;
+    private static long _meshPoolsReclaimed;
+    private static long _meshPoolReclaimedBytes;
+
+    public static long MeshPoolsAllocated => Interlocked.Read(ref _meshPoolsAllocated);
+    public static long MeshPoolsReclaimed => Interlocked.Read(ref _meshPoolsReclaimed);
+    public static long MeshPoolReclaimedBytes => Interlocked.Read(ref _meshPoolReclaimedBytes);
+
+    public static void RecordMeshPoolAllocated()
+    {
+        Interlocked.Increment(ref _meshPoolsAllocated);
+    }
+
+    public static void RecordMeshPoolReclaimed(long estimatedBytes)
+    {
+        Interlocked.Increment(ref _meshPoolsReclaimed);
+        if (estimatedBytes > 0)
+        {
+            Interlocked.Add(ref _meshPoolReclaimedBytes, estimatedBytes);
+        }
+    }
+
+    public static void ResetMeshPoolReclaimCounters()
+    {
+        Interlocked.Exchange(ref _meshPoolsAllocated, 0);
+        Interlocked.Exchange(ref _meshPoolsReclaimed, 0);
+        Interlocked.Exchange(ref _meshPoolReclaimedBytes, 0);
+    }
+
     public static string GetGlReclaimSummary()
     {
         return $"Optimum GL finalizer reclaim: vaos={OptimumGlReclaimQueue.ReclaimedVaoCount}, buffers={OptimumGlReclaimQueue.ReclaimedBufferCount}, textures={OptimumGlReclaimQueue.ReclaimedTextureCount}, pending={OptimumGlReclaimQueue.PendingTotalCount}, drains={OptimumGlReclaimQueue.DrainCount}, modBypass=(tex={OptimumGlReclaimQueue.LoadedTextureFinalizerPatchedByMod}, vao={OptimumGlReclaimQueue.VaoFinalizerPatchedByMod})";
+    }
+
+    public static string GetMeshPoolReclaimSummary()
+    {
+        long allocated = MeshPoolsAllocated;
+        long reclaimed = MeshPoolsReclaimed;
+        long reclaimedBytes = MeshPoolReclaimedBytes;
+        double reclaimedMb = reclaimedBytes / (1024.0 * 1024.0);
+        return $"Optimum mesh pool reclaim: enabled={OptimumConfig.MeshPoolReclaimEnabled}, allocated={allocated}, reclaimed={reclaimed}, reclaimedEstMB={reclaimedMb:0.0}";
     }
 }
 

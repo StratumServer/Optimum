@@ -1,16 +1,122 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs b/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
-index 436213b..3e8d15b 100644
+index 436213b..a0ff39c 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPoolMasterManager.cs
-@@ -63,10 +63,11 @@ namespace Vintagestory.API.Client
+@@ -44,109 +44,57 @@ namespace Vintagestory.API.Client
+         /// Removes the models with the given locations.
+         /// </summary>
+         /// <param name="locations">The locations of the model data.</param>
+         public void RemoveDataPoolLocations(ModelDataPoolLocation[] locations)
+         {
+-            if (DelayedPoolLocationRemoval)
+-            {
+-                for (int i = 0; i < locations.Length; i++)
+-                {
+-                    locations[i].Hide = true;
+-                }
+-                removalQueue[0].Enqueue(locations);
+-                return;
+-            }
+-
+-            RemoveLocationsNow(locations);
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.RemoveDataPoolLocations(this, locations);
+         }
+ 
+ 
          public void OnFrame(float dt, float[] modelviewMatrix, float[] shadowMVPMatrix)
          {
-             this.currentDt = dt;
-             this.currentModelViewMatrix = modelviewMatrix;
-             this.shadowMVPMatrix = shadowMVPMatrix;
+-            this.currentDt = dt;
+-            this.currentModelViewMatrix = modelviewMatrix;
+-            this.shadowMVPMatrix = shadowMVPMatrix;
+-            while (removalQueue[3].Count > 0)
+-            {
+-                RemoveLocationsNow(removalQueue[3].Dequeue());
+-            }
+-
+-            while (removalQueue[2].Count > 0)
+-            {
+-                removalQueue[3].Enqueue(removalQueue[2].Dequeue());
+-            }
+-
+-            while (removalQueue[1].Count > 0)
+-            {
+-                removalQueue[2].Enqueue(removalQueue[1].Dequeue());
+-            }
+-
+-            while (removalQueue[0].Count > 0)
+-            {
+-                removalQueue[1].Enqueue(removalQueue[0].Dequeue());
+-            }
 +            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkRenderFrame();
-             while (removalQueue[3].Count > 0)
-             {
-                 RemoveLocationsNow(removalQueue[3].Dequeue());
-             }
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.OnFrame(this, dt, modelviewMatrix, shadowMVPMatrix);
+         }
  
+         private void RemoveLocationsNow(ModelDataPoolLocation[] locations)
+         {
+-            for (int i = 0; i < locations.Length; i++)
+-            {
+-                if (locations[i] == null || modelPools[locations[i].PoolId] == null)
+-                {
+-                    capi.World.Logger.Error("Could not remove model data from the master pool. Something wonky is happening. Ignoring for now.");
+-                    continue;
+-                }
+-
+-                var mpool = modelPools[locations[i].PoolId];
+-                mpool.RemoveLocation(locations[i]);
+-            }
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.RemoveLocationsNow(this, locations);
+         }
+ 
+         /// <summary>
+         /// Adds a new pool to the master pool.
+         /// </summary>
+         /// <param name="pool">The mesh data pool to add.</param>
+         public void AddModelDataPool(MeshDataPool pool)
+         {
+-            pool.poolId = modelPools.Count;
+-            modelPools.Add(pool);
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.AddModelDataPool(this, pool);
+         }
+ 
+         /// <summary>
+         /// Cleans up and gets rid of all the pools.
+         /// </summary>
+         /// <param name="capi">The client API.</param>
+         public void DisposeAllPools(ICoreClientAPI capi)
+         {
+-            for (int i = 0; i < modelPools.Count; i++)
+-            {
+-                modelPools[i].Dispose(capi);
+-            }
++            Vintagestory.API.Config.OptimumMeshPoolLifecycle.DisposeAllPools(this, capi);
+         }
+ 
+         /// <summary>
+         /// Calculates the fragmentation.
+         /// </summary>
+         /// <returns>The resulting calculation.</returns>
+         public float CalcFragmentation()
+         {
+-            long totalUsed = 0;
+-            long totalAllocated = 0;
+-            for (int i = 0; i < modelPools.Count; i++)
+-            {
+-                totalUsed += modelPools[i].UsedVertices;
+-                totalAllocated += modelPools[i].VerticesPoolSize;
+-            }
+-
+-            return (float)(1 - (double)totalUsed / (double)totalAllocated);
++            return Vintagestory.API.Config.OptimumMeshPoolLifecycle.CalcFragmentation(this);
+         }
+ 
+         /// <summary>
+         /// The number of model pools in this master manager.
+         /// </summary>
+         /// <returns>The number of model pools</returns>
+         public int QuantityModelDataPools()
+         {
+-            return modelPools.Count;
++            return Vintagestory.API.Config.OptimumMeshPoolLifecycle.QuantityModelDataPools(this);
+         }
+     }
+ }
