@@ -12,7 +12,7 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
  	public TreeGen(TreeGenConfig config, int seed, ForestFloorSystem ffs)
  	{
  		this.config = config;
-@@ -76,7 +80,13 @@ public class TreeGen : ITreeGenerator
+@@ -76,7 +80,17 @@ public class TreeGen : ITreeGenerator
  		float num5 = curWidth / num;
  		int num6 = 0;
  		float num7 = 1f / (curWidth / num);
@@ -24,10 +24,14 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
 +			blockPos = new BlockPos(basePos.dimension);
 +			positionStack[depth] = blockPos;
 +		}
++		else
++		{
++			blockPos.dimension = basePos.dimension;
++		}
  		while (curWidth > 0f && num6++ < 5000)
  		{
  			curWidth -= num;
-@@ -157,7 +167,7 @@ public class TreeGen : ITreeGenerator
+@@ -157,7 +171,7 @@ public class TreeGen : ITreeGenerator
  	private void PlaceBlockEtc(int blockId, BlockPos currentPos, IRandom rand, float dx, float dz)
  	{
  		blockAccessor.SetBlock(blockId, currentPos);
@@ -36,7 +40,7 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
  		{
  			double num = rand.NextDouble();
  			int num2 = ((treeGenParams.hemisphere != EnumHemisphere.North) ? 2 : 0);
-@@ -201,7 +211,10 @@ public class TreeGen : ITreeGenerator
+@@ -201,7 +215,10 @@ public class TreeGen : ITreeGenerator
  			return;
  		}
  		BlockFacing blockFacing2 = BlockFacing.HORIZONTALS[rand.NextInt(4)];
