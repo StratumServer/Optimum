@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..0197649 100644
+index 431e51a..9e5db7e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -14,7 +14,7 @@ index 431e51a..0197649 100644
  namespace Vintagestory.Client.NoObf;
  
  public class ChunkRenderer
-@@ -40,10 +42,26 @@ public class ChunkRenderer
+@@ -40,10 +42,30 @@ public class ChunkRenderer
  
  	private float lastSetRainFall;
  
@@ -36,12 +36,16 @@ index 431e51a..0197649 100644
 +
 +	private float optimumTextureLodBias;
 +
++	// Issue #608: incremented whenever terrain geometry or occlusion visibility
++	// within ShadowFar range changes so cached ShadowmapFar invalidates immediately.
++	internal int optimumTerrainShadowGen;
++
  	public ChunkRenderer(int[] textureIds, ClientMain game)
  	{
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +123,45 @@ public class ChunkRenderer
+@@ -105,10 +127,45 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -87,7 +91,19 @@ index 431e51a..0197649 100644
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -170,10 +223,11 @@ public class ChunkRenderer
+@@ -133,10 +190,11 @@ public class ChunkRenderer
+ 
+ 	internal void SwapVisibleBuffers()
+ 	{
+ 		ClientChunk.bufIndex = (ClientChunk.bufIndex + 1) % 2;
+ 		ModelDataPoolLocation.VisibleBufIndex = ClientChunk.bufIndex;
++		System.Threading.Interlocked.Increment(ref optimumTerrainShadowGen);
+ 	}
+ 
+ 	public void OnSeperateThreadTick(float dt)
+ 	{
+ 		culler.CullInvisibleChunks();
+@@ -170,10 +228,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -99,7 +115,7 @@ index 431e51a..0197649 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +262,25 @@ public class ChunkRenderer
+@@ -208,14 +267,25 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -128,7 +144,7 @@ index 431e51a..0197649 100644
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -249,62 +314,72 @@ public class ChunkRenderer
+@@ -249,62 +319,72 @@ public class ChunkRenderer
  		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
  		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
  		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
@@ -250,7 +266,7 @@ index 431e51a..0197649 100644
  		platform.GlToggleBlend(on: true);
  		chunkopaque.AlphaTest = 0.2f;
  		chunkopaque.HaxyFade = 0;
-@@ -442,11 +517,11 @@ public class ChunkRenderer
+@@ -442,23 +522,60 @@ public class ChunkRenderer
  		masterPool.DisposeAllPools(game.api);
  	}
  
@@ -263,3 +279,52 @@ index 431e51a..0197649 100644
  		tesschunk.AddCenterToPools(this, chunkOrigin, dimension, boundingSphere, hostChunk);
  		tesschunk.AddEdgeToPools(this, chunkOrigin, dimension, boundingSphere, hostChunk);
  		tesschunk.centerParts = null;
+ 		tesschunk.edgeParts = null;
+ 		tesschunk.chunk = null;
++		EntityPlayer player = game.EntityPlayer;
++		if (player != null && OptimumShadowFarReuse.IsChunkWithinShadowFarRange(
++			player.CameraPos.X, player.CameraPos.Z, player.Pos.Dimension,
++			chunkOrigin.X + 16.0, chunkOrigin.Z + 16.0, dimension,
++			game.shUniforms.ShadowRangeFar, Dimensions.MiniDimensions))
++		{
++			System.Threading.Interlocked.Increment(ref optimumTerrainShadowGen);
++		}
+ 	}
+ 
+ 	public void RemoveDataPoolLocations(ModelDataPoolLocation[] locations)
+ 	{
+ 		masterPool.RemoveDataPoolLocations(locations);
++		if (locations == null || locations.Length == 0)
++		{
++			return;
++		}
++		EntityPlayer player = game.EntityPlayer;
++		if (player == null)
++		{
++			return;
++		}
++		Vec3d camPos = player.CameraPos;
++		int playerDim = player.Pos.Dimension;
++		float farRange = game.shUniforms.ShadowRangeFar;
++		for (int i = 0; i < locations.Length; i++)
++		{
++			ModelDataPoolLocation loc = locations[i];
++			if (loc == null)
++			{
++				continue;
++			}
++			Sphere sphere = loc.FrustumCullSphere;
++			if (OptimumShadowFarReuse.IsChunkWithinShadowFarRange(
++				camPos.X, camPos.Z, playerDim,
++				sphere.x, sphere.z, playerDim,
++				farRange, Dimensions.MiniDimensions))
++			{
++				System.Threading.Interlocked.Increment(ref optimumTerrainShadowGen);
++				break;
++			}
++		}
+ 	}
+ 
+ 	public void GetStats(out long usedVideoMemory, out long renderedTris, out long allocatedTris)
+ 	{
+ 		usedVideoMemory = 0L;
