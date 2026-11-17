@@ -23,6 +23,7 @@ uniform float minlight = 0.0;
 uniform float maxlight = 1;
 uniform float minsat = 0;
 uniform float maxsat = 1;
+uniform int optimumDisableFxaa = 0;
 
 in vec2 invFrameSize;
 in vec2 texCoord;
@@ -86,7 +87,9 @@ vec4 ColorGrade(vec4 color) {
 void main(void)
 {
 	#if FXAA == 1
-		vec4 color = fxaaTexturePixel(primaryScene, texCoord, invFrameSize);
+		vec4 color = (optimumDisableFxaa == 0)
+			? fxaaTexturePixel(primaryScene, texCoord, invFrameSize)
+			: texture(primaryScene, texCoord);
 	#else
 		vec4 color = texture(primaryScene, texCoord);
 	#endif

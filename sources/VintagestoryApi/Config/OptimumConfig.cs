@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -664,6 +665,16 @@ public static class OptimumConfig
     public static float OptimumFsrSharpness { get => FsrSharpness; set => FsrSharpness = value; }
 
     /// <summary>
+    /// Issue #610: Adjust world offscreen resolution dynamically between quantized tiers
+    /// (1.0, 0.85, 0.77, 0.67) over cached FBO sets using non-blocking GL_TIMESTAMP queries.
+    /// Disabled by default to preserve strict native 4K sharpness unless opted in.
+    /// </summary>
+    public static bool DynamicRenderScaleEnabled = false;
+    public static int DynamicRenderScaleTargetFps = 60;
+    public static float DynamicRenderScaleMinScale = 0.67f;
+    public static string DynamicRenderScaleUpscaler = "Auto";
+
+    /// <summary>
     /// R4: cap the god-rays post-process at 100 texture samples when enabled.
     /// The disabled path sends the vanilla 180-sample limit. This option can
     /// change the post-process image, so it stays off by default.
@@ -825,6 +836,8 @@ public static class OptimumConfig
         _greedyMeshVertexShaderReady && _greedyMeshFragmentShaderReady;
 
     public static float EffectiveRenderScale => IsShaderFeatureDisabled("RenderScale") ? 1.0f : RenderScale;
+
+    public static bool EffectiveDynamicRenderScale => DynamicRenderScaleEnabled && !IsShaderFeatureDisabled("RenderScale");
 
     public static bool EffectiveGodRaysSampleCap => GodRaysSampleCapEnabled &&
         !IsShaderFeatureDisabled("GodRaysSampleCap");
@@ -1297,6 +1310,10 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.GreedyMeshTextureGrad), GreedyMeshTextureGrad.ToString()),
         (nameof(OptimumConfigData.RenderScale), RenderScale.ToString("F2")),
         (nameof(OptimumConfigData.FsrSharpness), FsrSharpness.ToString("F2")),
+        (nameof(OptimumConfigData.DynamicRenderScale), DynamicRenderScaleEnabled.ToString()),
+        (nameof(OptimumConfigData.DynamicRenderScaleTargetFps), DynamicRenderScaleTargetFps.ToString(CultureInfo.InvariantCulture)),
+        (nameof(OptimumConfigData.DynamicRenderScaleMinScale), DynamicRenderScaleMinScale.ToString("F2", CultureInfo.InvariantCulture)),
+        (nameof(OptimumConfigData.DynamicRenderScaleUpscaler), DynamicRenderScaleUpscaler),
         (nameof(OptimumConfigData.GodRaysSampleCap), GodRaysSampleCapEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCache), MapPageCacheEnabled.ToString()),
         (nameof(OptimumConfigData.MapPageCacheMaxLayers), MapPageCacheMaxLayers.ToString()),
@@ -1420,6 +1437,11 @@ public static class OptimumConfig
             GreedyMeshTextureGrad = data.GreedyMeshTextureGrad;
             RenderScale = Math.Clamp(data.RenderScale, 0.5f, 1.0f);
             FsrSharpness = Math.Clamp(data.FsrSharpness, 0.0f, 1.0f);
+            DynamicRenderScaleEnabled = data.DynamicRenderScale;
+            DynamicRenderScaleTargetFps = Math.Clamp(data.DynamicRenderScaleTargetFps, OptimumDynamicRenderScale.MinTargetFps, OptimumDynamicRenderScale.MaxTargetFps);
+            DynamicRenderScaleMinScale = Math.Clamp(data.DynamicRenderScaleMinScale, 0.5f, 1.0f);
+            DynamicRenderScaleUpscaler = OptimumDynamicRenderScale.FormatUpscalerPreference(
+                OptimumDynamicRenderScale.ParseUpscalerPreference(data.DynamicRenderScaleUpscaler));
             GodRaysSampleCapEnabled = data.GodRaysSampleCap;
             MapPageCacheEnabled = data.MapPageCache;
             MapPageCacheMaxLayers = Math.Clamp(data.MapPageCacheMaxLayers, 16, 512);
@@ -1507,6 +1529,10 @@ public static class OptimumConfig
             GreedyMeshTextureGrad = GreedyMeshTextureGrad,
             RenderScale = RenderScale,
             FsrSharpness = FsrSharpness,
+            DynamicRenderScale = DynamicRenderScaleEnabled,
+            DynamicRenderScaleTargetFps = DynamicRenderScaleTargetFps,
+            DynamicRenderScaleMinScale = DynamicRenderScaleMinScale,
+            DynamicRenderScaleUpscaler = DynamicRenderScaleUpscaler,
             GodRaysSampleCap = GodRaysSampleCapEnabled,
             MapPageCache = MapPageCacheEnabled,
             MapPageCacheMaxLayers = MapPageCacheMaxLayers,
@@ -1618,6 +1644,10 @@ internal sealed class OptimumConfigData
     public bool GreedyMeshTextureGrad { get; set; } = true;
     public float RenderScale { get; set; } = 1.0f;
     public float FsrSharpness { get; set; } = 0.2f;
+    public bool DynamicRenderScale { get; set; } = false;
+    public int DynamicRenderScaleTargetFps { get; set; } = 60;
+    public float DynamicRenderScaleMinScale { get; set; } = 0.67f;
+    public string DynamicRenderScaleUpscaler { get; set; } = "Auto";
     public bool GodRaysSampleCap { get; set; } = false;
     public bool MapPageCache { get; set; } = true;
     public int MapPageCacheMaxLayers { get; set; } = 128;
@@ -2589,6 +2619,7 @@ public static class OptimumDiagnostics
         ResetMeshPoolReclaimCounters();
         ResetChunkDrawSortCounters();
         ResetSsaoDepthPositionDiagnostics();
+        ResetDynamicRenderScaleDiagnostics();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3444,6 +3475,78 @@ public static class OptimumDiagnostics
     {
         (long hits, long skips) = ShadowFarReuse.Snapshot();
         return $"Optimum ShadowFar reuse: enabled={OptimumConfig.ShadowFarReuseEnabled}, reused={hits}, rendered={skips}";
+    }
+
+    private static int _dynamicScaleKey = 100;
+    private static int _dynamicUpscalerKind;
+    private static int _dynamicCachedTiers;
+    private static long _dynamicDownscales;
+    private static long _dynamicUpscales;
+    private static long _dynamicCacheHits;
+    private static long _dynamicCacheAllocations;
+    private static long _dynamicCacheEvictions;
+    private static long _dynamicFsrFallbacks;
+    private static long _dynamicSceneGpuMsBits;
+    private static long _dynamicUpscaleGpuMsBits;
+
+    public static float DynamicRenderScaleCurrent => Volatile.Read(ref _dynamicScaleKey) / 100f;
+    public static OptimumDynamicUpscalerKind DynamicRenderScaleActiveUpscaler =>
+        (OptimumDynamicUpscalerKind)Volatile.Read(ref _dynamicUpscalerKind);
+    public static int DynamicRenderScaleCachedTiers => Volatile.Read(ref _dynamicCachedTiers);
+    public static long DynamicRenderScaleDownscales => Interlocked.Read(ref _dynamicDownscales);
+    public static long DynamicRenderScaleUpscales => Interlocked.Read(ref _dynamicUpscales);
+    public static long DynamicRenderScaleCacheHits => Interlocked.Read(ref _dynamicCacheHits);
+    public static long DynamicRenderScaleCacheAllocations => Interlocked.Read(ref _dynamicCacheAllocations);
+    public static long DynamicRenderScaleCacheEvictions => Interlocked.Read(ref _dynamicCacheEvictions);
+    public static long DynamicRenderScaleFsrFallbacks => Interlocked.Read(ref _dynamicFsrFallbacks);
+    public static double DynamicRenderScaleSceneGpuMs => BitConverter.Int64BitsToDouble(Interlocked.Read(ref _dynamicSceneGpuMsBits));
+    public static double DynamicRenderScaleUpscaleGpuMs => BitConverter.Int64BitsToDouble(Interlocked.Read(ref _dynamicUpscaleGpuMsBits));
+
+    public static void RecordDynamicRenderScaleState(
+        float scale,
+        OptimumDynamicUpscalerKind upscaler,
+        int cachedTiers,
+        double sceneGpuMs,
+        double upscaleGpuMs)
+    {
+        Volatile.Write(ref _dynamicScaleKey, OptimumTierCache<object>.ToScaleKey(scale));
+        Volatile.Write(ref _dynamicUpscalerKind, (int)upscaler);
+        Volatile.Write(ref _dynamicCachedTiers, Math.Max(0, cachedTiers));
+        Interlocked.Exchange(ref _dynamicSceneGpuMsBits, BitConverter.DoubleToInt64Bits(Math.Max(0.0, sceneGpuMs)));
+        Interlocked.Exchange(ref _dynamicUpscaleGpuMsBits, BitConverter.DoubleToInt64Bits(Math.Max(0.0, upscaleGpuMs)));
+    }
+
+    public static void RecordDynamicRenderScaleStep(bool isDownscale)
+    {
+        if (isDownscale) Interlocked.Increment(ref _dynamicDownscales);
+        else Interlocked.Increment(ref _dynamicUpscales);
+    }
+
+    public static void RecordDynamicRenderScaleCacheHit() => Interlocked.Increment(ref _dynamicCacheHits);
+    public static void RecordDynamicRenderScaleCacheAlloc() => Interlocked.Increment(ref _dynamicCacheAllocations);
+    public static void RecordDynamicRenderScaleCacheEvict() => Interlocked.Increment(ref _dynamicCacheEvictions);
+    public static void RecordDynamicRenderScaleFsrFallback() => Interlocked.Increment(ref _dynamicFsrFallbacks);
+
+    public static void ResetDynamicRenderScaleDiagnostics()
+    {
+        Volatile.Write(ref _dynamicScaleKey, 100);
+        Volatile.Write(ref _dynamicUpscalerKind, 0);
+        Volatile.Write(ref _dynamicCachedTiers, 0);
+        Interlocked.Exchange(ref _dynamicDownscales, 0);
+        Interlocked.Exchange(ref _dynamicUpscales, 0);
+        Interlocked.Exchange(ref _dynamicCacheHits, 0);
+        Interlocked.Exchange(ref _dynamicCacheAllocations, 0);
+        Interlocked.Exchange(ref _dynamicCacheEvictions, 0);
+        Interlocked.Exchange(ref _dynamicFsrFallbacks, 0);
+        Interlocked.Exchange(ref _dynamicSceneGpuMsBits, 0);
+        Interlocked.Exchange(ref _dynamicUpscaleGpuMsBits, 0);
+    }
+
+    public static string GetDynamicRenderScaleSummary()
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"Optimum dynamic render scale: enabled={OptimumConfig.DynamicRenderScaleEnabled}, active={OptimumConfig.EffectiveDynamicRenderScale}, scale={DynamicRenderScaleCurrent:F2}, upscaler={DynamicRenderScaleActiveUpscaler}, sceneMs={DynamicRenderScaleSceneGpuMs:0.00}, upscaleMs={DynamicRenderScaleUpscaleGpuMs:0.00}, cachedTiers={DynamicRenderScaleCachedTiers}, cacheHits={DynamicRenderScaleCacheHits}, cacheAllocs={DynamicRenderScaleCacheAllocations}, cacheEvicts={DynamicRenderScaleCacheEvictions}, downscales={DynamicRenderScaleDownscales}, upscales={DynamicRenderScaleUpscales}, fsrFallbacks={DynamicRenderScaleFsrFallbacks}");
     }
 }
 

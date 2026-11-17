@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
-index 7248005..b1cbff7 100644
+index 7248005..62bd562 100644
 --- a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
 +++ b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
 @@ -66,24 +66,12 @@ public class GuiScreenRunningGame : GuiScreen
@@ -29,7 +29,24 @@ index 7248005..b1cbff7 100644
  	public override bool OnEvent(string eventCode, object arg)
  	{
  		if (eventCode == "maploaded")
-@@ -227,10 +215,14 @@ public class GuiScreenRunningGame : GuiScreen
+@@ -147,11 +135,15 @@ public class GuiScreenRunningGame : GuiScreen
+ 	}
+ 
+ 	public override void RenderToPrimary(float dt)
+ 	{
+ 		platform.DoPostProcessingEffects = true;
+-		float sSAA = ClientSettings.SSAA;
++		float sSAA = Vintagestory.API.Config.OptimumDynamicRenderScale.ResolveActiveViewportScale(
++			ClientSettings.SSAA,
++			Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale,
++			ClientSettings.OptimumRenderScale,
++			Vintagestory.API.Config.OptimumConfig.EffectiveDynamicRenderScale);
+ 		int width = platform.WindowSize.Width;
+ 		int height = platform.WindowSize.Height;
+ 		int width2 = (int)((float)width * sSAA);
+ 		int height2 = (int)((float)height * sSAA);
+ 		platform.GlViewport(0, 0, width2, height2);
+@@ -227,10 +219,14 @@ public class GuiScreenRunningGame : GuiScreen
  
  	public override bool OnWindowClosed()
  	{

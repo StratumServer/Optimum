@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..9e5db7e 100644
+index 431e51a..f0a1fdd 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -45,7 +45,7 @@ index 431e51a..9e5db7e 100644
  		this.textureIds = textureIds;
  		platform = game.Platform;
  		this.game = game;
-@@ -105,10 +127,45 @@ public class ChunkRenderer
+@@ -105,10 +127,73 @@ public class ChunkRenderer
  		foreach (EnumChunkRenderPass item in values)
  		{
  			AddPoolsForAtlasAndPass(atlas, item, modelDataPoolMaxVertexSize, modelDataPoolMaxIndexSize, maxPartsPerPool);
@@ -69,11 +69,16 @@ index 431e51a..9e5db7e 100644
 +					GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, 0f);
 +				}
 +				GL.BindTexture((TextureTarget)3553, 0);
++				ApplyOptimumCustomSamplerLodBias(0f);
 +				optimumTextureLodBias = float.NaN;
 +			}
 +			return;
 +		}
 +		float textureLodBias = MathF.Log2(Math.Clamp(Vintagestory.API.Config.OptimumConfig.EffectiveRenderScale, 0.5f, 1.0f));
++		if (Vintagestory.API.Config.OptimumConfig.EffectiveDynamicRenderScale)
++		{
++			textureLodBias = MathF.Log2(Math.Clamp(ClientSettings.OptimumRenderScale, 0.5f, 1.0f));
++		}
 +		if (Math.Abs(textureLodBias - optimumTextureLodBias) < 0.0001f)
 +		{
 +			return;
@@ -85,13 +90,36 @@ index 431e51a..9e5db7e 100644
 +			GL.TexParameter((TextureTarget)3553, (TextureParameterName)34049, textureLodBias);
 +		}
 +		GL.BindTexture((TextureTarget)3553, 0);
++		ApplyOptimumCustomSamplerLodBias(textureLodBias);
 +		optimumTextureLodBias = textureLodBias;
++	}
++
++	private static void ApplyOptimumCustomSamplerLodBias(float bias)
++	{
++		ApplyOptimumProgramSamplerLodBias(ShaderPrograms.Chunkopaque, bias);
++		ApplyOptimumProgramSamplerLodBias(ShaderPrograms.Chunktopsoil, bias);
++	}
++
++	private static void ApplyOptimumProgramSamplerLodBias(ShaderProgram program, float bias)
++	{
++		if (program == null || program.Disposed || program.customSamplers == null)
++		{
++			return;
++		}
++		if (program.customSamplers.TryGetValue("terrainTex", out int nearestSampler) && nearestSampler != 0)
++		{
++			GL.SamplerParameter(nearestSampler, (SamplerParameterName)34049, bias);
++		}
++		if (program.customSamplers.TryGetValue("terrainTexLinear", out int linearSampler) && linearSampler != 0)
++		{
++			GL.SamplerParameter(linearSampler, (SamplerParameterName)34049, bias);
++		}
  	}
  
  	private void AddPoolsForAtlasAndPass(int atlas, EnumChunkRenderPass pass, int maxVertices, int maxIndices, int maxPartsPerPool)
  	{
  		switch (pass)
-@@ -133,10 +190,11 @@ public class ChunkRenderer
+@@ -133,10 +218,11 @@ public class ChunkRenderer
  
  	internal void SwapVisibleBuffers()
  	{
@@ -103,7 +131,7 @@ index 431e51a..9e5db7e 100644
  	public void OnSeperateThreadTick(float dt)
  	{
  		culler.CullInvisibleChunks();
-@@ -170,10 +228,11 @@ public class ChunkRenderer
+@@ -170,10 +256,11 @@ public class ChunkRenderer
  		game.Platform.LoadFrameBuffer(EnumFrameBuffer.Primary);
  	}
  
@@ -115,7 +143,7 @@ index 431e51a..9e5db7e 100644
  		RuntimeStats.availableTriangles = 0;
  		accum += dt;
  		if (accum > 5f)
-@@ -208,14 +267,25 @@ public class ChunkRenderer
+@@ -208,14 +295,25 @@ public class ChunkRenderer
  			chunkshadowmap.Tex2d2D = textureIds[j];
  			poolsByRenderPass[5][j].Render(cameraPos, "origin", frustumCullMode);
  		}
@@ -144,7 +172,7 @@ index 431e51a..9e5db7e 100644
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -249,62 +319,72 @@ public class ChunkRenderer
+@@ -249,62 +347,72 @@ public class ChunkRenderer
  		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
  		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
  		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
@@ -170,9 +198,7 @@ index 431e51a..9e5db7e 100644
 -		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
 -		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
 -		for (int j = 0; j < textureIds.Length; j++)
-+		Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(true);
-+		try
- 		{
+-		{
 -			chunktopsoil.TerrainTex2D = textureIds[j];
 -			chunktopsoil.TerrainTexLinear2D = textureIds[j];
 -			poolsByRenderPass[5][j].Render(cameraPos, "origin");
@@ -191,7 +217,9 @@ index 431e51a..9e5db7e 100644
 -		chunkopaque.HaxyFade = 0;
 -		platform.GlToggleBlend(on: true);
 -		for (int k = 0; k < textureIds.Length; k++)
--		{
++		Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(true);
++		try
+ 		{
 -			chunkopaque.TerrainTex2D = textureIds[k];
 -			chunkopaque.TerrainTexLinear2D = textureIds[k];
 -			poolsByRenderPass[2][k].Render(cameraPos, "origin");
@@ -266,7 +294,7 @@ index 431e51a..9e5db7e 100644
  		platform.GlToggleBlend(on: true);
  		chunkopaque.AlphaTest = 0.2f;
  		chunkopaque.HaxyFade = 0;
-@@ -442,23 +522,60 @@ public class ChunkRenderer
+@@ -442,23 +550,60 @@ public class ChunkRenderer
  		masterPool.DisposeAllPools(game.api);
  	}
  
