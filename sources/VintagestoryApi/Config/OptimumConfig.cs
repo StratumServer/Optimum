@@ -273,6 +273,7 @@ public static class OptimumConfig
     public static bool KometGuardEnabled = true;
     public static bool GlFinalizerReclaimEnabled = true;
     public static bool MeshPoolReclaimEnabled = true;
+    public static bool FrontToBackChunkSortEnabled = true;
 
     public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
 
@@ -1296,6 +1297,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
         (nameof(OptimumConfigData.GlFinalizerReclaim), GlFinalizerReclaimEnabled.ToString()),
         (nameof(OptimumConfigData.MeshPoolReclaim), MeshPoolReclaimEnabled.ToString()),
+        (nameof(OptimumConfigData.FrontToBackChunkSort), FrontToBackChunkSortEnabled.ToString()),
     };
 
     /// <summary>
@@ -1415,6 +1417,7 @@ public static class OptimumConfig
             KometGuardEnabled = data.KometGuard;
             GlFinalizerReclaimEnabled = data.GlFinalizerReclaim;
             MeshPoolReclaimEnabled = data.MeshPoolReclaim;
+            FrontToBackChunkSortEnabled = data.FrontToBackChunkSort;
         }
         catch (Exception)
         {
@@ -1498,6 +1501,7 @@ public static class OptimumConfig
             KometGuard = KometGuardEnabled,
             GlFinalizerReclaim = GlFinalizerReclaimEnabled,
             MeshPoolReclaim = MeshPoolReclaimEnabled,
+            FrontToBackChunkSort = FrontToBackChunkSortEnabled,
         };
 
         try
@@ -1605,6 +1609,7 @@ internal sealed class OptimumConfigData
     public bool KometGuard { get; set; } = true;
     public bool GlFinalizerReclaim { get; set; } = true;
     public bool MeshPoolReclaim { get; set; } = true;
+    public bool FrontToBackChunkSort { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2546,6 +2551,7 @@ public static class OptimumDiagnostics
         ResetGameLaunchTasks();
         ResetWorldgenPassTiming();
         ResetMeshPoolReclaimCounters();
+        ResetChunkDrawSortCounters();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3338,6 +3344,39 @@ public static class OptimumDiagnostics
         long reclaimedBytes = MeshPoolReclaimedBytes;
         double reclaimedMb = reclaimedBytes / (1024.0 * 1024.0);
         return $"Optimum mesh pool reclaim: enabled={OptimumConfig.MeshPoolReclaimEnabled}, allocated={allocated}, reclaimed={reclaimed}, reclaimedEstMB={reclaimedMb:0.0}";
+    }
+
+    private static long _chunkSortCalls;
+    private static long _chunkSortPoolsOrdered;
+    private static long _chunkSortSpansSorted;
+
+    public static long ChunkSortCalls => Interlocked.Read(ref _chunkSortCalls);
+    public static long ChunkSortPoolsOrdered => Interlocked.Read(ref _chunkSortPoolsOrdered);
+    public static long ChunkSortSpansSorted => Interlocked.Read(ref _chunkSortSpansSorted);
+
+    public static void RecordChunkDrawSort(int poolsOrdered, int spansSorted)
+    {
+        Interlocked.Increment(ref _chunkSortCalls);
+        if (poolsOrdered > 0)
+        {
+            Interlocked.Add(ref _chunkSortPoolsOrdered, poolsOrdered);
+        }
+        if (spansSorted > 0)
+        {
+            Interlocked.Add(ref _chunkSortSpansSorted, spansSorted);
+        }
+    }
+
+    public static void ResetChunkDrawSortCounters()
+    {
+        Interlocked.Exchange(ref _chunkSortCalls, 0);
+        Interlocked.Exchange(ref _chunkSortPoolsOrdered, 0);
+        Interlocked.Exchange(ref _chunkSortSpansSorted, 0);
+    }
+
+    public static string GetFrontToBackSortSummary()
+    {
+        return $"Optimum front-to-back chunk sort: enabled={OptimumConfig.FrontToBackChunkSortEnabled}, calls={ChunkSortCalls}, poolsOrdered={ChunkSortPoolsOrdered}, spansSorted={ChunkSortSpansSorted}";
     }
 }
 
