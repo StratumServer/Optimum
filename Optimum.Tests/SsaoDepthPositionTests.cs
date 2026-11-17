@@ -105,35 +105,46 @@ public sealed class SsaoDepthPositionTests
         string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderFrameBufferDebug.cs.patch", cecilList);
 
-        string patchedLibPath = FindPatchedVintagestoryLibPath();
-        using var asm = AssemblyDefinition.ReadAssembly(patchedLibPath);
-        var module = asm.MainModule;
+        string? tempPatchedPath = null;
+        string patchedLibPath = ResolveOrBuildPatchedVintagestoryLibPath(out tempPatchedPath);
+        try
+        {
+            using var asm = AssemblyDefinition.ReadAssembly(patchedLibPath);
+            var module = asm.MainModule;
 
-        var platform = module.GetType("Vintagestory.Client.NoObf.ClientPlatformWindows")!;
-        var setupMethod = platform.Methods.Single(m => m.Name == "SetupDefaultFrameBuffers" && m.Parameters.Count == 0);
-        var postMethod = platform.Methods.Single(m => m.Name == "RenderPostprocessingEffects" && m.Parameters.Count == 1);
-        var clearMethod = platform.Methods.Single(m => m.Name == "ClearFrameBuffer" && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.Name == "EnumFrameBuffer");
-        var blendMethod = platform.Methods.Single(m => m.Name == "GlToggleBlend" && m.Parameters.Count == 2);
+            var platform = module.GetType("Vintagestory.Client.NoObf.ClientPlatformWindows")!;
+            var setupMethod = platform.Methods.Single(m => m.Name == "SetupDefaultFrameBuffers" && m.Parameters.Count == 0);
+            var postMethod = platform.Methods.Single(m => m.Name == "RenderPostprocessingEffects" && m.Parameters.Count == 1);
+            var clearMethod = platform.Methods.Single(m => m.Name == "ClearFrameBuffer" && m.Parameters.Count == 1 && m.Parameters[0].ParameterType.Name == "EnumFrameBuffer");
+            var blendMethod = platform.Methods.Single(m => m.Name == "GlToggleBlend" && m.Parameters.Count == 2);
 
-        AssertCallsMember(setupMethod, "get_EffectiveSsaoDepthPosition");
-        AssertCallsMember(setupMethod, "RecordPrimaryGPositionState");
-        AssertCallsMember(setupMethod, "EnsureOptimumDefaults");
-        AssertCallsMember(postMethod, "BindTexture2D");
-        AssertContainsIntConstant(clearMethod, 3);
-        AssertContainsIntConstant(blendMethod, 3);
+            AssertCallsMember(setupMethod, "get_EffectiveSsaoDepthPosition");
+            AssertCallsMember(setupMethod, "RecordPrimaryGPositionState");
+            AssertCallsMember(setupMethod, "EnsureOptimumDefaults");
+            AssertCallsMember(postMethod, "BindTexture2D");
+            AssertContainsIntConstant(clearMethod, 3);
+            AssertContainsIntConstant(blendMethod, 3);
 
-        var fbDebug = module.GetType("Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug")!;
-        var overlayMethod = fbDebug.Methods.Single(m => m.Name == "OnRenderFrame2DOverlay" && m.Parameters.Count == 1);
-        Assert.Contains(overlayMethod.Body.Instructions, i => i.OpCode == OpCodes.Ldlen);
+            var fbDebug = module.GetType("Vintagestory.Client.NoObf.SystemRenderFrameBufferDebug")!;
+            var overlayMethod = fbDebug.Methods.Single(m => m.Name == "OnRenderFrame2DOverlay" && m.Parameters.Count == 1);
+            Assert.Contains(overlayMethod.Body.Instructions, i => i.OpCode == OpCodes.Ldlen);
 
-        var registry = module.GetType("Vintagestory.Client.NoObf.ShaderRegistry")!;
-        var prefixMethod = registry.Methods.Single(m => m.Name == "registerDefaultShaderCodePrefixes" && m.Parameters.Count == 2);
-        var loadMethod = registry.Methods.Single(m => m.Name == "loadRegisteredShaderPrograms" && m.Parameters.Count == 0);
-        Assert.Contains(prefixMethod.Body.Instructions, i => i.OpCode == OpCodes.Ldstr && i.Operand is string s && s.Contains("SSAO_DEPTH_RECONSTRUCT", StringComparison.Ordinal));
-        AssertCallsMember(loadMethod, "VerifyOptimumSsaoDepthContracts");
-        AssertCallsMember(loadMethod, "SetSsaoDepthPositionRuntimeCompatible");
-        AssertCallsMember(loadMethod, "DowngradeOptimumSsaoDepthPrefixes");
-        AssertCallsMember(loadMethod, "RebuildFrameBuffers");
+            var registry = module.GetType("Vintagestory.Client.NoObf.ShaderRegistry")!;
+            var prefixMethod = registry.Methods.Single(m => m.Name == "registerDefaultShaderCodePrefixes" && m.Parameters.Count == 2);
+            var loadMethod = registry.Methods.Single(m => m.Name == "loadRegisteredShaderPrograms" && m.Parameters.Count == 0);
+            Assert.Contains(prefixMethod.Body.Instructions, i => i.OpCode == OpCodes.Ldstr && i.Operand is string s && s.Contains("SSAO_DEPTH_RECONSTRUCT", StringComparison.Ordinal));
+            AssertCallsMember(loadMethod, "VerifyOptimumSsaoDepthContracts");
+            AssertCallsMember(loadMethod, "SetSsaoDepthPositionRuntimeCompatible");
+            AssertCallsMember(loadMethod, "DowngradeOptimumSsaoDepthPrefixes");
+            AssertCallsMember(loadMethod, "RebuildFrameBuffers");
+        }
+        finally
+        {
+            if (tempPatchedPath != null && File.Exists(tempPatchedPath))
+            {
+                try { File.Delete(tempPatchedPath); } catch { }
+            }
+        }
     }
 
     [GlContextFact]
@@ -684,17 +695,46 @@ void main() {
         return arr;
     }
 
-    private static string FindPatchedVintagestoryLibPath()
+    private static string ResolveOrBuildPatchedVintagestoryLibPath(out string? tempPatchedPath)
     {
+        tempPatchedPath = null;
+        string buildLibDir = Path.GetDirectoryName(PatchReader.FindRepositoryFile("build/VintagestoryLib/VintagestoryLib.csproj"))!;
         foreach (string config in new[] { "Release", "Debug" })
         {
-            string candidate = Path.Combine(
-                PatchReader.FindRepositoryFile("build/VintagestoryLib/VintagestoryLib.csproj"),
-                "..", "bin", config, "net10.0", "VintagestoryLib-patched.dll");
-            string full = Path.GetFullPath(candidate);
-            if (File.Exists(full)) return full;
+            string candidate = Path.GetFullPath(Path.Combine(buildLibDir, "bin", config, "net10.0", "VintagestoryLib-patched.dll"));
+            if (File.Exists(candidate)) return candidate;
         }
-        throw new FileNotFoundException("VintagestoryLib-patched.dll not found under Release or Debug.");
+
+        string? compiledLibPath = new[] { "Release", "Debug" }
+            .Select(config => Path.GetFullPath(Path.Combine(buildLibDir, "bin", config, "net10.0", "VintagestoryLib.dll")))
+            .FirstOrDefault(File.Exists);
+        if (compiledLibPath == null)
+        {
+            throw new FileNotFoundException("Neither VintagestoryLib-patched.dll nor donor VintagestoryLib.dll was found under Release or Debug.");
+        }
+
+        string? vanillaLibPath = new[]
+        {
+            ".vanilla/win-x64/vintagestory/VintagestoryLib.vanilla.dll",
+            ".vanilla/win-x64/vintagestory/VintagestoryLib.dll",
+        }
+        .Select(rel =>
+        {
+            try { return PatchReader.FindRepositoryFile(rel); }
+            catch (FileNotFoundException) { return null; }
+        })
+        .FirstOrDefault(p => p != null && File.Exists(p));
+
+        if (vanillaLibPath == null)
+        {
+            throw new FileNotFoundException("Vanilla VintagestoryLib.dll not found under .vanilla/win-x64/vintagestory.");
+        }
+
+        tempPatchedPath = Path.Combine(Path.GetTempPath(), $"optimum-ssao-test-patched-{Guid.NewGuid():N}.dll");
+        int exitCode = Optimum.Patcher.Program.Run(new[] { vanillaLibPath, compiledLibPath, tempPatchedPath });
+        Assert.Equal(0, exitCode);
+        Assert.True(File.Exists(tempPatchedPath), "Optimum.Patcher did not produce the temporary patched VintagestoryLib assembly.");
+        return tempPatchedPath;
     }
 
     private static void AssertCallsMember(MethodDefinition method, string memberName)
