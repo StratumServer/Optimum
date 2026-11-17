@@ -16,6 +16,7 @@
     <Compile Include="OptimumGlReclaimQueue.cs" />
     <Compile Include="OptimumMeshPoolLifecycle.cs" />
     <Compile Include="OptimumMeshPoolSort.cs" />
+    <Compile Include="OptimumChunkFaceBuckets.cs" />
     <Compile Include="OptimumShadowFarReuse.cs" />
     <Compile Include="OptimumDynamicRenderScale.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\AdaptiveWorkerController.cs" Link="Config\AdaptiveWorkerController.cs" />

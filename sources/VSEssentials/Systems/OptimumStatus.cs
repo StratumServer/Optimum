@@ -463,6 +463,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetGlReclaimSummary());
         sb.AppendLine(OptimumDiagnostics.GetMeshPoolReclaimSummary());
         sb.AppendLine(OptimumDiagnostics.GetFrontToBackSortSummary());
+        sb.AppendLine(OptimumDiagnostics.GetChunkFaceBucketCullSummary());
         sb.AppendLine(OptimumDiagnostics.GetSsaoDepthPositionSummary());
         sb.AppendLine(OptimumDiagnostics.GetShadowFarReuseSummary());
         sb.AppendLine(OptimumDiagnostics.GetDynamicRenderScaleSummary());
@@ -532,6 +533,8 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
         else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
             api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
+        if (OptimumConfig.ChunkFaceBucketCullEnabled)
+            api.Logger.Debug("[Optimum] Chunk face bucket culling: ON");
         if (OptimumConfig.EffectiveDynamicRenderScale)
             api.Logger.Debug("[Optimum] Dynamic render scale: ON (targetFps={0}, minScale={1:F2}, upscaler={2})",
                 OptimumConfig.DynamicRenderScaleTargetFps,

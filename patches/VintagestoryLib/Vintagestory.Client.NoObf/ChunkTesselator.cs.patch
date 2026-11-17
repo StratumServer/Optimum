@@ -1,6 +1,10 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
+index 42fad1f..3c536eb 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-@@ -5,6 +5,7 @@
+@@ -3,10 +3,11 @@ using System.Collections.Generic;
+ using System.Runtime.CompilerServices;
+ using System.Threading;
  using Vintagestory.API.Client;
  using Vintagestory.API.Client.Tesselation;
  using Vintagestory.API.Common;
@@ -8,7 +12,11 @@
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  using Vintagestory.API.Util;
-@@ -64,10 +65,16 @@
+ using Vintagestory.Common;
+ 
+@@ -62,14 +63,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 
+ 	internal bool[] isLiquidBlock;
  
  	internal MeshData[][][] currentModeldataByRenderPassByLodLevel;
  
@@ -25,7 +33,11 @@
  	private int[][] fastBlockTextureSubidsByBlockAndFace;
  
  	private TesselatedChunkPart[] ret;
-@@ -264,16 +271,41 @@
+ 
+ 	private TesselatedChunkPart[] emptyParts = Array.Empty<TesselatedChunkPart>();
+@@ -262,20 +269,45 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			quantityAtlasses = textureIDs.Length;
+ 			TextureIdToReturnNum = textureIDs;
  			fastBlockTextureSubidsByBlockAndFace = game.FastBlockTextureSubidsByBlockAndFace;
  			Array values = Enum.GetValues(typeof(EnumChunkRenderPass));
  			ret = new TesselatedChunkPart[values.Length * quantityAtlasses];
@@ -67,7 +79,11 @@
  				}
  			}
  		}
-@@ -397,15 +429,19 @@
+ 	}
+ 
+@@ -395,27 +427,35 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 				for (int j = 0; j < quantityAtlasses; j++)
+ 				{
  					for (int k = 0; k < 4; k++)
  					{
  						edgeModeldataByRenderPassByLodLevel[k][(int)enumChunkRenderPass][j].Clear();
@@ -87,7 +103,8 @@
  				if (skipChunkCenter)
  				{
  					BuildBlockPolygons_EdgeOnly(chunkX, chunkY, chunkZ);
-@@ -414,6 +450,10 @@
+ 				}
+ 				else
  				{
  					BuildBlockPolygons(chunkX, chunkY, chunkZ);
  				}
@@ -98,7 +115,11 @@
  			}
  			catch (RetryTesselationException)
  			{
-@@ -428,17 +468,64 @@
+ 				throw;
+ 			}
+@@ -426,21 +466,68 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			if (dictionary != null)
+ 			{
  				BuildDecorPolygons(chunkX, chunkY, chunkZ, dictionary, skipChunkCenter);
  			}
  			int num = 0;
@@ -140,7 +161,8 @@
 +		}
 +		return src.CloneUsingRecycler();
 +	}
-+
+ 
+-	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
 +
 +	private TesselatedChunkPart[] MergeTesselatedChunkParts(TesselatedChunkPart[] first, TesselatedChunkPart[] second)
 +	{
@@ -158,13 +180,16 @@
 +		Array.Copy(second, 0, merged, first.Length, second.Length);
 +		return merged;
 +	}
- 
--	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
++
 +	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts, bool optimumUseChiselLodDistance = false)
  	{
  		int num = 0;
  		int num2 = 0;
-@@ -458,14 +545,23 @@
+ 		MeshData.Recycler.DoRecycling();
+ 		EnumChunkRenderPass[] array = passes;
+@@ -456,18 +543,34 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 				int verticesCount2 = meshData2.VerticesCount;
+ 				int verticesCount3 = meshData3.VerticesCount;
  				int verticesCount4 = meshData4.VerticesCount;
  				if (verticesCount + verticesCount2 + verticesCount3 + verticesCount4 > 0)
  				{
@@ -176,6 +201,13 @@
 +					MeshData __cl3 = (verticesCount4 == 0) ? null : OptimumCloneChunkMesh(meshData4, __pool);
 +					if (OptimumDiagnostics.MeshProfileEnabled)
 +						OptimumDiagnostics.RecordMeshClone(System.GC.GetAllocatedBytesForCurrentThread() - __clA0, 0, verticesCount + verticesCount2 + verticesCount3 + verticesCount4);
++					if (OptimumConfig.ChunkFaceBucketCullEnabled && OptimumChunkFaceBuckets.IsSupportedRenderPass(enumChunkRenderPass))
++					{
++						if (__cl0 != null) OptimumChunkFaceBuckets.BucketAndAttach(__cl0, enumChunkRenderPass);
++						if (__cl1 != null) OptimumChunkFaceBuckets.BucketAndAttach(__cl1, enumChunkRenderPass);
++						if (__cl2 != null) OptimumChunkFaceBuckets.BucketAndAttach(__cl2, enumChunkRenderPass);
++						if (__cl3 != null) OptimumChunkFaceBuckets.BucketAndAttach(__cl3, enumChunkRenderPass);
++					}
  					ret[num++] = new TesselatedChunkPart
  					{
  						atlasNumber = j,
@@ -193,7 +225,11 @@
  					};
  					num2 += verticesCount + verticesCount2;
  				}
-@@ -491,6 +587,13 @@
+ 			}
+ 		}
+@@ -489,20 +592,26 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 	public bool CalculateVisibleFaces(bool skipChunkCenter, int baseX, int baseY, int baseZ)
+ 	{
  		byte[] array = currentChunkDraw32;
  		int num = 0;
  		Block block = blocksFast[0];
@@ -207,7 +243,9 @@
  		for (int i = 0; i < 32; i++)
  		{
  			int num2 = i * 32 * 32;
-@@ -500,7 +603,6 @@
+ 			for (int j = 0; j < 32; j++)
+ 			{
+ 				int num3 = (i * 34 + j) * 34 + 1191;
  				int num4 = i * (i ^ 0x1F) * j * (j ^ 0x1F);
  				for (int k = 0; k < 32; k++)
  				{
@@ -215,7 +253,11 @@
  					if ((block2 = currentChunkBlocksExt[num3 + k]) == block)
  					{
  						array[num2 + k] = 0;
-@@ -717,8 +819,18 @@
+ 					}
+ 					else
+@@ -715,12 +824,22 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				currentChunkDraw32[i] &= 223;
  				currentChunkDrawFluids[i] &= 223;
  			}
  		}
@@ -234,7 +276,11 @@
  		int num4 = -1;
  		for (int j = 0; j < 32; j++)
  		{
-@@ -733,9 +845,11 @@
+ 			int num5 = (j + 1) * 34 + 1;
+ 			tCTCache.posY = num + j;
+@@ -731,20 +850,23 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			do
+ 			{
  				tCTCache.lz = num7;
  				int posZ = (tCTCache.posZ = num2 + num7);
  				MeshData[][][] array = ((num6 * num7 * (num7 ^ 0x1F) != 0) ? centerModeldataByRenderPassByLodLevel : edgeModeldataByRenderPassByLodLevel);
@@ -246,7 +292,7 @@
  				int num8 = 1;
  				do
  				{
-@@ -743,6 +857,7 @@
+ 					TesselateBlock(++num4, extIndex3dBase, num8, baseX, posZ);
  				}
  				while (++num8 < 31);
  				currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
@@ -254,7 +300,11 @@
  				TesselateBlock(++num4, extIndex3dBase, num8, baseX, posZ);
  			}
  			while (++num7 < 32);
-@@ -763,6 +878,7 @@
+ 		}
+ 	}
+@@ -761,10 +883,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			{
+ 				currentChunkDraw32[i] &= 223;
  			}
  		}
  		currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
@@ -262,7 +312,11 @@
  		TCTCache tCTCache = vars;
  		int num4 = -1;
  		for (int j = 0; j < 32; j++)
-@@ -840,6 +956,7 @@
+ 		{
+ 			int num5 = (j + 1) * 34 + 1;
+@@ -838,18 +961,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			int num7 = num5 / 32 / 32;
+ 			int num8 = num5 / 32 % 32;
  			if (num6 * (num6 ^ num) * num7 * (num7 ^ num) * num8 * (num8 ^ num) == 0)
  			{
  				currentModeldataByRenderPassByLodLevel = edgeModeldataByRenderPassByLodLevel;
@@ -270,7 +324,8 @@
  			}
  			else
  			{
-@@ -848,6 +965,7 @@
+ 				if (edgeonly)
+ 				{
  					continue;
  				}
  				currentModeldataByRenderPassByLodLevel = centerModeldataByRenderPassByLodLevel;
@@ -278,7 +333,11 @@
  			}
  			tCTCache.extIndex3d = ((num7 + 1) * 34 + num8 + 1) * 34 + num6 + 1;
  			tCTCache.index3d = num5;
-@@ -861,7 +979,7 @@
+ 			Vec3i normali = blockFacing.Normali;
+ 			num7 += normali.Y;
+@@ -859,11 +984,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 			tCTCache.posY = num3 + num7;
+ 			tCTCache.posZ = num4 + num8;
  			tCTCache.finalY = num7;
  			if (value is IDrawYAdjustable drawYAdjustable)
  			{
@@ -287,7 +346,11 @@
  			}
  			tCTCache.ly = num7;
  			tCTCache.lz = num8;
-@@ -1015,7 +1133,7 @@
+ 			int faceflags = 63 - blockFacing.Opposite.Flag;
+ 			tCTCache.decorSubPosition = DecorBits.SubpositionFromIndex(key);
+@@ -1013,11 +1138,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 		vars.lx = lX;
+ 		vars.finalX = lX;
  		vars.finalY = vars.ly;
  		if (block is IDrawYAdjustable drawYAdjustable)
  		{
@@ -296,7 +359,11 @@
  		}
  		vars.finalZ = vars.lz;
  		int num = (vars.blockId = block.BlockId);
-@@ -1196,12 +1314,13 @@
+ 		vars.textureSubId = 0;
+ 		vars.VertexFlags = block.VertexFlags.All;
+@@ -1194,16 +1319,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+ 	}
+ 
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]
  	public MeshData GetMeshPoolForPass(int textureid, EnumChunkRenderPass renderPass, int lodLevel)
  	{
@@ -311,3 +378,5 @@
  			}
  		}
  		while (++num < quantityAtlasses);
+ 		return null;
+ 	}

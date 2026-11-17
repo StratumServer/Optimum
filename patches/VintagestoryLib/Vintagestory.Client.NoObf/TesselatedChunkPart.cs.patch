@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
-index c29a2bc..2a13809 100644
+index c29a2bc..2beddc5 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
 @@ -1,8 +1,9 @@
@@ -25,12 +25,16 @@ index c29a2bc..2a13809 100644
  		bool flag = dimension == 1 && BlockAccessorMovable.IsTransparent(chunkOrigin);
  		MeshDataPoolManager pools = cr.poolsByRenderPass[flag ? Math.Max(3, (int)pass) : ((int)pass)][atlasNumber];
  		if (modelDataLod0 != null)
-@@ -49,14 +52,25 @@ public class TesselatedChunkPart
+@@ -49,14 +52,29 @@ public class TesselatedChunkPart
  	}
  
  	internal void AddModelAndStoreLocation(MeshDataPoolManager pools, List<ModelDataPoolLocation> locations, MeshData modeldata, Vec3i modelOrigin, int dimension, Sphere frustumCullSphere, Bools cullVisible, int lodLevel)
  	{
  		ModelDataPoolLocation modelDataPoolLocation = pools.AddModel(modeldata, modelOrigin, dimension, frustumCullSphere);
++		if (modelDataPoolLocation != null && modeldata != null)
++		{
++			Vintagestory.API.Config.OptimumChunkFaceBuckets.BindLocation(modelDataPoolLocation, modeldata, modelOrigin, dimension);
++		}
 +		// Optimum issue #73: AddModel has uploaded the mesh buffers into the GPU
 +		// pool (read-only copy); the CustomMeshDataPart buffers are now free to
 +		// recycle. Reclaim returns them to OptimumMeshPartPool (a ConcurrentQueue
