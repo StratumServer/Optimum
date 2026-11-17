@@ -1,0 +1,311 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs b/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
+index da1f735..f586b46 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
+@@ -1,7 +1,9 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
++using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Util;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+@@ -19,55 +21,96 @@ public class AudioMetaData : AudioData
+ 
+ 	public bool AutoUnload;
+ 
+ 	private List<MainThreadAction> waitingToPlay;
+ 
++	private object decodeLock;
++
++	private int activeOwnerCount;
++
++	private int unloadRequested;
++
+ 	public AudioMetaData(IAsset asset)
+ 	{
+ 		if (asset == null)
+ 		{
+ 			throw new ArgumentNullException("Asset cannot be null");
+ 		}
+ 		Asset = asset;
+ 	}
+ 
++	private object GetDecodeLock()
++	{
++		return LazyInitializer.EnsureInitialized(ref decodeLock);
++	}
++
+ 	private void DoLoad()
+ 	{
+-		if (!Asset.IsLoaded())
++		AudioMetaData audioMetaData = null;
++		lock (GetDecodeLock())
+ 		{
+-			Asset.Origin.LoadAsset(Asset);
++			if (Asset != null)
++			{
++				if (!Asset.IsLoaded() && Asset.Origin != null)
++				{
++					Asset.Origin.LoadAsset(Asset);
++				}
++				if (Asset.Data != null)
++				{
++					audioMetaData = (AudioMetaData)ScreenManager.Platform.CreateAudioData(Asset);
++					Asset.Data = null;
++				}
++			}
+ 		}
+-		AudioMetaData audioMetaData = (AudioMetaData)ScreenManager.Platform.CreateAudioData(Asset);
+-		Pcm = audioMetaData.Pcm;
+-		Channels = audioMetaData.Channels;
+-		Rate = audioMetaData.Rate;
+-		BitsPerSample = audioMetaData.BitsPerSample;
+-		Asset.Data = null;
+-		Loaded = 2;
++		List<MainThreadAction> list = null;
+ 		lock (this)
+ 		{
+-			if (waitingToPlay == null)
++			if (audioMetaData != null && !(Interlocked.Exchange(ref unloadRequested, 0) != 0 && Volatile.Read(ref activeOwnerCount) == 0))
+ 			{
+-				return;
++				Channels = audioMetaData.Channels;
++				Rate = audioMetaData.Rate;
++				BitsPerSample = audioMetaData.BitsPerSample;
++				Volatile.Write(ref Pcm, audioMetaData.Pcm);
++				Volatile.Write(ref Loaded, 2);
+ 			}
+-			foreach (MainThreadAction item in waitingToPlay)
++			else
+ 			{
+-				item.Enqueue();
++				Volatile.Write(ref Pcm, null);
++				Channels = 0;
++				Rate = 0;
++				BitsPerSample = 0;
++				Volatile.Write(ref Loaded, 0);
++			}
++			if (waitingToPlay != null)
++			{
++				list = waitingToPlay;
++				waitingToPlay = null;
+ 			}
+-			waitingToPlay = null;
++		}
++		if (list == null)
++		{
++			return;
++		}
++		foreach (MainThreadAction item in list)
++		{
++			item.Enqueue();
+ 		}
+ 	}
+ 
+ 	public override bool Load()
+ 	{
+ 		if (AsyncHelper.CanProceedOnThisThread(ref Loaded))
+ 		{
+ 			DoLoad();
+-			return true;
++			return Volatile.Read(ref Pcm) != null;
+ 		}
+-		if (Loaded >= 2)
++		if (Volatile.Read(ref Loaded) >= 2)
+ 		{
++			if (Volatile.Read(ref Pcm) == null)
++			{
++				return EnsurePcmLoaded();
++			}
+ 			return true;
+ 		}
+ 		return false;
+ 	}
+ 
+@@ -90,30 +133,171 @@ public class AudioMetaData : AudioData
+ 		return onCompleted.Invoke();
+ 	}
+ 
+ 	public void AddOnLoaded(MainThreadAction onCompleted)
+ 	{
++		if (onCompleted == null)
++		{
++			return;
++		}
++		bool flag = false;
+ 		lock (this)
+ 		{
+-			if (Loaded == 3)
++			if (Volatile.Read(ref Loaded) >= 2)
+ 			{
+-				onCompleted.Enqueue();
+-				return;
++				flag = true;
++			}
++			else
++			{
++				if (waitingToPlay == null)
++				{
++					waitingToPlay = new List<MainThreadAction>();
++				}
++				waitingToPlay.Add(onCompleted);
++			}
++		}
++		if (flag)
++		{
++			onCompleted.Enqueue();
++		}
++	}
++
++	internal bool EnsurePcmLoaded()
++	{
++		if (Volatile.Read(ref Pcm) != null)
++		{
++			return true;
++		}
++		lock (GetDecodeLock())
++		{
++			if (Volatile.Read(ref Pcm) != null)
++			{
++				return true;
++			}
++			if (Asset == null)
++			{
++				return false;
++			}
++			if (!Asset.IsLoaded() && Asset.Origin != null)
++			{
++				Asset.Origin.LoadAsset(Asset);
++			}
++			if (Asset.Data == null)
++			{
++				return false;
++			}
++			AudioMetaData audioMetaData = (AudioMetaData)ScreenManager.Platform.CreateAudioData(Asset);
++			Asset.Data = null;
++			if (audioMetaData == null || audioMetaData.Pcm == null)
++			{
++				return false;
++			}
++			lock (this)
++			{
++				Channels = audioMetaData.Channels;
++				Rate = audioMetaData.Rate;
++				BitsPerSample = audioMetaData.BitsPerSample;
++				Volatile.Write(ref Pcm, audioMetaData.Pcm);
++				if (Volatile.Read(ref Loaded) < 2)
++				{
++					Volatile.Write(ref Loaded, 2);
++				}
+ 			}
+-			if (waitingToPlay == null)
++			return true;
++		}
++	}
++
++	internal void AcquireOwner()
++	{
++		Interlocked.Exchange(ref unloadRequested, 0);
++		Interlocked.Increment(ref activeOwnerCount);
++	}
++
++	internal int ReleaseOwner()
++	{
++		while (true)
++		{
++			int num = Volatile.Read(ref activeOwnerCount);
++			if (num <= 0)
++			{
++				return 0;
++			}
++			int num2 = num - 1;
++			if (Interlocked.CompareExchange(ref activeOwnerCount, num2, num) == num)
++			{
++				return num2;
++			}
++		}
++	}
++
++	internal byte[] AcquirePcmSnapshot()
++	{
++		byte[] array = Volatile.Read(ref Pcm);
++		if (array != null)
++		{
++			return array;
++		}
++		if (!EnsurePcmLoaded())
++		{
++			return null;
++		}
++		return Volatile.Read(ref Pcm);
++	}
++
++	internal void ReleaseManagedPcm()
++	{
++		lock (this)
++		{
++			Volatile.Write(ref Pcm, null);
++			if (Asset != null)
+ 			{
+-				waitingToPlay = new List<MainThreadAction>();
++				Asset.Data = null;
+ 			}
+-			waitingToPlay.Add(onCompleted);
+ 		}
+ 	}
+ 
+ 	public void Unload()
+ 	{
+-		Pcm = null;
+-		Channels = 0;
+-		Rate = 0;
+-		BitsPerSample = 0;
+-		Asset.Data = null;
+-		Loaded = 0;
++		lock (this)
++		{
++			if (Volatile.Read(ref Loaded) == 1)
++			{
++				Interlocked.Exchange(ref unloadRequested, 1);
++				return;
++			}
++			Interlocked.Exchange(ref unloadRequested, 0);
++			Volatile.Write(ref Pcm, null);
++			Channels = 0;
++			Rate = 0;
++			BitsPerSample = 0;
++			if (Asset != null)
++			{
++				Asset.Data = null;
++			}
++			Volatile.Write(ref Loaded, 0);
++		}
++	}
++}
++
++internal sealed class OptimumPendingPlaySound
++{
++	private readonly ClientMain game;
++
++	private readonly AudioData audiodata;
++
++	private readonly SoundParams sparams;
++
++	private readonly AssetLocation location;
++
++	public OptimumPendingPlaySound(ClientMain game, AudioData audiodata, SoundParams sparams, AssetLocation location)
++	{
++		this.game = game;
++		this.audiodata = audiodata;
++		this.sparams = sparams;
++		this.location = location;
++	}
++
++	public int Run()
++	{
++		return game.InvokeStartPlaying(audiodata, sparams, location);
+ 	}
+ }

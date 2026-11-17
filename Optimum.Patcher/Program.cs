@@ -77,6 +77,8 @@ var typesToInject = new List<string>
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
     "Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend",
     "Vintagestory.Client.NoObf.OptimumGuiSvgRecorder",
+    // Issue #603: lambda-free closure helper for ClientMain.PlaySoundAtInternal
+    "Vintagestory.Client.NoObf.OptimumPendingPlaySound",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -400,6 +402,38 @@ var membersToInject = new Dictionary<string, List<string>>
         "RegisterTesselationThread",
         "GetTesselationWorkerSlot",
         "ChunkTesselatorManager",
+        "InvokeStartPlaying",
+    },
+    // Issue #603: audio lifecycle synchronization, PCM retention cleanup, and intro music disposal
+    ["Vintagestory.Client.NoObf.AudioMetaData"] = new()
+    {
+        "decodeLock",
+        "activeOwnerCount",
+        "unloadRequested",
+        "GetDecodeLock",
+        "EnsurePcmLoaded",
+        "AcquireOwner",
+        "ReleaseOwner",
+        "AcquirePcmSnapshot",
+        "ReleaseManagedPcm",
+    },
+    ["Vintagestory.Client.LoadedSoundNative"] = new()
+    {
+        "ownsSampleRef",
+        "ownerReleased",
+        "ReleaseSampleOwner",
+    },
+    ["Vintagestory.Client.ScreenManager"] = new()
+    {
+        "soundAudioDataLock",
+        "GetSoundAudioDataLock",
+        "TryGetAudioData",
+        "GetOrAddAudioData",
+        "CopySoundAudioDataToAsyncTemp",
+        "SnapshotSoundAudioData",
+        "StopAndDisposeIntroMusic",
+        "FadeAndDisposeIntroMusicWorker",
+        "DisposeSoundWhenStoppedWorker",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -753,6 +787,27 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemRenderSkyColor", "OnRenderFrame3D", 1),
     // SystemSoundEngine: audio listener update threshold + periodic refresh
     new("Vintagestory.Client.NoObf.SystemSoundEngine", "OnRenderFrame", 2),
+    // Issue #603: release music PCM after OpenAL buffering, synchronize audio asset cache, pre-size seekable Ogg PCM buffers, and dispose intro music
+    new("Vintagestory.Client.NoObf.OggDecoder", "OggToWav", 2),
+    new("Vintagestory.Client.NoObf.AudioMetaData", "DoLoad", 0),
+    new("Vintagestory.Client.NoObf.AudioMetaData", "Load", 0),
+    new("Vintagestory.Client.NoObf.AudioMetaData", "AddOnLoaded", 1),
+    new("Vintagestory.Client.NoObf.AudioMetaData", "Unload", 0),
+    new("Vintagestory.Client.LoadedSoundNative", ".ctor", 3),
+    new("Vintagestory.Client.LoadedSoundNative", ".ctor", 2),
+    new("Vintagestory.Client.LoadedSoundNative", "createSoundSource", 0),
+    new("Vintagestory.Client.LoadedSoundNative", "Dispose", 0),
+    new("Vintagestory.Client.LoadedSoundNative", "Finalize", 0),
+    new("Vintagestory.Client.ScreenManager", "CatalogSounds", 1),
+    new("Vintagestory.Client.ScreenManager", "LoadMusicTrack", 1),
+    new("Vintagestory.Client.ScreenManager", "LoadSound", 1),
+    new("Vintagestory.Client.ScreenManager", "PlaySound", 1,
+        new[] { "Vintagestory.API.Common.AssetLocation" }),
+    new("Vintagestory.Client.GuiScreenRunningGame", "handOverRenderingToRunningGame", 0),
+    new("Vintagestory.Client.NoObf.ClientMain", "PlaySoundAtInternal", 8),
+    new("Vintagestory.Client.NoObf.ClientMain", "LoadSound", 1),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "StartSlowLoadingSoundsWhenReady", 0),
+    new("Vintagestory.Client.NoObf.ClientSystemDebugCommands", "OnCmdSoundsummary", 1),
     // Issue #577: scanning chunk blocks is read-only; preserve compressed chunk buffers.
     new("Vintagestory.Client.NoObf.SystemClientTickingBlocks", "OnSeperateThreadGameTick", 1),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)

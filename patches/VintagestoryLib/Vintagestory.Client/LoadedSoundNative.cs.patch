@@ -1,0 +1,213 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
+index cb81034..e9ae449 100644
+--- a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
++++ b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
+@@ -45,10 +45,14 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 
+ 	private long stoppedMsAgo;
+ 
+ 	private int curFadingIter;
+ 
++	private bool ownsSampleRef;
++
++	private int ownerReleased;
++
+ 	public SoundParams Params => soundParams;
+ 
+ 	public bool IsDisposed => disposed;
+ 
+ 	public int Channels => sample.Channels;
+@@ -206,10 +210,15 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		}
+ 		lock (loadedSoundsLock)
+ 		{
+ 			loadedSounds.Add(this);
+ 		}
++		if (this.sample != null)
++		{
++			this.sample.AcquireOwner();
++			ownsSampleRef = true;
++		}
+ 		switch (sample.Loaded)
+ 		{
+ 		case 0:
+ 			sample.Load();
+ 			createSoundSource();
+@@ -237,10 +246,15 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		}
+ 		lock (loadedSoundsLock)
+ 		{
+ 			loadedSounds.Add(this);
+ 		}
++		if (this.sample != null)
++		{
++			this.sample.AcquireOwner();
++			ownsSampleRef = true;
++		}
+ 		if (sample.Loaded == 0)
+ 		{
+ 			sample.Load();
+ 		}
+ 		int num = 64;
+@@ -263,22 +277,31 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		//IL_032b: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_032d: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0334: Invalid comparison between Unknown and I4
+ 		//IL_0336: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_033d: Invalid comparison between Unknown and I4
++		if (Volatile.Read(ref ownerReleased) != 0)
++		{
++			return 0;
++		}
+ 		try
+ 		{
++			byte[] array = sample?.AcquirePcmSnapshot();
++			if (array == null || array.Length == 0)
++			{
++				throw new InvalidOperationException("No PCM data available for " + (soundParams?.Location?.ToShortString() ?? "<unknown>"));
++			}
+ 			sourceId = AL.GenSource();
+ 			if (sourceId == 0)
+ 			{
+ 				throw new Exception("Unable to get sourceId");
+ 			}
+ 			bufferId = AL.GenBuffer();
+ 			ALFormat soundFormat = AudioOpenAl.GetSoundFormat(sample.Channels, sample.BitsPerSample);
+-			fixed (byte* pcm = sample.Pcm)
++			fixed (byte* pcm = array)
+ 			{
+-				AL.BufferData(bufferId, soundFormat, (void*)pcm, sample.Pcm.Length, sample.Rate);
++				AL.BufferData(bufferId, soundFormat, (void*)pcm, array.Length, sample.Rate);
+ 			}
+ 			int num = default(int);
+ 			AL.GetBuffer(bufferId, (ALGetBufferi)8196, out num);
+ 			int num2 = default(int);
+ 			AL.GetBuffer(bufferId, (ALGetBufferi)8195, out num2);
+@@ -323,18 +346,35 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 			}
+ 			else
+ 			{
+ 				AL.SourcePlay(sourceId);
+ 			}
+-			sample.Loaded = 3;
++			Volatile.Write(ref sample.Loaded, 3);
+ 			disposed = false;
++			if (sample.AutoUnload)
++			{
++				sample.ReleaseManagedPcm();
++			}
+ 		}
+ 		catch (Exception e)
+ 		{
++			if (sourceId != 0)
++			{
++				AL.SourceStop(sourceId);
++				AL.Source(sourceId, (ALSourcei)4105, 0);
++				AL.DeleteSource(sourceId);
++				sourceId = 0;
++			}
++			if (bufferId != 0)
++			{
++				AL.DeleteBuffer(bufferId);
++				bufferId = 0;
++			}
+ 			ScreenManager.Platform.Logger.Error("Could not load sound " + soundParams?.Location);
+ 			ScreenManager.Platform.Logger.Error(e);
+ 			disposed = true;
++			ReleaseSampleOwner(unloadIfLast: true);
+ 		}
+ 		testError("construction");
+ 		return 0;
+ 	}
+ 
+@@ -563,18 +603,42 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	{
+ 		if (!disposed)
+ 		{
+ 			lock (loadedSoundsLock)
+ 			{
+-				disposeSoundSource();
+-				loadedSounds.Remove(this);
++				if (!disposed)
++				{
++					disposeSoundSource();
++					loadedSounds.Remove(this);
++				}
+ 			}
+-			if (ClientSettings.OptimizeRamMode == 2 && sample.AutoUnload)
++		}
++		else
++		{
++			lock (loadedSoundsLock)
+ 			{
+-				sample?.Unload();
++				loadedSounds.Remove(this);
+ 			}
+ 		}
++		ReleaseSampleOwner(unloadIfLast: true);
++		GC.SuppressFinalize(this);
++	}
++
++	private void ReleaseSampleOwner(bool unloadIfLast)
++	{
++		if (!ownsSampleRef)
++		{
++			return;
++		}
++		if (Interlocked.Exchange(ref ownerReleased, 1) != 0)
++		{
++			return;
++		}
++		if (sample != null && sample.ReleaseOwner() == 0 && unloadIfLast && sample.AutoUnload)
++		{
++			sample.Unload();
++		}
+ 	}
+ 
+ 	private void testError(string during)
+ 	{
+ 		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
+@@ -603,25 +667,32 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		throw new Exception("Sound dispose debug enabled, killing game. More debug info see client-main.log");
+ 	}
+ 
+ 	~LoadedSoundNative()
+ 	{
+-		if (!disposed && !ScreenManager.Platform.IsShuttingDown)
++		try
+ 		{
+-			lock (loadedSoundsLock)
+-			{
+-				loadedSounds.Remove(this);
+-			}
+-			if (trace == null)
+-			{
+-				ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose()", Params.Location);
+-			}
+-			else
++			if (!disposed && !ScreenManager.Platform.IsShuttingDown)
+ 			{
+-				ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose(). Allocated at {1}", Params.Location, trace);
++				lock (loadedSoundsLock)
++				{
++					loadedSounds.Remove(this);
++				}
++				if (trace == null)
++				{
++					ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose()", Params?.Location);
++				}
++				else
++				{
++					ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose(). Allocated at {1}", Params?.Location, trace);
++				}
+ 			}
+ 		}
++		finally
++		{
++			ReleaseSampleOwner(unloadIfLast: true);
++		}
+ 	}
+ 
+ 	public void FadeTo(double newVolume, float duration, Action<ILoadedSound> onFaded)
+ 	{
+ 		duration = Math.Max(0.02f, duration);
