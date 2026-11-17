@@ -386,6 +386,14 @@ public static class OptimumConfig
     /// </summary>
     public static bool ItemRenderInfoReuseEnabled = true;
 
+    /// <summary>
+    /// Issue #611: lazily tessellate and upload inventory block and item meshes on first
+    /// access instead of eagerly building all inventory meshes during world join.
+    /// Set false to restore vanilla startup pre-tessellation for mods that read the public
+    /// *ModelRefsInventory arrays directly without calling GetDefaultBlockMeshRef/GetDefaultItemMeshRef.
+    /// </summary>
+    public static bool LazyInventoryMeshesEnabled = true;
+
     // Settings that live in VintagestoryLib (read per-frame from ClientSettings).
     // Mirrored here for persistence only.
     public static bool EntityShadowCull = true;
@@ -1271,6 +1279,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.BfsChunkVisibility), BfsChunkVisibilityEnabled.ToString()),
         (nameof(OptimumConfigData.MeshPartPool), MeshPartPoolEnabled.ToString()),
         (nameof(OptimumConfigData.ItemRenderInfoReuse), ItemRenderInfoReuseEnabled.ToString()),
+        (nameof(OptimumConfigData.LazyInventoryMeshes), LazyInventoryMeshesEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -1379,6 +1388,7 @@ public static class OptimumConfig
             BfsChunkVisibilityEnabled = data.BfsChunkVisibility;
             MeshPartPoolEnabled = data.MeshPartPool;
             ItemRenderInfoReuseEnabled = data.ItemRenderInfoReuse;
+            LazyInventoryMeshesEnabled = data.LazyInventoryMeshes;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -1479,6 +1489,7 @@ public static class OptimumConfig
             BfsChunkVisibility = BfsChunkVisibilityEnabled,
             MeshPartPool = MeshPartPoolEnabled,
             ItemRenderInfoReuse = ItemRenderInfoReuseEnabled,
+            LazyInventoryMeshes = LazyInventoryMeshesEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -1589,6 +1600,7 @@ internal sealed class OptimumConfigData
     public bool BfsChunkVisibility { get; set; } = true;
     public bool MeshPartPool { get; set; } = true;
     public bool ItemRenderInfoReuse { get; set; } = true;
+    public bool LazyInventoryMeshes { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;

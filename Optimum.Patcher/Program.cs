@@ -79,6 +79,8 @@ var typesToInject = new List<string>
     "Vintagestory.Client.NoObf.OptimumGuiSvgRecorder",
     // Issue #603: lambda-free closure helper for ClientMain.PlaySoundAtInternal
     "Vintagestory.Client.NoObf.OptimumPendingPlaySound",
+    // Issue #611: lambda-free main-thread marshal request for lazy inventory meshes
+    "Vintagestory.Client.NoObf.OptimumLazyInventoryMeshRequest",
     // Server-side worldgen scheduler + chunk read pool (see
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
@@ -506,6 +508,21 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "sharedIndexBuffer",
     },
+    // Issue #611: lazy inventory block and item mesh resolution on ShapeTesselatorManager
+    ["Vintagestory.Client.NoObf.ShapeTesselatorManager"] = new()
+    {
+        "lazyReloadedShapes",
+        "EnsureUnknownItemModelRef",
+        "EnsureUnknownBlockModelRef",
+        "HasItemRenderVariant",
+        "GetInventoryItemMeshRef",
+        "EnsureBlockInventoryMeshRefOnMainThread",
+        "EnsureItemInventoryMeshRefOnMainThread",
+        "ResetLazyItemInventoryMeshes",
+        "EnsureCompositeShapeLoaded",
+        "EnsureLoadedForLazy",
+        "ReUnloadTemporaryShapes",
+    },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
     // field initializer only runs once .ctor is a transplant target (see targets below).
@@ -814,9 +831,10 @@ var targets = new List<MethodTarget>
     // the reused-scratch per-slot item render path.
     new("Vintagestory.Client.NoObf.ClientEventManager", "TriggerRenderStage", 2,
         new[] { "Vintagestory.API.Client.EnumRenderStage", "System.Single" }),
-    // Issue #74 item-render profiler: measure per-slot GetItemStackRenderInfo cost.
+    // Issue #74 item-render profiler & #611 lazy inventory mesh lookup on public GetItemStackRenderInfo path.
     new("Vintagestory.Client.NoObf.InventoryItemRenderer", "RenderItemstackToGui", 10,
         new[] { "Vintagestory.API.Common.ItemSlot", "System.Double", "System.Double", "System.Double", "System.Single", "System.Int32", "System.Single", "System.Boolean", "System.Boolean", "System.Boolean" }),
+    new("Vintagestory.Client.NoObf.InventoryItemRenderer", "GetItemStackRenderInfo", 4),
     // GuiCompositeMainMenuLeft: Optimum link in main menu (no lambdas)
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // The Optimum update links are handled before the vanilla link handling (no lambdas, no closures).
@@ -963,6 +981,13 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "CreateMesh", 4),
     // Issue #467: restore multi-threaded TargetSet partitioning in LoadBlockShapes
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "LoadBlockShapes", 1),
+    // Issue #611: lazy inventory block and item tessellation/upload
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateBlocksAndItems", 0),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateBlocksForInventory_ASync", 1),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateItems_Pre", 1),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateItems", 3),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultBlockMeshRef", 1),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultItemMeshRef", 1),
     // Texture atlas overflow recovery and decode worker scaling.
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeCreateNewAtlas", 1),
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "PopulateTextureAtlassesFromTextures", 0),
