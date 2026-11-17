@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
-index b5000e7..dd73564 100644
+index b5000e7..22e39c1 100644
 --- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 @@ -38,10 +38,12 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
@@ -31,7 +31,37 @@ index b5000e7..dd73564 100644
  
  	public static void LoadSoundsSlow_Async(ClientMain game)
  	{
-@@ -481,42 +486,124 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -444,10 +449,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 			{
+ 				return;
+ 			}
+ 			if (item.Key.BeginsWith("game", "sounds/weather/") || item.Key.BeginsWith("game", "sounds/environment") || item.Key.BeginsWith("game", "sounds/effect/tempstab") || item.Key.BeginsWith("game", "sounds/effect/rift"))
+ 			{
++				if (item.Value is AudioMetaData audioMetaData && audioMetaData.ShouldSkipSlowPredecode())
++				{
++					continue;
++				}
+ 				if (extendedDebugInfo)
+ 				{
+ 					Platform.Logger.VerboseDebug("Load sound asset " + item.Key.ToShortString());
+ 				}
+ 				item.Value.Load();
+@@ -466,10 +475,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 			{
+ 				return;
+ 			}
+ 			foreach (KeyValuePair<AssetLocation, AudioData> item2 in soundAudioDataAsyncLoadTemp)
+ 			{
++				if (item2.Value is AudioMetaData audioMetaData2 && audioMetaData2.ShouldSkipSlowPredecode())
++				{
++					continue;
++				}
+ 				if (extendedDebugInfo && item2.Value.Loaded == 0)
+ 				{
+ 					Platform.Logger.VerboseDebug("Load sound asset " + item2.Key);
+ 				}
+ 				item2.Value.Load();
+@@ -481,42 +494,127 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  			}
  		}
  		soundAudioDataAsyncLoadTemp.Clear();
@@ -112,7 +142,10 @@ index b5000e7..dd73564 100644
 +			{
 +				audioMetaData.Asset = asset;
 +			}
-+			audioMetaData.EnsurePcmLoaded();
++			if (!audioMetaData.HasValidSharedBuffer())
++			{
++				audioMetaData.EnsurePcmLoaded();
++			}
 +			return audioMetaData;
 +		}
 +		if (!asset.IsLoaded() && asset.Origin != null)
@@ -165,7 +198,7 @@ index b5000e7..dd73564 100644
  	public void loadMods()
  	{
  		List<string> list = new List<string>(ClientSettings.ModPaths);
-@@ -1051,30 +1138,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -1051,30 +1149,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  	public static void PlaySound(string name)
  	{
  		PlaySound(new AssetLocation("sounds/" + name).WithPathAppendixOnce(".ogg"));

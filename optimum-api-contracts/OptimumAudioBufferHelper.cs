@@ -143,6 +143,137 @@ internal static class OptimumAudioBufferHelper
             ArrayPool<byte>.Shared.Return(rented);
         }
     }
+
+    /// <summary>
+    /// Reads only the first Ogg Vorbis identification page and the trailing EOS page
+    /// <c>granulepos</c> of a seekable single-bitstream Ogg stream to determine channel count,
+    /// sample rate, and playback duration without decoding any audio samples.
+    /// </summary>
+    internal static bool TryEstimateOggDurationAndFormat(
+        Stream stream,
+        out int channels,
+        out int sampleRate,
+        out float durationSeconds)
+    {
+        channels = 0;
+        sampleRate = 0;
+        durationSeconds = 0f;
+
+        if (stream == null || !stream.CanSeek)
+        {
+            return false;
+        }
+
+        long length = stream.Length;
+        if (length < OggMinPageHeaderBytes + 30)
+        {
+            return false;
+        }
+
+        long savedPosition = stream.Position;
+        try
+        {
+            int headToRead = (int)Math.Min(length, 512L);
+            Span<byte> head = stackalloc byte[headToRead];
+            stream.Position = 0;
+            int totalRead = 0;
+            while (totalRead < headToRead)
+            {
+                int read = stream.Read(head.Slice(totalRead));
+                if (read <= 0)
+                {
+                    break;
+                }
+                totalRead += read;
+            }
+
+            if (totalRead < OggMinPageHeaderBytes + 30)
+            {
+                return false;
+            }
+
+            if (head[0] != (byte)'O' ||
+                head[1] != (byte)'g' ||
+                head[2] != (byte)'g' ||
+                head[3] != (byte)'S' ||
+                head[4] != 0)
+            {
+                return false;
+            }
+
+            int firstSerial = BinaryPrimitives.ReadInt32LittleEndian(head.Slice(14, 4));
+            if (firstSerial == 0)
+            {
+                return false;
+            }
+
+            int segmentCount = head[26];
+            int packetOffset = OggMinPageHeaderBytes + segmentCount;
+            if (packetOffset + 30 > totalRead)
+            {
+                return false;
+            }
+
+            // Vorbis Identification header: 0x01 + "vorbis" + uint32 version(0) + byte channels + int32 rate
+            if (head[packetOffset] != 0x01 ||
+                head[packetOffset + 1] != (byte)'v' ||
+                head[packetOffset + 2] != (byte)'o' ||
+                head[packetOffset + 3] != (byte)'r' ||
+                head[packetOffset + 4] != (byte)'b' ||
+                head[packetOffset + 5] != (byte)'i' ||
+                head[packetOffset + 6] != (byte)'s')
+            {
+                return false;
+            }
+
+            uint vorbisVersion = BinaryPrimitives.ReadUInt32LittleEndian(head.Slice(packetOffset + 7, 4));
+            int headerChannels = head[packetOffset + 11];
+            int headerRate = BinaryPrimitives.ReadInt32LittleEndian(head.Slice(packetOffset + 12, 4));
+            if (vorbisVersion != 0 || headerChannels <= 0 || headerRate <= 0)
+            {
+                return false;
+            }
+
+            if (!TryEstimateOggPcmByteLength(stream, firstSerial, headerChannels, out int estimatedPcmBytes))
+            {
+                return false;
+            }
+
+            long samples = estimatedPcmBytes / (headerChannels * 2L);
+            if (samples <= 0)
+            {
+                return false;
+            }
+
+            channels = headerChannels;
+            sampleRate = headerRate;
+            durationSeconds = (float)((double)samples / headerRate);
+            return true;
+        }
+        finally
+        {
+            try
+            {
+                stream.Position = savedPosition;
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    internal static bool ShouldLazyDecodeSfx(
+        Stream stream,
+        long compressedByteLength,
+        float minDurationSeconds = 5f,
+        long unseekableCompressedThresholdBytes = 262144L)
+    {
+        if (TryEstimateOggDurationAndFormat(stream, out _, out _, out float durationSeconds))
+        {
+            return durationSeconds >= minDurationSeconds;
+        }
+        return compressedByteLength >= unseekableCompressedThresholdBytes;
+    }
 }
 
 /// <summary>

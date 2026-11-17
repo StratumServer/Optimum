@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
-index cb81034..e9ae449 100644
+index cb81034..8241c8e 100644
 --- a/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
 +++ b/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs
-@@ -45,10 +45,14 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+@@ -45,82 +45,130 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
  
  	private long stoppedMsAgo;
  
@@ -12,139 +12,767 @@ index cb81034..e9ae449 100644
 +
 +	private int ownerReleased;
 +
++	private object sourceLock;
++
++	private int bufferEpoch;
++
++	private bool awaitingAsyncLoad;
++
++	private bool explicitStopOrPause;
++
++	private object GetSourceLock()
++	{
++		return LazyInitializer.EnsureInitialized(ref sourceLock);
++	}
++
  	public SoundParams Params => soundParams;
  
  	public bool IsDisposed => disposed;
  
  	public int Channels => sample.Channels;
-@@ -206,10 +210,15 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 
+ 	public bool IsPlaying
+ 	{
+ 		get
+ 		{
+-			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+-			if (!disposed)
++			lock (GetSourceLock())
+ 			{
++				if (disposed)
++				{
++					return false;
++				}
++				if (sourceId == 0)
++				{
++					return awaitingAsyncLoad && (int)sourceState == 4114;
++				}
++				int num = default(int);
++				AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+ 				return num == 4114;
+ 			}
+-			return false;
+ 		}
+ 	}
+ 
+ 	public bool IsPaused
+ 	{
+ 		get
+ 		{
+-			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+-			if (!disposed)
++			lock (GetSourceLock())
+ 			{
++				if (disposed)
++				{
++					return false;
++				}
++				if (sourceId == 0)
++				{
++					return awaitingAsyncLoad && (int)sourceState == 4115;
++				}
++				int num = default(int);
++				AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+ 				return num == 4115;
+ 			}
+-			return false;
+ 		}
+ 	}
+ 
+-	public bool IsReady => sample.Loaded == 3;
++	public bool IsReady => !disposed && sourceId != 0 && Volatile.Read(ref sample.Loaded) == 3;
+ 
+ 	public bool HasStopped
+ 	{
+ 		get
+ 		{
+-			if (disposed)
++			lock (GetSourceLock())
+ 			{
+-				return true;
+-			}
+-			int num = default(int);
+-			AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
+-			if (num != 4114)
+-			{
+-				return num != 4115;
++				if (disposed || Volatile.Read(ref ownerReleased) != 0)
++				{
++					return true;
++				}
++				if (sourceId == 0)
++				{
++					if (!awaitingAsyncLoad)
++					{
++						return true;
++					}
++					return explicitStopOrPause && (int)sourceState != 4115;
++				}
++				int num = default(int);
++				AL.GetSource(sourceId, (ALGetSourcei)4112, out num);
++				if (num != 4114)
++				{
++					return num != 4115;
++				}
++				return false;
+ 			}
+-			return false;
+ 		}
+ 	}
+ 
+ 	public float PlaybackPosition
+ 	{
+ 		get
+ 		{
+-			if (!disposed)
++			lock (GetSourceLock())
+ 			{
+-				AL.GetSource(sourceId, (ALSourcef)4132, out playbackPosition);
+-				testError("get playback pos");
++				if (!disposed && sourceId != 0)
++				{
++					AL.GetSource(sourceId, (ALSourcef)4132, out playbackPosition);
++					testError("get playback pos");
++				}
++				return playbackPosition;
+ 			}
+-			return playbackPosition;
+ 		}
+ 		set
+ 		{
+-			playbackPosition = value;
+-			if (!disposed)
++			lock (GetSourceLock())
+ 			{
+-				AL.Source(sourceId, (ALSourcef)4132, value);
+-				testError("set playback pos");
++				playbackPosition = value;
++				if (!disposed && sourceId != 0)
++				{
++					AL.Source(sourceId, (ALSourcef)4132, value);
++					testError("set playback pos");
++				}
+ 			}
+ 		}
+ 	}
+ 
+ 	public float SoundLengthSeconds => soundLengthSeconds;
+@@ -206,18 +254,33 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
  		}
  		lock (loadedSoundsLock)
  		{
  			loadedSounds.Add(this);
  		}
+-		switch (sample.Loaded)
 +		if (this.sample != null)
 +		{
 +			this.sample.AcquireOwner();
 +			ownsSampleRef = true;
++			soundLengthSeconds = this.sample.EnsureDurationMetadataKnown();
 +		}
- 		switch (sample.Loaded)
++		switch (Volatile.Read(ref this.sample.Loaded))
  		{
  		case 0:
- 			sample.Load();
+-			sample.Load();
+-			createSoundSource();
++			if (game != null)
++			{
++				awaitingAsyncLoad = true;
++				this.sample.Load_Async(new MainThreadAction(game, createSoundSource, "soundloading"));
++			}
++			else
++			{
++				this.sample.Load();
++				createSoundSource();
++			}
+ 			break;
+ 		case 1:
+-			sample.AddOnLoaded(new MainThreadAction(game, createSoundSource, "soundloading"));
++			awaitingAsyncLoad = true;
++			this.sample.AddOnLoaded(new MainThreadAction(game, createSoundSource, "soundloading"));
+ 			break;
+ 		default:
  			createSoundSource();
-@@ -237,10 +246,15 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 			break;
+ 		}
+@@ -237,16 +300,22 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
  		}
  		lock (loadedSoundsLock)
  		{
  			loadedSounds.Add(this);
  		}
+-		if (sample.Loaded == 0)
 +		if (this.sample != null)
 +		{
 +			this.sample.AcquireOwner();
 +			ownsSampleRef = true;
++			soundLengthSeconds = this.sample.EnsureDurationMetadataKnown();
 +		}
- 		if (sample.Loaded == 0)
++		if (Volatile.Read(ref sample.Loaded) == 0)
  		{
  			sample.Load();
  		}
  		int num = 64;
-@@ -263,22 +277,31 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+-		while (sample.Loaded < 2 && num-- > 0)
++		while (Volatile.Read(ref sample.Loaded) < 2 && num-- > 0)
+ 		{
+ 			Thread.Sleep(15);
+ 		}
+ 		createSoundSource();
+ 	}
+@@ -263,256 +332,318 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
  		//IL_032b: Unknown result type (might be due to invalid IL or missing references)
  		//IL_032d: Unknown result type (might be due to invalid IL or missing references)
  		//IL_0334: Invalid comparison between Unknown and I4
  		//IL_0336: Unknown result type (might be due to invalid IL or missing references)
  		//IL_033d: Invalid comparison between Unknown and I4
-+		if (Volatile.Read(ref ownerReleased) != 0)
-+		{
-+			return 0;
-+		}
- 		try
+-		try
++		lock (GetSourceLock())
  		{
-+			byte[] array = sample?.AcquirePcmSnapshot();
-+			if (array == null || array.Length == 0)
-+			{
-+				throw new InvalidOperationException("No PCM data available for " + (soundParams?.Location?.ToShortString() ?? "<unknown>"));
-+			}
- 			sourceId = AL.GenSource();
- 			if (sourceId == 0)
+-			sourceId = AL.GenSource();
+-			if (sourceId == 0)
++			if (Volatile.Read(ref ownerReleased) != 0)
  			{
- 				throw new Exception("Unable to get sourceId");
+-				throw new Exception("Unable to get sourceId");
++				return 0;
  			}
- 			bufferId = AL.GenBuffer();
- 			ALFormat soundFormat = AudioOpenAl.GetSoundFormat(sample.Channels, sample.BitsPerSample);
+-			bufferId = AL.GenBuffer();
+-			ALFormat soundFormat = AudioOpenAl.GetSoundFormat(sample.Channels, sample.BitsPerSample);
 -			fixed (byte* pcm = sample.Pcm)
-+			fixed (byte* pcm = array)
++			if (sourceId != 0)
  			{
 -				AL.BufferData(bufferId, soundFormat, (void*)pcm, sample.Pcm.Length, sample.Rate);
-+				AL.BufferData(bufferId, soundFormat, (void*)pcm, array.Length, sample.Rate);
++				return 0;
  			}
- 			int num = default(int);
- 			AL.GetBuffer(bufferId, (ALGetBufferi)8196, out num);
- 			int num2 = default(int);
- 			AL.GetBuffer(bufferId, (ALGetBufferi)8195, out num2);
-@@ -323,18 +346,35 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
- 			}
- 			else
+-			int num = default(int);
+-			AL.GetBuffer(bufferId, (ALGetBufferi)8196, out num);
+-			int num2 = default(int);
+-			AL.GetBuffer(bufferId, (ALGetBufferi)8195, out num2);
+-			soundLengthSeconds = 1f * (float)num / (float)(sample.Rate * sample.BitsPerSample / 8) / (float)num2;
+-			float num3 = 0f - (float)(Math.Log(0.009999999776482582) / Math.Log(soundParams.Range));
+-			float num4 = (float)Math.Max(3.0, Math.Pow(soundParams.Range, 0.5) - 2.0);
+-			AL.DistanceModel((ALDistanceModel)53254);
+-			AL.Source(sourceId, (ALSourcef)4129, num3);
+-			AL.Source(sourceId, (ALSourcef)4128, (soundParams.ReferenceDistance != 3f) ? soundParams.ReferenceDistance : num4);
+-			AL.Source(sourceId, (ALSourcef)4131, 9999f);
+-			AL.Source(sourceId, (ALSourcei)4105, bufferId);
+-			AL.Source(sourceId, (ALSourcef)4106, soundParams.Volume * GlobalVolume);
+-			AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
+-			bool flag = ((int)soundFormat - 4354) <= 1;
+-			if (flag && AudioOpenAl.UseHrtf)
++			if (awaitingAsyncLoad && Volatile.Read(ref sample.Loaded) == 1)
  			{
- 				AL.SourcePlay(sourceId);
+-				AL.Source(sourceId, (ALSourcei)4147, 2);
++				return 0;
+ 			}
+-			if (soundParams.Position != null)
++			try
+ 			{
+-				Vector3 val = default(Vector3);
+-				val = new Vector3(soundParams.Position.X, soundParams.Position.Y, soundParams.Position.Z);
+-				AL.Source(sourceId, (ALSource3f)4100, ref val);
+-			}
+-			AL.Source(sourceId, (ALSourceb)514, soundParams.RelativePosition);
+-			AL.Source(sourceId, (ALSourceb)4103, soundParams.ShouldLoop);
+-			if (playbackPosition > 0f)
+-			{
+-				AL.Source(sourceId, (ALSourcef)4132, playbackPosition);
+-			}
+-			testError("setup");
+-			SetReverb(Params.ReverbDecayTime);
+-			SetLowPassfiltering(Params.LowPassFilter);
+-			testError("filter");
+-			ALSourceState val2 = sourceState;
+-			if ((int)val2 != 4114)
+-			{
+-				if ((int)val2 == 4115)
++				if (sample == null || !sample.AcquireSharedBuffer(out int sharedBufId, out int sharedEpoch, out int byteLen, out int channels, out int rate, out int bitsPerSample))
++				{
++					throw new InvalidOperationException("No PCM data available for " + (soundParams?.Location?.ToShortString() ?? "<unknown>"));
++				}
++				bufferId = sharedBufId;
++				bufferEpoch = sharedEpoch;
++				awaitingAsyncLoad = false;
++				sourceId = AL.GenSource();
++				if (sourceId == 0)
++				{
++					throw new Exception("Unable to get sourceId");
++				}
++				ALFormat soundFormat = AudioOpenAl.GetSoundFormat(channels, bitsPerSample);
++				if (channels > 0 && rate > 0 && bitsPerSample > 0)
++				{
++					soundLengthSeconds = 1f * (float)byteLen / (float)(rate * bitsPerSample / 8) / (float)channels;
++				}
++				float num3 = 0f - (float)(Math.Log(0.009999999776482582) / Math.Log(soundParams.Range));
++				float num4 = (float)Math.Max(3.0, Math.Pow(soundParams.Range, 0.5) - 2.0);
++				AL.DistanceModel((ALDistanceModel)53254);
++				AL.Source(sourceId, (ALSourcef)4129, num3);
++				AL.Source(sourceId, (ALSourcef)4128, (soundParams.ReferenceDistance != 3f) ? soundParams.ReferenceDistance : num4);
++				AL.Source(sourceId, (ALSourcef)4131, 9999f);
++				AL.Source(sourceId, (ALSourcei)4105, bufferId);
++				AL.Source(sourceId, (ALSourcef)4106, soundParams.Volume * GlobalVolume);
++				AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
++				bool flag = ((int)soundFormat - 4354) <= 1;
++				if (flag && AudioOpenAl.UseHrtf)
++				{
++					AL.Source(sourceId, (ALSourcei)4147, 2);
++				}
++				if (soundParams.Position != null)
+ 				{
+-					AL.SourcePause(sourceId);
++					Vector3 val = default(Vector3);
++					val = new Vector3(soundParams.Position.X, soundParams.Position.Y, soundParams.Position.Z);
++					AL.Source(sourceId, (ALSource3f)4100, ref val);
+ 				}
++				AL.Source(sourceId, (ALSourceb)514, soundParams.RelativePosition);
++				AL.Source(sourceId, (ALSourceb)4103, soundParams.ShouldLoop);
++				if (playbackPosition > 0f)
++				{
++					AL.Source(sourceId, (ALSourcef)4132, playbackPosition);
++				}
++				testError("setup");
++				SetReverb(Params.ReverbDecayTime);
++				SetLowPassfiltering(Params.LowPassFilter);
++				testError("filter");
++				ALSourceState val2 = sourceState;
++				if ((int)val2 != 4114)
++				{
++					if ((int)val2 == 4115)
++					{
++						AL.SourcePause(sourceId);
++					}
++				}
++				else
++				{
++					AL.SourcePlay(sourceId);
++				}
++				disposed = false;
+ 			}
+-			else
++			catch (Exception e)
+ 			{
+-				AL.SourcePlay(sourceId);
++				if (sourceId != 0)
++				{
++					AL.SourceStop(sourceId);
++					AL.Source(sourceId, (ALSourcei)4105, 0);
++					AL.DeleteSource(sourceId);
++					sourceId = 0;
++				}
++				if (bufferId != 0)
++				{
++					sample?.ReleaseSharedBuffer(bufferId, bufferEpoch, allowDeleteAutoUnload: true);
++					bufferId = 0;
++					bufferEpoch = 0;
++				}
++				awaitingAsyncLoad = false;
++				ScreenManager.Platform.Logger.Error("Could not load sound " + soundParams?.Location);
++				ScreenManager.Platform.Logger.Error(e);
++				disposed = true;
++				ReleaseSampleOwner(unloadIfLast: true);
  			}
 -			sample.Loaded = 3;
-+			Volatile.Write(ref sample.Loaded, 3);
- 			disposed = false;
-+			if (sample.AutoUnload)
-+			{
-+				sample.ReleaseManagedPcm();
-+			}
+-			disposed = false;
+-		}
+-		catch (Exception e)
+-		{
+-			ScreenManager.Platform.Logger.Error("Could not load sound " + soundParams?.Location);
+-			ScreenManager.Platform.Logger.Error(e);
+-			disposed = true;
++			testError("construction");
++			return 0;
  		}
- 		catch (Exception e)
- 		{
-+			if (sourceId != 0)
-+			{
-+				AL.SourceStop(sourceId);
-+				AL.Source(sourceId, (ALSourcei)4105, 0);
-+				AL.DeleteSource(sourceId);
-+				sourceId = 0;
-+			}
-+			if (bufferId != 0)
-+			{
-+				AL.DeleteBuffer(bufferId);
-+				bufferId = 0;
-+			}
- 			ScreenManager.Platform.Logger.Error("Could not load sound " + soundParams?.Location);
- 			ScreenManager.Platform.Logger.Error(e);
- 			disposed = true;
-+			ReleaseSampleOwner(unloadIfLast: true);
- 		}
- 		testError("construction");
- 		return 0;
+-		testError("construction");
+-		return 0;
  	}
  
-@@ -563,18 +603,42 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	public void SetReverb(float reverbDecayTime)
  	{
- 		if (!disposed)
+-		Params.ReverbDecayTime = reverbDecayTime;
+-		if (AudioOpenAl.HasEffectsExtension)
++		lock (GetSourceLock())
+ 		{
+-			if (Params.ReverbDecayTime > 0f)
+-			{
+-				ReverbEffect orCreateReverbEffect = AudioOpenAl.GetOrCreateReverbEffect(reverbDecayTime);
+-				AL.Source(sourceId, (ALSource3i)131078, orCreateReverbEffect.ReverbEffectSlot, 0, 0);
+-			}
+-			else
++			Params.ReverbDecayTime = reverbDecayTime;
++			if (sourceId != 0 && !disposed && AudioOpenAl.HasEffectsExtension)
+ 			{
+-				AL.Source(sourceId, (ALSource3i)131078, 0, 0, 0);
++				if (Params.ReverbDecayTime > 0f)
++				{
++					ReverbEffect orCreateReverbEffect = AudioOpenAl.GetOrCreateReverbEffect(reverbDecayTime);
++					AL.Source(sourceId, (ALSource3i)131078, orCreateReverbEffect.ReverbEffectSlot, 0, 0);
++				}
++				else
++				{
++					AL.Source(sourceId, (ALSource3i)131078, 0, 0, 0);
++				}
++				testError("SetReverb");
+ 			}
+-			testError("SetReverb");
+ 		}
+ 	}
+ 
+ 	private void DisposeReverb()
+ 	{
+-		if (AudioOpenAl.HasEffectsExtension)
++		if (sourceId != 0 && AudioOpenAl.HasEffectsExtension)
+ 		{
+ 			AL.Source(sourceId, (ALSource3i)131078, 0, 0, 0);
+ 			testError("disposereverb");
+ 		}
+ 	}
+ 
+ 	public void SetLowPassfiltering(float value)
+ 	{
+-		Params.LowPassFilter = value;
+-		if (!AudioOpenAl.HasEffectsExtension)
++		lock (GetSourceLock())
+ 		{
+-			return;
+-		}
+-		if (Params.LowPassFilter < 1f)
+-		{
+-			if (AudioOpenAl.EchoFilterId == 0)
++			Params.LowPassFilter = value;
++			if (sourceId == 0 || disposed || !AudioOpenAl.HasEffectsExtension)
+ 			{
+-				AudioOpenAl.EchoFilterId = EFX.GenFilter();
+-				EFX.Filter(AudioOpenAl.EchoFilterId, (FilterInteger)32769, 1);
+-				EFX.Filter(AudioOpenAl.EchoFilterId, (FilterFloat)1, 1f);
+-				EFX.Filter(AudioOpenAl.EchoFilterId, (FilterFloat)2, Params.LowPassFilter);
++				return;
+ 			}
+-			AL.Source(sourceId, (ALSourcei)131077, AudioOpenAl.EchoFilterId);
+-		}
+-		else
+-		{
+-			AL.Source(sourceId, (ALSourcei)131077, 0);
++			if (Params.LowPassFilter < 1f)
++			{
++				if (AudioOpenAl.EchoFilterId == 0)
++				{
++					AudioOpenAl.EchoFilterId = EFX.GenFilter();
++					EFX.Filter(AudioOpenAl.EchoFilterId, (FilterInteger)32769, 1);
++					EFX.Filter(AudioOpenAl.EchoFilterId, (FilterFloat)1, 1f);
++					EFX.Filter(AudioOpenAl.EchoFilterId, (FilterFloat)2, Params.LowPassFilter);
++				}
++				AL.Source(sourceId, (ALSourcei)131077, AudioOpenAl.EchoFilterId);
++			}
++			else
++			{
++				AL.Source(sourceId, (ALSourcei)131077, 0);
++			}
++			testError("SetLowPassfiltering");
+ 		}
+-		testError("SetLowPassfiltering");
+ 	}
+ 
+ 	private void DisposeLowPassfilter()
+ 	{
+-		if (AudioOpenAl.HasEffectsExtension)
++		if (sourceId != 0 && AudioOpenAl.HasEffectsExtension)
+ 		{
+ 			AL.Source(sourceId, (ALSourcei)131077, 0);
+ 			testError("disposeLowPassFilter");
+ 		}
+ 	}
+ 
+ 	private void disposeSoundSource()
+ 	{
+-		if (sourceId == 0)
++		lock (GetSourceLock())
+ 		{
+-			disposed = true;
+-			return;
++			int num = sourceId;
++			int num2 = bufferId;
++			int num3 = bufferEpoch;
++			if (num != 0)
++			{
++				if (num3 == Volatile.Read(ref AudioOpenAl.ContextGeneration) && ScreenManager.Platform?.IsShuttingDown != true)
++				{
++					AL.GetSource(num, (ALSourcef)4132, out playbackPosition);
++					AL.SourceStop(num);
++					AL.Source(num, (ALSourcei)4105, 0);
++					testError("disposestop");
++					DisposeLowPassfilter();
++					DisposeReverb();
++					AL.DeleteSource(num);
++					testError("dispose");
++				}
++				sourceId = 0;
++			}
++			if (num2 != 0)
++			{
++				sample?.ReleaseSharedBuffer(num2, num3, allowDeleteAutoUnload: true);
++				bufferId = 0;
++				bufferEpoch = 0;
++			}
++			if (!(awaitingAsyncLoad && Volatile.Read(ref ownerReleased) == 0 && Volatile.Read(ref sample.Loaded) < 2))
++			{
++				disposed = true;
++			}
+ 		}
+-		AL.GetSource(sourceId, (ALSourcef)4132, out playbackPosition);
+-		AL.SourceStop(sourceId);
+-		AL.Source(sourceId, (ALSourcei)4105, 0);
+-		testError("disposestop");
+-		DisposeLowPassfilter();
+-		DisposeReverb();
+-		AL.DeleteSource(sourceId);
+-		AL.DeleteBuffer(bufferId);
+-		testError("dispose");
+-		sourceId = 0;
+-		bufferId = 0;
+-		disposed = true;
+ 	}
+ 
+ 	public void SetPosition(float x, float y, float z)
+ 	{
+-		if (soundParams.Position == null)
++		lock (GetSourceLock())
+ 		{
+-			soundParams.Position = new Vec3f(x, y, z);
+-			soundParams.RelativePosition = false;
+-			if (!disposed)
++			if (soundParams.Position == null)
+ 			{
+-				AL.Source(sourceId, (ALSourceb)514, false);
++				soundParams.Position = new Vec3f(x, y, z);
++				soundParams.RelativePosition = false;
++				if (!disposed && sourceId != 0)
++				{
++					AL.Source(sourceId, (ALSourceb)514, false);
++				}
+ 			}
+-		}
+-		else
+-		{
+-			soundParams.Position.Set(x, y, z);
+-		}
+-		if (sourceId != 0)
+-		{
+-			if (!disposed)
++			else
++			{
++				soundParams.Position.Set(x, y, z);
++			}
++			if (sourceId != 0 && !disposed)
+ 			{
+ 				Vector3 val = default(Vector3);
+ 				val = new Vector3(x, y, z);
+ 				AL.Source(sourceId, (ALSource3f)4100, ref val);
++				testError("setposition x/y/z");
+ 			}
+-			testError("setposition x/y/z");
+ 		}
+ 	}
+ 
+ 	public void SetPosition(Vec3f position)
+ 	{
+-		testError("before setposition vec3");
+-		if (soundParams.Position == null)
++		lock (GetSourceLock())
+ 		{
+-			soundParams.Position = position.Clone();
+-			soundParams.RelativePosition = false;
+-			if (!disposed)
++			testError("before setposition vec3");
++			if (soundParams.Position == null)
+ 			{
+-				AL.Source(sourceId, (ALSourceb)514, false);
++				soundParams.Position = position.Clone();
++				soundParams.RelativePosition = false;
++				if (!disposed && sourceId != 0)
++				{
++					AL.Source(sourceId, (ALSourceb)514, false);
++				}
+ 			}
+-		}
+-		else
+-		{
+-			soundParams.Position.Set(position.X, position.Y, position.Z);
+-		}
+-		if (sourceId != 0)
+-		{
+-			if (!disposed)
++			else
++			{
++				soundParams.Position.Set(position.X, position.Y, position.Z);
++			}
++			if (sourceId != 0 && !disposed)
+ 			{
+ 				Vector3 val = default(Vector3);
+ 				val = new Vector3(position.X, position.Y, position.Z);
+ 				AL.Source(sourceId, (ALSource3f)4100, ref val);
++				testError("setposition vec3");
+ 			}
+-			testError("setposition vec3");
+ 		}
+ 	}
+ 
+ 	public void SetPitch(float val)
+ 	{
+-		soundParams.Pitch = val;
+-		if (sourceId != 0 && !disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
+-			testError("SetPitch");
++			soundParams.Pitch = val;
++			if (sourceId != 0 && !disposed)
++			{
++				AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
++				testError("SetPitch");
++			}
+ 		}
+ 	}
+ 
+ 	public void SetPitchOffset(float val)
+ 	{
+-		pitchOffset = val;
+-		if (sourceId != 0 && !disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
+-			testError("SetPitchOffset");
++			pitchOffset = val;
++			if (sourceId != 0 && !disposed)
++			{
++				AL.Source(sourceId, (ALSourcef)4099, GameMath.Clamp(soundParams.Pitch + pitchOffset, 0.1f, 3f));
++				testError("SetPitchOffset");
++			}
+ 		}
+ 	}
+ 
+ 	public void SetVolume()
+ 	{
+-		if (sourceId != 0 && !disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.Source(sourceId, (ALSourcef)4106, soundParams.Volume * GlobalVolume);
+-			testError("setvolume");
++			if (sourceId != 0 && !disposed)
++			{
++				AL.Source(sourceId, (ALSourcef)4106, soundParams.Volume * GlobalVolume);
++				testError("setvolume");
++			}
+ 		}
+ 	}
+ 
+ 	public void SetVolume(float val)
+ 	{
+-		soundParams.Volume = val;
+-		if (sourceId != 0 && !disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.Source(sourceId, (ALSourcef)4106, val * GlobalVolume);
+-			testError("setvolume(val)");
++			soundParams.Volume = val;
++			if (sourceId != 0 && !disposed)
++			{
++				AL.Source(sourceId, (ALSourcef)4106, val * GlobalVolume);
++				testError("setvolume(val)");
++			}
+ 		}
+ 	}
+ 
+ 	public void Toggle(bool on)
+ 	{
+@@ -527,54 +658,93 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 	}
+ 
+ 	public void Start()
+ 	{
+ 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
+-		sourceState = (ALSourceState)4114;
+-		if (!disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.SourcePlay(sourceId);
+-			testError("start");
++			explicitStopOrPause = false;
++			sourceState = (ALSourceState)4114;
++			if (!disposed && sourceId != 0)
++			{
++				AL.SourcePlay(sourceId);
++				testError("start");
++			}
+ 		}
+ 	}
+ 
+ 	public void Stop()
+ 	{
+ 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
+-		sourceState = (ALSourceState)4116;
+-		if (!disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.SourceStop(sourceId);
+-			testError("stop");
++			explicitStopOrPause = true;
++			sourceState = (ALSourceState)4116;
++			if (!disposed && sourceId != 0)
++			{
++				AL.SourceStop(sourceId);
++				testError("stop");
++			}
+ 		}
+ 	}
+ 
+ 	public void Pause()
+ 	{
+ 		//IL_0006: Unknown result type (might be due to invalid IL or missing references)
+-		sourceState = (ALSourceState)4115;
+-		if (!disposed)
++		lock (GetSourceLock())
+ 		{
+-			AL.SourcePause(sourceId);
+-			testError("pause");
++			explicitStopOrPause = true;
++			sourceState = (ALSourceState)4115;
++			if (!disposed && sourceId != 0)
++			{
++				AL.SourcePause(sourceId);
++				testError("pause");
++			}
+ 		}
+ 	}
+ 
+ 	public void Dispose()
+ 	{
+-		if (!disposed)
++		if (Interlocked.Exchange(ref ownerReleased, 1) == 0)
  		{
  			lock (loadedSoundsLock)
  			{
--				disposeSoundSource();
--				loadedSounds.Remove(this);
-+				if (!disposed)
-+				{
-+					disposeSoundSource();
-+					loadedSounds.Remove(this);
-+				}
++				awaitingAsyncLoad = false;
+ 				disposeSoundSource();
+ 				loadedSounds.Remove(this);
  			}
 -			if (ClientSettings.OptimizeRamMode == 2 && sample.AutoUnload)
++			if (ownsSampleRef && sample != null && sample.ReleaseOwner() == 0 && sample.AutoUnload)
++			{
++				sample.Unload();
++			}
 +		}
 +		else
 +		{
 +			lock (loadedSoundsLock)
  			{
 -				sample?.Unload();
++				awaitingAsyncLoad = false;
++				disposeSoundSource();
 +				loadedSounds.Remove(this);
  			}
  		}
-+		ReleaseSampleOwner(unloadIfLast: true);
 +		GC.SuppressFinalize(this);
 +	}
 +
@@ -167,7 +795,7 @@ index cb81034..e9ae449 100644
  	private void testError(string during)
  	{
  		//IL_0000: Unknown result type (might be due to invalid IL or missing references)
-@@ -603,25 +667,32 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+@@ -603,24 +773,37 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
  		throw new Exception("Sound dispose debug enabled, killing game. More debug info see client-main.log");
  	}
  
@@ -177,17 +805,13 @@ index cb81034..e9ae449 100644
 +		try
  		{
 -			lock (loadedSoundsLock)
--			{
++			if (!disposed && !ScreenManager.Platform.IsShuttingDown)
+ 			{
 -				loadedSounds.Remove(this);
 -			}
 -			if (trace == null)
 -			{
 -				ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose()", Params.Location);
--			}
--			else
-+			if (!disposed && !ScreenManager.Platform.IsShuttingDown)
- 			{
--				ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose(). Allocated at {1}", Params.Location, trace);
 +				lock (loadedSoundsLock)
 +				{
 +					loadedSounds.Remove(this);
@@ -201,13 +825,43 @@ index cb81034..e9ae449 100644
 +					ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose(). Allocated at {1}", Params?.Location, trace);
 +				}
  			}
- 		}
+-			else
++		}
 +		finally
 +		{
++			if (bufferId != 0)
+ 			{
+-				ScreenManager.Platform.Logger.Debug("Loaded sound {0} is leaking memory, missing call to Dispose(). Allocated at {1}", Params.Location, trace);
++				sample?.ReleaseSharedBuffer(bufferId, bufferEpoch, allowDeleteAutoUnload: false);
++				bufferId = 0;
++				bufferEpoch = 0;
+ 			}
 +			ReleaseSampleOwner(unloadIfLast: true);
-+		}
+ 		}
  	}
  
  	public void FadeTo(double newVolume, float duration, Action<ILoadedSound> onFaded)
  	{
- 		duration = Math.Max(0.02f, duration);
+@@ -699,13 +882,19 @@ public class LoadedSoundNative : ILoadedSound, IDisposable
+ 		});
+ 	}
+ 
+ 	public void SetLooping(bool on)
+ 	{
+-		Params.ShouldLoop = on;
+-		AL.Source(sourceId, (ALSourceb)4103, on);
+-		testError("set looping");
++		lock (GetSourceLock())
++		{
++			Params.ShouldLoop = on;
++			if (!disposed && sourceId != 0)
++			{
++				AL.Source(sourceId, (ALSourceb)4103, on);
++				testError("set looping");
++			}
++		}
+ 	}
+ 
+ 	public static void DisposeAllSounds()
+ 	{
+ 		lock (loadedSoundsLock)

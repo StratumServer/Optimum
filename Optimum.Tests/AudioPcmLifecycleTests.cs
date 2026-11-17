@@ -170,6 +170,114 @@ public sealed class AudioPcmLifecycleTests
         }
     }
 
+    private static byte[] BuildSyntheticVorbisHeaderAndTailOgg(int serial, byte channels, int sampleRate, long totalSamples)
+    {
+        byte[] headPage = new byte[28 + 30];
+        headPage[0] = (byte)'O';
+        headPage[1] = (byte)'g';
+        headPage[2] = (byte)'g';
+        headPage[3] = (byte)'S';
+        headPage[4] = 0;
+        headPage[5] = 0x02; // BOS
+        BinaryPrimitives.WriteInt32LittleEndian(headPage.AsSpan(14, 4), serial);
+        headPage[26] = 1;
+        headPage[27] = 30;
+        int pkt = 28;
+        headPage[pkt] = 0x01;
+        headPage[pkt + 1] = (byte)'v';
+        headPage[pkt + 2] = (byte)'o';
+        headPage[pkt + 3] = (byte)'r';
+        headPage[pkt + 4] = (byte)'b';
+        headPage[pkt + 5] = (byte)'i';
+        headPage[pkt + 6] = (byte)'s';
+        BinaryPrimitives.WriteUInt32LittleEndian(headPage.AsSpan(pkt + 7, 4), 0);
+        headPage[pkt + 11] = channels;
+        BinaryPrimitives.WriteInt32LittleEndian(headPage.AsSpan(pkt + 12, 4), sampleRate);
+
+        byte[] fullWithTail = BuildSyntheticOggTailStream(
+            prefixBytes: headPage.Length + 1024,
+            serial: serial,
+            granulePos: totalSamples,
+            headerTypeFlags: 0x04,
+            version: 0,
+            payload: new byte[32]);
+        Array.Copy(headPage, 0, fullWithTail, 0, headPage.Length);
+        return fullWithTail;
+    }
+
+    [Fact]
+    public void TryEstimateOggDurationAndFormat_AndShouldLazyDecodeSfx_ClassifyDurationsAccurately()
+    {
+        byte[] longOgg = BuildSyntheticVorbisHeaderAndTailOgg(serial: 777, channels: 2, sampleRate: 44100, totalSamples: 44100 * 12);
+        using (var ms = new MemoryStream(longOgg))
+        {
+            ms.Position = 17;
+            Assert.True(OptimumAudioBufferHelper.TryEstimateOggDurationAndFormat(ms, out int ch, out int rate, out float dur));
+            Assert.Equal(2, ch);
+            Assert.Equal(44100, rate);
+            Assert.InRange(dur, 11.99f, 12.01f);
+            Assert.Equal(17, ms.Position);
+            Assert.True(OptimumAudioBufferHelper.ShouldLazyDecodeSfx(ms, longOgg.Length));
+        }
+
+        byte[] shortOgg = BuildSyntheticVorbisHeaderAndTailOgg(serial: 778, channels: 1, sampleRate: 48000, totalSamples: 48000 * 2);
+        using (var ms = new MemoryStream(shortOgg))
+        {
+            Assert.True(OptimumAudioBufferHelper.TryEstimateOggDurationAndFormat(ms, out int ch, out int rate, out float dur));
+            Assert.Equal(1, ch);
+            Assert.Equal(48000, rate);
+            Assert.InRange(dur, 1.99f, 2.01f);
+            Assert.False(OptimumAudioBufferHelper.ShouldLazyDecodeSfx(ms, shortOgg.Length));
+        }
+
+        // Unseekable fallback classifies by compressed threshold cleanly.
+        using (var unseekableSmall = new UnseekableStream(new MemoryStream(shortOgg)))
+        {
+            Assert.False(OptimumAudioBufferHelper.ShouldLazyDecodeSfx(unseekableSmall, compressedByteLength: 64 * 1024));
+            Assert.True(OptimumAudioBufferHelper.ShouldLazyDecodeSfx(unseekableSmall, compressedByteLength: 300 * 1024));
+        }
+    }
+
+    [Fact]
+    public void Issue604_SharedOpenAlBuffersAndLazySfx_AreRegisteredInProgramAndOwnedList()
+    {
+        string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+        string cecilList = File.ReadAllText(PatchReader.FindRepositoryFile("patches/cecil-owned.list"));
+
+        string[] expectedPatches =
+        {
+            "patches/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs.patch",
+            "patches/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs.patch",
+            "patches/VintagestoryLib/Vintagestory.Client/ScreenManager.cs.patch",
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs.patch",
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch",
+        };
+
+        foreach (string patch in expectedPatches)
+        {
+            Assert.Contains(patch, cecilList);
+            Assert.True(File.Exists(PatchReader.FindRepositoryFile(patch)), $"Missing patch file: {patch}");
+        }
+
+        Assert.Contains("\"AcquireSharedBuffer\"", programSource);
+        Assert.Contains("\"EvictIdleSharedBuffers\"", programSource);
+        Assert.Contains("\"DisposeAllSharedBuffers\"", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.AudioOpenAl\", \"initContext\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.AudioOpenAl\", \"Dispose\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.ScreenManager\", \"LoadSoundsSlow\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemSoundEngine\", \"OnGameTick500ms\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemSoundEngine\", \"Dispose\", 1)", programSource);
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientPlatformWindows\", \"CreateAudio\", 3)", programSource);
+
+        string loadedSoundPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs.patch");
+        Assert.Contains("AcquireSharedBuffer", loadedSoundPatch);
+        Assert.Contains("ReleaseSharedBuffer", loadedSoundPatch);
+
+        string screenMgrPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client/ScreenManager.cs.patch");
+        Assert.Contains("ShouldSkipSlowPredecode", screenMgrPatch);
+    }
+
     [Fact]
     public void OptimumPcmBuffer_PreSizedExactTrimsAndGrowsProperly()
     {
@@ -233,9 +341,12 @@ public sealed class AudioPcmLifecycleTests
         Assert.Contains("new(\"Vintagestory.Client.GuiScreenRunningGame\", \"handOverRenderingToRunningGame\", 0)", programSource);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientSystemDebugCommands\", \"OnCmdSoundsummary\", 1)", programSource);
 
+        string audioMetaPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs.patch");
+        Assert.Contains("ReleaseManagedPcm();", audioMetaPatch);
+
         string loadedSoundPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs.patch");
         Assert.DoesNotContain("+			if (ClientSettings.OptimizeRamMode == 2", loadedSoundPatch);
-        Assert.Contains("ReleaseManagedPcm();", loadedSoundPatch);
+        Assert.Contains("AcquireSharedBuffer", loadedSoundPatch);
 
         string screenManagerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client/ScreenManager.cs.patch");
         Assert.Contains("StopAndDisposeIntroMusic", screenManagerPatch);

@@ -1,18 +1,22 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs b/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
-index da1f735..f586b46 100644
+index da1f735..6d18ed6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs
-@@ -1,7 +1,9 @@
+@@ -1,8 +1,13 @@
  using System;
  using System.Collections.Generic;
++using System.IO;
 +using System.Threading;
++using OpenTK.Audio.OpenAL;
 +using Vintagestory.API.Client;
  using Vintagestory.API.Common;
++using Vintagestory.API.Config;
  using Vintagestory.API.Util;
  
  namespace Vintagestory.Client.NoObf;
  
-@@ -19,55 +21,96 @@ public class AudioMetaData : AudioData
+ public class AudioMetaData : AudioData
+@@ -19,55 +24,114 @@ public class AudioMetaData : AudioData
  
  	public bool AutoUnload;
  
@@ -23,6 +27,24 @@ index da1f735..f586b46 100644
 +	private int activeOwnerCount;
 +
 +	private int unloadRequested;
++
++	private object bufferLock;
++
++	private int sharedBufferId;
++
++	private int sharedBufferEpoch;
++
++	private int sharedBufferBytes;
++
++	private int sharedBufferUsers;
++
++	private long lastUnreferencedMs;
++
++	private float cachedDurationSeconds;
++
++	private static object sharedBuffersLock;
++
++	private static HashSet<AudioMetaData> activeSharedBuffers;
 +
  	public AudioMetaData(IAsset asset)
  	{
@@ -87,13 +109,13 @@ index da1f735..f586b46 100644
 +				Rate = 0;
 +				BitsPerSample = 0;
 +				Volatile.Write(ref Loaded, 0);
-+			}
+ 			}
+-			waitingToPlay = null;
 +			if (waitingToPlay != null)
 +			{
 +				list = waitingToPlay;
 +				waitingToPlay = null;
- 			}
--			waitingToPlay = null;
++			}
 +		}
 +		if (list == null)
 +		{
@@ -125,7 +147,7 @@ index da1f735..f586b46 100644
  		return false;
  	}
  
-@@ -90,30 +133,171 @@ public class AudioMetaData : AudioData
+@@ -90,30 +154,557 @@ public class AudioMetaData : AudioData
  		return onCompleted.Invoke();
  	}
  
@@ -140,9 +162,7 @@ index da1f735..f586b46 100644
  		{
 -			if (Loaded == 3)
 +			if (Volatile.Read(ref Loaded) >= 2)
- 			{
--				onCompleted.Enqueue();
--				return;
++			{
 +				flag = true;
 +			}
 +			else
@@ -200,8 +220,7 @@ index da1f735..f586b46 100644
 +				{
 +					Volatile.Write(ref Loaded, 2);
 +				}
- 			}
--			if (waitingToPlay == null)
++			}
 +			return true;
 +		}
 +	}
@@ -249,9 +268,397 @@ index da1f735..f586b46 100644
 +		{
 +			Volatile.Write(ref Pcm, null);
 +			if (Asset != null)
++			{
++				Asset.Data = null;
++			}
++		}
++	}
++
++	private object GetBufferLock()
++	{
++		return LazyInitializer.EnsureInitialized(ref bufferLock);
++	}
++
++	private static object GetSharedBuffersLock()
++	{
++		return LazyInitializer.EnsureInitialized(ref sharedBuffersLock);
++	}
++
++	private static HashSet<AudioMetaData> GetActiveSharedBuffers()
++	{
++		return LazyInitializer.EnsureInitialized(ref activeSharedBuffers);
++	}
++
++	internal float EnsureDurationMetadataKnown()
++	{
++		float num = Volatile.Read(ref cachedDurationSeconds);
++		if (num > 0f)
++		{
++			return num;
++		}
++		int num2 = Volatile.Read(ref sharedBufferBytes);
++		if (num2 > 0 && Channels > 0 && Rate > 0 && BitsPerSample > 0)
++		{
++			float num3 = 1f * (float)num2 / (float)(Rate * BitsPerSample / 8) / (float)Channels;
++			Volatile.Write(ref cachedDurationSeconds, num3);
++			return num3;
++		}
++		byte[] array = Volatile.Read(ref Pcm);
++		if (array != null && Channels > 0 && Rate > 0 && BitsPerSample > 0)
++		{
++			float num4 = 1f * (float)array.Length / (float)(Rate * BitsPerSample / 8) / (float)Channels;
++			Volatile.Write(ref cachedDurationSeconds, num4);
++			return num4;
++		}
++		if (Asset == null)
++		{
++			return 0f;
++		}
++		lock (GetDecodeLock())
++		{
++			num = Volatile.Read(ref cachedDurationSeconds);
++			if (num > 0f)
++			{
++				return num;
++			}
++			bool flag = false;
++			if (!Asset.IsLoaded() && Asset.Origin != null)
++			{
++				Asset.Origin.LoadAsset(Asset);
++				flag = true;
++			}
++			try
++			{
++				byte[] data = Asset.Data;
++				if (data == null || data.Length == 0)
++				{
++					return 0f;
++				}
++				using MemoryStream memoryStream = new MemoryStream(data, writable: false);
++				if (OptimumAudioBufferHelper.TryEstimateOggDurationAndFormat(memoryStream, out int channels, out int sampleRate, out float durationSeconds))
++				{
++					if (Channels == 0)
++					{
++						Channels = channels;
++					}
++					if (Rate == 0)
++					{
++						Rate = sampleRate;
++					}
++					Volatile.Write(ref cachedDurationSeconds, durationSeconds);
++					return durationSeconds;
++				}
++			}
++			finally
++			{
++				if (flag && Volatile.Read(ref Loaded) == 0 && Asset != null)
++				{
++					Asset.Data = null;
++				}
++			}
++		}
++		return 0f;
++	}
++
++	internal bool ShouldSkipSlowPredecode()
++	{
++		if (Volatile.Read(ref cachedDurationSeconds) >= 5f)
++		{
++			return true;
++		}
++		if (Volatile.Read(ref Loaded) > 0 || Asset == null)
++		{
++			return false;
++		}
++		lock (GetDecodeLock())
++		{
++			if (Volatile.Read(ref Loaded) > 0 || Asset == null)
++			{
++				return false;
++			}
++			if (!Asset.IsLoaded() && Asset.Origin != null)
++			{
++				Asset.Origin.LoadAsset(Asset);
++			}
++			byte[] data = Asset.Data;
++			if (data == null || data.Length == 0)
++			{
++				return false;
++			}
++			using MemoryStream memoryStream = new MemoryStream(data, writable: false);
++			if (OptimumAudioBufferHelper.TryEstimateOggDurationAndFormat(memoryStream, out int channels, out int sampleRate, out float durationSeconds))
++			{
++				if (Channels == 0)
++				{
++					Channels = channels;
++				}
++				if (Rate == 0)
++				{
++					Rate = sampleRate;
++				}
++				Volatile.Write(ref cachedDurationSeconds, durationSeconds);
++				if (durationSeconds >= 5f)
++				{
++					Asset.Data = null;
++					return true;
++				}
++				return false;
++			}
++			if (data.Length >= 262144)
++			{
++				Asset.Data = null;
++				return true;
++			}
++			return false;
++		}
++	}
++
++	internal bool HasValidSharedBuffer()
++	{
++		lock (GetBufferLock())
++		{
++			return sharedBufferId != 0 && sharedBufferEpoch == Volatile.Read(ref AudioOpenAl.ContextGeneration);
++		}
++	}
++
++	internal unsafe bool AcquireSharedBuffer(
++		out int outBufferId,
++		out int outEpoch,
++		out int outByteLength,
++		out int outChannels,
++		out int outRate,
++		out int outBitsPerSample)
++	{
++		outBufferId = 0;
++		outEpoch = 0;
++		outByteLength = 0;
++		outChannels = 0;
++		outRate = 0;
++		outBitsPerSample = 16;
++
++		lock (GetBufferLock())
++		{
++			int num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
++			if (sharedBufferId != 0 && sharedBufferEpoch == num)
++			{
++				sharedBufferUsers++;
++				outBufferId = sharedBufferId;
++				outEpoch = num;
++				outByteLength = sharedBufferBytes;
++				outChannels = Channels;
++				outRate = Rate;
++				outBitsPerSample = BitsPerSample;
++				if (Volatile.Read(ref Loaded) < 3)
++				{
++					Volatile.Write(ref Loaded, 3);
++				}
++				return true;
++			}
++
++			if (sharedBufferEpoch != num)
++			{
++				sharedBufferId = 0;
++				sharedBufferBytes = 0;
++				sharedBufferUsers = 0;
++			}
++
++			byte[] array = AcquirePcmSnapshot();
++			if (array == null || array.Length == 0)
++			{
++				return false;
++			}
++
++			num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
++			int num2 = AL.GenBuffer();
++			if (num2 == 0)
++			{
++				return false;
++			}
++
++			int channels = Channels;
++			int rate = Rate;
++			int num3 = (BitsPerSample > 0) ? BitsPerSample : 16;
++			try
++			{
++				ALFormat soundFormat = AudioOpenAl.GetSoundFormat(channels, num3);
++				fixed (byte* pcm = array)
++				{
++					AL.BufferData(num2, soundFormat, (void*)pcm, array.Length, rate);
++				}
++				ALError error = AL.GetError();
++				AL.GetBuffer(num2, (ALGetBufferi)8196, out int actualBytes);
++				if ((int)error != 0 || actualBytes <= 0)
++				{
++					AL.DeleteBuffer(num2);
++					return false;
++				}
++			}
++			catch
++			{
++				try
++				{
++					AL.DeleteBuffer(num2);
++				}
++				catch
++				{
++				}
++				throw;
++			}
++
++			sharedBufferId = num2;
++			sharedBufferEpoch = num;
++			sharedBufferBytes = array.Length;
++			sharedBufferUsers = 1;
++			if (channels > 0 && rate > 0 && num3 > 0)
++			{
++				Volatile.Write(ref cachedDurationSeconds, 1f * (float)array.Length / (float)(rate * num3 / 8) / (float)channels);
++			}
++			lock (GetSharedBuffersLock())
++			{
++				GetActiveSharedBuffers().Add(this);
++			}
++			Volatile.Write(ref Loaded, 3);
++			ReleaseManagedPcm();
++
++			outBufferId = num2;
++			outEpoch = num;
++			outByteLength = sharedBufferBytes;
++			outChannels = channels;
++			outRate = rate;
++			outBitsPerSample = num3;
++			return true;
++		}
++	}
++
++	internal void ReleaseSharedBuffer(int bufferId, int bufferEpoch, bool allowDeleteAutoUnload)
++	{
++		lock (GetBufferLock())
++		{
++			if (sharedBufferId != bufferId || sharedBufferEpoch != bufferEpoch)
++			{
++				return;
++			}
++			if (sharedBufferUsers > 0)
++			{
++				sharedBufferUsers--;
++			}
++			if (sharedBufferUsers == 0)
++			{
++				Volatile.Write(ref lastUnreferencedMs, Environment.TickCount64);
++				int num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
++				if (AutoUnload && allowDeleteAutoUnload)
++				{
++					if (sharedBufferId != 0 && sharedBufferEpoch == num && ScreenManager.Platform?.IsShuttingDown != true)
++					{
++						AL.DeleteBuffer(sharedBufferId);
++					}
++					sharedBufferId = 0;
++					sharedBufferBytes = 0;
++					sharedBufferEpoch = 0;
++					lock (GetSharedBuffersLock())
++					{
++						activeSharedBuffers?.Remove(this);
++					}
++				}
++			}
++		}
++	}
++
++	internal static void EvictIdleSharedBuffers(int maxIdleMs, int minBytesToEvict)
++	{
++		AudioMetaData[] array;
++		lock (GetSharedBuffersLock())
++		{
++			if (activeSharedBuffers == null || activeSharedBuffers.Count == 0)
+ 			{
+-				onCompleted.Enqueue();
+ 				return;
+ 			}
+-			if (waitingToPlay == null)
++			array = new AudioMetaData[activeSharedBuffers.Count];
++			activeSharedBuffers.CopyTo(array);
++		}
++
++		long tickCount = Environment.TickCount64;
++		int num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
++		for (int i = 0; i < array.Length; i++)
++		{
++			AudioMetaData audioMetaData = array[i];
++			bool flag = false;
++			lock (audioMetaData.GetBufferLock())
++			{
++				if (audioMetaData.sharedBufferId != 0 &&
++					Volatile.Read(ref audioMetaData.sharedBufferUsers) == 0 &&
++					Volatile.Read(ref audioMetaData.activeOwnerCount) == 0 &&
++					(audioMetaData.AutoUnload || audioMetaData.sharedBufferBytes >= minBytesToEvict) &&
++					(maxIdleMs <= 0 || tickCount - Volatile.Read(ref audioMetaData.lastUnreferencedMs) >= maxIdleMs))
++				{
++					if (audioMetaData.sharedBufferEpoch == num && ScreenManager.Platform?.IsShuttingDown != true)
++					{
++						AL.DeleteBuffer(audioMetaData.sharedBufferId);
++					}
++					audioMetaData.sharedBufferId = 0;
++					audioMetaData.sharedBufferBytes = 0;
++					audioMetaData.sharedBufferEpoch = 0;
++					lock (GetSharedBuffersLock())
++					{
++						activeSharedBuffers?.Remove(audioMetaData);
++					}
++					flag = true;
++				}
++			}
++			if (flag)
  			{
 -				waitingToPlay = new List<MainThreadAction>();
-+				Asset.Data = null;
++				audioMetaData.Unload();
++			}
++		}
++	}
++
++	internal static void DisposeAllSharedBuffers()
++	{
++		AudioMetaData[] array;
++		lock (GetSharedBuffersLock())
++		{
++			if (activeSharedBuffers == null || activeSharedBuffers.Count == 0)
++			{
++				return;
++			}
++			array = new AudioMetaData[activeSharedBuffers.Count];
++			activeSharedBuffers.CopyTo(array);
++			activeSharedBuffers.Clear();
++		}
++
++		int num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
++		for (int i = 0; i < array.Length; i++)
++		{
++			AudioMetaData audioMetaData = array[i];
++			lock (audioMetaData.GetBufferLock())
++			{
++				if (audioMetaData.sharedBufferId != 0)
++				{
++					if (audioMetaData.sharedBufferEpoch == num)
++					{
++						try
++						{
++							AL.DeleteBuffer(audioMetaData.sharedBufferId);
++						}
++						catch
++						{
++						}
++					}
++					audioMetaData.sharedBufferId = 0;
++					audioMetaData.sharedBufferBytes = 0;
++					audioMetaData.sharedBufferEpoch = 0;
++					audioMetaData.sharedBufferUsers = 0;
++				}
++				lock (audioMetaData)
++				{
++					if (Volatile.Read(ref audioMetaData.Loaded) == 3 && Volatile.Read(ref audioMetaData.Pcm) == null)
++					{
++						Volatile.Write(ref audioMetaData.Loaded, 0);
++					}
++				}
  			}
 -			waitingToPlay.Add(onCompleted);
  		}

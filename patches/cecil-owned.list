@@ -48,6 +48,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemDebugCommands.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/ScreenManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
