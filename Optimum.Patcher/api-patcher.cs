@@ -217,6 +217,12 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 10 MeshDataPool lifecycle patches, applied {meshPoolLifecyclePatches}.");
         }
+        int meshPoolSortPatches = PatchMeshDataPoolSort(vanilla.MainModule, contracts.MainModule);
+        if (meshPoolSortPatches != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 MeshDataPool front-to-back sort patches, applied {meshPoolSortPatches}.");
+        }
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
         int inventorySearchPatches = PatchInventorySearch(
             vanilla.MainModule,
@@ -414,6 +420,7 @@ public static class ApiPatcher
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{guiTextureDisposals} GUI texture disposals, " +
                 $"{meshPoolLifecyclePatches} MeshDataPool lifecycle hooks, " +
+                $"{meshPoolSortPatches} MeshDataPool sort hooks, " +
                 $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
                 $"{inventorySearchPatches} inventory search optimizations, " +
                 $"{guiHoverTextPatches} hover text same-text skips, " +
@@ -1536,6 +1543,73 @@ public static class ApiPatcher
         }
         variable = null;
         return false;
+    }
+
+    internal static int PatchMeshDataPoolSort(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string sortTypeName = "Vintagestory.API.Config.OptimumMeshPoolSort";
+        const string managerTypeName = "Vintagestory.API.Client.MeshDataPoolManager";
+        const string poolTypeName = "Vintagestory.API.Client.MeshDataPool";
+
+        var sortType = contracts.GetType(sortTypeName)
+            ?? throw new InvalidOperationException($"{sortTypeName} is missing from the contracts assembly.");
+        var managerType = module.GetType(managerTypeName)
+            ?? throw new InvalidOperationException($"{managerTypeName} is missing from the vanilla API.");
+        var poolType = module.GetType(poolTypeName)
+            ?? throw new InvalidOperationException($"{poolTypeName} is missing from the vanilla API.");
+
+        var renderMethod = managerType.Methods.SingleOrDefault(m => m.Name == "Render" && m.Parameters.Count == 3)
+            ?? throw new InvalidOperationException($"{managerTypeName}.Render is missing from the vanilla API.");
+        var tryRenderSorted = sortType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "TryRenderSorted" && m.Parameters.Count == 4)
+            ?? throw new InvalidOperationException($"{sortTypeName}.TryRenderSorted helper is missing.");
+
+        var frustumCullMethod = poolType.Methods.SingleOrDefault(m => m.Name == "FrustumCull" && m.Parameters.Count == 2)
+            ?? throw new InvalidOperationException($"{poolTypeName}.FrustumCull is missing from the vanilla API.");
+        var tryFrustumCullSorted = sortType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "TryFrustumCullSortedOpaque" && m.Parameters.Count == 3)
+            ?? throw new InvalidOperationException($"{sortTypeName}.TryFrustumCullSortedOpaque helper is missing.");
+
+        int patched = 0;
+        patched += PrependTryFastPath(renderMethod, module.ImportReference(tryRenderSorted));
+        patched += PrependTryFastPath(frustumCullMethod, module.ImportReference(tryFrustumCullSorted));
+
+        Console.WriteLine(
+            $"  API PATCHED: {managerTypeName}.Render + {poolTypeName}.FrustumCull front-to-back sort ({patched} hooks) -> OptimumMeshPoolSort");
+        return patched;
+    }
+
+    private static int PrependTryFastPath(MethodDefinition target, MethodReference fastPathMethod)
+    {
+        if (!target.HasBody)
+        {
+            throw new InvalidOperationException($"{target.FullName} has no method body.");
+        }
+
+        var instructions = target.Body.Instructions;
+        if (instructions.Any(ins =>
+                ins.OpCode == OpCodes.Call &&
+                ins.Operand is MethodReference callee &&
+                callee.Name == fastPathMethod.Name &&
+                callee.DeclaringType.FullName == fastPathMethod.DeclaringType.FullName))
+        {
+            return 1;
+        }
+
+        ClearDebugInformation(target);
+        var originalFirst = instructions[0];
+        var processor = target.Body.GetILProcessor();
+
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Ldarg_0));
+        for (int i = 0; i < target.Parameters.Count; i++)
+        {
+            processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Ldarg, target.Parameters[i]));
+        }
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Call, fastPathMethod));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Brfalse, originalFirst));
+        processor.InsertBefore(originalFirst, Instruction.Create(OpCodes.Ret));
+
+        return 1;
     }
 
     internal static int PatchGuiTextureDisposal(

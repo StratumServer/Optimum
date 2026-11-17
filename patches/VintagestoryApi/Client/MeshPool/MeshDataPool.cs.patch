@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..48fc331 100644
+index f9128b4..fdd1e34 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -1,7 +1,8 @@
@@ -224,7 +224,7 @@ index f9128b4..48fc331 100644
          /// </summary>
          /// <param name="capi">The core client API</param>
          /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
-@@ -364,38 +468,282 @@ namespace Vintagestory.API.Client
+@@ -364,38 +468,310 @@ namespace Vintagestory.API.Client
          /// <param name="frustumCullMode">The mode of the culling.</param>
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
@@ -276,6 +276,11 @@ index f9128b4..48fc331 100644
  
 -                    indicesGroupsCount++;
 +            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
++            float sortCamX = 0f, sortCamY = 0f, sortCamZ = 0f;
++            bool sortFrontToBack = frustumCullMode == EnumFrustumCullMode.CullNormal
++                && this.dimensionId != Dimensions.MiniDimensions
++                && Vintagestory.API.Config.OptimumMeshPoolSort.TryGetCameraPosition(frustumCuller, out sortCamX, out sortCamY, out sortCamZ);
++            float[] spanDistSq = sortFrontToBack ? Vintagestory.API.Config.OptimumMeshPoolSort.EnsureSpanDistanceScratch(count) : null;
 +
 +            if (cullData != null && frustumCuller != null)
 +            {
@@ -297,11 +302,22 @@ index f9128b4..48fc331 100644
 +                                int size = cullData.IndexCounts[idx];
 +                                indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[idx];
 +                                indicesSizes[indicesGroupsCount] = size;
++                                if (sortFrontToBack)
++                                {
++                                    float dx = cullData.CenterX[idx] - sortCamX;
++                                    float dy = cullData.CenterY[idx] - sortCamY;
++                                    float dz = cullData.CenterZ[idx] - sortCamZ;
++                                    spanDistSq[indicesGroupsCount] = dx * dx + dy * dy + dz * dz;
++                                }
 +                                RenderedTriangles += size / 3;
 +                                indicesGroupsCount++;
 +                                location.FrustumVisible = true;
 +                                flagged.Add(location);
 +                            }
++                        }
++                        if (sortFrontToBack && indicesGroupsCount > 1)
++                        {
++                            Vintagestory.API.Config.OptimumMeshPoolSort.SortVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
 +                        }
 +                        return;
 +
@@ -411,11 +427,23 @@ index f9128b4..48fc331 100644
 +                            {
 +                                indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
 +                                indicesSizes[indicesGroupsCount] = size;
++                                if (sortFrontToBack)
++                                {
++                                    Sphere sphere = location.FrustumCullSphere;
++                                    float dx = sphere.x - sortCamX;
++                                    float dy = sphere.y - sortCamY;
++                                    float dz = sphere.z - sortCamZ;
++                                    spanDistSq[indicesGroupsCount] = dx * dx + dy * dy + dz * dz;
++                                }
 +                                RenderedTriangles += size / 3;
 +                                indicesGroupsCount++;
 +                                flagged.Add(location);
 +                            }
 +                        }
++                    }
++                    if (sortFrontToBack && indicesGroupsCount > 1)
++                    {
++                        Vintagestory.API.Config.OptimumMeshPoolSort.SortVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
 +                    }
 +                    break;
 +
@@ -517,7 +545,7 @@ index f9128b4..48fc331 100644
                  ModelDataPoolLocation location = poolLocations[i];
  
                  int size = location.IndicesEnd - location.IndicesStart;
-@@ -423,11 +771,11 @@ namespace Vintagestory.API.Client
+@@ -423,11 +799,11 @@ namespace Vintagestory.API.Client
          /// Disposes of the current mesh pool.
          /// </summary>
          /// <param name="capi">The core client API</param>
@@ -530,7 +558,7 @@ index f9128b4..48fc331 100644
          /// <summary>
          /// Calculates the current fragmentation of the mesh.
          /// </summary>
-@@ -462,11 +810,15 @@ namespace Vintagestory.API.Client
+@@ -462,11 +838,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -546,7 +574,7 @@ index f9128b4..48fc331 100644
  
  
      /// <summary>
-@@ -513,10 +865,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +893,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -559,7 +587,7 @@ index f9128b4..48fc331 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +889,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +917,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);

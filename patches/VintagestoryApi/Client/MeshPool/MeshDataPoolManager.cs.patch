@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
-index c56f6af..93af075 100644
+index c56f6af..6dc1dd9 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPoolManager.cs
 @@ -89,10 +89,11 @@ namespace Vintagestory.API.Client
@@ -14,55 +14,165 @@ index c56f6af..93af075 100644
  
              if (location == null)
              {
-@@ -110,10 +111,12 @@ namespace Vintagestory.API.Client
+@@ -110,85 +111,109 @@ namespace Vintagestory.API.Client
          /// <param name="originUniformName"></param>
          /// <param name="frustumCullMode">The culling mode.  Default is CulHideDelay.</param>
          public void Render(Vec3d playerpos, string originUniformName, EnumFrustumCullMode frustumCullMode = EnumFrustumCullMode.CullNormal)
          {
              int count = pools.Count;
+-            for (int i = 0; i < count; i++)
 +            int poolsRendered = 0;
 +            int poolsCulled = 0;
-             for (int i = 0; i < count; i++)
++            bool opaqueSortPass = frustumCullMode == EnumFrustumCullMode.CullNormal
++                && Vintagestory.API.Config.OptimumMeshPoolSort.IsOpaqueEarlyZSortActive;
++            int[] sortedIndices = opaqueSortPass
++                ? Vintagestory.API.Config.OptimumMeshPoolSort.GetSortedPoolIndices(pools, count, playerpos)
++                : null;
++            try
              {
-                 MeshDataPool pool = pools[i];
-                 if (pool.dimensionId == Dimensions.MiniDimensions)
+-                MeshDataPool pool = pools[i];
+-                if (pool.dimensionId == Dimensions.MiniDimensions)
++                for (int k = 0; k < count; k++)
                  {
-@@ -155,10 +158,11 @@ namespace Vintagestory.API.Client
-                         (float)(pool.poolOrigin.Z + renderOffset.Z - playerpos.Z)
-                     ));
+-                    bool revertModelviewMatrix = false;
+-                    bool revertMVPMatrix = false;
+-                    bool revertTransparency = false;
++                    int i = sortedIndices != null ? sortedIndices[k] : k;
++                    MeshDataPool pool = pools[i];
++                    if (pool.dimensionId == Dimensions.MiniDimensions)
++                    {
++                        bool revertModelviewMatrix = false;
++                        bool revertMVPMatrix = false;
++                        bool revertTransparency = false;
  
-                     try
+-                    // Special code for movable chunks
+-                    if (!capi.World.TryGetMiniDimension(pool.poolOrigin, out IMiniDimension dimension) || dimension.selectionTrackingOriginalPos == null) continue;
++                        // Special code for movable chunks
++                        if (!capi.World.TryGetMiniDimension(pool.poolOrigin, out IMiniDimension dimension) || dimension.selectionTrackingOriginalPos == null) continue;
+ 
+-                    pool.SetFullyVisible();
+-                    if (pool.indicesGroupsCount == 0)
+-                    {
+-                        continue;
+-                    }
++                        pool.SetFullyVisible();
++                        if (pool.indicesGroupsCount == 0)
++                        {
++                            continue;
++                        }
+ 
+-                    FastVec3d renderOffset = dimension.GetRenderOffset(masterPool.currentDt);
++                        FastVec3d renderOffset = dimension.GetRenderOffset(masterPool.currentDt);
+ 
+-                    var currShader = capi.Render.CurrentActiveShader;
+-                    if (currShader.HasUniform("modelViewMatrix"))
+-                    {
+-                        currShader.UniformMatrix("modelViewMatrix", dimension.GetRenderTransformMatrix(masterPool.currentModelViewMatrix, playerpos));
+-                        revertModelviewMatrix = true;
+-                        if (currShader.HasUniform("forcedTransparency"))
++                        var currShader = capi.Render.CurrentActiveShader;
++                        if (currShader.HasUniform("modelViewMatrix"))
++                        {
++                            currShader.UniformMatrix("modelViewMatrix", dimension.GetRenderTransformMatrix(masterPool.currentModelViewMatrix, playerpos));
++                            revertModelviewMatrix = true;
++                            if (currShader.HasUniform("forcedTransparency"))
++                            {
++                                currShader.Uniform("forcedTransparency", capi.Settings.Float["previewTransparency"]);
++                                revertTransparency = true;
++                            }
++                        }
++                        else if (currShader.HasUniform("mvpMatrix"))
++                        {
++                            currShader.UniformMatrix("mvpMatrix", dimension.GetRenderTransformMatrix(masterPool.shadowMVPMatrix, playerpos));
++                            revertMVPMatrix = true;
++                        }
++
++                        currShader.Uniform(originUniformName, tmp.Set(
++                            (float)(pool.poolOrigin.X + renderOffset.X - playerpos.X),
++                            (float)(pool.poolOrigin.Y + renderOffset.Y - playerpos.Y),
++                            (float)(pool.poolOrigin.Z + renderOffset.Z - playerpos.Z)
++                        ));
++
++                        try
++                        {
++                            poolsRendered++;
++                            pool.RenderMesh(capi.Render);
++                        }
++                        finally
+                         {
+-                            currShader.Uniform("forcedTransparency", capi.Settings.Float["previewTransparency"]);
+-                            revertTransparency = true;
++                            if (revertModelviewMatrix)
++                                capi.Render.CurrentActiveShader.UniformMatrix("modelViewMatrix", masterPool.currentModelViewMatrix);
++                            if (revertMVPMatrix)
++                                capi.Render.CurrentActiveShader.UniformMatrix("mvpMatrix", masterPool.shadowMVPMatrix);
++                            if (revertTransparency)
++                                capi.Render.CurrentActiveShader.Uniform("forcedTransparency", 0f);
+                         }
+                     }
+-                    else if (currShader.HasUniform("mvpMatrix"))
++                    else
                      {
+-                        currShader.UniformMatrix("mvpMatrix", dimension.GetRenderTransformMatrix(masterPool.shadowMVPMatrix, playerpos));
+-                        revertMVPMatrix = true;
+-                    }
++                        long cullStart = System.Diagnostics.Stopwatch.GetTimestamp();
++                        pool.FrustumCull(frustumCuller, frustumCullMode);
++                        Vintagestory.API.Config.OptimumDiagnostics.RecordChunkFrustumCullTicks(System.Diagnostics.Stopwatch.GetTimestamp() - cullStart);
+ 
+-                    currShader.Uniform(originUniformName, tmp.Set(
+-                        (float)(pool.poolOrigin.X + renderOffset.X - playerpos.X),
+-                        (float)(pool.poolOrigin.Y + renderOffset.Y - playerpos.Y),
+-                        (float)(pool.poolOrigin.Z + renderOffset.Z - playerpos.Z)
+-                    ));
++                        if (pool.indicesGroupsCount == 0)
++                        {
++                            poolsCulled++;
++                            continue;
++                        }
+ 
+-                    try
+-                    {
++                        capi.Render.CurrentActiveShader.Uniform(originUniformName, tmp.Set(
++                            (float)(pool.poolOrigin.X - playerpos.X),
++                            (float)(pool.poolOrigin.Y + pool.dimensionId * BlockPos.DimensionBoundary - playerpos.Y),
++                            (float)(pool.poolOrigin.Z - playerpos.Z)
++                        ));
++
 +                        poolsRendered++;
                          pool.RenderMesh(capi.Render);
                      }
-                     finally
-                     {
-                         if (revertModelviewMatrix)
-@@ -169,26 +173,31 @@ namespace Vintagestory.API.Client
-                             capi.Render.CurrentActiveShader.Uniform("forcedTransparency", 0f);
-                     }
+-                    finally
+-                    {
+-                        if (revertModelviewMatrix)
+-                            capi.Render.CurrentActiveShader.UniformMatrix("modelViewMatrix", masterPool.currentModelViewMatrix);
+-                        if (revertMVPMatrix)
+-                            capi.Render.CurrentActiveShader.UniformMatrix("mvpMatrix", masterPool.shadowMVPMatrix);
+-                        if (revertTransparency)
+-                            capi.Render.CurrentActiveShader.Uniform("forcedTransparency", 0f);
+-                    }
                  }
-                 else
+-                else
++            }
++            finally
++            {
++                if (opaqueSortPass)
                  {
-+                    long cullStart = System.Diagnostics.Stopwatch.GetTimestamp();
-                     pool.FrustumCull(frustumCuller, frustumCullMode);
-+                    Vintagestory.API.Config.OptimumDiagnostics.RecordChunkFrustumCullTicks(System.Diagnostics.Stopwatch.GetTimestamp() - cullStart);
- 
-                     if (pool.indicesGroupsCount == 0)
-                     {
-+                        poolsCulled++;
-                         continue;
-                     }
- 
-                     capi.Render.CurrentActiveShader.Uniform(originUniformName, tmp.Set(
-                         (float)(pool.poolOrigin.X - playerpos.X),
-                         (float)(pool.poolOrigin.Y + pool.dimensionId * BlockPos.DimensionBoundary - playerpos.Y),
-                         (float)(pool.poolOrigin.Z - playerpos.Z)
-                     ));
- 
-+                    poolsRendered++;
-                     pool.RenderMesh(capi.Render);
+-                    pool.FrustumCull(frustumCuller, frustumCullMode);
+-
+-                    if (pool.indicesGroupsCount == 0)
+-                    {
+-                        continue;
+-                    }
+-
+-                    capi.Render.CurrentActiveShader.Uniform(originUniformName, tmp.Set(
+-                        (float)(pool.poolOrigin.X - playerpos.X),
+-                        (float)(pool.poolOrigin.Y + pool.dimensionId * BlockPos.DimensionBoundary - playerpos.Y),
+-                        (float)(pool.poolOrigin.Z - playerpos.Z)
+-                    ));
+-
+-                    pool.RenderMesh(capi.Render);
++                    Vintagestory.API.Config.OptimumMeshPoolSort.ClearRenderCameraPosition();
                  }
              }
 +            Vintagestory.API.Config.OptimumDiagnostics.RecordChunkRenderPass(poolsRendered, poolsCulled);

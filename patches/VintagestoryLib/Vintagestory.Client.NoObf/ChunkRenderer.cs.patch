@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
-index 431e51a..ce28235 100644
+index 431e51a..0197649 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkRenderer.cs
 @@ -1,9 +1,11 @@
@@ -128,7 +128,129 @@ index 431e51a..ce28235 100644
  		{
  			chunkshadowmap.Tex2d2D = textureIds[l];
  			poolsByRenderPass[1][l].Render(cameraPos, "origin", frustumCullMode);
-@@ -442,11 +507,11 @@ public class ChunkRenderer
+@@ -249,62 +314,72 @@ public class ChunkRenderer
+ 		chunkopaque.Uniform("subpixelPaddingX", subPixelPaddingX);
+ 		chunkopaque.Uniform("subpixelPaddingY", subPixelPaddingY);
+ 		chunkopaque.SunPosition = game.GameWorldCalendar.SunPositionNormalized;
+ 		chunkopaque.DayLight = game.shUniforms.SkyDaylight;
+ 		chunkopaque.HorizonFog = game.AmbientManager.BlendedCloudDensity;
+-		for (int i = 0; i < textureIds.Length; i++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[i];
+-			chunkopaque.TerrainTexLinear2D = textureIds[i];
+-			poolsByRenderPass[0][i].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
+-		chunkopaque.Stop();
+-		ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
+-		chunktopsoil.Use();
+-		chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunktopsoil.BlockTextureSize = blockTextureSize;
+-		chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
+-		chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
+-		for (int j = 0; j < textureIds.Length; j++)
++		Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(true);
++		try
+ 		{
+-			chunktopsoil.TerrainTex2D = textureIds[j];
+-			chunktopsoil.TerrainTexLinear2D = textureIds[j];
+-			poolsByRenderPass[5][j].Render(cameraPos, "origin");
+-		}
+-		ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
+-		chunktopsoil.Stop();
+-		platform.GlDisableCullFace();
+-		chunkopaque.Use();
+-		chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
+-		chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
+-		chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
+-		chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
+-		chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
+-		chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
+-		chunkopaque.AlphaTest = 0.25f;
+-		chunkopaque.HaxyFade = 0;
+-		platform.GlToggleBlend(on: true);
+-		for (int k = 0; k < textureIds.Length; k++)
+-		{
+-			chunkopaque.TerrainTex2D = textureIds[k];
+-			chunkopaque.TerrainTexLinear2D = textureIds[k];
+-			poolsByRenderPass[2][k].Render(cameraPos, "origin");
++			for (int i = 0; i < textureIds.Length; i++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[i];
++				chunkopaque.TerrainTexLinear2D = textureIds[i];
++				poolsByRenderPass[0][i].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-op");
++			chunkopaque.Stop();
++			ShaderProgramChunktopsoil chunktopsoil = ShaderPrograms.Chunktopsoil;
++			chunktopsoil.Use();
++			chunktopsoil.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunktopsoil.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunktopsoil.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunktopsoil.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunktopsoil.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunktopsoil.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunktopsoil.BlockTextureSize = blockTextureSize;
++			chunktopsoil.Uniform("subpixelPaddingX", subPixelPaddingX);
++			chunktopsoil.Uniform("subpixelPaddingY", subPixelPaddingY);
++			for (int j = 0; j < textureIds.Length; j++)
++			{
++				chunktopsoil.TerrainTex2D = textureIds[j];
++				chunktopsoil.TerrainTexLinear2D = textureIds[j];
++				poolsByRenderPass[5][j].Render(cameraPos, "origin");
++			}
++			ScreenManager.FrameProfiler.Mark("rend3D-ret-tpp");
++			chunktopsoil.Stop();
++			platform.GlDisableCullFace();
++			chunkopaque.Use();
++			chunkopaque.RgbaFogIn = game.AmbientManager.BlendedFogColor;
++			chunkopaque.RgbaAmbientIn = game.AmbientManager.BlendedAmbientColor;
++			chunkopaque.FogDensityIn = game.AmbientManager.BlendedFogDensity;
++			chunkopaque.FogMinIn = game.AmbientManager.BlendedFogMin;
++			chunkopaque.ProjectionMatrix = game.CurrentProjectionMatrix;
++			chunkopaque.ModelViewMatrix = game.CurrentModelViewMatrix;
++			chunkopaque.AlphaTest = 0.25f;
++			chunkopaque.HaxyFade = 0;
++			platform.GlToggleBlend(on: true);
++			Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(false);
++			for (int k = 0; k < textureIds.Length; k++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[k];
++				chunkopaque.TerrainTexLinear2D = textureIds[k];
++				poolsByRenderPass[2][k].Render(cameraPos, "origin");
++			}
++			platform.GlToggleBlend(on: false);
++			chunkopaque.AlphaTest = 0.42f;
++			chunkopaque.HaxyFade = 1;
++			Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(true);
++			for (int l = 0; l < textureIds.Length; l++)
++			{
++				chunkopaque.TerrainTex2D = textureIds[l];
++				chunkopaque.TerrainTexLinear2D = textureIds[l];
++				poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			}
+ 		}
+-		platform.GlToggleBlend(on: false);
+-		chunkopaque.AlphaTest = 0.42f;
+-		chunkopaque.HaxyFade = 1;
+-		for (int l = 0; l < textureIds.Length; l++)
++		finally
+ 		{
+-			chunkopaque.TerrainTex2D = textureIds[l];
+-			chunkopaque.TerrainTexLinear2D = textureIds[l];
+-			poolsByRenderPass[1][l].Render(cameraPos, "origin");
++			Vintagestory.API.Config.OptimumMeshPoolSort.SetOpaqueEarlyZPass(false);
+ 		}
+ 		platform.GlEnableCullFace();
+ 		platform.GlToggleBlend(on: true);
+ 		chunkopaque.AlphaTest = 0.2f;
+ 		chunkopaque.HaxyFade = 0;
+@@ -442,11 +517,11 @@ public class ChunkRenderer
  		masterPool.DisposeAllPools(game.api);
  	}
  

@@ -68,8 +68,8 @@ public sealed class VintagestoryApiPatchDeliveryTests
     private static readonly IReadOnlyDictionary<string, string> AuditedLegacyUnshippedGaps =
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            ["Client/MeshPool/MeshDataPool.cs.patch"] = "Legacy unshipped hunks (#539/#542/#547 pool bounds/cullData/telemetry); #613 TryAdd/Dispose fixes shipped via PatchMeshDataPoolLifecycle.",
-            ["Client/MeshPool/MeshDataPoolManager.cs.patch"] = "Legacy unshipped hunks (render pass diagnostics); #613 manager binding shipped via PatchMeshDataPoolLifecycle.",
+            ["Client/MeshPool/MeshDataPool.cs.patch"] = "Legacy unshipped hunks (#539/#542/#547 pool bounds/cullData/telemetry); #613 TryAdd/Dispose and #606 front-to-back sort shipped via ApiPatcher.",
+            ["Client/MeshPool/MeshDataPoolManager.cs.patch"] = "Legacy unshipped hunks (render pass diagnostics); #613 manager binding and #606 front-to-back sort shipped via ApiPatcher.",
             ["Client/MeshPool/MeshDataRecycler.cs.patch"] = "Legacy unshipped patch (#489 TTL eviction).",
             ["Client/Model/Mesh/MeshData.cs.patch"] = "Legacy unshipped patch (#494 custom attribute stride/indexing).",
             ["Client/UI/Dialog/GuiDialog.cs.patch"] = "Legacy unshipped patch (skip disabled composers).",
