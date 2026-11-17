@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 6d5300a..247a368 100644
+index 6d5300a..247a368
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -65,14 +65,9 @@ index 6d5300a..247a368 100644
  
  	public Queue<ClientTask> MainThreadTasks;
  
-@@ -340,15 +368,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -344,11 +372,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  
- 	internal bool ignoreServerCalendarUpdates;
- 
- 	public HashSet<ChunkPos> chunkPositionsForRegenTrav = new HashSet<ChunkPos>();
- 
--	public object chunkPositionsLock = new object();
-+	public readonly Lock chunkPositionsLock = new();
+ 	public object chunkPositionsLock = new object();
  
  	public Queue<long> compactedClientChunks = new Queue<long>();
  

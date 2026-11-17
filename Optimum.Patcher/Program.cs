@@ -143,6 +143,16 @@ var membersToInject = new Dictionary<string, List<string>>
         "bfsRecalcPending",
         "bfsLastLogMs",
     },
+    // Issue #566: nearest-first time-budgeted traversability queue state on SystemChunkVisibilityCalc.
+    ["Vintagestory.Client.NoObf.SystemChunkVisibilityCalc"] = new()
+    {
+        "incomingTrav",
+        "drainedIncoming",
+        "travWorkHeap",
+        "travPopBatch",
+        "travTrackedCount",
+        "ConnectFacesToMask",
+    },
     // Issue #74: reusable ItemRenderInfo scratch + fill/reset helpers so the GUI
     // item render path avoids a per-slot allocation without touching the public API.
     ["Vintagestory.Client.NoObf.InventoryItemRenderer"] = new()
@@ -821,6 +831,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkCuller", "bfsResetAndFill", 1),
     new("Vintagestory.Client.NoObf.ChunkCuller", "runFlatBfsVisibility", 1),
     new("Vintagestory.Client.NoObf.ChunkCuller", "countVisibleMarked", 0),
+    // Issue #566: nearest-first time-budgeted traversability queue and atomic mask publish.
+    new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "OnChunkLoaded", 1),
+    new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "OnUpdateLighting", 4),
+    new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "OnSeperateThreadGameTick", 1),
+    new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "RegenTraversabilityGraph", 1),
+    new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "ConnectFacesToMask", 2),
     // AmbientManager: reusable scratch buffers instead of per-frame array/BlockPos allocations.
     // All four run every frame from the UpdateAmbient renderer registration.
     new("Vintagestory.Client.NoObf.AmbientManager", "UpdateAmbient", 1),

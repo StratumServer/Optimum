@@ -218,7 +218,7 @@ public class BfsChunkVisibilityTests
         Assert.Contains("bfsPrepareGrid();", patch);                        // sized at the start of a pass
         Assert.Contains("bfsResetAndFill(chunks);", patch);                 // snapshot under chunksLock
         Assert.Contains("OptimumChunkVisibilityGrid.EncodeCell(", patch);
-        Assert.Contains("bool fresh = chunk.traversabilityFresh;", patch);  // fresh flag read before the bits
+        Assert.Contains("bool fresh = System.Threading.Volatile.Read(ref chunk.traversabilityFresh);", patch);  // fresh flag acquire-read before the bits
         Assert.Contains("Array.Clear(chunkGrid, 0, grid.CellCount);", patch); // chunk references dropped after the pass
         Assert.Contains("runFlatBfsVisibility(ClientSettings.Occlusionculling);", patch);
 

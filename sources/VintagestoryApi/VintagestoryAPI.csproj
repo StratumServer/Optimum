@@ -56,6 +56,7 @@
     <Compile Remove="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Remove="Config\optimum-api-bridge.cs" />
     <Compile Remove="Config\OptimumChunkVisibilityGrid.cs" />
+    <Compile Remove="Config\OptimumTraversabilityQueue.cs" />
     <Compile Remove="Config\PoolCullData.cs" />
     <Compile Remove="Config\OptimumFrustumCullSimd.cs" />
     <Compile Remove="Config\OptimumKometGuard.cs" />
