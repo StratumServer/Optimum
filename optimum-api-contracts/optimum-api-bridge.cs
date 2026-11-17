@@ -256,6 +256,200 @@ public static class OptimumApiBridge
         textureId = 0;
     }
 
+    [ThreadStatic]
+    private static DummySlot? s_searchDummySlot;
+
+    [ThreadStatic]
+    private static WeightedSlotEntry[]? s_weightedSlotScratch;
+
+    private readonly struct WeightedSlotEntry(int key, ItemSlot slot, float weight, int order)
+    {
+        public readonly int Key = key;
+        public readonly ItemSlot Slot = slot;
+        public readonly float Weight = weight;
+        public readonly int Order = order;
+    }
+
+    private sealed class WeightedSlotEntryComparer : System.Collections.Generic.IComparer<WeightedSlotEntry>
+    {
+        public static readonly WeightedSlotEntryComparer Instance = new();
+
+        public int Compare(WeightedSlotEntry x, WeightedSlotEntry y)
+        {
+            int weightComparison = x.Weight.CompareTo(y.Weight);
+            return weightComparison != 0 ? weightComparison : x.Order.CompareTo(y.Order);
+        }
+    }
+
+    public static bool ItemStackMatchesSearchText(ItemStack stack, IWorldAccessor? world, string? searchText)
+    {
+        if (string.IsNullOrEmpty(searchText))
+        {
+            return true;
+        }
+
+        string name = stack.GetName();
+        if (name != null && name.CaseInsensitiveContains(searchText))
+        {
+            return true;
+        }
+
+        // Steal the thread-local DummySlot across GetDescription so a nested
+        // MatchesSearchText inside a modded GetHeldItemInfo cannot clobber it.
+        DummySlot? slot = s_searchDummySlot;
+        if (slot != null)
+        {
+            s_searchDummySlot = null;
+        }
+        else
+        {
+            slot = new DummySlot();
+        }
+
+        slot.Set(stack);
+        try
+        {
+            string? description = stack.GetDescription(world, slot, false);
+            return description != null && description.CaseInsensitiveContains(searchText);
+        }
+        finally
+        {
+            slot.Set(null);
+            slot.BackgroundIcon = null;
+            slot.HexBackgroundColor = null;
+            slot.DrawUnavailable = false;
+            s_searchDummySlot ??= slot;
+        }
+    }
+
+    public static void FilterSlotGridItems(
+        ref string? searchTextField,
+        OrderedDictionary<int, ItemSlot> availableSlots,
+        OrderedDictionary<int, ItemSlot> renderedSlots,
+        IInventory inventory,
+        ICoreClientAPI? api,
+        int cols,
+        ref int rows,
+        string? text,
+        System.Collections.Generic.Dictionary<int, string>? searchCache,
+        System.Collections.Generic.Dictionary<int, string>? searchCacheNames)
+    {
+        string normalized = string.IsNullOrEmpty(text)
+            ? string.Empty
+            : text.ToSearchFriendly().ToLowerInvariant();
+        searchTextField = normalized;
+        renderedSlots.Clear();
+
+        int slotCount = availableSlots.Count;
+        if (normalized.Length == 0)
+        {
+            for (int i = 0; i < slotCount; i++)
+            {
+                int key = availableSlots.GetKeyAtIndex(i);
+                ItemSlot slot = inventory[key];
+                if (slot.Itemstack == null) continue;
+                renderedSlots.Add(key, slot);
+            }
+
+            rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
+            return;
+        }
+
+        if (searchCacheNames == null)
+        {
+            rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
+            return;
+        }
+
+        WeightedSlotEntry[]? scratch = s_weightedSlotScratch;
+        s_weightedSlotScratch = null;
+        int weightedCount = 0;
+        try
+        {
+            IWorldAccessor? world = api?.World;
+            for (int i = 0; i < slotCount; i++)
+            {
+                int key = availableSlots.GetKeyAtIndex(i);
+                ItemSlot slot = inventory[key];
+                ItemStack? stack = slot.Itemstack;
+                if (stack == null) continue;
+
+                if (searchCache != null && searchCache.TryGetValue(key, out string? cachedText))
+                {
+                    string? name = searchCacheNames[key];
+                    float weight = ComputeSlotSearchWeight(name, cachedText, normalized);
+                    if (weight >= 0f)
+                    {
+                        if (scratch == null)
+                        {
+                            scratch = new WeightedSlotEntry[Math.Clamp(slotCount, 16, 256)];
+                        }
+                        else if (weightedCount == scratch.Length)
+                        {
+                            Array.Resize(ref scratch, scratch.Length * 2);
+                        }
+
+                        scratch[weightedCount] = new WeightedSlotEntry(key, slot, weight, weightedCount);
+                        weightedCount++;
+                    }
+                }
+                else
+                {
+                    // Preserve vanilla evaluation order for searchCacheNames[key].
+                    _ = searchCacheNames[key];
+                    if (ItemStackMatchesSearchText(stack, world, normalized))
+                    {
+                        renderedSlots.Add(key, slot);
+                    }
+                }
+            }
+
+            if (weightedCount > 0)
+            {
+                Array.Sort(scratch!, 0, weightedCount, WeightedSlotEntryComparer.Instance);
+                for (int i = 0; i < weightedCount; i++)
+                {
+                    renderedSlots.Add(scratch![i].Key, scratch[i].Slot);
+                }
+            }
+
+            rows = (int)Math.Ceiling(1f * renderedSlots.Count / cols);
+        }
+        finally
+        {
+            if (scratch != null)
+            {
+                if (weightedCount > 0)
+                {
+                    Array.Clear(scratch, 0, weightedCount);
+                }
+
+                if (s_weightedSlotScratch == null || scratch.Length > s_weightedSlotScratch.Length)
+                {
+                    s_weightedSlotScratch = scratch;
+                }
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float ComputeSlotSearchWeight(string? name, string? cachedText, string normalizedSearch)
+    {
+        int index = name != null
+            ? name.IndexOf(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)
+            : -1;
+
+        if (index == 0 && name!.Length == normalizedSearch.Length) return 0f;
+        if (index == 0 && name!.Length > normalizedSearch.Length && name[normalizedSearch.Length] == ' ') return 0.125f;
+        if (index > 0 && name![index - 1] == ' ' && index + normalizedSearch.Length == name.Length) return 0.25f;
+        if (index > 0 && name![index - 1] == ' ') return 0.5f;
+        if (index == 0) return 0.75f;
+        if (index > 0) return 1f;
+        if (cachedText != null && cachedText.StartsWith(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)) return 2f;
+        if (cachedText != null && cachedText.CaseInsensitiveContains(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)) return 3f;
+        return -1f;
+    }
+
     public static void MarkInventoryDirty()
     {
         Volatile.Write(ref inventoryDirty, 1);
