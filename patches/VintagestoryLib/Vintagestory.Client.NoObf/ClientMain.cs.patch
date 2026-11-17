@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 6d5300a..4178f11 100644
+index 6d5300a..9bbbeac 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -235,7 +235,38 @@ index 6d5300a..4178f11 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -3530,6 +3598,17 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3394,14 +3462,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 				SoundType = soundType
+ 			};
+ 		}
+ 		sparams.Pitch = pitch;
+ 		sparams.Volume *= volume;
+-		ScreenManager.soundAudioData.TryGetValue(location, out var audiodata);
++		AudioData audiodata = ScreenManager.TryGetAudioData(location);
+ 		if (audiodata != null)
+ 		{
+-			int num = audiodata.Load_Async(new MainThreadAction(this, () => StartPlaying(audiodata, sparams, location), "playSound"));
++			OptimumPendingPlaySound optimumPendingPlaySound = new OptimumPendingPlaySound(this, audiodata, sparams, location);
++			int num = audiodata.Load_Async(new MainThreadAction(this, new System.Func<int>(optimumPendingPlaySound.Run), "playSound"));
+ 			if (num >= 0)
+ 			{
+ 				return num;
+ 			}
+ 			return 500;
+@@ -3451,11 +3520,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 			throw new InvalidOperationException("Cannot call LoadSound outside the main thread, it is not thread safe");
+ 		}
+ 		ArgumentNullException.ThrowIfNull(sound.Location, "sound.Location");
+ 		sound.Location = ResolveSoundPath(sound.Location.Clone());
+ 		sound.Location.WithPathAppendixOnce(".ogg");
+-		ScreenManager.soundAudioData.TryGetValue(sound.Location, out var value);
++		AudioData value = ScreenManager.TryGetAudioData(sound.Location);
+ 		if (value == null)
+ 		{
+ 			Platform.Logger.Warning("Audio File not found: {0}", sound.Location);
+ 			return null;
+ 		}
+@@ -3530,6 +3599,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);
@@ -251,5 +282,10 @@ index 6d5300a..4178f11 100644
 +	private Random CreateRandom()
 +	{
 +		return new Random(Environment.TickCount);
++	}
++
++	internal int InvokeStartPlaying(AudioData audiodata, SoundParams sparams, AssetLocation location)
++	{
++		return StartPlaying(audiodata, sparams, location);
 +	}
  }

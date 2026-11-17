@@ -45,6 +45,11 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.p
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderSkyColor.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/AudioMetaData.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemDebugCommands.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/LoadedSoundNative.cs.patch
+patches/VintagestoryLib/Vintagestory.Client/ScreenManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/TextureAtlasManager.cs.patch

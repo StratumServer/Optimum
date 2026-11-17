@@ -1,0 +1,209 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs b/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
+index b3d9aa2..432b52b 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/OggDecoder.cs
+@@ -1,8 +1,9 @@
+ using System;
+ using System.IO;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using csogg;
+ using csvorbis;
+ 
+ namespace Vintagestory.Client.NoObf;
+ 
+@@ -29,15 +30,11 @@ public class OggDecoder
+ 		//IL_0051: Expected O, but got Unknown
+ 		//IL_0053: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_005a: Expected O, but got Unknown
+ 		AudioMetaData audioMetaData = new AudioMetaData(asset);
+ 		audioMetaData.Loaded = 1;
+-		TextWriter textWriter = new StringWriter();
+-		Stream stream = null;
+-		MemoryStream memoryStream = null;
+-		stream = ogg;
+-		memoryStream = new MemoryStream();
++		Stream stream = ogg;
+ 		SyncState val = new SyncState();
+ 		StreamState val2 = new StreamState();
+ 		Page val3 = (Page)(object)new OggPage();
+ 		Packet val4 = new Packet();
+ 		Info val5 = new Info();
+@@ -51,38 +48,28 @@ public class OggDecoder
+ 		byte[] data = val.data;
+ 		try
+ 		{
+ 			num = stream.Read(data, offset, 4096);
+ 		}
+-		catch (Exception ex)
++		catch (Exception)
+ 		{
+-			textWriter.WriteLine(LoggerBase.CleanStackTrace(ex.ToString()));
+ 		}
+ 		val.wrote(num);
+-		if (val.pageout(val3) != 1)
++		if (val.pageout(val3) != 1 && num < 4096)
+ 		{
+-			if (num < 4096)
+-			{
+-				goto IL_04fd;
+-			}
+-			textWriter.WriteLine("Input does not appear to be an Ogg bitstream.");
++			val.clear();
++			stream.Close();
++			audioMetaData.Pcm = Array.Empty<byte>();
++			return audioMetaData;
+ 		}
+-		val2.init(val3.serialno());
++		int firstSerial = val3.serialno();
++		val2.init(firstSerial);
+ 		val5.init();
+ 		val6.init();
+-		if (val2.pagein(val3) < 0)
+-		{
+-			textWriter.WriteLine("Error reading first page of Ogg bitstream data.");
+-		}
+-		if (val2.packetout(val4) != 1)
+-		{
+-			textWriter.WriteLine("Error reading initial header packet.");
+-		}
+-		if (val5.synthesis_headerin(val6, val4) < 0)
+-		{
+-			textWriter.WriteLine("This Ogg bitstream does not contain Vorbis audio data.");
+-		}
++		val2.pagein(val3);
++		val2.packetout(val4);
++		val5.synthesis_headerin(val6, val4);
+ 		int i = 0;
+ 		while (i < 2)
+ 		{
+ 			while (i < 2)
+ 			{
+@@ -93,11 +80,10 @@ public class OggDecoder
+ 					for (; i < 2; val5.synthesis_headerin(val6, val4), i++)
+ 					{
+ 						switch (val2.packetout(val4))
+ 						{
+ 						case -1:
+-							textWriter.WriteLine("Corrupt secondary header.  Exiting.");
+ 							continue;
+ 						default:
+ 							continue;
+ 						case 0:
+ 							break;
+@@ -116,29 +102,19 @@ public class OggDecoder
+ 			data = val.data;
+ 			try
+ 			{
+ 				num = stream.Read(data, offset, 4096);
+ 			}
+-			catch (Exception ex2)
+-			{
+-				textWriter.WriteLine(LoggerBase.CleanStackTrace(ex2.ToString()));
+-			}
+-			if (num == 0 && i < 2)
++			catch (Exception)
+ 			{
+-				textWriter.WriteLine("End of file before finding all Vorbis headers!");
+ 			}
+ 			val.wrote(num);
+ 		}
+-		byte[][] user_comments = val6.user_comments;
+-		for (int j = 0; j < val6.user_comments.Length && user_comments[j] != null; j++)
+-		{
+-			textWriter.WriteLine(val6.getComment(j));
+-		}
+-		textWriter.WriteLine("\nBitstream is " + val5.channels + " channel, " + val5.rate + "Hz");
+-		textWriter.WriteLine("Encoded by: " + val6.getVendor() + "\n");
+ 		audioMetaData.Channels = val5.channels;
+ 		audioMetaData.Rate = val5.rate;
++		OptimumAudioBufferHelper.TryEstimateOggPcmByteLength(stream, firstSerial, val5.channels, out int estimatedPcmBytes);
++		OptimumPcmBuffer pcmBuffer = new OptimumPcmBuffer(estimatedPcmBytes);
+ 		int num3 = 4096 / val5.channels;
+ 		val7.synthesis_init(val5);
+ 		val8.init(val7);
+ 		float[][][] array = new float[1][][];
+ 		int[] array2 = new int[val5.channels];
+@@ -151,11 +127,10 @@ public class OggDecoder
+ 			while (num2 == 0)
+ 			{
+ 				switch (val.pageout(val3))
+ 				{
+ 				case -1:
+-					textWriter.WriteLine("Corrupt or missing data in bitstream; continuing...");
+ 					continue;
+ 				default:
+ 					val2.pagein(val3);
+ 					while (true)
+ 					{
+@@ -171,11 +146,10 @@ public class OggDecoder
+ 							}
+ 							int num4;
+ 							while ((num4 = val7.synthesis_pcmout(array, array2)) > 0)
+ 							{
+ 								float[][] array3 = array[0];
+-								bool flag = false;
+ 								int num5 = ((num4 < num3) ? num4 : num3);
+ 								for (i = 0; i < val5.channels; i++)
+ 								{
+ 									int num6 = i * 2;
+ 									int num7 = array2[i];
+@@ -183,27 +157,25 @@ public class OggDecoder
+ 									{
+ 										int num8 = (int)((double)array3[i][num7 + k] * 32767.0);
+ 										if (num8 > 32767)
+ 										{
+ 											num8 = 32767;
+-											flag = true;
+ 										}
+ 										if (num8 < -32768)
+ 										{
+ 											num8 = -32768;
+-											flag = true;
+ 										}
+ 										if (num8 < 0)
+ 										{
+ 											num8 |= 0x8000;
+ 										}
+ 										convbuffer[num6] = (byte)num8;
+ 										convbuffer[num6 + 1] = (byte)((uint)num8 >> 8);
+ 										num6 += 2 * val5.channels;
+ 									}
+ 								}
+-								memoryStream.Write(convbuffer, 0, 2 * val5.channels * num5);
++								pcmBuffer.Append(convbuffer, 2 * val5.channels * num5);
+ 								val7.synthesis_read(num5);
+ 							}
+ 							continue;
+ 						}
+ 						case 0:
+@@ -227,13 +199,12 @@ public class OggDecoder
+ 				data = val.data;
+ 				try
+ 				{
+ 					num = stream.Read(data, offset, 4096);
+ 				}
+-				catch (Exception ex3)
++				catch (Exception)
+ 				{
+-					textWriter.WriteLine(LoggerBase.CleanStackTrace(ex3.ToString()));
+ 				}
+ 				val.wrote(num);
+ 				if (num == 0)
+ 				{
+ 					num2 = 1;
+@@ -242,13 +213,11 @@ public class OggDecoder
+ 		}
+ 		val2.clear();
+ 		val8.clear();
+ 		val7.clear();
+ 		val5.clear();
+-		goto IL_04fd;
+-		IL_04fd:
+ 		val.clear();
+ 		stream.Close();
+-		audioMetaData.Pcm = memoryStream.ToArray();
++		audioMetaData.Pcm = pcmBuffer.ToExactArray();
+ 		return audioMetaData;
+ 	}
+ }

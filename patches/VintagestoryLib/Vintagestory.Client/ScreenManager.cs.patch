@@ -1,0 +1,275 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+index b5000e7..dd73564 100644
+--- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
++++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
+@@ -38,10 +38,12 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 
+ 	public static bool[] MouseButtonState = new bool[(int)Enum.GetValues(typeof(EnumMouseButton)).Cast<EnumMouseButton>().Max()];
+ 
+ 	public static Dictionary<AssetLocation, AudioData> soundAudioData = new Dictionary<AssetLocation, AudioData>();
+ 
++	private static object soundAudioDataLock;
++
+ 	public static Dictionary<AssetLocation, AudioData> soundAudioDataAsyncLoadTemp = new Dictionary<AssetLocation, AudioData>();
+ 
+ 	public static Queue<Action> MainThreadTasks = new Queue<Action>();
+ 
+ 	public static bool debugDrawCallNextFrame = false;
+@@ -397,11 +399,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 	}
+ 
+ 	public static void CatalogSounds(Action onCompleted)
+ 	{
+ 		AsyncSoundLoadComplete = false;
+-		soundAudioData.Clear();
++		lock (GetSoundAudioDataLock())
++		{
++			soundAudioData.Clear();
++		}
+ 		new LoadSoundsThread(Platform.Logger, null, onCompleted).Process();
+ 	}
+ 
+ 	public static void LoadSoundsSlow_Async(ClientMain game)
+ 	{
+@@ -481,42 +486,124 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 			}
+ 		}
+ 		soundAudioDataAsyncLoadTemp.Clear();
+ 	}
+ 
++	internal static object GetSoundAudioDataLock()
++	{
++		return LazyInitializer.EnsureInitialized(ref soundAudioDataLock);
++	}
++
++	internal static AudioData TryGetAudioData(AssetLocation location)
++	{
++		if (location == null)
++		{
++			return null;
++		}
++		lock (GetSoundAudioDataLock())
++		{
++			soundAudioData.TryGetValue(location, out var value);
++			return value;
++		}
++	}
++
++	internal static AudioData GetOrAddAudioData(AssetLocation location, AudioData created)
++	{
++		lock (GetSoundAudioDataLock())
++		{
++			if (!soundAudioData.TryGetValue(location, out var value))
++			{
++				soundAudioData[location] = created;
++				return created;
++			}
++			if (created is AudioMetaData audioMetaData && value is AudioMetaData audioMetaData2)
++			{
++				audioMetaData2.AutoUnload |= audioMetaData.AutoUnload;
++			}
++			return value;
++		}
++	}
++
++	internal static void CopySoundAudioDataToAsyncTemp()
++	{
++		lock (GetSoundAudioDataLock())
++		{
++			soundAudioDataAsyncLoadTemp.Clear();
++			foreach (KeyValuePair<AssetLocation, AudioData> item in soundAudioData)
++			{
++				soundAudioDataAsyncLoadTemp[item.Key] = item.Value;
++			}
++		}
++	}
++
++	internal static KeyValuePair<AssetLocation, AudioData>[] SnapshotSoundAudioData()
++	{
++		lock (GetSoundAudioDataLock())
++		{
++			KeyValuePair<AssetLocation, AudioData>[] array = new KeyValuePair<AssetLocation, AudioData>[soundAudioData.Count];
++			int num = 0;
++			foreach (KeyValuePair<AssetLocation, AudioData> item in soundAudioData)
++			{
++				array[num++] = item;
++			}
++			return array;
++		}
++	}
++
+ 	public static AudioData LoadMusicTrack(IAsset asset)
+ 	{
+-		if (asset != null && !asset.IsLoaded())
++		if (asset == null)
++		{
++			return null;
++		}
++		if (TryGetAudioData(asset.Location) is AudioMetaData audioMetaData)
++		{
++			audioMetaData.AutoUnload = true;
++			lock (audioMetaData)
++			{
++				audioMetaData.Asset = asset;
++			}
++			audioMetaData.EnsurePcmLoaded();
++			return audioMetaData;
++		}
++		if (!asset.IsLoaded() && asset.Origin != null)
+ 		{
+ 			asset.Origin.LoadAsset(asset);
+ 		}
+-		if (asset == null || asset.Data == null)
++		if (asset.Data == null)
+ 		{
+ 			return null;
+ 		}
+-		if (!soundAudioData.TryGetValue(asset.Location, out var value))
++		AudioData audioData = Platform.CreateAudioData(asset);
++		asset.Data = null;
++		if (audioData is AudioMetaData audioMetaData2)
+ 		{
+-			soundAudioData[asset.Location] = Platform.CreateAudioData(asset);
+-			asset.Data = null;
++			audioMetaData2.AutoUnload = true;
+ 		}
+-		else
++		AudioData orAddAudioData = GetOrAddAudioData(asset.Location, audioData);
++		if (orAddAudioData != audioData && orAddAudioData is AudioMetaData audioMetaData3)
+ 		{
+-			value.Load();
++			audioMetaData3.AutoUnload = true;
++			audioMetaData3.EnsurePcmLoaded();
+ 		}
+-		return soundAudioData[asset.Location];
++		return orAddAudioData;
+ 	}
+ 
+ 	public static AudioData LoadSound(IAsset asset)
+ 	{
+ 		if (asset == null)
+ 		{
+ 			return null;
+ 		}
+-		return soundAudioData[asset.Location] = new AudioMetaData(asset)
++		AudioMetaData audioMetaData = new AudioMetaData(asset)
+ 		{
+ 			Loaded = 0
+ 		};
++		lock (GetSoundAudioDataLock())
++		{
++			return soundAudioData[asset.Location] = audioMetaData;
++		}
+ 	}
+ 
+ 	public void loadMods()
+ 	{
+ 		List<string> list = new List<string>(ClientSettings.ModPaths);
+@@ -1051,30 +1138,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 	public static void PlaySound(string name)
+ 	{
+ 		PlaySound(new AssetLocation("sounds/" + name).WithPathAppendixOnce(".ogg"));
+ 	}
+ 
++	internal static void StopAndDisposeIntroMusic()
++	{
++		ILoadedSound introMusic = IntroMusic;
++		if (introMusic == null || introMusic.IsDisposed)
++		{
++			return;
++		}
++		if (!introMusic.HasStopped)
++		{
++			ThreadPool.QueueUserWorkItem(new WaitCallback(FadeAndDisposeIntroMusicWorker), introMusic);
++		}
++		else
++		{
++			introMusic.Dispose();
++		}
++	}
++
++	private static void FadeAndDisposeIntroMusicWorker(object state)
++	{
++		if (state is not ILoadedSound loadedSound)
++		{
++			return;
++		}
++		try
++		{
++			float volume = loadedSound.Params?.Volume ?? 0f;
++			while (!loadedSound.IsDisposed && !loadedSound.HasStopped && Platform?.IsShuttingDown != true && (double)(loadedSound.Params?.Volume ?? 0f) > 0.01)
++			{
++				Thread.Sleep(40);
++				if (loadedSound.IsDisposed || loadedSound.HasStopped)
++				{
++					break;
++				}
++				volume *= 0.98f;
++				loadedSound.SetVolume(volume);
++			}
++			if (!loadedSound.IsDisposed)
++			{
++				loadedSound.Stop();
++			}
++		}
++		catch
++		{
++		}
++		finally
++		{
++			loadedSound.Dispose();
++		}
++	}
++
++	private static void DisposeSoundWhenStoppedWorker(object state)
++	{
++		if (state is not ILoadedSound loadedSound)
++		{
++			return;
++		}
++		try
++		{
++			while (!loadedSound.IsDisposed && !loadedSound.HasStopped && Platform?.IsShuttingDown != true)
++			{
++				Thread.Sleep(100);
++			}
++		}
++		catch
++		{
++		}
++		finally
++		{
++			loadedSound.Dispose();
++		}
++	}
++
+ 	public static void PlaySound(AssetLocation location)
+ 	{
+ 		location = location.Clone().WithPathAppendixOnce(".ogg");
+-		soundAudioData.TryGetValue(location, out var value);
++		AudioData value = TryGetAudioData(location);
+ 		if (value != null)
+ 		{
+ 			if (!value.Load())
+ 			{
+ 				return;
+ 			}
+ 			ILoadedSound sound = Platform.CreateAudio(new SoundParams(location), value);
+-			sound.Start();
+-			TyronThreadPool.QueueTask(async delegate
++			if (sound != null)
+ 			{
+-				while (!sound.HasStopped)
+-				{
+-					await Task.Delay(100);
+-				}
+-				sound.Dispose();
+-			}, $"SoundWaitStop_{sound.Params.Location}");
++				sound.Start();
++				ThreadPool.QueueUserWorkItem(new WaitCallback(DisposeSoundWhenStoppedWorker), sound);
++			}
+ 		}
+ 		else
+ 		{
+ 			Platform.Logger.Error("Could not play {0}, sound file not found", location);
+ 		}

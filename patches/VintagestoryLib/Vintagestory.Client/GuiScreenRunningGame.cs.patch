@@ -1,8 +1,35 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
-index 7248005..8a1b10d 100644
+index 7248005..b1cbff7 100644
 --- a/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
 +++ b/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs
-@@ -227,10 +227,14 @@ public class GuiScreenRunningGame : GuiScreen
+@@ -66,24 +66,12 @@ public class GuiScreenRunningGame : GuiScreen
+ 	private void handOverRenderingToRunningGame()
+ 	{
+ 		runningGame.MouseGrabbed = platform.IsFocused;
+ 		ScreenManager.LoadScreen(this);
+ 		ScreenManager.introMusicShouldStop = true;
+-		if (ScreenManager.IntroMusic != null && !ScreenManager.IntroMusic.HasStopped)
+-		{
+-			float volume = ScreenManager.IntroMusic.Params.Volume;
+-			TyronThreadPool.QueueTask(async delegate
+-			{
+-				while ((double)ScreenManager.IntroMusic.Params.Volume > 0.01)
+-				{
+-					await Task.Delay(40);
+-					ScreenManager.IntroMusic.SetVolume(volume *= 0.98f);
+-				}
+-				ScreenManager.IntroMusic.Stop();
+-			}, "handOverRenderingToRunningGame");
+-		}
+-		ScreenManager.EnqueueMainThreadTask(printWarningsAndEndCapture);
++		ScreenManager.StopAndDisposeIntroMusic();
++		ScreenManager.EnqueueMainThreadTask(new System.Action(printWarningsAndEndCapture));
+ 	}
+ 
+ 	public override bool OnEvent(string eventCode, object arg)
+ 	{
+ 		if (eventCode == "maploaded")
+@@ -227,10 +215,14 @@ public class GuiScreenRunningGame : GuiScreen
  
  	public override bool OnWindowClosed()
  	{

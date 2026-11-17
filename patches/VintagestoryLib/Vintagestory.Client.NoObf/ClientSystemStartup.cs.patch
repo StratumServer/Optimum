@@ -1,8 +1,25 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..88bbc5e 100644
+index f437458..137b0e6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-@@ -578,10 +578,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -445,15 +445,11 @@ public class ClientSystemStartup : ClientSystem
+ 		{
+ 			return;
+ 		}
+ 		loadSoundsSlowPrerequisites = 0;
+ 		logger.VerboseDebug("Starting to load sounds fully");
+-		ScreenManager.soundAudioDataAsyncLoadTemp.Clear();
+-		foreach (KeyValuePair<AssetLocation, AudioData> soundAudioDatum in ScreenManager.soundAudioData)
+-		{
+-			ScreenManager.soundAudioDataAsyncLoadTemp[soundAudioDatum.Key] = soundAudioDatum.Value;
+-		}
++		ScreenManager.CopySoundAudioDataToAsyncTemp();
+ 		ScreenManager.LoadSoundsSlow_Async(game);
+ 	}
+ 
+ 	private void loadBlockAtlasManagerAsync(IList<Block> blocks)
+ 	{
+@@ -578,10 +574,11 @@ public class ClientSystemStartup : ClientSystem
  			{
  				blocks[packet_BlockType.BlockId] = BlockTypeNet.ReadBlockTypePacket(packet_BlockType, game, ClientMain.ClassRegistry);
  				num++;
@@ -14,7 +31,7 @@ index f437458..88bbc5e 100644
  
  	private int PopulateItems(List<Item> items, int listSize)
  	{
-@@ -600,10 +601,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -600,10 +597,11 @@ public class ClientSystemStartup : ClientSystem
  			{
  				items[packet_ItemType.ItemId] = ItemTypeNet.ReadItemTypePacket(packet_ItemType, game, ClientMain.ClassRegistry);
  				num++;
@@ -26,7 +43,7 @@ index f437458..88bbc5e 100644
  
  	private void LoadEntityTypes()
  	{
-@@ -738,11 +740,14 @@ public class ClientSystemStartup : ClientSystem
+@@ -738,11 +736,14 @@ public class ClientSystemStartup : ClientSystem
  	}
  
  	internal void FinaliseTextureAtlas(TextureAtlasManager manager, string type, Action onCompleted)
@@ -41,7 +58,7 @@ index f437458..88bbc5e 100644
  		{
  			TyronThreadPool.QueueTask(delegate
  			{
-@@ -762,17 +767,23 @@ public class ClientSystemStartup : ClientSystem
+@@ -762,17 +763,23 @@ public class ClientSystemStartup : ClientSystem
  		}, "FinaliseTextureAtlas_StageC_" + type);
  	}
  
