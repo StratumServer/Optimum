@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
-index 7befa7d..4381045 100644
+index 7befa7d..4879c46 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 @@ -1,8 +1,9 @@
@@ -246,7 +246,7 @@ index 7befa7d..4381045 100644
 +			// thread rewrites without a lock. A recalculation that sees the bits of a regeneration in
 +			// progress can hide the chunk until the next one, as in vanilla; closing that window needs
 +			// the writer in SystemChunkVisibilityCalc to publish the bits before the flag.
-+			bool fresh = chunk.traversabilityFresh;
++			bool fresh = System.Threading.Volatile.Read(ref chunk.traversabilityFresh);
 +			grid.SetCell(idx, OptimumChunkVisibilityGrid.EncodeCell(chunk.traversability, fresh));
 +		}
 +	}

@@ -1,0 +1,303 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemChunkVisibilityCalc.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemChunkVisibilityCalc.cs
+index 5464e44..a5d0628 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemChunkVisibilityCalc.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemChunkVisibilityCalc.cs
+@@ -1,7 +1,11 @@
++using System;
+ using System.Collections.Generic;
++using System.Diagnostics;
++using System.Threading;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ using Vintagestory.Common;
+ using Vintagestory.Common.Database;
+@@ -22,10 +26,18 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 
+ 	private Block[] blocksFast;
+ 
+ 	private int[] Blocks;
+ 
++	// Optimum issue #566: swap-list under chunkPositionsLock + worker-owned min-heap for nearest-first 2 ms batches.
++	// Lazy-initialized so field transplants need no .ctor edits.
++	private List<ChunkPos> incomingTrav;
++	private List<ChunkPos> drainedIncoming;
++	private OptimumTraversabilityQueue travWorkHeap;
++	private ChunkPos[] travPopBatch;
++	private int travTrackedCount;
++
+ 	public override string Name => "chunkculler";
+ 
+ 	public SystemChunkVisibilityCalc(ClientMain game)
+ 		: base(game)
+ 	{
+@@ -76,13 +88,17 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 	{
+ 		if (!doOcclCulling)
+ 		{
+ 			return;
+ 		}
++		ChunkPos pos = new ChunkPos(chunkpos);
+ 		lock (game.chunkPositionsLock)
+ 		{
+-			game.chunkPositionsForRegenTrav.Add(new ChunkPos(chunkpos));
++			if (game.chunkPositionsForRegenTrav.Add(pos))
++			{
++				(incomingTrav ??= new List<ChunkPos>(64)).Add(pos);
++			}
+ 		}
+ 	}
+ 
+ 	private void OnUpdateLighting(int oldBlockId, int newBlockId, BlockPos pos, Dictionary<BlockPos, BlockUpdate> blockUpdatesBulk)
+ 	{
+@@ -97,13 +113,13 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 				foreach (KeyValuePair<BlockPos, BlockUpdate> item3 in blockUpdatesBulk)
+ 				{
+ 					if (item3.Value.NewSolidBlockId >= 0 && RequiresRecalc(item3.Value.OldBlockId, item3.Value.NewSolidBlockId))
+ 					{
+ 						ChunkPos item = ChunkPos.FromPosition(item3.Key.X, item3.Key.Y, item3.Key.Z, 0);
+-						if (!game.chunkPositionsForRegenTrav.Contains(item))
++						if (game.chunkPositionsForRegenTrav.Add(item))
+ 						{
+-							game.chunkPositionsForRegenTrav.Add(item);
++							(incomingTrav ??= new List<ChunkPos>(64)).Add(item);
+ 							ClientChunk clientChunk = game.WorldMap.GetClientChunk(item.X, item.Y, item.Z);
+ 							if (clientChunk != null)
+ 							{
+ 								clientChunk.traversabilityFresh = false;
+ 							}
+@@ -115,13 +131,13 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 			if (!RequiresRecalc(oldBlockId, newBlockId))
+ 			{
+ 				return;
+ 			}
+ 			ChunkPos item2 = new ChunkPos(pos);
+-			if (!game.chunkPositionsForRegenTrav.Contains(item2))
++			if (game.chunkPositionsForRegenTrav.Add(item2))
+ 			{
+-				game.chunkPositionsForRegenTrav.Add(item2);
++				(incomingTrav ??= new List<ChunkPos>(64)).Add(item2);
+ 				ClientChunk clientChunk2 = game.WorldMap.GetClientChunk(item2.X, item2.InternalY, item2.Z);
+ 				if (clientChunk2 != null)
+ 				{
+ 					clientChunk2.traversabilityFresh = false;
+ 				}
+@@ -145,38 +161,144 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 		return 10;
+ 	}
+ 
+ 	public override void OnSeperateThreadGameTick(float dt)
+ 	{
+-		if (game.chunkPositionsForRegenTrav.Count != 0)
++		OptimumTraversabilityQueue heap = travWorkHeap ??= new OptimumTraversabilityQueue();
++		if (game.chunkPositionsForRegenTrav.Count == 0 && heap.Count == 0)
++		{
++			return;
++		}
++
++		Vec3d cameraPos = game.player?.Entity?.CameraPos;
++		int camX = cameraPos != null ? (int)(cameraPos.X / 32.0) : 0;
++		int camY = cameraPos != null ? (int)(cameraPos.Y / 32.0) : 0;
++		int camZ = cameraPos != null ? (int)(cameraPos.Z / 32.0) : 0;
++
++		List<ChunkPos> drained = drainedIncoming ??= new List<ChunkPos>(64);
++		drained.Clear();
++		bool needsFullResync;
++
++		lock (game.chunkPositionsLock)
++		{
++			int setCount = game.chunkPositionsForRegenTrav.Count;
++			int incomingCount = incomingTrav != null ? incomingTrav.Count : 0;
++			needsFullResync = (setCount - incomingCount) != travTrackedCount;
++			if (needsFullResync)
++			{
++				incomingTrav?.Clear();
++				if (setCount > 0)
++				{
++					if (drained.Capacity < setCount) drained.Capacity = setCount;
++					foreach (ChunkPos pos in game.chunkPositionsForRegenTrav)
++					{
++						drained.Add(pos);
++					}
++				}
++				travTrackedCount = setCount;
++			}
++			else if (incomingCount > 0)
++			{
++				List<ChunkPos> prevDrained = drained;
++				drained = incomingTrav;
++				incomingTrav = prevDrained;
++				drainedIncoming = drained;
++				travTrackedCount = setCount;
++			}
++		}
++
++		if (needsFullResync)
++		{
++			heap.BeginBulkReset(drained.Count, camX, camY, camZ);
++			for (int i = 0; i < drained.Count; i++)
++			{
++				ChunkPos p = drained[i];
++				heap.PushUnordered(p.X, p.Y, p.Z, p.Dimension);
++			}
++			heap.FinishBulkReset();
++			drained.Clear();
++		}
++		else if (drained.Count > 0)
++		{
++			for (int i = 0; i < drained.Count; i++)
++			{
++				ChunkPos p = drained[i];
++				heap.Push(p.X, p.Y, p.Z, p.Dimension, camX, camY, camZ);
++			}
++			drained.Clear();
++			heap.ReheapIfCameraMoved(camX, camY, camZ);
++		}
++		else
++		{
++			heap.ReheapIfCameraMoved(camX, camY, camZ);
++		}
++
++		if (heap.Count == 0)
++		{
++			return;
++		}
++
++		ChunkPos[] batch = travPopBatch ??= new ChunkPos[OptimumTraversabilityQueue.PopBatchSize];
++		long budgetStart = Stopwatch.GetTimestamp();
++
++		while (heap.Count > 0 && Stopwatch.GetElapsedTime(budgetStart).TotalMilliseconds < OptimumTraversabilityQueue.BatchBudgetMs)
+ 		{
+-			ChunkPos chunkpos;
++			int batchLen = 0;
++			while (batchLen < batch.Length && heap.TryPop(out OptimumTraversabilityQueue.Entry entry))
++			{
++				batch[batchLen++] = new ChunkPos(entry.X, entry.Y, entry.Z, entry.Dimension);
++			}
++			if (batchLen == 0)
++			{
++				break;
++			}
++
+ 			lock (game.chunkPositionsLock)
+ 			{
+-				chunkpos = game.chunkPositionsForRegenTrav.PopFirst();
++				for (int i = 0; i < batchLen; i++)
++				{
++					if (!game.chunkPositionsForRegenTrav.Remove(batch[i]))
++					{
++						batch[i].Dimension = int.MinValue;
++					}
++				}
++				int remainingIncoming = incomingTrav != null ? incomingTrav.Count : 0;
++				travTrackedCount = game.chunkPositionsForRegenTrav.Count - remainingIncoming;
++			}
++
++			for (int i = 0; i < batchLen; i++)
++			{
++				if (batch[i].Dimension == int.MinValue)
++				{
++					continue;
++				}
++				RegenTraversabilityGraph(batch[i]);
+ 			}
+-			RegenTraversabilityGraph(chunkpos);
+ 		}
+ 	}
+ 
+ 	private void RegenTraversabilityGraph(ChunkPos chunkpos)
+ 	{
+-		ClientChunk clientChunk = game.WorldMap.GetClientChunk(chunkpos.X, chunkpos.Y, chunkpos.Z);
++		if (visitedBlock == null || blocksFast == null)
++		{
++			return;
++		}
++		ClientChunk clientChunk = game.WorldMap.GetClientChunk(chunkpos.X, chunkpos.InternalY, chunkpos.Z);
+ 		if (clientChunk == null || !clientChunk.ChunkHasData())
+ 		{
+ 			return;
+ 		}
+ 		if (clientChunk.Empty)
+ 		{
+-			setFullyTraversable(clientChunk);
++			clientChunk.traversability = OptimumChunkVisibilityGrid.AllPass;
++			Volatile.Write(ref clientChunk.traversabilityFresh, true);
+ 			return;
+ 		}
+-		clientChunk.ClearTraversable();
++		ushort traversabilityMask = 0;
+ 		bfsQueue.Clear();
+ 		uint num = ++iteration;
+ 		clientChunk.TemporaryUnpack(Blocks);
+-		Vec3i vec3i = new Vec3i();
+ 		int num2 = blocksFast.Length;
+ 		for (int i = 0; i < Blocks.Length; i++)
+ 		{
+ 			if (visitedBlock[i] == num)
+ 			{
+@@ -195,21 +317,23 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 				Block block = blocksFast[num5];
+ 				if (AllSidesOpaque(block))
+ 				{
+ 					continue;
+ 				}
+-				vec3i.Set(num4 % 32, num4 / 32 / 32, num4 / 32 % 32);
++				int vx = num4 & 31;
++				int vy = num4 >> 10;
++				int vz = (num4 >> 5) & 31;
+ 				for (int j = 0; j < 6; j++)
+ 				{
+ 					if (block.SideOpaque[j])
+ 					{
+ 						continue;
+ 					}
+ 					Vec3i vec3i2 = BlockFacing.ALLNORMALI[j];
+-					int num6 = vec3i.X + vec3i2.X;
+-					int num7 = vec3i.Y + vec3i2.Y;
+-					int num8 = vec3i.Z + vec3i2.Z;
++					int num6 = vx + vec3i2.X;
++					int num7 = vy + vec3i2.Y;
++					int num8 = vz + vec3i2.Z;
+ 					if (DidWeExitChunk(num6, num7, num8))
+ 					{
+ 						num3 |= 1 << j;
+ 						continue;
+ 					}
+@@ -219,13 +343,33 @@ public class SystemChunkVisibilityCalc : ClientSystem
+ 						visitedBlock[num9] = num;
+ 						bfsQueue.Enqueue(num9);
+ 					}
+ 				}
+ 			}
+-			connectFacesAndSetTraversable(num3, clientChunk);
++			ConnectFacesToMask(num3, ref traversabilityMask);
++		}
++		clientChunk.traversability = traversabilityMask;
++		Volatile.Write(ref clientChunk.traversabilityFresh, true);
++	}
++
++	private static void ConnectFacesToMask(int exitedFaces, ref ushort mask)
++	{
++		for (int i = 0; i < 6; i++)
++		{
++			if ((exitedFaces & (1 << i)) == 0)
++			{
++				continue;
++			}
++			for (int j = i + 1; j < 6; j++)
++			{
++				if ((exitedFaces & (1 << j)) != 0)
++				{
++					int bit = ClientChunk.traversabilityMapping[i, j];
++					mask |= (ushort)(1 << bit);
++				}
++			}
+ 		}
+-		clientChunk.traversabilityFresh = true;
+ 	}
+ 
+ 	private void connectFacesAndSetTraversable(int exitedFaces, ClientChunk chunk)
+ 	{
+ 		for (int i = 0; i < 6; i++)

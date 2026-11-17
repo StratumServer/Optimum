@@ -37,6 +37,7 @@
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumWorldgenSafetyGate.cs" Link="Config\OptimumWorldgenSafetyGate.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\optimum-worldgen-footprint-lease.cs" Link="Config\optimum-worldgen-footprint-lease.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumChunkVisibilityGrid.cs" Link="Config\OptimumChunkVisibilityGrid.cs" />
+    <Compile Include="..\sources\VintagestoryApi\Config\OptimumTraversabilityQueue.cs" Link="Config\OptimumTraversabilityQueue.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\PoolCullData.cs" Link="Config\PoolCullData.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumFrustumCullSimd.cs" Link="Config\OptimumFrustumCullSimd.cs" />
     <Compile Include="..\sources\VintagestoryApi\Config\OptimumKometGuard.cs" Link="Config\OptimumKometGuard.cs" />
