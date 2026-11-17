@@ -134,6 +134,10 @@ public static class ApiPatcher
             method.Name == "DeleteGuiTextures" && method.Parameters.Count == 2);
         var deleteGuiTexture = bridge.Methods.Single(method =>
             method.Name == "DeleteGuiTexture" && method.Parameters.Count == 2);
+        var itemStackMatchesSearchText = bridge.Methods.Single(method =>
+            method.Name == "ItemStackMatchesSearchText" && method.Parameters.Count == 3);
+        var filterSlotGridItems = bridge.Methods.Single(method =>
+            method.Name == "FilterSlotGridItems" && method.Parameters.Count == 10);
         var optimumConfig = contracts.MainModule.GetType("Vintagestory.API.Config.OptimumConfig")
             ?? throw new InvalidOperationException("OptimumConfig is missing from the contracts assembly.");
         var versionField = optimumConfig.Fields.Single(field =>
@@ -195,6 +199,10 @@ public static class ApiPatcher
             vanilla.MainModule.ImportReference(deleteGuiTextures),
             vanilla.MainModule.ImportReference(deleteGuiTexture));
         int guiSlotNotifiedPatches = PatchGuiSlotNotifiedSubscription(vanilla.MainModule);
+        int inventorySearchPatches = PatchInventorySearch(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(itemStackMatchesSearchText),
+            vanilla.MainModule.ImportReference(filterSlotGridItems));
         int guiHoverTextPatches = PatchGuiHoverTextSameText(vanilla.MainModule);
         int guiStatbarPatches = PatchGuiStatbarOnDemand(vanilla.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
@@ -315,6 +323,11 @@ public static class ApiPatcher
             throw new InvalidOperationException(
                 $"Expected 3 slot grid SlotNotified patches, applied {guiSlotNotifiedPatches}.");
         }
+        if (inventorySearchPatches != 2)
+        {
+            throw new InvalidOperationException(
+                $"Expected 2 inventory search patches, applied {inventorySearchPatches}.");
+        }
         if (guiHoverTextPatches != 2)
         {
             throw new InvalidOperationException(
@@ -382,6 +395,7 @@ public static class ApiPatcher
                 $"{guiCompositionMetrics} GUI composition metrics hook, " +
                 $"{guiTextureDisposals} GUI texture disposals, " +
                 $"{guiSlotNotifiedPatches} slot grid SlotNotified subscription fixes, " +
+                $"{inventorySearchPatches} inventory search optimizations, " +
                 $"{guiHoverTextPatches} hover text same-text skips, " +
                 $"{guiStatbarPatches} statbar on-demand edits, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
@@ -1384,6 +1398,113 @@ public static class ApiPatcher
         Console.WriteLine($"  API PATCHED: {gridTypeName} constructor no longer subscribes to SlotNotified");
         Console.WriteLine($"  API PATCHED: {gridTypeName}.ComposeInteractiveElements subscribes on every compose");
         return 3;
+    }
+
+    /// <summary>
+    /// Issue #580 / #512: ships tiered name short-circuiting and thread-local DummySlot reuse for
+    /// ItemStack.MatchesSearchText plus allocation-free stable weighted slot sorting for
+    /// GuiElementItemSlotGridBase.FilterItemsBySearchText through OptimumApiBridge.
+    /// </summary>
+    internal static int PatchInventorySearch(
+        ModuleDefinition module,
+        MethodReference matchesSearchBridge,
+        MethodReference filterItemsBridge)
+    {
+        const string itemStackTypeName = "Vintagestory.API.Common.ItemStack";
+        const string gridTypeName = "Vintagestory.API.Client.GuiElementItemSlotGridBase";
+        const string elementTypeName = "Vintagestory.API.Client.GuiElement";
+
+        var itemStack = module.GetType(itemStackTypeName)
+            ?? throw new InvalidOperationException($"{itemStackTypeName} is missing from the vanilla API.");
+        var matchesMethod = itemStack.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "MatchesSearchText" &&
+            method.Parameters.Count == 2 &&
+            method.HasBody)
+            ?? throw new InvalidOperationException($"{itemStackTypeName}.MatchesSearchText(IWorldAccessor, string) is missing from the vanilla API.");
+
+        if (matchesMethod.Body.Instructions.Any(instruction =>
+            instruction.Operand is MethodReference called &&
+            called.DeclaringType.FullName == "Vintagestory.API.Config.OptimumApiBridge"))
+        {
+            throw new InvalidOperationException($"{itemStackTypeName}.MatchesSearchText is already patched.");
+        }
+
+        var grid = module.GetType(gridTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName} is missing from the vanilla API.");
+        var element = module.GetType(elementTypeName)
+            ?? throw new InvalidOperationException($"{elementTypeName} is missing from the vanilla API.");
+
+        var filterMethod = grid.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "FilterItemsBySearchText" &&
+            method.Parameters.Count == 3 &&
+            method.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.FilterItemsBySearchText is missing from the vanilla API.");
+
+        if (filterMethod.Body.Instructions.Any(instruction =>
+            instruction.Operand is MethodReference called &&
+            called.DeclaringType.FullName == "Vintagestory.API.Config.OptimumApiBridge"))
+        {
+            throw new InvalidOperationException($"{gridTypeName}.FilterItemsBySearchText is already patched.");
+        }
+
+        var searchTextField = grid.Fields.SingleOrDefault(field => field.Name == "searchText" && field.FieldType.MetadataType == MetadataType.String)
+            ?? throw new InvalidOperationException($"{gridTypeName}.searchText is missing from the vanilla API.");
+        var availableSlotsField = grid.Fields.SingleOrDefault(field => field.Name == "availableSlots")
+            ?? throw new InvalidOperationException($"{gridTypeName}.availableSlots is missing from the vanilla API.");
+        var renderedSlotsField = grid.Fields.SingleOrDefault(field => field.Name == "renderedSlots")
+            ?? throw new InvalidOperationException($"{gridTypeName}.renderedSlots is missing from the vanilla API.");
+        var inventoryField = grid.Fields.SingleOrDefault(field => field.Name == "inventory")
+            ?? throw new InvalidOperationException($"{gridTypeName}.inventory is missing from the vanilla API.");
+        var apiField = element.Fields.SingleOrDefault(field => field.Name == "api")
+            ?? throw new InvalidOperationException($"{elementTypeName}.api is missing from the vanilla API.");
+        var colsField = grid.Fields.SingleOrDefault(field => field.Name == "cols" && field.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{gridTypeName}.cols is missing from the vanilla API.");
+        var rowsField = grid.Fields.SingleOrDefault(field => field.Name == "rows" && field.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{gridTypeName}.rows is missing from the vanilla API.");
+        var composeInteractive = grid.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "ComposeInteractiveElements" &&
+            method.Parameters.Count == 0 &&
+            method.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeInteractiveElements is missing from the vanilla API.");
+
+        RewriteThreeArgForwarder(matchesMethod, matchesSearchBridge);
+
+        ClearDebugInformation(filterMethod);
+        var filterBody = new MethodBody(filterMethod)
+        {
+            InitLocals = false,
+            MaxStackSize = 16,
+        };
+        var il = filterBody.GetILProcessor();
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldflda, searchTextField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldfld, availableSlotsField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldfld, renderedSlotsField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldfld, inventoryField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldfld, apiField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldfld, colsField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Ldflda, rowsField));
+        il.Append(Instruction.Create(OpCodes.Ldarg_1));
+        il.Append(Instruction.Create(OpCodes.Ldarg_2));
+        il.Append(Instruction.Create(OpCodes.Ldarg_3));
+        il.Append(Instruction.Create(OpCodes.Call, filterItemsBridge));
+        il.Append(Instruction.Create(OpCodes.Ldarg_0));
+        il.Append(Instruction.Create(OpCodes.Call, composeInteractive));
+        il.Append(Instruction.Create(OpCodes.Ret));
+        filterMethod.Body = filterBody;
+
+        Console.WriteLine($"  API PATCHED: {itemStackTypeName}.MatchesSearchText -> OptimumApiBridge");
+        Console.WriteLine($"  API PATCHED: {gridTypeName}.FilterItemsBySearchText -> OptimumApiBridge");
+        return 2;
     }
 
     /// <summary>
