@@ -1,8 +1,41 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-index 8f0a63f..342de86 100644
+index 8f0a63f..d91fdab 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemSoundEngine.cs
-@@ -180,15 +180,52 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+@@ -26,10 +26,12 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+ 
+ 	private bool prevSubmerged;
+ 
+ 	private int prevReverbKey = -999;
+ 
++	private int idleEvictTickCounter;
++
+ 	public override string Name => "soen";
+ 
+ 	public double RenderOrder => 1.0;
+ 
+ 	public int RenderRange => 1;
+@@ -128,13 +130,18 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+ 			else if (!loadedSound.IsDisposed)
+ 			{
+ 				game.ActiveSounds.Enqueue(loadedSound);
+ 			}
+ 		}
++		if (++idleEvictTickCounter >= 20)
++		{
++			idleEvictTickCounter = 0;
++			AudioMetaData.EvictIdleSharedBuffers(60000, 262144);
++		}
+ 		if (!scanning)
+ 		{
+-			TyronThreadPool.QueueTask((Action)scanReverbnessOffthread, "scanReverbnessOffthread");
++			TyronThreadPool.QueueTask(new Action(scanReverbnessOffthread), "scanReverbnessOffthread");
+ 		}
+ 	}
+ 
+ 	private void scanReverbnessOffthread()
+ 	{
+@@ -180,15 +187,52 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
  		TargetReverbness = (float)num;
  		RoomLocation = new Cuboidi(vec3d2.AsBlockPos, vec3d3.AsBlockPos).GrowBy(10, 10, 10);
  		scanning = false;
@@ -56,3 +89,15 @@ index 8f0a63f..342de86 100644
  
  	private void OnGameTick100ms(float dt)
  	{
+@@ -292,10 +336,11 @@ public class SystemSoundEngine : ClientSystem, IRenderer, IDisposable
+ 		{
+ 			ILoadedSound loadedSound = game.ActiveSounds.Dequeue();
+ 			loadedSound?.Stop();
+ 			loadedSound?.Dispose();
+ 		}
++		AudioMetaData.EvictIdleSharedBuffers(0, 262144);
+ 	}
+ 
+ 	private void OnSoundLevelChanged(int newValue)
+ 	{
+ 		int count = game.ActiveSounds.Count;

@@ -1,0 +1,89 @@
+diff --git a/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs b/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
+index d55cec5..a1acd96 100644
+--- a/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
++++ b/VintagestoryLib/Vintagestory.Client/AudioOpenAl.cs
+@@ -1,19 +1,22 @@
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
+ using System.Linq;
++using System.Threading;
+ using OpenTK.Audio.OpenAL;
+ using EFX = OpenTK.Audio.OpenAL.ALC.EFX;
+ using OpenTK.Mathematics;
+ using Vintagestory.API.Common;
+ using Vintagestory.Client.NoObf;
+ 
+ namespace Vintagestory.Client;
+ 
+ public class AudioOpenAl : IDisposable
+ {
++	internal static int ContextGeneration;
++
+ 	private ALContext Context;
+ 
+ 	private ALDevice Device;
+ 
+ 	public static bool UseHrtf;
+@@ -115,10 +118,11 @@ public class AudioOpenAl : IDisposable
+ 		//IL_007c: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0087: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0093: Unknown result type (might be due to invalid IL or missing references)
+ 		//IL_0098: Unknown result type (might be due to invalid IL or missing references)
+ 		LoadedSoundNative.DisposeAllSounds();
++		AudioMetaData.DisposeAllSharedBuffers();
+ 		for (int i = 0; i < reverbEffectsByReverbness.Length; i++)
+ 		{
+ 			ReverbEffect reverbEffect = reverbEffectsByReverbness[i];
+ 			if (reverbEffect != null)
+ 			{
+@@ -139,10 +143,11 @@ public class AudioOpenAl : IDisposable
+ 		{
+ 			ALC.MakeContextCurrent(ALContext.Null);
+ 			ALC.DestroyContext(Context);
+ 			ALC.CloseDevice(Device);
+ 			Device = ALDevice.Null;
++			Interlocked.Increment(ref ContextGeneration);
+ 		}
+ 	}
+ 
+ 	public void Dispose()
+ 	{
+@@ -172,11 +177,24 @@ public class AudioOpenAl : IDisposable
+ 				ALC.MakeContextCurrent(ALContext.Null);
+ 				ALC.DestroyContext(Context);
+ 				ALC.CloseDevice(Device);
+ 			}
+ 			string desiredDevice = ClientSettings.AudioDevice;
+-			if (!Devices.Any((string d) => d.Equals(desiredDevice)))
++			bool foundDevice = false;
++			if (desiredDevice != null)
++			{
++				IList<string> devices = Devices;
++				for (int j = 0; j < devices.Count; j++)
++				{
++					if (devices[j].Equals(desiredDevice))
++					{
++						foundDevice = true;
++						break;
++					}
++				}
++			}
++			if (!foundDevice)
+ 			{
+ 				desiredDevice = null;
+ 				ClientSettings.AudioDevice = null;
+ 			}
+ 			Device = ALC.OpenDevice(desiredDevice);
+@@ -191,10 +209,11 @@ public class AudioOpenAl : IDisposable
+ 				array = Array.Empty<int>();
+ 				UseHrtf = false;
+ 			}
+ 			Context = ALC.CreateContext(Device, array);
+ 			ALC.MakeContextCurrent(Context);
++			Interlocked.Increment(ref ContextGeneration);
+ 			CheckALError(logger, "Start");
+ 			AL.Listener((ALListener3f)4102, 0f, 0f, 0f);
+ 		}
+ 		catch (Exception e)
+ 		{
