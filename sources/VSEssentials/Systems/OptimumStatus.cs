@@ -465,6 +465,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetFrontToBackSortSummary());
         sb.AppendLine(OptimumDiagnostics.GetSsaoDepthPositionSummary());
         sb.AppendLine(OptimumDiagnostics.GetShadowFarReuseSummary());
+        sb.AppendLine(OptimumDiagnostics.GetDynamicRenderScaleSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }
@@ -531,6 +532,11 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Indirect draw (glMultiDrawElementsIndirect): ON");
         else if (OptimumConfig.IndirectDrawEnabled && !OptimumConfig.IndirectDrawSupported)
             api.Logger.Debug("[Optimum] Indirect draw: REQUESTED but UNSUPPORTED by GPU/driver (fallback: vanilla multi-draw)");
+        if (OptimumConfig.EffectiveDynamicRenderScale)
+            api.Logger.Debug("[Optimum] Dynamic render scale: ON (targetFps={0}, minScale={1:F2}, upscaler={2})",
+                OptimumConfig.DynamicRenderScaleTargetFps,
+                OptimumConfig.DynamicRenderScaleMinScale,
+                OptimumConfig.DynamicRenderScaleUpscaler);
 
         if (OptimumConfig.OptiTimeDetected)
             api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..6fb26c1 100644
+index bba43f6..3f5420c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,45 +18,95 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -18,64 +18,115 @@ public class SystemRenderOITLayers : ClientSystem
  		public int RenderRange => 1;
  
  		public BeforeOIT(ICoreClientAPI capi)
@@ -67,7 +67,10 @@ index bba43f6..6fb26c1 100644
 +				if (revealTextureId == 0 || transparentfb == null || transparentfb.Disposed || transparentfb != currentTransparentfb)
 +				{
 +					transparentfb = currentTransparentfb;
-+					rebuild();
++					if (!SystemRenderOITLayers.OptimumTryActivateCachedOit(currentTransparentfb))
++					{
++						rebuild();
++					}
 +					if (revealTextureId == 0 || accumTextureId == 0)
 +					{
 +						SystemRenderOITLayers.DisableOptimumOit(capi, "OIT framebuffer rebuild produced no textures");
@@ -125,9 +128,11 @@ index bba43f6..6fb26c1 100644
  
  		private void freeResources()
  		{
- 			GL.DeleteTexture(accumTextureId);
-@@ -65,11 +115,11 @@ public class SystemRenderOITLayers : ClientSystem
- 			revealTextureId = 0;
+-			GL.DeleteTexture(accumTextureId);
+-			GL.DeleteTexture(revealTextureId);
+-			accumTextureId = 0;
+-			revealTextureId = 0;
++			SystemRenderOITLayers.OptimumFreeAllOitResources();
  		}
  
  		public void Dispose()
@@ -138,8 +143,28 @@ index bba43f6..6fb26c1 100644
  
  		private void rebuild()
  		{
- 			freeResources();
-@@ -104,15 +154,24 @@ public class SystemRenderOITLayers : ClientSystem
+-			freeResources();
++			SystemRenderOITLayers.OptimumCleanupDisposedOitEntries();
+ 			transparentfb = capi.Render.FrameBuffers[1];
++			SystemRenderOITLayers.OptimumEvictOitEntryForFb(transparentfb);
+ 			int width = transparentfb.Width;
+ 			int height = transparentfb.Height;
+ 			GL.BindFramebuffer((FramebufferTarget)36160, transparentfb.FboId);
+ 			revealTextureId = GL.GenTexture();
+ 			GL.BindTexture((TextureTarget)3553, revealTextureId);
+@@ -93,10 +144,11 @@ public class SystemRenderOITLayers : ClientSystem
+ 			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10243, 33071);
+ 			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, revealTextureId, 0);
+ 			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36067, accumTextureId, 0, 0);
+ 			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36068, accumTextureId, 0, 1);
+ 			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36069, accumTextureId, 0, 2);
++			SystemRenderOITLayers.OptimumStoreCachedOit(transparentfb, revealTextureId, accumTextureId, width, height);
+ 		}
+ 	}
+ 
+ 	public class AfterOIT : IRenderer, IDisposable
+ 	{
+@@ -104,15 +156,24 @@ public class SystemRenderOITLayers : ClientSystem
  
  		public int RenderRange => 1;
  
@@ -169,7 +194,7 @@ index bba43f6..6fb26c1 100644
  		public void Dispose()
  		{
  		}
-@@ -122,19 +181,50 @@ public class SystemRenderOITLayers : ClientSystem
+@@ -122,19 +183,182 @@ public class SystemRenderOITLayers : ClientSystem
  
  	private static int accumTextureId;
  
@@ -178,6 +203,138 @@ index bba43f6..6fb26c1 100644
 +	private static bool optimumOitDisabled;
 +
 +	private static bool optimumOitFailureLogged;
++
++	private const int OptimumOitCacheCapacity = 3;
++
++	private static FrameBufferRef[] optimumOitCachedFbs;
++
++	private static int[] optimumOitCachedRevealIds;
++
++	private static int[] optimumOitCachedAccumIds;
++
++	private static int[] optimumOitCachedWidths;
++
++	private static int[] optimumOitCachedHeights;
++
++	private static int optimumOitCacheCount;
++
++	private static void OptimumEnsureOitCacheAllocated()
++	{
++		if (optimumOitCachedFbs != null) return;
++		optimumOitCachedFbs = new FrameBufferRef[OptimumOitCacheCapacity];
++		optimumOitCachedRevealIds = new int[OptimumOitCacheCapacity];
++		optimumOitCachedAccumIds = new int[OptimumOitCacheCapacity];
++		optimumOitCachedWidths = new int[OptimumOitCacheCapacity];
++		optimumOitCachedHeights = new int[OptimumOitCacheCapacity];
++	}
++
++	private static void OptimumRemoveOitCacheAt(int index)
++	{
++		if (optimumOitCachedAccumIds[index] != 0) GL.DeleteTexture(optimumOitCachedAccumIds[index]);
++		if (optimumOitCachedRevealIds[index] != 0) GL.DeleteTexture(optimumOitCachedRevealIds[index]);
++		int last = optimumOitCacheCount - 1;
++		for (int i = index; i < last; i++)
++		{
++			optimumOitCachedFbs[i] = optimumOitCachedFbs[i + 1];
++			optimumOitCachedRevealIds[i] = optimumOitCachedRevealIds[i + 1];
++			optimumOitCachedAccumIds[i] = optimumOitCachedAccumIds[i + 1];
++			optimumOitCachedWidths[i] = optimumOitCachedWidths[i + 1];
++			optimumOitCachedHeights[i] = optimumOitCachedHeights[i + 1];
++		}
++		optimumOitCachedFbs[last] = null;
++		optimumOitCachedRevealIds[last] = 0;
++		optimumOitCachedAccumIds[last] = 0;
++		optimumOitCachedWidths[last] = 0;
++		optimumOitCachedHeights[last] = 0;
++		optimumOitCacheCount = last;
++	}
++
++	internal static void OptimumCleanupDisposedOitEntries()
++	{
++		if (optimumOitCachedFbs == null || optimumOitCacheCount == 0) return;
++		for (int i = optimumOitCacheCount - 1; i >= 0; i--)
++		{
++			FrameBufferRef fb = optimumOitCachedFbs[i];
++			if (fb == null || fb.Disposed)
++			{
++				OptimumRemoveOitCacheAt(i);
++			}
++		}
++	}
++
++	internal static void OptimumEvictOitEntryForFb(FrameBufferRef targetFb)
++	{
++		if (optimumOitCachedFbs == null || targetFb == null) return;
++		for (int i = optimumOitCacheCount - 1; i >= 0; i--)
++		{
++			if (ReferenceEquals(optimumOitCachedFbs[i], targetFb))
++			{
++				OptimumRemoveOitCacheAt(i);
++			}
++		}
++	}
++
++	internal static bool OptimumTryActivateCachedOit(FrameBufferRef targetFb)
++	{
++		if (targetFb == null || targetFb.Disposed) return false;
++		OptimumCleanupDisposedOitEntries();
++		if (optimumOitCachedFbs == null) return false;
++		for (int i = 0; i < optimumOitCacheCount; i++)
++		{
++			if (ReferenceEquals(optimumOitCachedFbs[i], targetFb)
++				&& optimumOitCachedWidths[i] == targetFb.Width
++				&& optimumOitCachedHeights[i] == targetFb.Height
++				&& optimumOitCachedRevealIds[i] != 0
++				&& optimumOitCachedAccumIds[i] != 0)
++			{
++				revealTextureId = optimumOitCachedRevealIds[i];
++				accumTextureId = optimumOitCachedAccumIds[i];
++				return true;
++			}
++		}
++		return false;
++	}
++
++	internal static void OptimumStoreCachedOit(FrameBufferRef targetFb, int revealTex, int accumTex, int width, int height)
++	{
++		OptimumEnsureOitCacheAllocated();
++		OptimumEvictOitEntryForFb(targetFb);
++		if (optimumOitCacheCount >= OptimumOitCacheCapacity)
++		{
++			OptimumRemoveOitCacheAt(0);
++		}
++		int idx = optimumOitCacheCount++;
++		optimumOitCachedFbs[idx] = targetFb;
++		optimumOitCachedRevealIds[idx] = revealTex;
++		optimumOitCachedAccumIds[idx] = accumTex;
++		optimumOitCachedWidths[idx] = width;
++		optimumOitCachedHeights[idx] = height;
++	}
++
++	internal static void OptimumFreeAllOitResources()
++	{
++		if (optimumOitCachedFbs != null && optimumOitCacheCount > 0)
++		{
++			for (int i = optimumOitCacheCount - 1; i >= 0; i--)
++			{
++				if (optimumOitCachedAccumIds[i] != 0) GL.DeleteTexture(optimumOitCachedAccumIds[i]);
++				if (optimumOitCachedRevealIds[i] != 0) GL.DeleteTexture(optimumOitCachedRevealIds[i]);
++				optimumOitCachedFbs[i] = null;
++				optimumOitCachedRevealIds[i] = 0;
++				optimumOitCachedAccumIds[i] = 0;
++				optimumOitCachedWidths[i] = 0;
++				optimumOitCachedHeights[i] = 0;
++			}
++			optimumOitCacheCount = 0;
++		}
++		else
++		{
++			if (accumTextureId != 0) GL.DeleteTexture(accumTextureId);
++			if (revealTextureId != 0) GL.DeleteTexture(revealTextureId);
++		}
++		accumTextureId = 0;
++		revealTextureId = 0;
++	}
 +
 +	private static void RestoreVanillaTransparentState()
 +	{

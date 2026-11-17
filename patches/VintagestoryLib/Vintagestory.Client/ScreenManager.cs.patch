@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
-index b5000e7..22e39c1 100644
+index b5000e7..1cdaa36 100644
 --- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 @@ -38,10 +38,12 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
@@ -198,7 +198,22 @@ index b5000e7..22e39c1 100644
  	public void loadMods()
  	{
  		List<string> list = new List<string>(ClientSettings.ModPaths);
-@@ -1051,30 +1149,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -704,10 +802,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 		}, code);
+ 	}
+ 
+ 	internal void Render(float dt)
+ 	{
++		if (Platform is Vintagestory.Client.NoObf.ClientPlatformWindows optimumWinPlatform)
++		{
++			optimumWinPlatform.OptimumUpdateDynamicResolution(CurrentScreen is GuiScreenRunningGame);
++		}
+ 		int width = Platform.WindowSize.Width;
+ 		int height = Platform.WindowSize.Height;
+ 		Platform.GlViewport(0, 0, width, height);
+ 		Platform.ClearFrameBuffer(EnumFrameBuffer.Default);
+ 		Platform.ClearFrameBuffer(EnumFrameBuffer.Primary);
+@@ -1051,30 +1153,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  	public static void PlaySound(string name)
  	{
  		PlaySound(new AssetLocation("sounds/" + name).WithPathAppendixOnce(".ogg"));

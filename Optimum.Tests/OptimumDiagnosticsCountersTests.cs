@@ -90,6 +90,22 @@ public class OptimumDiagnosticsCountersTests
         Assert.Contains("blocks=0", summary);
     }
 
+    [Fact]
+    public void ResetAllCountersClearsDynamicRenderScaleToo()
+    {
+        OptimumDiagnostics.RecordDynamicRenderScaleState(0.77f, OptimumDynamicUpscalerKind.Bilinear, 2, 14.0, 2.5);
+        OptimumDiagnostics.RecordDynamicRenderScaleStep(isDownscale: true);
+        OptimumDiagnostics.RecordDynamicRenderScaleCacheHit();
+        OptimumDiagnostics.RecordDynamicRenderScaleFsrFallback();
+        OptimumDiagnostics.ResetAllCounters();
+
+        string summary = OptimumDiagnostics.GetDynamicRenderScaleSummary();
+        Assert.Contains("scale=1.00", summary);
+        Assert.Contains("downscales=0", summary);
+        Assert.Contains("cacheHits=0", summary);
+        Assert.Contains("fsrFallbacks=0", summary);
+    }
+
     // Step 6 of the worker-pool wiring plan: OptimumTesselationWorkerRegistry.Register
     // publishes the registered thread id set, so `.optimum status` can show `ids=<the
     // tesselateterrain thread id>` as direct, in-game evidence that ClientMain::Start's
