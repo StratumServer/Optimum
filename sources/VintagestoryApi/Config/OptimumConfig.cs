@@ -271,6 +271,9 @@ public static class OptimumConfig
     /// render-path overlaps remain unnegotiated. Persisted to ModConfig/optimum.json.
     /// </summary>
     public static bool KometGuardEnabled = true;
+    public static bool GlFinalizerReclaimEnabled = true;
+
+    public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
 
     public static bool EffectiveIndirectDraw => IndirectDrawEnabled && IndirectDrawSupported &&
         !OptimumCompatibilityGuard.IsKometRenderGuardActive;
@@ -1290,6 +1293,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.IndirectDraw), IndirectDrawEnabled.ToString()),
         (nameof(OptimumConfigData.SimdCulling), SimdCullingEnabled.ToString()),
         (nameof(OptimumConfigData.KometGuard), KometGuardEnabled.ToString()),
+        (nameof(OptimumConfigData.GlFinalizerReclaim), GlFinalizerReclaimEnabled.ToString()),
     };
 
     /// <summary>
@@ -1407,6 +1411,7 @@ public static class OptimumConfig
             IndirectDrawEnabled = data.IndirectDraw;
             SimdCullingEnabled = data.SimdCulling;
             KometGuardEnabled = data.KometGuard;
+            GlFinalizerReclaimEnabled = data.GlFinalizerReclaim;
         }
         catch (Exception)
         {
@@ -1488,6 +1493,7 @@ public static class OptimumConfig
             IndirectDraw = IndirectDrawEnabled,
             SimdCulling = SimdCullingEnabled,
             KometGuard = KometGuardEnabled,
+            GlFinalizerReclaim = GlFinalizerReclaimEnabled,
         };
 
         try
@@ -1593,6 +1599,7 @@ internal sealed class OptimumConfigData
     public bool IndirectDraw { get; set; } = false;
     public bool SimdCulling { get; set; } = true;
     public bool KometGuard { get; set; } = true;
+    public bool GlFinalizerReclaim { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -3282,6 +3289,11 @@ public static class OptimumDiagnostics
     public static string GetPerformanceModsSummary()
     {
         return OptimumCompatibilityGuard.GetPerformanceModsSummary();
+    }
+
+    public static string GetGlReclaimSummary()
+    {
+        return $"Optimum GL finalizer reclaim: vaos={OptimumGlReclaimQueue.ReclaimedVaoCount}, buffers={OptimumGlReclaimQueue.ReclaimedBufferCount}, textures={OptimumGlReclaimQueue.ReclaimedTextureCount}, pending={OptimumGlReclaimQueue.PendingTotalCount}, drains={OptimumGlReclaimQueue.DrainCount}, modBypass=(tex={OptimumGlReclaimQueue.LoadedTextureFinalizerPatchedByMod}, vao={OptimumGlReclaimQueue.VaoFinalizerPatchedByMod})";
     }
 }
 

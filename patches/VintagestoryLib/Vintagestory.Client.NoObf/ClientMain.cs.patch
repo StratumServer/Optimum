@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
-index 6d5300a..9bbbeac 100644
+index 6d5300a..247a368 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs
 @@ -200,10 +200,12 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
@@ -235,7 +235,59 @@ index 6d5300a..9bbbeac 100644
  		mouseWorldInteractAnyway = !MouseGrabbed && !flag2;
  		if (!mouseGrabbed && MouseGrabbed)
  		{
-@@ -3394,14 +3462,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -2328,40 +2396,41 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+ 		return value.TextureId;
+ 	}
+ 
+ 	public void GetOrLoadCachedTexture(AssetLocation name, ref LoadedTexture intoTexture)
+ 	{
+-		intoTexture.IgnoreUndisposed = true;
+ 		if (!texturesByLocation.TryGetValue(name, out var value))
+ 		{
+ 			byte[] array = Platform.AssetManager.TryGet(name.Clone().WithPathPrefixOnce("textures/"))?.Data;
+ 			if (array == null)
+ 			{
++				intoTexture.IgnoreUndisposed = true;
+ 				return;
+ 			}
+ 			BitmapRef bitmapRef = Platform.CreateBitmapFromPng(array, array.Length);
+ 			value = (texturesByLocation[name] = new LoadedTexture(api, Platform.LoadTexture((IBitmap)bitmapRef, false, 0, false), bitmapRef.Width, bitmapRef.Height));
+ 			bitmapRef.Dispose();
+ 		}
+-		if (value.TextureId != intoTexture.TextureId && intoTexture.TextureId != 0)
+-		{
+-			intoTexture.Dispose();
+-		}
+-		intoTexture.TextureId = value.TextureId;
+-		intoTexture.Width = value.Width;
+-		intoTexture.Height = value.Height;
++		AssignCachedTexture(value, intoTexture);
+ 	}
+ 
+ 	public void GetOrLoadCachedTexture(AssetLocation name, BitmapRef bmp, ref LoadedTexture intoTexture)
+ 	{
+ 		if (!texturesByLocation.TryGetValue(name, out var value))
+ 		{
+ 			value = (texturesByLocation[name] = new LoadedTexture(api, Platform.LoadTexture((IBitmap)bmp, false, 0, false), bmp.Width, bmp.Height));
+ 		}
+-		if (value.TextureId != intoTexture.TextureId && intoTexture.TextureId != 0)
++		AssignCachedTexture(value, intoTexture);
++	}
++
++	private void AssignCachedTexture(LoadedTexture value, LoadedTexture intoTexture)
++	{
++		bool wasShared = intoTexture.IgnoreUndisposed;
++		intoTexture.IgnoreUndisposed = true;
++		if (!wasShared && value.TextureId != intoTexture.TextureId && intoTexture.TextureId != 0)
+ 		{
+-			intoTexture.Dispose();
++			Platform.GLDeleteTexture(intoTexture.TextureId);
+ 		}
+ 		intoTexture.TextureId = value.TextureId;
+ 		intoTexture.Width = value.Width;
+ 		intoTexture.Height = value.Height;
+ 	}
+@@ -3394,14 +3463,15 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  				SoundType = soundType
  			};
  		}
@@ -253,7 +305,7 @@ index 6d5300a..9bbbeac 100644
  				return num;
  			}
  			return 500;
-@@ -3451,11 +3520,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3451,11 +3521,11 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  			throw new InvalidOperationException("Cannot call LoadSound outside the main thread, it is not thread safe");
  		}
  		ArgumentNullException.ThrowIfNull(sound.Location, "sound.Location");
@@ -266,7 +318,7 @@ index 6d5300a..9bbbeac 100644
  			Platform.Logger.Warning("Audio File not found: {0}", sound.Location);
  			return null;
  		}
-@@ -3530,6 +3599,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
+@@ -3530,6 +3600,22 @@ public sealed class ClientMain : GameMain, IWorldIntersectionSupplier, IClientWo
  		EntityRenderers.TryGetValue(forEntity.EntityId, out var value);
  		value?.Dispose();
  		EntityRenderers.Remove(forEntity.EntityId);

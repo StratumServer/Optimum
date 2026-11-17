@@ -20,6 +20,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
         {
             ["Client/API/ICoreClientAPI.cs.patch"] = ["PatchClientApiThreadContract"],
             ["Client/Render/FrustumCulling.cs.patch"] = ["PatchFrustumCulling"],
+            ["Client/Texture/LoadedTexture.cs.patch"] = ["PatchLoadedTextureDisposal"],
             ["Client/UI/CairoFont.cs.patch"] = ["PatchFontMeasurementMetrics"],
             ["Client/UI/Elements/Impl/Interactive/GuiElementConfigList.cs.patch"] = ["PatchGuiTextureDisposal"],
             ["Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs.patch"] = ["PatchGuiStatbarOnDemand", "PatchQueuedGuiContexts"],

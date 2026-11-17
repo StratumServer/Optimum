@@ -171,6 +171,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "_optimumLastFsrOutputWidth",
         "_optimumLastFsrOutputHeight",
         "_optimumLastFsrSharpness",
+        "reclaimVaoScratch",
+        "reclaimBufferScratch",
+        "reclaimTextureScratch",
+        "DrainFinalizerReclaimQueues",
+        "FlushFinalizerReclaimQueuesOnShutdown",
+        "DrainFinalizerReclaimQueuesCore",
     },
     ["Vintagestory.Client.NoObf.ShaderPrograms"] = new()
     {
@@ -403,6 +409,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "GetTesselationWorkerSlot",
         "ChunkTesselatorManager",
         "InvokeStartPlaying",
+        "AssignCachedTexture",
     },
     // Issue #603: audio lifecycle synchronization, PCM retention cleanup, and intro music disposal
     ["Vintagestory.Client.NoObf.AudioMetaData"] = new()
@@ -466,6 +473,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "StopAndDisposeIntroMusic",
         "FadeAndDisposeIntroMusicWorker",
         "DisposeSoundWhenStoppedWorker",
+    },
+    // Issue #605: VAO shared index buffer ownership guard
+    ["Vintagestory.Client.NoObf.VAO"] = new()
+    {
+        "sharedIndexBuffer",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -872,6 +884,14 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.SystemClientTickingBlocks", "OnSeperateThreadGameTick", 1),
     // RenderAPIBase: skip disposed meshrefs instead of rendering freed GL handles (#8881/#8950/#8982-class crash)
     new("Vintagestory.Client.RenderAPIBase", "RenderMultiTextureMesh", 3),
+    // Issue #605: finalizer GL reclamation queues, GC.SuppressFinalize, and shared-ID aliasing fixes
+    new("Vintagestory.Client.NoObf.VAO", "Dispose", 0),
+    new("Vintagestory.Client.NoObf.VAO", "Finalize", 0),
+    new("Vintagestory.Client.RenderAPIBase", "LoadTexture", 5),
+    new("Vintagestory.Client.NoObf.ClientMain", "GetOrLoadCachedTexture", 2),
+    new("Vintagestory.Client.NoObf.ClientMain", "GetOrLoadCachedTexture", 3),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "AllocateEmptySSBOMesh", 12),
+    new("Vintagestory.Client.NoObf.ClientPlatformWindows", "WindowExit", 2),
     // Issue #480: bounds-check atlasNumber in TextureAtlasManager.RegenMipMaps
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RegenMipMaps", 1),
     // Chunk tesselator worker pool: .ctor constructs the tesselators and the upload space

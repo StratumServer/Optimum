@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
-index 4536b4c..05a9bba 100644
+index 4536b4c..95765df 100644
 --- a/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ClientProgram.cs
 @@ -46,10 +46,45 @@ public class ClientProgram
@@ -145,3 +145,28 @@ index 4536b4c..05a9bba 100644
  		}
  		GLFW.SetErrorCallback(new ErrorCallback(GlfwErrorCallback));
  		GameWindowNative gameWindowNative = AttemptToOpenWindow(gameWindowSettings, val2, num3, num4, 3);
+@@ -323,10 +402,11 @@ public class ClientProgram
+ 		{
+ 			clientPlatformWindows.SetWindowAttribute((WindowAttribute)131078, value: false);
+ 		}
+ 		screenManager.Start(args, rawArgs);
+ 		clientPlatformWindows.Start();
++		OptimumGlReclaimQueue.BeginNewContext();
+ 		Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
+ 		try
+ 		{
+ 			((GameWindow)gameWindowNative).Run();
+ 		}
+@@ -336,10 +416,12 @@ public class ClientProgram
+ 			{
+ 				GLFW.IconifyWindow(((NativeWindow)gameWindowNative).WindowPtr);
+ 			}
+ 			Thread.CurrentThread.Priority = ThreadPriority.Normal;
+ 			ScreenManager.Platform.Logger.Debug("After gamewindow.Run()");
++			clientPlatformWindows.IsShuttingDown = true;
++			clientPlatformWindows.FlushFinalizerReclaimQueuesOnShutdown();
+ 			clientPlatformWindows.DisposeFrameBuffers(clientPlatformWindows.FrameBuffers);
+ 			clientPlatformWindows.StopAudio();
+ 			((NativeWindow)gameWindowNative).Dispose();
+ 		}
+ 	}
