@@ -338,22 +338,24 @@ public static class OptimumFrustumCullSimd
         return ctx;
     }
 
-    public static bool InFrustumAndRange(
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool InRangeAndLodOnly(
         FrustumCulling culler,
         Sphere sphere,
         bool nowVisible,
         int lodLevel,
         ModelDataPoolLocation location)
     {
+        var playerPos = GetPlayerPos(culler);
+        if (playerPos == null) return false;
+
+        double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
+
         if (OptimumConfig.ChiselLodEnabled
             && (lodLevel == 2 || lodLevel == 3)
             && OptimumApiBridge.IsChiselTracked(location))
         {
-            var pPos = GetPlayerPos(culler);
-            if (pPos == null) return false;
-
-            double chiselDistance = pPos.HorDistanceSqTo(sphere.x, sphere.z);
-            if (chiselDistance >= culler.ViewDistanceSq)
+            if (distance >= culler.ViewDistanceSq)
             {
                 return false;
             }
@@ -361,26 +363,31 @@ public static class OptimumFrustumCullSimd
             double chiselDistanceSq = OptimumConfig.ChiselLodDistanceSq;
             double innerThreshold = chiselDistanceSq;
             double outerThreshold = chiselDistanceSq * OptimumConfig.HysteresisFactorSq;
-            bool chiselVisible = lodLevel == 2
-                ? chiselDistance <= (nowVisible ? outerThreshold : innerThreshold)
-                : chiselDistance > (nowVisible ? innerThreshold : outerThreshold);
-            if (!chiselVisible) return false;
+            return lodLevel == 2
+                ? distance <= (nowVisible ? outerThreshold : innerThreshold)
+                : distance > (nowVisible ? innerThreshold : outerThreshold);
         }
-        else
-        {
-            var playerPos = GetPlayerPos(culler);
-            if (playerPos == null) return false;
 
-            double distance = playerPos.HorDistanceSqTo(sphere.x, sphere.z);
-            bool rangeVisible = lodLevel switch
-            {
-                0 => culler.lod0BiasSq > 0 && distance < culler.lod0BiasSq + 32 * 32,
-                1 => distance < culler.ViewDistanceSq,
-                2 => distance <= culler.lod2BiasSq,
-                3 => distance > culler.lod2BiasSq && distance < culler.ViewDistanceSq,
-                _ => false,
-            };
-            if (!rangeVisible) return false;
+        return lodLevel switch
+        {
+            0 => culler.lod0BiasSq > 0 && distance < culler.lod0BiasSq + 32 * 32,
+            1 => distance < culler.ViewDistanceSq,
+            2 => distance <= culler.lod2BiasSq,
+            3 => distance > culler.lod2BiasSq && distance < culler.ViewDistanceSq,
+            _ => false,
+        };
+    }
+
+    public static bool InFrustumAndRange(
+        FrustumCulling culler,
+        Sphere sphere,
+        bool nowVisible,
+        int lodLevel,
+        ModelDataPoolLocation location)
+    {
+        if (!InRangeAndLodOnly(culler, sphere, nowVisible, lodLevel, location))
+        {
+            return false;
         }
 
         Plane[] planes = GetFrustum(culler);

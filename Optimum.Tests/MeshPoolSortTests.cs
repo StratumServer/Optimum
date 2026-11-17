@@ -225,11 +225,12 @@ public sealed class MeshPoolSortTests
             Assert.True(OptimumDiagnostics.ChunkSortPoolsOrdered >= 4);
             Assert.True(OptimumDiagnostics.ChunkSortSpansSorted >= 9);
 
-            // 2. Outside opaque pass (simulating BlendNoCull / Decor / RenderOIT) OR shadow mode -> original order
+            // 2. Outside opaque pass (simulating BlendNoCull / Decor / RenderOIT) OR shadow mode -> original order + contiguous coalescing
             harness.DrawCalls.Clear();
             manager.Render(camera, "origin", EnumFrustumCullMode.CullNormal);
             Assert.Equal(new[] { 0, 1, 2, 3 }, harness.DrawCalls.Select(d => d.PoolTag).ToArray());
-            Assert.Equal(new[] { p2a.IndicesStart * 4, p2b.IndicesStart * 4, p2c.IndicesStart * 4 }, harness.DrawCalls[2].Starts);
+            Assert.Equal(new[] { p2a.IndicesStart * 4 }, harness.DrawCalls[2].Starts);
+            Assert.Equal(new[] { 72 }, harness.DrawCalls[2].Sizes);
 
             harness.DrawCalls.Clear();
             using (OptimumMeshPoolSort.EnterOpaquePassScope())
@@ -421,6 +422,247 @@ public sealed class MeshPoolSortTests
             if (Directory.Exists(tempDir))
             {
                 Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void PoolCullState_UpdatesFlaggedClearsOnCull_AndInvalidatesOnMiddleReplacement()
+    {
+        bool origSort = OptimumConfig.FrontToBackChunkSortEnabled;
+        OptimumDiagnostics.ResetSimdFrustumCounters();
+        try
+        {
+            OptimumConfig.FrontToBackChunkSortEnabled = true;
+            var harness = new SortTestHarness();
+            var master = new MeshDataPoolMasterManager(harness.Api);
+            var frustum = CreateOpenFrustum(5000);
+            var manager = new MeshDataPoolManager(master, frustum, harness.Api, 1024, 1536, 64);
+
+            var cFirst = AddChunk(manager, 0, 0, 0, 100, 0, 0);
+            var cMid = AddChunk(manager, 0, 0, 0, 200, 0, 0);
+            var cLast = AddChunk(manager, 0, 0, 0, 300, 0, 0);
+
+            using (OptimumMeshPoolSort.EnterOpaquePassScope())
+            {
+                manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullNormal);
+            }
+
+            Assert.True(cFirst.FrustumVisible);
+            Assert.True(cMid.FrustumVisible);
+            Assert.True(cLast.FrustumVisible);
+
+            // Replace middle location while keeping Count == 3, First == cFirst, Last == cLast.
+            // PoolCullState must detect Mid/UsedVertices change and recompute pool bounds & CullData.
+            master.RemoveDataPoolLocations(new[] { cMid });
+            var cMidReplacement = AddChunk(manager, 0, 0, 0, 50, 0, 0);
+
+            harness.DrawCalls.Clear();
+            using (OptimumMeshPoolSort.EnterOpaquePassScope())
+            {
+                manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullNormal);
+            }
+
+            // Nearest chunk in Pool 0 is now cMidReplacement (50m) before cFirst (100m) and cLast (300m).
+            Assert.Single(harness.DrawCalls);
+            Assert.Equal(new[] { cMidReplacement.IndicesStart * 4, cFirst.IndicesStart * 4, cLast.IndicesStart * 4 }, harness.DrawCalls[0].Starts);
+            Assert.True(cMidReplacement.FrustumVisible);
+
+            // Shrink ViewDistance to minimum (32m) -> all chunks (50m, 100m, 300m) are out of range and flagged must clear!
+            frustum.UpdateViewDistance(1);
+            harness.DrawCalls.Clear();
+            using (OptimumMeshPoolSort.EnterOpaquePassScope())
+            {
+                manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullNormal);
+            }
+
+            Assert.Empty(harness.DrawCalls);
+            Assert.False(cFirst.FrustumVisible);
+            Assert.False(cMidReplacement.FrustumVisible);
+            Assert.False(cLast.FrustumVisible);
+
+            // Verify CullInstant and CullInstantShadowPassNear coalesce contiguous [cLast, cMidReplacement] while keeping [cFirst] separate.
+            frustum.UpdateViewDistance(5000);
+            frustum.shadowRangeX = 1000;
+            frustum.shadowRangeZ = 1000;
+            harness.DrawCalls.Clear();
+            manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullInstant);
+            Assert.Single(harness.DrawCalls);
+            Assert.Equal(2, harness.DrawCalls[0].Starts.Length);
+            Assert.Equal(new[] { 24, 48 }, harness.DrawCalls[0].Sizes);
+
+            harness.DrawCalls.Clear();
+            manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullInstantShadowPassNear);
+            Assert.Single(harness.DrawCalls);
+            Assert.Equal(2, harness.DrawCalls[0].Starts.Length);
+            Assert.Equal(new[] { 24, 48 }, harness.DrawCalls[0].Sizes);
+
+            master.DisposeAllPools(harness.Api);
+        }
+        finally
+        {
+            OptimumConfig.FrontToBackChunkSortEnabled = origSort;
+        }
+    }
+
+    [Fact]
+    public void PalindromicLodOrder_CoalescesAdjacentLodSpansPerChunk_WhilePreservingChunkFrontToBackOrder()
+    {
+        bool origSort = OptimumConfig.FrontToBackChunkSortEnabled;
+        try
+        {
+            OptimumConfig.FrontToBackChunkSortEnabled = true;
+            var harness = new SortTestHarness();
+            var master = new MeshDataPoolMasterManager(harness.Api);
+            var frustum = CreateOpenFrustum(5000);
+            var manager = new MeshDataPoolManager(master, frustum, harness.Api, 1024, 1536, 64);
+
+            // Chunk Far (200m) and Chunk Near (50m) uploaded consecutively inside the same pool.
+            // Each chunk uploads 8 palindromic LOD slots sharing the same chunk sphere:
+            // center: [Lod3(Lod2Far), Lod0, Lod2(NotLod2Far), Lod1]
+            // edge:   [Lod1, Lod2(NotLod2Far), Lod0, Lod3(Lod2Far)]
+            // Notice center.Lod1 and edge.Lod1 become physically contiguous in pool memory!
+            int[] centerOrder = { 3, 0, 2, 1 };
+            int[] edgeOrder = { 1, 2, 0, 3 };
+
+            var farLocs = new List<ModelDataPoolLocation>();
+            foreach (int lod in centerOrder)
+            {
+                var loc = AddChunk(manager, 0, 0, 0, 200, 0, 0);
+                loc.LodLevel = lod;
+                farLocs.Add(loc);
+            }
+            foreach (int lod in edgeOrder)
+            {
+                var loc = AddChunk(manager, 0, 0, 0, 200, 0, 0);
+                loc.LodLevel = lod;
+                farLocs.Add(loc);
+            }
+
+            var nearLocs = new List<ModelDataPoolLocation>();
+            foreach (int lod in centerOrder)
+            {
+                var loc = AddChunk(manager, 0, 0, 0, 50, 0, 0);
+                loc.LodLevel = lod;
+                nearLocs.Add(loc);
+            }
+            foreach (int lod in edgeOrder)
+            {
+                var loc = AddChunk(manager, 0, 0, 0, 50, 0, 0);
+                loc.LodLevel = lod;
+                nearLocs.Add(loc);
+            }
+
+            // Force Far (200m) to show only Lod2 + Lod1 (center.Lod2, center.Lod1, edge.Lod1, edge.Lod2 = 4 adjacent spans!),
+            // and Near (50m) to show Lod1 only (center.Lod1, edge.Lod1 = 2 adjacent spans!).
+            // Note: farLocs[3], farLocs[4] are center.Lod1 and edge.Lod1; farLocs[2], farLocs[5] are Lod2.
+            foreach (var loc in farLocs) loc.CullVisible = new Bools(loc.LodLevel == 1 || loc.LodLevel == 2, true);
+            foreach (var loc in nearLocs) loc.CullVisible = new Bools(loc.LodLevel == 1, true);
+
+            // Set ModelDataPoolLocation.VisibleBufIndex = 0 via CullVisible[0].
+            ModelDataPoolLocation.VisibleBufIndex = 0;
+
+            using (OptimumMeshPoolSort.EnterOpaquePassScope())
+            {
+                manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullNormal);
+            }
+
+            Assert.Single(harness.DrawCalls);
+            // Near (50m) MUST stay strictly before Far (200m), AND each chunk's adjacent visible LOD spans
+            // coalesce into ONE span per chunk -> 2 total spans instead of 6!
+            Assert.Equal(2, harness.DrawCalls[0].Starts.Length);
+            Assert.Equal(new[] { nearLocs[3].IndicesStart * 4, farLocs[2].IndicesStart * 4 }, harness.DrawCalls[0].Starts);
+            Assert.Equal(new[] { 48, 96 }, harness.DrawCalls[0].Sizes);
+
+            // Verify CullInstantShadowPassNear and SetFullyVisible also coalesce contiguous spans cleanly.
+            harness.DrawCalls.Clear();
+            manager.Render(new Vec3d(0, 0, 0), "origin", EnumFrustumCullMode.CullInstantShadowPassNear);
+            Assert.Single(harness.DrawCalls);
+            Assert.Equal(2, harness.DrawCalls[0].Starts.Length);
+            Assert.Equal(new[] { farLocs[2].IndicesStart * 4, nearLocs[3].IndicesStart * 4 }, harness.DrawCalls[0].Starts);
+            Assert.Equal(new[] { 96, 48 }, harness.DrawCalls[0].Sizes);
+
+            var poolsField = typeof(MeshDataPoolManager).GetField("pools", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            var pool = ((List<MeshDataPool>)poolsField.GetValue(manager)!)[0];
+            pool.SetFullyVisible();
+            Assert.Equal(1, pool.indicesGroupsCount);
+            Assert.Equal(16 * 24, pool.indicesSizes[0]);
+
+            master.DisposeAllPools(harness.Api);
+        }
+        finally
+        {
+            OptimumConfig.FrontToBackChunkSortEnabled = origSort;
+        }
+    }
+
+    [Fact]
+    public void TesselatedChunkPart_PatchedIl_UsesPalindromicCenterAndEdgeLodUploadOrder()
+    {
+        string repoRoot = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(PatchReader.FindRepositoryFile("Optimum.Tests/Optimum.Tests.csproj"))!, ".."));
+        string configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        string? tempPatchedPath = null;
+        try
+        {
+            string? patchedLibPath = new[] { configuration, "Release", "Debug" }
+                .Distinct()
+                .Select(cfg => Path.Combine(repoRoot, "build", "VintagestoryLib", "bin", cfg, "net10.0", "VintagestoryLib-patched.dll"))
+                .FirstOrDefault(File.Exists);
+
+            if (patchedLibPath == null)
+            {
+                string? compiledLibPath = new[] { configuration, "Release", "Debug" }
+                    .Distinct()
+                    .Select(cfg => Path.Combine(repoRoot, "build", "VintagestoryLib", "bin", cfg, "net10.0", "VintagestoryLib.dll"))
+                    .FirstOrDefault(File.Exists);
+                string? vanillaLibPath = new[]
+                    {
+                        Path.Combine(repoRoot, ".vanilla", "linux-x64", "vintagestory", "VintagestoryLib.vanilla.dll"),
+                        Path.Combine(repoRoot, ".vanilla", "win-x64", "vintagestory", "VintagestoryLib.vanilla.dll"),
+                    }
+                    .FirstOrDefault(File.Exists);
+
+                if (compiledLibPath == null || vanillaLibPath == null)
+                {
+                    return;
+                }
+
+                tempPatchedPath = Path.Combine(Path.GetTempPath(), $"optimum-lod-patched-{Guid.NewGuid():N}.dll");
+                Assert.Equal(0, Optimum.Patcher.Program.Run(new[] { vanillaLibPath, compiledLibPath, tempPatchedPath }));
+                patchedLibPath = tempPatchedPath;
+            }
+
+            using var patchedDef = AssemblyDefinition.ReadAssembly(patchedLibPath);
+            Assert.Empty(IlStackVerifier.VerifyModule(patchedDef.MainModule));
+
+            TypeDefinition chunkPartType = patchedDef.MainModule.Types.First(t => t.FullName == "Vintagestory.Client.NoObf.TesselatedChunkPart");
+            MethodDefinition addToPools7 = chunkPartType.Methods.First(m => m.Name == "AddToPools" && m.Parameters.Count == 7);
+            MethodDefinition uploadLodSlot = chunkPartType.Methods.First(m => m.Name == "UploadLodSlot");
+            Assert.NotNull(uploadLodSlot);
+
+            // Verify AddToPools/7 delegates all 4 LOD slots through UploadLodSlot and AddCenterToPools/AddEdgeToPools pass false/true.
+            int uploadSlotCalls = addToPools7.Body.Instructions.Count(ins =>
+                ins.OpCode.Code == Mono.Cecil.Cil.Code.Call &&
+                ins.Operand is MethodReference mr &&
+                mr.Name == "UploadLodSlot");
+            Assert.Equal(8, uploadSlotCalls);
+
+            TypeDefinition chunkType = patchedDef.MainModule.Types.First(t => t.FullName == "Vintagestory.Client.NoObf.TesselatedChunk");
+            MethodDefinition addCenter = chunkType.Methods.First(m => m.Name == "AddCenterToPools");
+            MethodDefinition addEdge = chunkType.Methods.First(m => m.Name == "AddEdgeToPools");
+
+            Assert.Contains(addCenter.Body.Instructions, ins =>
+                (ins.OpCode.Code == Mono.Cecil.Cil.Code.Call || ins.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt) &&
+                ins.Operand is MethodReference mr && mr.Name == "AddToPools" && mr.Parameters.Count == 7);
+            Assert.Contains(addEdge.Body.Instructions, ins =>
+                (ins.OpCode.Code == Mono.Cecil.Cil.Code.Call || ins.OpCode.Code == Mono.Cecil.Cil.Code.Callvirt) &&
+                ins.Operand is MethodReference mr && mr.Name == "AddToPools" && mr.Parameters.Count == 7);
+        }
+        finally
+        {
+            if (tempPatchedPath != null && File.Exists(tempPatchedPath))
+            {
+                File.Delete(tempPatchedPath);
             }
         }
     }
@@ -807,11 +1049,11 @@ void main() {
         Assert.Equal(new[] { 1, 2, 0 }, drawLog.Select(d => d.tag).ToArray());
         Assert.Equal(new[] { p1Near, p1Far }, drawLog[0].starts);
 
-        // 2. Outside opaque pass -> Expect original order [0, 1, 2] and spans [p1Far, p1Near]
+        // 2. Outside opaque pass -> Expect original pool order [0, 1, 2] and contiguous spans [p1Far, p1Near] coalesced to [p1Far]
         drawLog.Clear();
         renderMethod.Invoke(manager, new[] { camPos, "origin", cullNormal });
         Assert.Equal(new[] { 0, 1, 2 }, drawLog.Select(d => d.tag).ToArray());
-        Assert.Equal(new[] { p1Far, p1Near }, drawLog[1].starts);
+        Assert.Equal(new[] { p1Far }, drawLog[1].starts);
     }
 
     private static IEnumerable<Type> CollectAllInterfaces(Type iface)

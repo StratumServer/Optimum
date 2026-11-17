@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..fdd1e34 100644
+index f9128b4..c3a955e 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -1,7 +1,8 @@
@@ -224,7 +224,7 @@ index f9128b4..fdd1e34 100644
          /// </summary>
          /// <param name="capi">The core client API</param>
          /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
-@@ -364,38 +468,310 @@ namespace Vintagestory.API.Client
+@@ -364,51 +468,330 @@ namespace Vintagestory.API.Client
          /// <param name="frustumCullMode">The mode of the culling.</param>
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
@@ -245,12 +245,22 @@ index f9128b4..fdd1e34 100644
 -                if (location.IsVisible(frustumCullMode, frustumCuller))
 +            AllocatedTris = allocatedIndices / 3;
 +
-+            if (BoundsValid && frustumCuller != null)
++            if (frustumCullMode == EnumFrustumCullMode.CullNormal && flagged != null && flagged.Count > 0)
 +            {
-+                if (frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassNear || frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassFar)
++                for (int f = 0; f < flagged.Count; f++)
                  {
 -                    indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
 -                    indicesSizes[indicesGroupsCount] = size;
++                    flagged[f].FrustumVisible = false;
++                }
++                flagged.Clear();
++            }
+ 
+-                    RenderedTriangles += size / 3;
++            if (BoundsValid && frustumCuller != null)
++            {
++                if (frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassNear || frustumCullMode == EnumFrustumCullMode.CullInstantShadowPassFar)
++                {
 +                    if (!frustumCuller.BoxInShadowPass(BoundMinX, BoundMinZ, BoundMaxX, BoundMaxZ))
 +                    {
 +                        return;
@@ -265,23 +275,17 @@ index f9128b4..fdd1e34 100644
 +                    }
 +                }
 +            }
- 
--                    RenderedTriangles += size / 3;
++
 +            flagged ??= new List<ModelDataPoolLocation>();
-+            for (int f = 0; f < flagged.Count; f++)
-+            {
-+                flagged[f].FrustumVisible = false;
-+            }
-+            flagged.Clear();
- 
--                    indicesGroupsCount++;
++
 +            int visibleBufIndex = ModelDataPoolLocation.VisibleBufIndex;
 +            float sortCamX = 0f, sortCamY = 0f, sortCamZ = 0f;
 +            bool sortFrontToBack = frustumCullMode == EnumFrustumCullMode.CullNormal
 +                && this.dimensionId != Dimensions.MiniDimensions
 +                && Vintagestory.API.Config.OptimumMeshPoolSort.TryGetCameraPosition(frustumCuller, out sortCamX, out sortCamY, out sortCamZ);
 +            float[] spanDistSq = sortFrontToBack ? Vintagestory.API.Config.OptimumMeshPoolSort.EnsureSpanDistanceScratch(count) : null;
-+
+ 
+-                    indicesGroupsCount++;
 +            if (cullData != null && frustumCuller != null)
 +            {
 +                Plane[] planes = OptimumFrustumCullSimd.GetFrustum(frustumCuller);
@@ -299,25 +303,30 @@ index f9128b4..fdd1e34 100644
 +
 +                            if (frustumCuller.InRangeAndLod(location.FrustumCullSphere, location.LodLevel, location.OptimumUseChiselLodDistance))
 +                            {
++                                int startBytes = cullData.IndexStartBytes[idx];
 +                                int size = cullData.IndexCounts[idx];
-+                                indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[idx];
-+                                indicesSizes[indicesGroupsCount] = size;
 +                                if (sortFrontToBack)
 +                                {
++                                    indicesStartsByte[indicesGroupsCount * 2] = startBytes;
++                                    indicesSizes[indicesGroupsCount] = size;
 +                                    float dx = cullData.CenterX[idx] - sortCamX;
 +                                    float dy = cullData.CenterY[idx] - sortCamY;
 +                                    float dz = cullData.CenterZ[idx] - sortCamZ;
 +                                    spanDistSq[indicesGroupsCount] = dx * dx + dy * dy + dz * dz;
++                                    indicesGroupsCount++;
++                                }
++                                else
++                                {
++                                    AppendCoalescedSpan(startBytes, size);
 +                                }
 +                                RenderedTriangles += size / 3;
-+                                indicesGroupsCount++;
 +                                location.FrustumVisible = true;
 +                                flagged.Add(location);
 +                            }
 +                        }
 +                        if (sortFrontToBack && indicesGroupsCount > 1)
 +                        {
-+                            Vintagestory.API.Config.OptimumMeshPoolSort.SortVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
++                            indicesGroupsCount = Vintagestory.API.Config.OptimumMeshPoolSort.SortAndCoalesceVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
 +                        }
 +                        return;
 +
@@ -331,10 +340,8 @@ index f9128b4..fdd1e34 100644
 +                            if (location.Hide || !location.CullVisible[visibleBufIndex]) continue;
 +
 +                            int size = cullData.IndexCounts[idx];
-+                            indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[idx];
-+                            indicesSizes[indicesGroupsCount] = size;
++                            AppendCoalescedSpan(cullData.IndexStartBytes[idx], size);
 +                            RenderedTriangles += size / 3;
-+                            indicesGroupsCount++;
 +                        }
 +                        return;
 +
@@ -357,10 +364,8 @@ index f9128b4..fdd1e34 100644
 +                            if (frustumCuller.OptimumChiselLodVisible(sphere, location.LodLevel, location.OptimumUseChiselLodDistance))
 +                            {
 +                                int size = cullData.IndexCounts[idx];
-+                                indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[idx];
-+                                indicesSizes[indicesGroupsCount] = size;
++                                AppendCoalescedSpan(cullData.IndexStartBytes[idx], size);
 +                                RenderedTriangles += size / 3;
-+                                indicesGroupsCount++;
 +                            }
 +                        }
 +                        return;
@@ -384,10 +389,8 @@ index f9128b4..fdd1e34 100644
 +                            if (frustumCuller.OptimumChiselLodVisible(sphere, location.LodLevel, location.OptimumUseChiselLodDistance))
 +                            {
 +                                int size = cullData.IndexCounts[idx];
-+                                indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[idx];
-+                                indicesSizes[indicesGroupsCount] = size;
++                                AppendCoalescedSpan(cullData.IndexStartBytes[idx], size);
 +                                RenderedTriangles += size / 3;
-+                                indicesGroupsCount++;
 +                            }
 +                        }
 +                        return;
@@ -399,10 +402,8 @@ index f9128b4..fdd1e34 100644
 +                            if (!location.Hide)
 +                            {
 +                                int size = cullData.IndexCounts[i];
-+                                indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[i];
-+                                indicesSizes[indicesGroupsCount] = size;
++                                AppendCoalescedSpan(cullData.IndexStartBytes[i], size);
 +                                RenderedTriangles += size / 3;
-+                                indicesGroupsCount++;
 +                            }
 +                        }
 +                        return;
@@ -425,25 +426,30 @@ index f9128b4..fdd1e34 100644
 +                            location.FrustumVisible = visible;
 +                            if (visible)
 +                            {
-+                                indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
-+                                indicesSizes[indicesGroupsCount] = size;
++                                int startBytes = location.IndicesStart * 4;
 +                                if (sortFrontToBack)
 +                                {
++                                    indicesStartsByte[indicesGroupsCount * 2] = startBytes;
++                                    indicesSizes[indicesGroupsCount] = size;
 +                                    Sphere sphere = location.FrustumCullSphere;
 +                                    float dx = sphere.x - sortCamX;
 +                                    float dy = sphere.y - sortCamY;
 +                                    float dz = sphere.z - sortCamZ;
 +                                    spanDistSq[indicesGroupsCount] = dx * dx + dy * dy + dz * dz;
++                                    indicesGroupsCount++;
++                                }
++                                else
++                                {
++                                    AppendCoalescedSpan(startBytes, size);
 +                                }
 +                                RenderedTriangles += size / 3;
-+                                indicesGroupsCount++;
 +                                flagged.Add(location);
 +                            }
 +                        }
 +                    }
 +                    if (sortFrontToBack && indicesGroupsCount > 1)
 +                    {
-+                        Vintagestory.API.Config.OptimumMeshPoolSort.SortVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
++                        indicesGroupsCount = Vintagestory.API.Config.OptimumMeshPoolSort.SortAndCoalesceVisibleSpans(indicesStartsByte, indicesSizes, spanDistSq, indicesGroupsCount);
 +                    }
 +                    break;
 +
@@ -456,10 +462,8 @@ index f9128b4..fdd1e34 100644
 +
 +                        if (!location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustum(location.FrustumCullSphere))
 +                        {
-+                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
-+                            indicesSizes[indicesGroupsCount] = size;
++                            AppendCoalescedSpan(location.IndicesStart * 4, size);
 +                            RenderedTriangles += size / 3;
-+                            indicesGroupsCount++;
 +                        }
 +                    }
 +                    break;
@@ -473,10 +477,8 @@ index f9128b4..fdd1e34 100644
 +
 +                        if (!location.Hide && location.CullVisible[visibleBufIndex] && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && frustumCuller.OptimumChiselLodVisible(location.FrustumCullSphere, location.LodLevel, location.OptimumUseChiselLodDistance))
 +                        {
-+                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
-+                            indicesSizes[indicesGroupsCount] = size;
++                            AppendCoalescedSpan(location.IndicesStart * 4, size);
 +                            RenderedTriangles += size / 3;
-+                            indicesGroupsCount++;
 +                        }
 +                    }
 +                    break;
@@ -490,10 +492,8 @@ index f9128b4..fdd1e34 100644
 +
 +                        if (!location.Hide && location.CullVisible[visibleBufIndex] && location.LodLevel >= 1 && frustumCuller.InFrustumShadowPass(location.FrustumCullSphere) && frustumCuller.OptimumChiselLodVisible(location.FrustumCullSphere, location.LodLevel, location.OptimumUseChiselLodDistance))
 +                        {
-+                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
-+                            indicesSizes[indicesGroupsCount] = size;
++                            AppendCoalescedSpan(location.IndicesStart * 4, size);
 +                            RenderedTriangles += size / 3;
-+                            indicesGroupsCount++;
 +                        }
 +                    }
 +                    break;
@@ -507,10 +507,8 @@ index f9128b4..fdd1e34 100644
 +
 +                        if (!location.Hide)
 +                        {
-+                            indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4;
-+                            indicesSizes[indicesGroupsCount] = size;
++                            AppendCoalescedSpan(location.IndicesStart * 4, size);
 +                            RenderedTriangles += size / 3;
-+                            indicesGroupsCount++;
 +                        }
 +                    }
 +                    break;
@@ -530,11 +528,9 @@ index f9128b4..fdd1e34 100644
 +                for (int i = 0; i < count; i++)
 +                {
 +                    int size = cullData.IndexCounts[i];
-+                    indicesStartsByte[indicesGroupsCount * 2] = cullData.IndexStartBytes[i];
-+                    indicesSizes[indicesGroupsCount] = size;
++                    AppendCoalescedSpan(cullData.IndexStartBytes[i], size);
 +
 +                    RenderedTriangles += size / 3;
-+                    indicesGroupsCount++;
 +                    AllocatedTris += size / 3;
 +                }
 +                return;
@@ -545,7 +541,35 @@ index f9128b4..fdd1e34 100644
                  ModelDataPoolLocation location = poolLocations[i];
  
                  int size = location.IndicesEnd - location.IndicesStart;
-@@ -423,11 +799,11 @@ namespace Vintagestory.API.Client
+-                indicesStartsByte[indicesGroupsCount * 2] = location.IndicesStart * 4; // Offset in bytes, not ints
+-                indicesSizes[indicesGroupsCount] = size;
++                AppendCoalescedSpan(location.IndicesStart * 4, size); // Offset in bytes, not ints
+ 
+                 RenderedTriangles += size / 3;
++                AllocatedTris += size / 3;
++            }
++        }
+ 
++        [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
++        private void AppendCoalescedSpan(int startBytes, int size)
++        {
++            if (indicesGroupsCount > 0 && indicesStartsByte[(indicesGroupsCount - 1) * 2] + indicesSizes[indicesGroupsCount - 1] * 4 == startBytes)
++            {
++                indicesSizes[indicesGroupsCount - 1] += size;
++            }
++            else
++            {
++                indicesStartsByte[indicesGroupsCount * 2] = startBytes;
++                indicesSizes[indicesGroupsCount] = size;
+                 indicesGroupsCount++;
+-
+-                AllocatedTris += size / 3;
+             }
+         }
+ 
+         /// <summary>
+         /// Is this an empty pool.
+@@ -423,11 +806,11 @@ namespace Vintagestory.API.Client
          /// Disposes of the current mesh pool.
          /// </summary>
          /// <param name="capi">The core client API</param>
@@ -558,7 +582,7 @@ index f9128b4..fdd1e34 100644
          /// <summary>
          /// Calculates the current fragmentation of the mesh.
          /// </summary>
-@@ -462,11 +838,15 @@ namespace Vintagestory.API.Client
+@@ -462,11 +845,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -574,7 +598,7 @@ index f9128b4..fdd1e34 100644
  
  
      /// <summary>
-@@ -513,10 +893,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +900,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -587,7 +611,7 @@ index f9128b4..fdd1e34 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +917,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +924,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);

@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-index bdcda35..b8bcc1b 100644
+index bdcda35..739867f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunk.cs
-@@ -24,43 +24,83 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+@@ -24,46 +24,86 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  
  	internal TesselatedChunkPart[] edgeParts;
  
@@ -89,10 +89,14 @@ index bdcda35..b8bcc1b 100644
 +			list.Clear();
  			for (int i = 0; i < centerParts.Length; i++)
  			{
- 				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
+-				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
++				centerParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible, false);
  			}
  			hostChunk.SetPoolLocations(ref hostChunk.centerModelPoolLocations, list.ToArray(), hiddenState);
-@@ -73,11 +113,14 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
+ 			return true;
+ 		}
+ 		return false;
+@@ -73,14 +113,17 @@ public class TesselatedChunk : IComparable<TesselatedChunk>, IMergeable<Tesselat
  	{
  		if (edgeParts != null)
  		{
@@ -105,6 +109,10 @@ index bdcda35..b8bcc1b 100644
 +			list.Clear();
  			for (int i = 0; i < edgeParts.Length; i++)
  			{
- 				edgeParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
+-				edgeParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible);
++				edgeParts[i].AddToPools(chunkRenderer, list, chunkOrigin, dimension, boundingSphere, CullVisible, true);
  			}
  			hostChunk.SetPoolLocations(ref hostChunk.edgeModelPoolLocations, list.ToArray(), hiddenState);
+ 			chunkRenderer.QuantityRenderingChunks++;
+ 			return true;
+ 		}

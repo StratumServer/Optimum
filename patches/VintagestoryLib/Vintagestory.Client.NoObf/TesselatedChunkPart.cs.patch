@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
-index c29a2bc..2beddc5 100644
+index c29a2bc..40c5fed 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs
 @@ -1,8 +1,9 @@
@@ -12,7 +12,7 @@ index c29a2bc..2beddc5 100644
  using Vintagestory.Common;
  
  namespace Vintagestory.Client.NoObf;
-@@ -19,10 +20,12 @@ public class TesselatedChunkPart
+@@ -19,44 +20,69 @@ public class TesselatedChunkPart
  
  	internal MeshData modelDataLod2Far;
  
@@ -21,11 +21,53 @@ index c29a2bc..2beddc5 100644
 +	internal bool optimumUseChiselLodDistance;
 +
  	internal void AddToPools(ChunkRenderer cr, List<ModelDataPoolLocation> locations, Vec3i chunkOrigin, int dimension, Sphere boundingSphere, Bools cullVisible)
++	{
++		AddToPools(cr, locations, chunkOrigin, dimension, boundingSphere, cullVisible, false);
++	}
++
++	internal void AddToPools(ChunkRenderer cr, List<ModelDataPoolLocation> locations, Vec3i chunkOrigin, int dimension, Sphere boundingSphere, Bools cullVisible, bool optimumMirroredLodOrder)
  	{
  		bool flag = dimension == 1 && BlockAccessorMovable.IsTransparent(chunkOrigin);
  		MeshDataPoolManager pools = cr.poolsByRenderPass[flag ? Math.Max(3, (int)pass) : ((int)pass)][atlasNumber];
- 		if (modelDataLod0 != null)
-@@ -49,14 +52,29 @@ public class TesselatedChunkPart
+-		if (modelDataLod0 != null)
++		if (optimumMirroredLodOrder)
+ 		{
+-			cr.SetInterleaveStrides(modelDataLod0, pass);
+-			AddModelAndStoreLocation(pools, locations, modelDataLod0, chunkOrigin, dimension, boundingSphere, cullVisible, 0);
++			UploadLodSlot(cr, pools, locations, modelDataLod1, chunkOrigin, dimension, boundingSphere, cullVisible, 1);
++			UploadLodSlot(cr, pools, locations, modelDataNotLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 2);
++			UploadLodSlot(cr, pools, locations, modelDataLod0, chunkOrigin, dimension, boundingSphere, cullVisible, 0);
++			UploadLodSlot(cr, pools, locations, modelDataLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 3);
+ 		}
+-		if (modelDataLod1 != null)
++		else
+ 		{
+-			cr.SetInterleaveStrides(modelDataLod1, pass);
+-			AddModelAndStoreLocation(pools, locations, modelDataLod1, chunkOrigin, dimension, boundingSphere, cullVisible, 1);
++			UploadLodSlot(cr, pools, locations, modelDataLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 3);
++			UploadLodSlot(cr, pools, locations, modelDataLod0, chunkOrigin, dimension, boundingSphere, cullVisible, 0);
++			UploadLodSlot(cr, pools, locations, modelDataNotLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 2);
++			UploadLodSlot(cr, pools, locations, modelDataLod1, chunkOrigin, dimension, boundingSphere, cullVisible, 1);
+ 		}
+-		if (modelDataNotLod2Far != null)
+-		{
+-			cr.SetInterleaveStrides(modelDataNotLod2Far, pass);
+-			AddModelAndStoreLocation(pools, locations, modelDataNotLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 2);
+-		}
+-		if (modelDataLod2Far != null)
++		Dispose();
++	}
++
++	private void UploadLodSlot(ChunkRenderer cr, MeshDataPoolManager pools, List<ModelDataPoolLocation> locations, MeshData modeldata, Vec3i chunkOrigin, int dimension, Sphere boundingSphere, Bools cullVisible, int lodLevel)
++	{
++		if (modeldata != null)
+ 		{
+-			cr.SetInterleaveStrides(modelDataLod2Far, pass);
+-			AddModelAndStoreLocation(pools, locations, modelDataLod2Far, chunkOrigin, dimension, boundingSphere, cullVisible, 3);
++			cr.SetInterleaveStrides(modeldata, pass);
++			AddModelAndStoreLocation(pools, locations, modeldata, chunkOrigin, dimension, boundingSphere, cullVisible, lodLevel);
+ 		}
+-		Dispose();
  	}
  
  	internal void AddModelAndStoreLocation(MeshDataPoolManager pools, List<ModelDataPoolLocation> locations, MeshData modeldata, Vec3i modelOrigin, int dimension, Sphere frustumCullSphere, Bools cullVisible, int lodLevel)

@@ -2793,6 +2793,12 @@ public static class OptimumDiagnostics
         }
     }
 
+    public static void RecordSimdFrustumBatch(int tests, int culled)
+    {
+        if (tests > 0) Interlocked.Add(ref _simdFrustumTests, tests);
+        if (culled > 0) Interlocked.Add(ref _simdFrustumCulled, culled);
+    }
+
     public static void ResetSimdFrustumCounters()
     {
         Interlocked.Exchange(ref _simdFrustumTests, 0);
