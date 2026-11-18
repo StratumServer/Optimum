@@ -42,7 +42,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Common/Inventory/InventoryBase.cs.patch"] = ["PatchInventoryDirtyHooks"],
             ["Common/Model/Animation/AnimationKeyFrame.cs.patch"] = ["PatchAnimationKeyFrame"],
             ["Common/Model/Animation/AnimationMetaData.cs.patch"] = ["PatchJsonLineInfo"],
-            ["Common/Model/Animation/ClientAnimator.cs.patch"] = ["PatchClientAnimator", "PatchClientAnimatorGetMaxDepth"],
+            ["Common/Model/Animation/ClientAnimator.cs.patch"] = ["PatchClientAnimator", "PatchClientAnimatorGetMaxDepth", "PatchClientAnimatorFrameLerp"],
             ["Common/Model/Animation/EntityHeadController.cs.patch"] = ["PatchHeadControllerPoseFallback"],
             ["Common/Registry/JsonConverters.cs.patch"] = ["PatchJsonLineInfo"],
             ["Common/Registry/RegistryObject.cs.patch"] = ["PatchRegistryObjectCodeParts", "PatchRegistryObjectFillPlaceHolder"],
