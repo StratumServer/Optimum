@@ -467,6 +467,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetSsaoDepthPositionSummary());
         sb.AppendLine(OptimumDiagnostics.GetShadowFarReuseSummary());
         sb.AppendLine(OptimumDiagnostics.GetDynamicRenderScaleSummary());
+        sb.AppendLine(OptimumDiagnostics.GetCommonNatFloatSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }
@@ -540,6 +541,8 @@ public class OptimumStatusModSystem : ModSystem
                 OptimumConfig.DynamicRenderScaleTargetFps,
                 OptimumConfig.DynamicRenderScaleMinScale,
                 OptimumConfig.DynamicRenderScaleUpscaler);
+        if (OptimumConfig.ReuseCommonNatFloatEnabled)
+            api.Logger.Debug("[Optimum] Common NatFloat reuse: ON");
 
         if (OptimumConfig.OptiTimeDetected)
             api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);

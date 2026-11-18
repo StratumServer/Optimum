@@ -1853,4 +1853,160 @@ public static class OptimumApiBridge
 
         return true;
     }
+
+    private static bool TryGetCommonNatFloat(
+        float avg,
+        float var,
+        EnumDistribution dist,
+        float offset,
+        out NatFloat? shared)
+    {
+        if (offset == 0f && dist == EnumDistribution.UNIFORM && avg == 1f)
+        {
+            if (var == 0f)
+            {
+                shared = SoundAttributes.NatFloatOne;
+                return true;
+            }
+            if (var == 0.25f)
+            {
+                shared = SoundAttributes.RandomPitch;
+                return true;
+            }
+        }
+
+        shared = null;
+        return false;
+    }
+
+    public static NatFloat ReuseCommonNatFloat(float avg, float var, EnumDistribution dist, float offset = 0f)
+    {
+        if (OptimumConfig.ReuseCommonNatFloatEnabled && TryGetCommonNatFloat(avg, var, dist, offset, out NatFloat? shared))
+        {
+            OptimumDiagnostics.RecordCommonNatFloatReuse();
+            return shared!;
+        }
+
+        OptimumDiagnostics.RecordCommonNatFloatAlloc();
+        NatFloat result = new NatFloat(avg, var, dist);
+        if (offset != 0f)
+        {
+            result.offset = offset;
+        }
+        return result;
+    }
+
+    public static NatFloat ReuseCommonNatFloat(NatFloat value)
+    {
+        if (value == null)
+        {
+            return null!;
+        }
+
+        if (OptimumConfig.ReuseCommonNatFloatEnabled && TryGetCommonNatFloat(value.avg, value.var, value.dist, value.offset, out NatFloat? shared))
+        {
+            OptimumDiagnostics.RecordCommonNatFloatReuse();
+            return shared!;
+        }
+
+        OptimumDiagnostics.RecordCommonNatFloatAlloc();
+        return value;
+    }
+
+    public static NatFloat CloneOrReuseNatFloat(NatFloat? value)
+    {
+        if (value == null)
+        {
+            return null!;
+        }
+
+        if (OptimumConfig.ReuseCommonNatFloatEnabled && TryGetCommonNatFloat(value.avg, value.var, value.dist, value.offset, out NatFloat? shared))
+        {
+            OptimumDiagnostics.RecordCommonNatFloatReuse();
+            return shared!;
+        }
+
+        OptimumDiagnostics.RecordCommonNatFloatAlloc();
+        return value.Clone();
+    }
+
+    public static NatFloat ReadCommonNatFloatFromBytes(BinaryReader reader)
+    {
+        float offset = reader.ReadSingle();
+        float avg = reader.ReadSingle();
+        float var = reader.ReadSingle();
+        EnumDistribution dist = (EnumDistribution)reader.ReadByte();
+        return ReuseCommonNatFloat(avg, var, dist, offset);
+    }
+
+    public static SoundAttributes? ReadSoundAttributesJson(
+        SoundAttributeConverter converter,
+        JsonReader reader,
+        JsonSerializer serializer)
+    {
+        if (reader.ValueType == typeof(string))
+        {
+            AssetLocationJsonParser? parser = null;
+            var converters = serializer.Converters;
+            for (int i = 0; i < converters.Count; i++)
+            {
+                if (converters[i] is AssetLocationJsonParser found)
+                {
+                    parser = found;
+                    break;
+                }
+            }
+            parser ??= new AssetLocationJsonParser(GlobalConstants.DefaultDomain);
+            AssetLocation? location = parser.ReadJson(reader, typeof(AssetLocation), null, false, serializer);
+            ArgumentNullException.ThrowIfNull(location);
+            if (converter.AddSoundsPrefix)
+            {
+                location.WithPathPrefixOnce("sounds/");
+            }
+
+            return new SoundAttributes(location, converter.RandomPitch) { Range = converter.DefaultRange };
+        }
+
+        SoundAttributes sound = new SoundAttributes();
+        sound.Range = converter.DefaultRange;
+
+        // Clear defaults before Populate so Newtonsoft allocates only fields present in JSON.
+        sound.Pitch = null!;
+        sound.Volume = null!;
+
+        try
+        {
+            object boxed = sound;
+            serializer.Populate(reader, boxed);
+            sound = (SoundAttributes)boxed;
+            if (converter.AddSoundsPrefix)
+            {
+                sound.Location?.WithPathPrefixOnce("sounds/");
+            }
+        }
+        catch (Exception e)
+        {
+            throw new Exception("Error while parsing " + sound, e);
+        }
+
+        if (sound.Pitch == null)
+        {
+            sound.Pitch = converter.RandomPitch ? SoundAttributes.RandomPitch : SoundAttributes.NatFloatOne;
+        }
+        else if (OptimumConfig.ReuseCommonNatFloatEnabled)
+        {
+            sound.Pitch = ReuseCommonNatFloat(sound.Pitch);
+        }
+
+        if (sound.Volume == null)
+        {
+            sound.Volume = SoundAttributes.NatFloatOne;
+        }
+        else if (OptimumConfig.ReuseCommonNatFloatEnabled)
+        {
+            sound.Volume = ReuseCommonNatFloat(sound.Volume);
+        }
+
+        return sound.Location == null ? null : sound;
+    }
 }

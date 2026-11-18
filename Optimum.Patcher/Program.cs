@@ -74,6 +74,7 @@ var typesToInject = new List<string>
     "Optimum.EntityLightBatchBuffer",
     "Optimum.OptimumOptiTimeGuard",
     "Optimum.PhysicsListReuseGuard",
+    "Optimum.OptimumNatFloatPacketCache",
     "Vintagestory.Client.NoObf.OptimumGreedyMeshEmitter",
     "Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend",
     "Vintagestory.Client.NoObf.OptimumGuiSvgRecorder",
@@ -1300,6 +1301,11 @@ var targets = new List<MethodTarget>
     // Issue #469: deduplicate consecutive JToken.Parse calls via DeepClone fast path
     new("Vintagestory.Common.BlockTypeNet", "ReadBlockTypePacket", 3),
     new("Vintagestory.Common.ItemTypeNet", "ReadItemTypePacket", 3),
+    // Issue #640: reuse common NatFloat and Packet_NatFloat instances during asset serialization
+    new("Vintagestory.Common.CollectibleNet", "ToPacket", 1,
+        new[] { "Vintagestory.API.MathTools.NatFloat" }),
+    new("Vintagestory.Common.CollectibleNet", "FromPacket", 1,
+        new[] { "Packet_NatFloat" }),
     // Issue #635: skip JSON LineInfo retention when Aggressive RAM mode is on and DeveloperMode is off
     new("Vintagestory.Client.NoObf.ClientSettings", "set_OptimizeRamMode", 1),
     new("Vintagestory.Client.NoObf.ClientSettings", "set_DeveloperMode", 1),

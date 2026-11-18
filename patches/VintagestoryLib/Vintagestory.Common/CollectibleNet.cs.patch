@@ -1,0 +1,63 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs b/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs
+index af51202..6e247f4 100644
+--- a/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs
++++ b/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs
+@@ -1,10 +1,12 @@
+ using System;
+ using System.Collections.Generic;
+ using System.IO;
++using Optimum;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+ namespace Vintagestory.Common;
+@@ -171,20 +173,42 @@ public abstract class CollectibleNet
+ 		return array;
+ 	}
+ 
+ 	public static Packet_NatFloat ToPacket(NatFloat val)
+ 	{
++		int avg = SerializeFloatPrecise(val.avg);
++		int var = SerializeFloatPrecise(val.var);
++		int dist = (int)val.dist;
++		if (OptimumNatFloatPacketCache.TryGetPacket(avg, var, dist, out Packet_NatFloat cached))
++		{
++			return cached;
++		}
++		OptimumDiagnostics.RecordPacketNatFloatAlloc();
+ 		return new Packet_NatFloat
+ 		{
+-			Avg = SerializeFloatPrecise(val.avg),
+-			Var = SerializeFloatPrecise(val.var),
+-			Dist = (int)val.dist
++			Avg = avg,
++			Var = var,
++			Dist = dist
+ 		};
+ 	}
+ 
+ 	public static NatFloat FromPacket(Packet_NatFloat val)
+ 	{
++		if (OptimumConfig.ReuseCommonNatFloatEnabled && val.Dist == 0 && val.Avg == 1024)
++		{
++			if (val.Var == 0)
++			{
++				OptimumDiagnostics.RecordCommonNatFloatReuse();
++				return SoundAttributes.NatFloatOne;
++			}
++			if (val.Var == 256)
++			{
++				OptimumDiagnostics.RecordCommonNatFloatReuse();
++				return SoundAttributes.RandomPitch;
++			}
++		}
++		OptimumDiagnostics.RecordCommonNatFloatAlloc();
+ 		return new NatFloat(DeserializeFloatPrecise(val.Avg), DeserializeFloatPrecise(val.Var), (EnumDistribution)val.Dist);
+ 	}
+ 
+ 	public static Packet_SoundAttributes ToPacket(SoundAttributes val)
+ 	{

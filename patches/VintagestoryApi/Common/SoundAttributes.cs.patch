@@ -1,0 +1,78 @@
+diff --git a/VintagestoryApi/Common/SoundAttributes.cs b/VintagestoryApi/Common/SoundAttributes.cs
+index c48311e..0a6e5c8 100644
+--- a/VintagestoryApi/Common/SoundAttributes.cs
++++ b/VintagestoryApi/Common/SoundAttributes.cs
+@@ -140,12 +140,12 @@ namespace Vintagestory.API.Common
+ 
+         public SoundAttributes Clone()
+         {
+             SoundAttributes sound = new SoundAttributes();
+             sound.Location = Location?.PermanentClone();
+-            sound.Pitch = Pitch.Clone();
+-            sound.Volume = Volume.Clone();
++            sound.Pitch = OptimumApiBridge.CloneOrReuseNatFloat(Pitch);
++            sound.Volume = OptimumApiBridge.CloneOrReuseNatFloat(Volume);
+             sound.Type = Type;
+             sound.Range = Range;
+             return sound;
+         }
+ 
+@@ -164,12 +164,12 @@ namespace Vintagestory.API.Common
+             return new SoundAttributes()
+             {
+                 Location = reader.ReadBoolean() ? AssetLocation.Create(reader.ReadString()) : null,
+                 Type = (EnumSoundType)reader.ReadInt32(),
+                 Range = reader.ReadSingle(),
+-                Pitch = NatFloat.createFromBytes(reader),
+-                Volume = NatFloat.createFromBytes(reader)
++                Pitch = OptimumApiBridge.ReadCommonNatFloatFromBytes(reader),
++                Volume = OptimumApiBridge.ReadCommonNatFloatFromBytes(reader)
+             };
+         }
+ 
+         public override string ToString() {
+             return $"SoundAttributes {{ Location: {Location}, Pitch: {Pitch}, Volume: {Volume}, Range: {Range}, Type: {Type} }}";
+@@ -200,42 +200,9 @@ namespace Vintagestory.API.Common
+             throw new NotImplementedException();
+         }
+ 
+         public override SoundAttributes? ReadJson(JsonReader reader, Type objectType, SoundAttributes? existingValue, bool hasExistingValue, JsonSerializer serializer)
+         {
+-            if (reader.ValueType == typeof(string))
+-            {
+-                AssetLocationJsonParser converter = serializer.Converters.Select(x => x as AssetLocationJsonParser).Where(x => x != null).FirstOrDefault() 
+-                    ?? new AssetLocationJsonParser(GlobalConstants.DefaultDomain);
+-                AssetLocation? location = converter.ReadJson(reader, typeof(AssetLocation), null, false, serializer);
+-                ArgumentNullException.ThrowIfNull(location); // This should never happen, no matter how the json is set up
+-                if (AddSoundsPrefix) location.WithPathPrefixOnce("sounds/");
+-
+-                return new SoundAttributes(location, RandomPitch) { Range = DefaultRange, };
+-            }
+-
+-            SoundAttributes sound = new SoundAttributes();
+-            sound.Range = DefaultRange;
+-
+-            // Set up so json serializer will create new instances, not populate the existing ones
+-            sound.Pitch = null!;
+-            sound.Volume = null!;
+-
+-            try
+-            {
+-                object boxed = sound;
+-                serializer.Populate(reader, boxed);
+-                sound = (SoundAttributes)boxed;
+-                if (AddSoundsPrefix) sound.Location?.WithPathPrefixOnce("sounds/");
+-            }
+-            catch (Exception e)
+-            {
+-                throw new Exception("Error while parsing " + sound, e);
+-            }
+-
+-            sound.Pitch ??= RandomPitch ? SoundAttributes.RandomPitch : SoundAttributes.NatFloatOne;
+-            sound.Volume ??= SoundAttributes.NatFloatOne;
+-
+-            return sound.Location == null ? null : sound;
++            return OptimumApiBridge.ReadSoundAttributesJson(this, reader, serializer);
+         }
+     }
+ }

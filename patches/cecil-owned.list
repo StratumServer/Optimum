@@ -76,6 +76,7 @@ patches/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch

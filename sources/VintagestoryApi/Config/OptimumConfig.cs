@@ -780,6 +780,10 @@ public static class OptimumConfig
     // on empty or static cold firepits until dynamic contents become active.
     public static bool FirepitIdleRendererEnabled = true;
 
+    // Issue #640: Reuse SoundAttributes.NatFloatOne and RandomPitch (plus static
+    // Packet_NatFloat equivalents) when avg, var, dist, and zero offset match.
+    public static bool ReuseCommonNatFloatEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)
@@ -1551,6 +1555,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.IgnoreJsonLineInfo), IgnoreJsonLineInfoEnabled.ToString()),
         (nameof(OptimumConfigData.CompactServerAssets), CompactServerAssetsEnabled.ToString()),
         (nameof(OptimumConfigData.FirepitIdleRenderer), FirepitIdleRendererEnabled.ToString()),
+        (nameof(OptimumConfigData.ReuseCommonNatFloat), ReuseCommonNatFloatEnabled.ToString()),
     };
 
     /// <summary>
@@ -1688,6 +1693,7 @@ public static class OptimumConfig
             IgnoreJsonLineInfoEnabled = data.IgnoreJsonLineInfo;
             CompactServerAssetsEnabled = data.CompactServerAssets;
             FirepitIdleRendererEnabled = data.FirepitIdleRenderer;
+            ReuseCommonNatFloatEnabled = data.ReuseCommonNatFloat;
         }
         catch (Exception)
         {
@@ -1788,6 +1794,7 @@ public static class OptimumConfig
             IgnoreJsonLineInfo = IgnoreJsonLineInfoEnabled,
             CompactServerAssets = CompactServerAssetsEnabled,
             FirepitIdleRenderer = FirepitIdleRendererEnabled,
+            ReuseCommonNatFloat = ReuseCommonNatFloatEnabled,
         };
 
         try
@@ -1912,6 +1919,7 @@ internal sealed class OptimumConfigData
     public bool IgnoreJsonLineInfo { get; set; } = true;
     public bool CompactServerAssets { get; set; } = true;
     public bool FirepitIdleRenderer { get; set; } = true;
+    public bool ReuseCommonNatFloat { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2865,6 +2873,7 @@ public static class OptimumDiagnostics
         ResetChunkFaceBucketCullCounters();
         ResetSsaoDepthPositionDiagnostics();
         ResetDynamicRenderScaleDiagnostics();
+        ResetCommonNatFloatCounters();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3863,6 +3872,47 @@ public static class OptimumDiagnostics
         return string.Create(
             CultureInfo.InvariantCulture,
             $"Optimum dynamic render scale: enabled={OptimumConfig.DynamicRenderScaleEnabled}, active={OptimumConfig.EffectiveDynamicRenderScale}, scale={DynamicRenderScaleCurrent:F2}, upscaler={DynamicRenderScaleActiveUpscaler}, sceneMs={DynamicRenderScaleSceneGpuMs:0.00}, upscaleMs={DynamicRenderScaleUpscaleGpuMs:0.00}, cachedTiers={DynamicRenderScaleCachedTiers}, cacheHits={DynamicRenderScaleCacheHits}, cacheAllocs={DynamicRenderScaleCacheAllocations}, cacheEvicts={DynamicRenderScaleCacheEvictions}, downscales={DynamicRenderScaleDownscales}, upscales={DynamicRenderScaleUpscales}, fsrFallbacks={DynamicRenderScaleFsrFallbacks}");
+    }
+
+    // Issue #640: Common NatFloat / Packet_NatFloat reuse diagnostics.
+    private static long _commonNatFloatReused;
+    private static long _commonNatFloatAllocated;
+    private static long _commonPacketNatFloatReused;
+    private static long _commonPacketNatFloatAllocated;
+
+    public static long CommonNatFloatReused => Interlocked.Read(ref _commonNatFloatReused);
+    public static long CommonNatFloatAllocated => Interlocked.Read(ref _commonNatFloatAllocated);
+    public static long CommonPacketNatFloatReused => Interlocked.Read(ref _commonPacketNatFloatReused);
+    public static long CommonPacketNatFloatAllocated => Interlocked.Read(ref _commonPacketNatFloatAllocated);
+
+    public static void RecordCommonNatFloatReuse() => Interlocked.Increment(ref _commonNatFloatReused);
+    public static void RecordCommonNatFloatAlloc() => Interlocked.Increment(ref _commonNatFloatAllocated);
+    public static void RecordPacketNatFloatReuse() => Interlocked.Increment(ref _commonPacketNatFloatReused);
+    public static void RecordPacketNatFloatAlloc() => Interlocked.Increment(ref _commonPacketNatFloatAllocated);
+
+    public static void ResetCommonNatFloatCounters()
+    {
+        Interlocked.Exchange(ref _commonNatFloatReused, 0);
+        Interlocked.Exchange(ref _commonNatFloatAllocated, 0);
+        Interlocked.Exchange(ref _commonPacketNatFloatReused, 0);
+        Interlocked.Exchange(ref _commonPacketNatFloatAllocated, 0);
+    }
+
+    public static string GetCommonNatFloatSummary()
+    {
+        long natReused = CommonNatFloatReused;
+        long natAlloc = CommonNatFloatAllocated;
+        long natTotal = natReused + natAlloc;
+        double natPct = natTotal > 0 ? (natReused * 100.0) / natTotal : 0.0;
+
+        long pktReused = CommonPacketNatFloatReused;
+        long pktAlloc = CommonPacketNatFloatAllocated;
+        long pktTotal = pktReused + pktAlloc;
+        double pktPct = pktTotal > 0 ? (pktReused * 100.0) / pktTotal : 0.0;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"Optimum common NatFloat reuse: enabled={OptimumConfig.ReuseCommonNatFloatEnabled}, natReused={natReused}, natAllocated={natAlloc}, natReusePct={natPct:0.0}%, packetReused={pktReused}, packetAllocated={pktAlloc}, packetReusePct={pktPct:0.0}%");
     }
 }
 
