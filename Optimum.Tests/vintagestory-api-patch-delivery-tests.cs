@@ -46,6 +46,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Common/Model/Animation/EntityHeadController.cs.patch"] = ["PatchHeadControllerPoseFallback"],
             ["Common/Registry/JsonConverters.cs.patch"] = ["PatchJsonLineInfo"],
             ["Common/Registry/RegistryObject.cs.patch"] = ["PatchRegistryObjectCodeParts", "PatchRegistryObjectFillPlaceHolder"],
+            ["Common/SoundAttributes.cs.patch"] = ["PatchSoundAttributes"],
             ["Common/TyronThreadPool.cs.patch"] = ["PatchTyronThreadPoolDiagnostics"],
             ["Datastructures/JsonObject.cs.patch"] = ["PatchJsonLineInfo"],
             ["Math/Ascii85.cs.patch"] = ["PatchAscii85"],

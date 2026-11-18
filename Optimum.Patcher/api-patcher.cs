@@ -271,6 +271,8 @@ public static class ApiPatcher
         if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
         int jsonLineInfoPatches = PatchJsonLineInfo(vanilla.MainModule, contracts.MainModule);
         if (jsonLineInfoPatches != 8) throw new InvalidOperationException($"Expected 8 JSON LineInfo patches, applied {jsonLineInfoPatches}.");
+        int soundAttributePatches = PatchSoundAttributes(vanilla.MainModule, contracts.MainModule);
+        if (soundAttributePatches != 3) throw new InvalidOperationException($"Expected 3 SoundAttributes patches, applied {soundAttributePatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -4447,6 +4449,129 @@ public static class ApiPatcher
             }
         }
 
+        return patched;
+    }
+
+    /// <summary>
+    /// Issue #640: Routes SoundAttributes.Clone, SoundAttributes.FromBytes, and
+    /// SoundAttributeConverter.ReadJson through OptimumApiBridge to reuse
+    /// SoundAttributes.NatFloatOne and SoundAttributes.RandomPitch while preserving ABI.
+    /// </summary>
+    internal static int PatchSoundAttributes(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        const string soundTypeName = "Vintagestory.API.Common.SoundAttributes";
+        const string converterTypeName = "Vintagestory.API.Common.SoundAttributeConverter";
+        const string natFloatTypeName = "Vintagestory.API.MathTools.NatFloat";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumApiBridge";
+
+        var bridge = contracts.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from Optimum.Api.Contracts.");
+
+        var cloneOrReuseRef = module.ImportReference(bridge.Methods.Single(m =>
+            m.IsStatic && m.Name == "CloneOrReuseNatFloat" && m.Parameters.Count == 1));
+        var readFromBytesRef = module.ImportReference(bridge.Methods.Single(m =>
+            m.IsStatic && m.Name == "ReadCommonNatFloatFromBytes" && m.Parameters.Count == 1));
+        var readJsonRef = module.ImportReference(bridge.Methods.Single(m =>
+            m.IsStatic && m.Name == "ReadSoundAttributesJson" && m.Parameters.Count == 3));
+
+        var soundType = module.GetType(soundTypeName)
+            ?? throw new InvalidOperationException($"{soundTypeName} is missing from the vanilla API.");
+        var converterType = module.GetType(converterTypeName)
+            ?? throw new InvalidOperationException($"{converterTypeName} is missing from the vanilla API.");
+
+        int patched = 0;
+
+        // 1. SoundAttributes.Clone(): replace Pitch.Clone() / Volume.Clone() calls.
+        var cloneMethod = soundType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "Clone" && m.Parameters.Count == 0 && m.HasBody)
+            ?? throw new InvalidOperationException($"{soundTypeName}.Clone() is missing.");
+        ClearDebugInformation(cloneMethod);
+        int existingCloneCalls = cloneMethod.Body.Instructions.Count(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == cloneOrReuseRef.FullName);
+        if (existingCloneCalls == 2)
+        {
+            patched++;
+        }
+        else
+        {
+            var natCloneCalls = cloneMethod.Body.Instructions.Where(i =>
+                (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                i.Operand is MethodReference mr &&
+                mr.DeclaringType.FullName == natFloatTypeName &&
+                mr.Name == "Clone" &&
+                mr.Parameters.Count == 0).ToArray();
+            if (natCloneCalls.Length != 2)
+            {
+                throw new InvalidOperationException(
+                    $"{cloneMethod.FullName}: expected 2 NatFloat.Clone calls, found {natCloneCalls.Length}.");
+            }
+            foreach (var instr in natCloneCalls)
+            {
+                instr.OpCode = OpCodes.Call;
+                instr.Operand = cloneOrReuseRef;
+            }
+            patched++;
+        }
+
+        // 2. SoundAttributes.FromBytes(BinaryReader, string): replace NatFloat.createFromBytes(reader) calls.
+        var fromBytesMethod = soundType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "FromBytes" && m.Parameters.Count == 2 && m.HasBody)
+            ?? throw new InvalidOperationException($"{soundTypeName}.FromBytes(BinaryReader, string) is missing.");
+        ClearDebugInformation(fromBytesMethod);
+        int existingFromBytesCalls = fromBytesMethod.Body.Instructions.Count(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == readFromBytesRef.FullName);
+        if (existingFromBytesCalls == 2)
+        {
+            patched++;
+        }
+        else
+        {
+            var createFromBytesCalls = fromBytesMethod.Body.Instructions.Where(i =>
+                i.OpCode == OpCodes.Call &&
+                i.Operand is MethodReference mr &&
+                mr.DeclaringType.FullName == natFloatTypeName &&
+                mr.Name == "createFromBytes" &&
+                mr.Parameters.Count == 1).ToArray();
+            if (createFromBytesCalls.Length != 2)
+            {
+                throw new InvalidOperationException(
+                    $"{fromBytesMethod.FullName}: expected 2 NatFloat.createFromBytes calls, found {createFromBytesCalls.Length}.");
+            }
+            foreach (var instr in createFromBytesCalls)
+            {
+                instr.Operand = readFromBytesRef;
+            }
+            patched++;
+        }
+
+        // 3. SoundAttributeConverter.ReadJson(...): delegate to OptimumApiBridge.ReadSoundAttributesJson.
+        var readJsonMethod = converterType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "ReadJson" && m.Parameters.Count == 5 && m.HasBody)
+            ?? throw new InvalidOperationException($"{converterTypeName}.ReadJson is missing.");
+        ClearDebugInformation(readJsonMethod);
+        if (readJsonMethod.Body.Instructions.Count == 5 &&
+            readJsonMethod.Body.Instructions[3].OpCode == OpCodes.Call &&
+            readJsonMethod.Body.Instructions[3].Operand is MethodReference existingJson &&
+            existingJson.FullName == readJsonRef.FullName)
+        {
+            patched++;
+        }
+        else
+        {
+            readJsonMethod.Body.ExceptionHandlers.Clear();
+            readJsonMethod.Body.Variables.Clear();
+            readJsonMethod.Body.InitLocals = false;
+            var il = readJsonMethod.Body.GetILProcessor();
+            readJsonMethod.Body.Instructions.Clear();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg, readJsonMethod.Parameters[4]);
+            il.Emit(OpCodes.Call, readJsonRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        Console.WriteLine($"  API PATCHED: {soundTypeName} + {converterTypeName} common NatFloat reuse ({patched}/3)");
         return patched;
     }
 }
