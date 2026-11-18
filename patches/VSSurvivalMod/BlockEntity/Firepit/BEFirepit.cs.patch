@@ -1,8 +1,66 @@
 diff --git a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
-index 613b86f..0c1ffaf 100644
+index 613b86f..c349ca3 100644
 --- a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
 +++ b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
-@@ -616,10 +616,11 @@ namespace Vintagestory.GameContent
+@@ -47,10 +47,12 @@ namespace Vintagestory.GameContent
+ 
+         GuiDialogBlockEntityFirepit clientDialog;
+         bool clientSidePrevBurning;
+ 
+         FirepitContentsRenderer renderer;
++        bool rendererRegistered;
++        long burnTickListenerId;
+ 
+         bool shouldRedraw;
+ 
+         public bool IsHot => IsBurning;
+         public float emptyFirepitBurnTimeMulBonus = 4f;
+@@ -114,19 +116,26 @@ namespace Vintagestory.GameContent
+         {
+             base.Initialize(api);
+ 
+             inventory.pos = Pos;
+             inventory.LateInitialize("smelting-" + Pos.X + "/" + Pos.Y + "/" + Pos.Z, api);
+-            
+-            RegisterGameTickListener(OnBurnTick, 100);
+-            RegisterGameTickListener(On500msTick, 500);
++
++            bool idleOpt = api.Side == EnumAppSide.Client && Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
++            if (!idleOpt)
++            {
++                burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++                RegisterGameTickListener(On500msTick, 500);
++            }
+ 
+             if (api is ICoreClientAPI capi)
+             {
+                 this.capi = capi;
+-                renderer = new FirepitContentsRenderer(capi, Pos);
+-                capi.Event.RegisterRenderer(renderer, EnumRenderStage.Opaque, "firepit");
++                if (!idleOpt)
++                {
++                    EnsureRenderer();
++                    SyncClientRendererAndTickState(false);
++                }
+                 capi.Event.RegisterEventBusListener(OnSetTransform, 0.5, "onsettransform");
+                 UpdateRenderer();
+             }
+         }
+ 
+@@ -146,11 +155,11 @@ namespace Vintagestory.GameContent
+             {
+                 if (collObj.Attributes == null) collObj.Attributes = new JsonObject(new JObject());
+                 collObj.Attributes.Token["inFirePitProps"]["transform"] = JToken.FromObject(tf);
+             }
+ 
+-            renderer.Transform = tf;
++            EnsureRenderer().Transform = tf;
+         }
+ 
+ 
+         private void OnSlotModified(int slotid)
+         {
+@@ -616,10 +625,11 @@ namespace Vintagestory.GameContent
              {
                  Inventory.AfterBlocksLoaded(Api.World);
              }
@@ -14,7 +72,7 @@ index 613b86f..0c1ffaf 100644
              inputStackCookingTime = tree.GetFloat("oreCookingTime");
              fuelBurnTime = tree.GetFloat("fuelBurnTime");
              maxFuelBurnTime = tree.GetFloat("maxFuelBurnTime");
-@@ -627,10 +628,14 @@ namespace Vintagestory.GameContent
+@@ -627,10 +637,14 @@ namespace Vintagestory.GameContent
              canIgniteFuel = tree.GetBool("canIgniteFuel", true);
              cachedFuel = tree.GetFloat("cachedFuel", 0);
  
@@ -29,10 +87,85 @@ index 613b86f..0c1ffaf 100644
                  if (clientDialog != null) SetDialogValues(clientDialog.Attributes);
              }
  
-@@ -648,24 +653,34 @@ namespace Vintagestory.GameContent
+@@ -643,46 +657,133 @@ namespace Vintagestory.GameContent
+                 shouldRedraw = false;
+             }
+         }
+ 
+ 
++        FirepitContentsRenderer EnsureRenderer()
++        {
++            if (renderer == null)
++            {
++                renderer = new FirepitContentsRenderer(capi, Pos);
++            }
++            return renderer;
++        }
++
++        void SyncClientRendererAndTickState(bool idleOpt)
++        {
++            if (capi == null) return;
++
++            bool hasActiveContent = renderer != null && renderer.HasActiveContent();
++            if (!idleOpt || hasActiveContent)
++            {
++                if (renderer != null && !rendererRegistered)
++                {
++                    capi.Event.RegisterRenderer(renderer, EnumRenderStage.Opaque, "firepit");
++                    rendererRegistered = true;
++                }
++            }
++            else
++            {
++                DisposeIdleRenderer();
++            }
++
++            bool needsBurnTick = !idleOpt || (renderer != null && renderer.contentStackRenderer != null);
++            if (needsBurnTick)
++            {
++                if (burnTickListenerId == 0)
++                {
++                    burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++                }
++            }
++            else if (burnTickListenerId != 0)
++            {
++                UnregisterGameTickListener(burnTickListenerId);
++                burnTickListenerId = 0;
++            }
++        }
++
++        void ClearIdleRenderer(bool idleOpt)
++        {
++            if (renderer != null)
++            {
++                renderer.contentStackRenderer?.Dispose();
++                renderer.contentStackRenderer = null;
++                renderer.SetContents(null, null);
++            }
++            SyncClientRendererAndTickState(idleOpt);
++        }
++
++        void DisposeIdleRenderer()
++        {
++            if (renderer != null)
++            {
++                rendererRegistered = false;
++                renderer.Dispose();
++                renderer = null;
++            }
++        }
++
          void UpdateRenderer()
          {
-             if (renderer == null) return;
+-            if (renderer == null) return;
++            if (capi == null) return;
++            bool idleOpt = Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
++            if (!idleOpt && renderer == null)
++            {
++                EnsureRenderer();
++                SyncClientRendererAndTickState(false);
++            }
  
              ItemStack contentStack = inputStack == null ? outputStack : inputStack;
 +            bool isPot = contentStack?.Collectible is IInFirepitRendererSupplier;
@@ -40,13 +173,12 @@ index 613b86f..0c1ffaf 100644
 +
 +            if (isColdPot)
 +            {
-+                renderer.contentStackRenderer?.Dispose();
-+                renderer.contentStackRenderer = null;
-+                renderer.SetContents(null, null);
++                ClearIdleRenderer(idleOpt);
 +                return;
 +            }
  
              bool useOldRenderer =
++                renderer != null &&
                  renderer.ContentStack != null &&
                  renderer.contentStackRenderer != null &&
 -                contentStack?.Collectible is IInFirepitRendererSupplier &&
@@ -54,10 +186,20 @@ index 613b86f..0c1ffaf 100644
                  renderer.ContentStack.Equals(Api.World, contentStack, GlobalConstants.IgnoredStackAttributes)
              ;
  
-             if (useOldRenderer) return; // Otherwise the cooking sounds restarts all the time
+-            if (useOldRenderer) return; // Otherwise the cooking sounds restarts all the time
++            if (useOldRenderer)
++            {
++                SyncClientRendererAndTickState(idleOpt);
++                return; // Otherwise the cooking sounds restarts all the time
++            }
  
-             renderer.contentStackRenderer?.Dispose();
-             renderer.contentStackRenderer = null;
+-            renderer.contentStackRenderer?.Dispose();
+-            renderer.contentStackRenderer = null;
++            if (renderer != null)
++            {
++                renderer.contentStackRenderer?.Dispose();
++                renderer.contentStackRenderer = null;
++            }
  
 -            if (contentStack?.Collectible is IInFirepitRendererSupplier)
 +            if (isPot)
@@ -65,8 +207,46 @@ index 613b86f..0c1ffaf 100644
                  IInFirepitRenderer childrenderer = (contentStack?.Collectible as IInFirepitRendererSupplier).GetRendererWhenInFirepit(contentStack, this, contentStack == outputStack);
                  if (childrenderer != null)
                  {
-                     renderer.SetChildRenderer(contentStack, childrenderer);
-@@ -910,10 +925,14 @@ namespace Vintagestory.GameContent
+-                    renderer.SetChildRenderer(contentStack, childrenderer);
++                    EnsureRenderer().SetChildRenderer(contentStack, childrenderer);
++                    SyncClientRendererAndTickState(idleOpt);
+                     return;
+                 }
+             }
+ 
+             InFirePitProps props = GetRenderProps(contentStack);
+-            if (contentStack?.Collectible != null && !(contentStack?.Collectible is IInFirepitMeshSupplier) && props != null)
++            if (contentStack?.Collectible != null && contentStack.Class != EnumItemClass.Block && !(contentStack?.Collectible is IInFirepitMeshSupplier) && props != null)
+             {
+-                renderer.SetContents(contentStack, props.Transform);
++                EnsureRenderer().SetContents(contentStack, props.Transform);
++                SyncClientRendererAndTickState(idleOpt);
+             }
+             else
+             {
+-                renderer.SetContents(null, null);
++                ClearIdleRenderer(idleOpt);
+             }
+         }
+ 
+ 
+         void SetDialogValues(ITreeAttribute dialogTree)
+@@ -736,12 +837,12 @@ namespace Vintagestory.GameContent
+ 
+         public override void OnBlockRemoved()
+         {
+             base.OnBlockRemoved();
+ 
+-            renderer?.Dispose();
+-            renderer = null;
++            burnTickListenerId = 0;
++            DisposeIdleRenderer();
+ 
+             if (clientDialog != null)
+             {
+                 clientDialog.TryClose();
+                 clientDialog?.Dispose();
+@@ -910,10 +1011,14 @@ namespace Vintagestory.GameContent
              
              if (contentStack.Collectible is IInFirepitRendererSupplier)
              {
@@ -81,7 +261,17 @@ index 613b86f..0c1ffaf 100644
  
              InFirePitProps renderProps = GetRenderProps(contentStack);
              
-@@ -944,10 +963,49 @@ namespace Vintagestory.GameContent
+@@ -935,24 +1040,64 @@ namespace Vintagestory.GameContent
+ 
+                 return null;
+             }
+             else
+             {
+-                if (renderer.RequireSpit)
++                if (renderer?.RequireSpit == true)
+                 {
+                     this.CurrentModel = EnumFirepitModel.Spit;
+                 }
                  return null; // Mesh drawing is handled by the FirepitContentsRenderer
              }
              
@@ -130,4 +320,11 @@ index 613b86f..0c1ffaf 100644
          {
              base.OnBlockUnloaded();
  
-             renderer?.Dispose();
+-            renderer?.Dispose();
++            burnTickListenerId = 0;
++            DisposeIdleRenderer();
+         }
+ 
+         public static InFirePitProps GetRenderProps(ItemStack contentStack)
+         {
+             InFirePitProps props = contentStack?.ItemAttributes?["inFirePitProps"].AsObject<InFirePitProps>();

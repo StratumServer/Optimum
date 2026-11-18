@@ -1,8 +1,23 @@
 diff --git a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
-index e2f1f8f..a37f884 100644
+index e2f1f8f..e9fbf85 100644
 --- a/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
 +++ b/VSSurvivalMod/BlockEntityRenderer/FirepitContentsRenderer.cs
-@@ -135,14 +135,14 @@ namespace Vintagestory.GameContent
+@@ -18,10 +18,14 @@ namespace Vintagestory.GameContent
+ 
+         public ModelTransform Transform;
+         ModelTransform defaultTransform;
+ 
+         public IInFirepitRenderer contentStackRenderer;
++        public bool HasActiveContent()
++        {
++            return contentStackRenderer != null || meshref != null;
++        }
+         public bool RequireSpit
+         {
+             get
+             {
+                 return contentStackRenderer == null && ContentStack?.Item != null;
+@@ -135,14 +139,14 @@ namespace Vintagestory.GameContent
              prog.AlphaTest = 0.05f;
              prog.OverlayOpacity = 0;
  
@@ -21,3 +36,17 @@ index e2f1f8f..a37f884 100644
              
              prog.ExtraGlow = (int)GameMath.Clamp((temp - 500) / 4, 0, 255);
              
+@@ -169,10 +173,13 @@ namespace Vintagestory.GameContent
+         public void Dispose()
+         {
+             api.Event.UnregisterRenderer(this, EnumRenderStage.Opaque);
+ 
+             meshref?.Dispose();
++            meshref = null;
+             contentStackRenderer?.Dispose();
++            contentStackRenderer = null;
++            ContentStack = null;
+         }
+ 
+     }
+ }

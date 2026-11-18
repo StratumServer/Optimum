@@ -1,0 +1,26 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs b/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
+index ab7895c..fabcc0f 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/FirepitContentsRenderer.cs
+@@ -26,6 +26,11 @@ public class FirepitContentsRenderer : IRenderer, IDisposable
+ 
+ 	public IInFirepitRenderer contentStackRenderer;
+ 
++	public bool HasActiveContent()
++	{
++		return contentStackRenderer != null || meshref != null;
++	}
++
+ 	public bool RequireSpit
+ 	{
+ 		get
+@@ -154,6 +159,9 @@ public class FirepitContentsRenderer : IRenderer, IDisposable
+ 	{
+ 		api.Event.UnregisterRenderer(this, EnumRenderStage.Opaque);
+ 		meshref?.Dispose();
++		meshref = null;
+ 		contentStackRenderer?.Dispose();
++		contentStackRenderer = null;
++		ContentStack = null;
+ 	}
+ }
