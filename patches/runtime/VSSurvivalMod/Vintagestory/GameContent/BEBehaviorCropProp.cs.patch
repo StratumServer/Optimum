@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
-index c778ff6..5e457f7 100644
+index c778ff6..5bb87e7 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCropProp.cs
-@@ -1,8 +1,9 @@
+@@ -1,6 +1,7 @@
  using System.Collections.Generic;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
@@ -10,11 +10,7 @@ index c778ff6..5e457f7 100644
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  using Vintagestory.API.Util;
- 
- namespace Vintagestory.GameContent;
-@@ -105,15 +106,19 @@ public class BEBehaviorCropProp : BlockEntityBehavior, ITexPositionSource
- 		if (Api == null || Api.Side != EnumAppSide.Client)
- 		{
+@@ -107,18 +108,30 @@ public class BEBehaviorCropProp : BlockEntityBehavior, ITexPositionSource
  			return;
  		}
  		capi = Api as ICoreClientAPI;
@@ -25,13 +21,63 @@ index c778ff6..5e457f7 100644
 +		}
 +		cropBlock = Api.World.GetBlock(new AssetLocation("crop-" + Type + "-" + Stage));
 +		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(Api, "croppropmeshes");
++		string cacheKey = getCacheKey();
 +		lock (orCreate)
  		{
 -			cropBlock = Api.World.GetBlock(new AssetLocation("crop-" + Type + "-" + Stage));
- 			string cacheKey = getCacheKey();
+-			string cacheKey = getCacheKey();
 -			Dictionary<string, MeshData> orCreate = ObjectCacheUtil.GetOrCreate(Api, "croppropmeshes", () => new Dictionary<string, MeshData>());
  			if (orCreate.TryGetValue(cacheKey, out var value))
  			{
  				mesh = value;
  				return;
  			}
+-			MeshData meshData = genMesh(cropBlock);
+-			cacheKey = getCacheKey();
++		}
++		MeshData meshData = genMesh(cropBlock);
++		cacheKey = getCacheKey();
++		lock (orCreate)
++		{
++			if (orCreate.TryGetValue(cacheKey, out var existing))
++			{
++				mesh = existing;
++				return;
++			}
+ 			MeshData meshData2 = (orCreate[cacheKey] = meshData);
+ 			mesh = meshData2;
+ 		}
+@@ -137,13 +150,14 @@ public class BEBehaviorCropProp : BlockEntityBehavior, ITexPositionSource
+ 	private MeshData genMesh(Block cropBlock)
+ 	{
+ 		CompositeShape compositeShape = config.Shape;
++		MeshData built;
+ 		if (compositeShape == null)
+ 		{
+ 			if (cropBlock.Shape.Alternates == null)
+ 			{
+-				mesh = capi.TesselatorManager.GetDefaultBlockMesh(cropBlock).Clone();
+-				mesh.Translate(0f, -0.0625f, 0f);
+-				return mesh;
++				built = capi.TesselatorManager.GetDefaultBlockMesh(cropBlock).Clone();
++				built.Translate(0f, -0.0625f, 0f);
++				return built;
+ 			}
+ 			compositeShape = cropBlock.Shape;
+ 		}
+@@ -156,10 +170,11 @@ public class BEBehaviorCropProp : BlockEntityBehavior, ITexPositionSource
+ 			config.BakedAlternatesLength = compositeShape.BakedAlternates.Length;
+ 			compositeShape = compositeShape.BakedAlternates[GameMath.MurmurHash3Mod(base.Pos.X, base.Pos.Y, base.Pos.Z, compositeShape.BakedAlternates.Length)];
+ 		}
+-		nowTesselatingShape = capi.Assets.TryGet(compositeShape.Base.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
+-		capi.Tesselator.TesselateShape("croprop", base.Block.Code, compositeShape, out mesh, this, 0, 0, 0);
+-		mesh.Translate(0f, -0.0625f, 0f);
+-		return mesh;
++		Shape shape = capi.Assets.TryGet(compositeShape.Base.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
++		OptimumCropPropTexSource texSource = new OptimumCropPropTexSource(capi, config.Textures, shape?.Textures);
++		capi.Tesselator.TesselateShape("croprop", base.Block.Code, compositeShape, out built, texSource, 0, 0, 0);
++		built.Translate(0f, -0.0625f, 0f);
++		return built;
+ 	}
+ 
+ 	private void onTick8s(float dt)

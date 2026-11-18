@@ -1,5 +1,5 @@
 diff --git a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
-index e8d9ce5..8de81cd 100644
+index e8d9ce5..b3e3b6c 100644
 --- a/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
 +++ b/VSSurvivalMod/BlockEntity/BEGenericTypedContainer.cs
 @@ -32,14 +32,16 @@ namespace Vintagestory.GameContent
@@ -47,7 +47,7 @@ index e8d9ce5..8de81cd 100644
              if (shapename == null)
              {
                  return null;
-@@ -370,30 +370,34 @@ namespace Vintagestory.GameContent
+@@ -370,30 +370,43 @@ namespace Vintagestory.GameContent
  
              Shape shape=null;
              if (animUtil != null)
@@ -60,12 +60,21 @@ index e8d9ce5..8de81cd 100644
 +                Dictionary<string, Shape> shapes = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, Shape>>(Api, skeydict);
                  string skey = Block.FirstCodePart() + type + block.Subtype + "-" + "-" + shapename + "-" + rndTexNum;
 -                if (!shapes.TryGetValue(skey, out shape))
++                bool shapeFound;
 +                lock (shapes)
                  {
 -                    shapes[skey] = shape = block.GetShape(Api as ICoreClientAPI, shapename);
-+                    if (!shapes.TryGetValue(skey, out shape))
++                    shapeFound = shapes.TryGetValue(skey, out shape);
++                }
++                if (!shapeFound)
++                {
++                    Shape loadedShape = block.GetShape(Api as ICoreClientAPI, shapename);
++                    lock (shapes)
 +                    {
-+                        shapes[skey] = shape = block.GetShape(Api as ICoreClientAPI, shapename);
++                        if (!shapes.TryGetValue(skey, out shape))
++                        {
++                            shape = shapes[skey] = loadedShape;
++                        }
 +                    }
                  }
              }
@@ -93,7 +102,7 @@ index e8d9ce5..8de81cd 100644
  
              if (rndTexNum > 0) rndTexNum = GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, rndTexNum);
  
-@@ -408,16 +412,26 @@ namespace Vintagestory.GameContent
+@@ -408,16 +421,25 @@ namespace Vintagestory.GameContent
                      };
  
                      mesh = animUtil.InitializeAnimator(type + "-" + key + "-" + block.Subtype, shape, texSource, rendererRot);
@@ -106,16 +115,15 @@ index e8d9ce5..8de81cd 100644
 +                }
              } else
              {
--                mesh = block.GenMesh(Api as ICoreClientAPI, type, shapename, tesselator, new Vec3f(), rndTexNum);
+                 mesh = block.GenMesh(Api as ICoreClientAPI, type, shapename, tesselator, new Vec3f(), rndTexNum);
+-
+-                return meshes[meshKey] = mesh;
 +                lock (meshes)
 +                {
 +                    if (meshes.TryGetValue(meshKey, out MeshData existing) && existing != null)
 +                    {
 +                        return existing;
 +                    }
-+                    mesh = block.GenMesh(Api as ICoreClientAPI, type, shapename, tesselator, new Vec3f(), rndTexNum);
- 
--                return meshes[meshKey] = mesh;
 +                    return meshes[meshKey] = mesh;
 +                }
              }
@@ -123,23 +131,23 @@ index e8d9ce5..8de81cd 100644
  
  
  
-@@ -429,23 +443,32 @@ namespace Vintagestory.GameContent
+@@ -429,23 +451,32 @@ namespace Vintagestory.GameContent
              {
                  if (ownMesh == null)
                  {
                      ownMesh = GenMesh(tesselator);
                      if (ownMesh == null) return false;
 +                    rotatedOwnMesh = null;
-                 }
- 
--                mesher.AddMeshData(ownMesh.Clone().Rotate(0, MeshAngle, 0));
++                }
++
 +                var mesh = rotatedOwnMesh;
 +                if (mesh == null)
 +                {
 +                    mesh = MeshAngle == 0 ? ownMesh : ownMesh.Clone().Rotate(0, MeshAngle, 0);
 +                    rotatedOwnMesh = mesh;
-+                }
-+
+                 }
+ 
+-                mesher.AddMeshData(ownMesh.Clone().Rotate(0, MeshAngle, 0));
 +                mesher.AddMeshData(mesh);
              }
  

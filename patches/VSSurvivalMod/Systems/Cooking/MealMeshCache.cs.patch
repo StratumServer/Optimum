@@ -1,17 +1,195 @@
 diff --git a/VSSurvivalMod/Systems/Cooking/MealMeshCache.cs b/VSSurvivalMod/Systems/Cooking/MealMeshCache.cs
-index 9a0a503..dc777da 100644
+index 9a0a503..19078ea 100644
 --- a/VSSurvivalMod/Systems/Cooking/MealMeshCache.cs
 +++ b/VSSurvivalMod/Systems/Cooking/MealMeshCache.cs
-@@ -314,11 +314,11 @@ namespace Vintagestory.GameContent
+@@ -107,49 +107,57 @@ namespace Vintagestory.GameContent
  
-             if (!meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? mealMeshRef))
+         public override void Dispose()
+         {
+             if (capi?.ObjectCache.TryGetValue("pieMeshRefs", out var objPi) == true && objPi is Dictionary<int, MultiTextureMeshRef> meshRefs)
              {
-                 if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+-                foreach (var (_, meshRef) in meshRefs)
++                MultiTextureMeshRef[] snapshot;
++                lock (meshRefs)
++                {
++                    snapshot = meshRefs.Values.ToArray();
++                    meshRefs.Clear();
++                }
++                foreach (var meshRef in snapshot)
+                 {
+                     meshRef.Dispose();
+                 }
+                 capi.ObjectCache.Remove("pieMeshRefs");
+             }
+         }
+ 
+         public MultiTextureMeshRef? GetOrCreatePieMeshRef(ItemStack? pieStack)
+         {
+-            Dictionary<int, MultiTextureMeshRef> meshrefs;
+-
+-            if (capi!.ObjectCache.TryGetValue("pieMeshRefs", out object? obj))
+-            {
+-                meshrefs = obj as Dictionary<int, MultiTextureMeshRef> ?? [];
+-            }
+-            else
+-            {
+-                capi.ObjectCache["pieMeshRefs"] = meshrefs = [];
+-            }
++            Dictionary<int, MultiTextureMeshRef> meshrefs = OptimumCacheHelper.GetOrCreateDefault<Dictionary<int, MultiTextureMeshRef>>(capi!, "pieMeshRefs");
+ 
+             if (pieStack?.Block is not BlockPie pieBlock) return null;
+ 
+ 
+-            ItemStack?[] contentStacks = pieBlock.GetContents(capi.World, pieStack);
++            ItemStack?[] contentStacks = pieBlock.GetContents(capi!.World, pieStack);
+ 
+             string extrakey = "ct" + (BlockPie.GetTopCrustType(pieStack) ?? "full") + "-bl" + pieStack.Attributes.GetAsInt("bakeLevel", 0) + "-ps" + pieStack.Attributes.GetAsInt("pieSize");
+ 
+             int mealhashcode = GetMealHashCode(pieBlock, contentStacks, null, extrakey);
+ 
+-
+-            if (!meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? mealMeshRef))
++            lock (meshrefs)
+             {
+-                if (GetPieMesh(pieStack) is not MeshData mesh) return null;
+-
+-                meshrefs[mealhashcode] = mealMeshRef = capi.Render.UploadMultiTextureMesh(mesh);
++                if (meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? cachedRef))
++                {
++                    return cachedRef;
++                }
+             }
+ 
+-            return mealMeshRef;
++            if (GetPieMesh(pieStack) is not MeshData mesh) return null;
++
++            MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(mesh);
++            lock (meshrefs)
++            {
++                if (meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? existingRef))
++                {
++                    uploadedRef.Dispose();
++                    return existingRef;
++                }
++                return meshrefs[mealhashcode] = uploadedRef;
++            }
+         }
+ 
+ 
+         public MeshData? GetPieMesh(ItemStack? pieStack, ModelTransform? transform = null)
+         {
+@@ -261,15 +269,21 @@ namespace Vintagestory.GameContent
+         {
+             if (singleFilling) return pieProps[1]?.Texture;
+ 
+             if (!singleFoodCat && mixingCodes.Length > 0)
+             {
+-                if (pieMixingCodeFillingTextures.TryGetValue(mixingCodes[0].GetHashCode(), out var loc))
++                int mixKey = mixingCodes[0].GetHashCode();
++                lock (pieMixingCodeFillingTextures)
+                 {
++                    if (pieMixingCodeFillingTextures.TryGetValue(mixKey, out var loc))
++                    {
++                        return loc;
++                    }
++                    loc = new("block/food/pie/fill-mixed" + mixingCodes[0]);
++                    pieMixingCodeFillingTextures[mixKey] = loc;
+                     return loc;
+                 }
+-                else pieMixingCodeFillingTextures.Add(mixingCodes[0].GetHashCode(), new("block/food/pie/fill-mixed" + mixingCodes[0]));
+             }
+ 
+             return pieMixedCategoryFillingTextures[(int)fillingCat];
+         }
+ 
+@@ -284,22 +298,11 @@ namespace Vintagestory.GameContent
+         ];
+ 
+ 
+         public Dictionary<int, MultiTextureMeshRef> GetCookedMeshRefs()
+         {
+-            Dictionary<int, MultiTextureMeshRef> meshrefs;
+-
+-            if (capi!.ObjectCache.TryGetValue("cookedMeshRefs", out object? obj))
+-            {
+-                meshrefs = obj as Dictionary<int, MultiTextureMeshRef> ?? [];
+-            }
+-            else
+-            {
+-                capi.ObjectCache["cookedMeshRefs"] = meshrefs = [];
+-            }
+-
+-            return meshrefs;
++            return OptimumCacheHelper.GetOrCreateDefault<Dictionary<int, MultiTextureMeshRef>>(capi!, "cookedMeshRefs");
+         }
+ 
+         public MultiTextureMeshRef? GetOrCreateMealInContainerMeshRef(IBlockMealContainer be, ItemStack containerStack, Vec3f? foodTranslate)
+         {
+             return GetOrCreateMealInContainerMeshRef(containerStack.Block, be.GetCookingRecipe(capi!.World, containerStack), be.GetNonEmptyContents(capi.World, containerStack), foodTranslate);
+@@ -310,23 +313,36 @@ namespace Vintagestory.GameContent
+             if (contentStacks == null) return null;
+ 
+             int mealhashcode = GetMealHashCode(containerBlock, contentStacks, foodTranslate);
+             Dictionary<int, MultiTextureMeshRef> meshrefs = GetCookedMeshRefs();
+ 
+-            if (!meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? mealMeshRef))
++            MultiTextureMeshRef? mealMeshRef;
++            lock (meshrefs)
+             {
+-                if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
++                if (meshrefs.TryGetValue(mealhashcode, out mealMeshRef))
                  {
 -                    if (capi != null && Environment.CurrentManagedThreadId == capi.TesselationThreadId) capi.Event.EnqueueMainThreadTask(() => GetOrCreateMealInContainerMeshRef(containerBlock, forRecipe, contentStacks, foodTranslate), "createmealmesh");    // Do it on the main thread instead
-+                    if (capi != null && capi.IsTesselationThread(Environment.CurrentManagedThreadId)) capi.Event.EnqueueMainThreadTask(() => GetOrCreateMealInContainerMeshRef(containerBlock, forRecipe, contentStacks, foodTranslate), "createmealmesh");    // Do it on the main thread instead
-                     throw new RetryTesselationException("Attempting to upload a new meal mesh outside of the main thread. If this occurs during tesselation, it should automatically retry. If not during tesselation, please only call this on the main thread!");
+-                    throw new RetryTesselationException("Attempting to upload a new meal mesh outside of the main thread. If this occurs during tesselation, it should automatically retry. If not during tesselation, please only call this on the main thread!");
++                    return mealMeshRef;
+                 }
++            }
+ 
+-                MeshData mesh = GenMealInContainerMesh(containerBlock, forRecipe, contentStacks, foodTranslate);
+-                meshrefs[mealhashcode] = mealMeshRef = capi!.Render.UploadMultiTextureMesh(mesh);
++            if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
++            {
++                if (capi != null && capi.IsTesselationThread(Environment.CurrentManagedThreadId)) capi.Event.EnqueueMainThreadTask(() => GetOrCreateMealInContainerMeshRef(containerBlock, forRecipe, contentStacks, foodTranslate), "createmealmesh");    // Do it on the main thread instead
++                throw new RetryTesselationException("Attempting to upload a new meal mesh outside of the main thread. If this occurs during tesselation, it should automatically retry. If not during tesselation, please only call this on the main thread!");
+             }
+ 
+-            return mealMeshRef;
++            MeshData mesh = GenMealInContainerMesh(containerBlock, forRecipe, contentStacks, foodTranslate);
++            mealMeshRef = capi!.Render.UploadMultiTextureMesh(mesh);
++            lock (meshrefs)
++            {
++                if (meshrefs.TryGetValue(mealhashcode, out MultiTextureMeshRef? existingRef))
++                {
++                    mealMeshRef.Dispose();
++                    return existingRef;
++                }
++                return meshrefs[mealhashcode] = mealMeshRef;
++            }
+         }
+ 
+ 
+         public MeshData GenMealInContainerMesh(Block containerBlock, CookingRecipe? forRecipe, ItemStack?[] contentStacks, Vec3f? foodTranslate = null)
+         {
+@@ -499,13 +515,20 @@ namespace Vintagestory.GameContent
+         {
+             if (capi == null) return;
+ 
+             if (capi.ObjectCache.TryGetValue("cookedMeshRefs", out object? obj) && obj is Dictionary<int, MultiTextureMeshRef> meshrefs)
+             {
+-                foreach (var val in meshrefs)
++                MultiTextureMeshRef[] snapshot;
++                lock (meshrefs)
++                {
++                    snapshot = meshrefs.Values.ToArray();
++                    meshrefs.Clear();
++                }
++
++                foreach (var val in snapshot)
+                 {
+-                    val.Value.Dispose();
++                    val.Dispose();
                  }
  
-                 MeshData mesh = GenMealInContainerMesh(containerBlock, forRecipe, contentStacks, foodTranslate);
-                 meshrefs[mealhashcode] = mealMeshRef = capi!.Render.UploadMultiTextureMesh(mesh);
+                 capi.ObjectCache.Remove("cookedMeshRefs");
+             }
+         }

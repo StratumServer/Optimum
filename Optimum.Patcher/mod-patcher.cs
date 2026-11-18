@@ -339,6 +339,12 @@ public static class ModPatcher
                 ["Vintagestory.GameContent.BlockBamboo"] =
                 [
                     "optimumWindDir",
+                    "optimumWindModeByFlagCount",
+                    "GetWindModeByFlagCount",
+                ],
+                ["Vintagestory.GameContent.BlockEntityGroundStorage"] =
+                [
+                    "finishGroundStorageMeshUpload",
                 ],
                 ["Vintagestory.GameContent.BlockVines"] =
                 [
@@ -383,6 +389,7 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockCrop", "OnJsonTesselation", 5),
                 new("Vintagestory.GameContent.BlockSmoothTextureTransition", "OnJsonTesselation", 5),
                 new("Vintagestory.GameContent.BlockSmoothTextureTransition", "genMeshes", 0),
+                new("Vintagestory.GameContent.BlockFenceStackAware", "OnLoaded", 1),
                 new("Vintagestory.GameContent.BlockFenceStackAware", "OnJsonTesselation", 5),
                 new("Vintagestory.GameContent.BlockBamboo", "OnJsonTesselation", 5),
                 new("Vintagestory.GameContent.BlockBamboo", "applyWindSwayToMesh", 4),
@@ -394,9 +401,21 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockLantern", "GenMesh", 6),
                 new("Vintagestory.GameContent.BlockCropProp", "OnBeforeRender", 4),
                 new("Vintagestory.GameContent.BEBehaviorCropProp", "loadMesh", 0),
+                new("Vintagestory.GameContent.BEBehaviorCropProp", "genMesh", 1),
                 new("Vintagestory.GameContent.BlockEntityCrate", "loadOrCreateMesh", 0),
                 new("Vintagestory.GameContent.BELantern", "getMesh", 1),
+                new("Vintagestory.GameContent.BlockCrock", "OnBeforeRender", 4),
                 new("Vintagestory.GameContent.BlockEntityCrock", "GetMesh", 6),
+                new("Vintagestory.GameContent.BlockEntityGroundStorage", "get_UploadedMeshCache", 0),
+                new("Vintagestory.GameContent.BlockEntityGroundStorage", "OnTesselation", 2),
+                new("Vintagestory.GameContent.BlockEntityGroundStorage", "getOrCreateMesh", 2),
+                new("Vintagestory.GameContent.BlockEntityGroundStorage", "OnGameDisposed", 1),
+                new("Vintagestory.GameContent.MealMeshCache", "Dispose", 0),
+                new("Vintagestory.GameContent.MealMeshCache", "GetOrCreatePieMeshRef", 1),
+                new("Vintagestory.GameContent.MealMeshCache", "getPieFillingTexture", 5),
+                new("Vintagestory.GameContent.MealMeshCache", "GetCookedMeshRefs", 0),
+                new("Vintagestory.GameContent.MealMeshCache", "GetOrCreateMealInContainerMeshRef", 4),
+                new("Vintagestory.GameContent.MealMeshCache", "Event_LeaveWorld", 0),
                 new("Vintagestory.GameContent.BlockEntityGenericTypedContainer", "GenMesh", 1),
                 new("Vintagestory.GameContent.BlockShapeFromAttributes", "GetOrCreateMesh", 4),
                 new("Vintagestory.GameContent.BlockEntityPlantContainer", "GenPotMesh", 1),

@@ -1,34 +1,40 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockBamboo.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockBamboo.cs
-index 662e494..1546bc8 100644
+index 662e494..15680c3 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockBamboo.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockBamboo.cs
-@@ -1,8 +1,9 @@
+@@ -1,6 +1,8 @@
  using System;
++using System.Collections.Concurrent;
  using System.Collections.Generic;
  using System.Linq;
 +using System.Threading;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
  using Vintagestory.API.Config;
- using Vintagestory.API.Datastructures;
- using Vintagestory.API.MathTools;
-@@ -19,10 +20,13 @@ public class BlockBamboo : Block, ITreeGenerator, ICustomTreeFellingBehavior
- 
- 	private IBlockAccessor? lockFreeBa;
+@@ -21,6 +23,22 @@ public class BlockBamboo : Block, ITreeGenerator, ICustomTreeFellingBehavior
  
  	private Dictionary<int, int[]> windModeByFlagCount = new Dictionary<int, int[]>();
  
++	private ConcurrentDictionary<int, int[]> optimumWindModeByFlagCount;
++
++	private ConcurrentDictionary<int, int[]> GetWindModeByFlagCount()
++	{
++		ConcurrentDictionary<int, int[]> dict = Volatile.Read(ref optimumWindModeByFlagCount);
++		if (dict != null)
++		{
++			return dict;
++		}
++		Interlocked.CompareExchange(ref optimumWindModeByFlagCount, new ConcurrentDictionary<int, int[]>(), null);
++		return Volatile.Read(ref optimumWindModeByFlagCount);
++	}
++
 +	[ThreadStatic]
 +	private static Vec3i optimumWindDir;
 +
  	private Vec3i windDir = new Vec3i();
  
  	public int MaxPlantHeight { get; private set; }
- 
- 	private string? domain
-@@ -232,28 +236,33 @@ public class BlockBamboo : Block, ITreeGenerator, ICustomTreeFellingBehavior
- 	}
- 
+@@ -234,9 +252,10 @@ public class BlockBamboo : Block, ITreeGenerator, ICustomTreeFellingBehavior
  	public override void OnJsonTesselation(ref MeshData sourceMesh, ref int[] lightRgbsByCorner, BlockPos pos, Block[] chunkExtBlocks, int extIndex3d)
  	{
  		bool enableWind = ((lightRgbsByCorner[24] >> 24) & 0xFF) >= 159;
@@ -42,29 +48,24 @@ index 662e494..1546bc8 100644
  	}
  
  	private void applyWindSwayToMesh(MeshData sourceMesh, bool enableWind, BlockPos pos, Vec3i windDir)
- 	{
- 		if (lockFreeBa == null)
+@@ -245,14 +264,15 @@ public class BlockBamboo : Block, ITreeGenerator, ICustomTreeFellingBehavior
  		{
  			return;
  		}
 -		if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out int[] value))
-+		int[] value;
-+		lock (windModeByFlagCount)
++		ConcurrentDictionary<int, int[]> windModes = GetWindModeByFlagCount();
++		if (!windModes.TryGetValue(sourceMesh.FlagsCount, out int[] value))
  		{
 -			int[] array = (windModeByFlagCount[sourceMesh.FlagsCount] = new int[sourceMesh.FlagsCount]);
 -			value = array;
 -			for (int i = 0; i < value.Length; i++)
-+			if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out value))
++			int[] array = new int[sourceMesh.FlagsCount];
++			for (int i = 0; i < array.Length; i++)
  			{
 -				value[i] = sourceMesh.Flags[i] & 0x1E000000;
-+				int[] array = new int[sourceMesh.FlagsCount];
-+				for (int i = 0; i < array.Length; i++)
-+				{
-+					array[i] = sourceMesh.Flags[i] & 0x1E000000;
-+				}
-+				value = (windModeByFlagCount[sourceMesh.FlagsCount] = array);
++				array[i] = sourceMesh.Flags[i] & 0x1E000000;
  			}
++			value = windModes.GetOrAdd(sourceMesh.FlagsCount, array);
  		}
  		bool flag = false;
  		Block blockBelow = lockFreeBa.GetBlockBelow(pos, 1, 1);
- 		if (blockBelow.VertexFlags.WindMode == EnumWindBitMode.NoWind && blockBelow.SideSolid[4])

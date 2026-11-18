@@ -384,14 +384,27 @@ public static class OptimumMeshRecyclerBridge
             DoRecycling();
         }
 
-        private void TryAdd(SortedList<float, MeshData> list, int intkey, MeshData entry)
+        private static void TryAdd(SortedList<float, MeshData> list, int intkey, MeshData entry)
         {
+            const int maxPerBucket = 16;
             float key = intkey;
-            while (list.ContainsKey(key))
+            float upperBound = intkey + 1;
+            for (int attempt = 0; attempt < maxPerBucket && key < upperBound; attempt++)
             {
-                key += 0.0001f;
+                if (!list.ContainsKey(key))
+                {
+                    list.Add(key, entry);
+                    return;
+                }
+                float next = key + 0.05f;
+                if (next == key)
+                {
+                    next = MathF.BitIncrement(key);
+                }
+                key = next;
             }
-            list.Add(key, entry);
+
+            entry.DisposeBasicData();
         }
 
         private MeshData? TryGet(SortedList<float, MeshData> list, int entrySize)
@@ -564,6 +577,39 @@ public static class OptimumCacheHelper
     {
         return OptimumObjectCacheBridge.GetOrCreate(api, key, Factory<T>.Create);
     }
+
+    /// <summary>
+    /// Looks up <paramref name="key"/> under <paramref name="cache"/> lock, invokes
+    /// <paramref name="factory"/> outside the lock on cache miss, and stores the result
+    /// under a double-checked lock write.
+    /// </summary>
+    public static TValue GetOrAdd<TKey, TValue, TState>(
+        Dictionary<TKey, TValue> cache,
+        TKey key,
+        TState state,
+        System.Func<TState, TValue> factory) where TKey : notnull
+    {
+        lock (cache)
+        {
+            if (cache.TryGetValue(key, out TValue? cached))
+            {
+                return cached;
+            }
+        }
+
+        TValue created = factory(state);
+
+        lock (cache)
+        {
+            if (cache.TryGetValue(key, out TValue? winner))
+            {
+                return winner;
+            }
+
+            cache[key] = created;
+            return created;
+        }
+    }
 }
 
 /// <summary>
@@ -670,6 +716,151 @@ public sealed class OptimumCropPropInvTexSource : ITexPositionSource
         {
             _capi.BlockTextureAtlas.GetOrInsertTexture(new AssetLocation("block/meta/cropprop/" + _type), out _, out var texPos);
             return texPos;
+        }
+    }
+}
+
+/// <summary>
+/// Per-call <see cref="ITexPositionSource"/> for placed crop-prop block tessellation
+/// so concurrent workers never read or mutate a shared <c>nowTesselatingShape</c> field.
+/// </summary>
+public sealed class OptimumCropPropTexSource : ITexPositionSource
+{
+    private readonly ICoreClientAPI _capi;
+    private readonly Dictionary<string, CompositeTexture>? _configTextures;
+    private readonly Dictionary<string, AssetLocation>? _shapeTextures;
+
+    public OptimumCropPropTexSource(
+        ICoreClientAPI capi,
+        Dictionary<string, CompositeTexture>? configTextures,
+        Dictionary<string, AssetLocation>? shapeTextures)
+    {
+        _capi = capi;
+        _configTextures = configTextures;
+        _shapeTextures = shapeTextures;
+    }
+
+    public Vintagestory.API.MathTools.Size2i AtlasSize => _capi.BlockTextureAtlas.Size;
+
+    public TextureAtlasPosition? this[string textureCode]
+    {
+        get
+        {
+            if (_configTextures != null && _configTextures.TryGetValue(textureCode, out CompositeTexture? ct))
+            {
+                _capi.BlockTextureAtlas.GetOrInsertTexture(ct, out _, out var texPosb);
+                return texPosb;
+            }
+
+            if (_shapeTextures != null && _shapeTextures.TryGetValue(textureCode, out AssetLocation? shapeTex))
+            {
+                _capi.BlockTextureAtlas.GetOrInsertTexture(shapeTex, out _, out var texPos);
+                return texPos;
+            }
+
+            return _capi.BlockTextureAtlas.UnknownTexturePosition;
+        }
+    }
+}
+
+/// <summary>
+/// Per-call <see cref="ITexPositionSource"/> that overrides one texture code with a
+/// resolved atlas position so callers never mutate shared <c>CompositeTexture.Baked</c>.
+/// </summary>
+public sealed class OptimumVariantOverrideTexSource : ITexPositionSource
+{
+    private readonly ITexPositionSource _inner;
+    private readonly string _textureCode;
+    private readonly TextureAtlasPosition? _overridePos;
+
+    public OptimumVariantOverrideTexSource(
+        ITexPositionSource inner,
+        string textureCode,
+        TextureAtlasPosition? overridePos)
+    {
+        _inner = inner;
+        _textureCode = textureCode;
+        _overridePos = overridePos;
+    }
+
+    public Vintagestory.API.MathTools.Size2i AtlasSize => _inner.AtlasSize;
+
+    public TextureAtlasPosition? this[string textureCode] =>
+        textureCode == _textureCode && _overridePos != null ? _overridePos : _inner[textureCode];
+}
+
+/// <summary>
+/// Per-call <see cref="ITexPositionSource"/> for plant container content meshing
+/// so global cache lookups do not serialize shape tessellation across workers.
+/// </summary>
+public sealed class OptimumPlantContentTexSource : ITexPositionSource
+{
+    private readonly ICoreClientAPI _capi;
+    private readonly ItemStack _content;
+    private readonly Dictionary<string, CompositeTexture>? _propTextures;
+    private readonly Dictionary<string, AssetLocation>? _shapeTextures;
+    private readonly ITexPositionSource _contentTexSource;
+
+    public OptimumPlantContentTexSource(
+        ICoreClientAPI capi,
+        ItemStack content,
+        Dictionary<string, CompositeTexture>? propTextures,
+        Dictionary<string, AssetLocation>? shapeTextures,
+        ITexPositionSource contentTexSource)
+    {
+        _capi = capi;
+        _content = content;
+        _propTextures = propTextures;
+        _shapeTextures = shapeTextures;
+        _contentTexSource = contentTexSource;
+    }
+
+    public Vintagestory.API.MathTools.Size2i AtlasSize => _capi.BlockTextureAtlas.Size;
+
+    public TextureAtlasPosition? this[string textureCode]
+    {
+        get
+        {
+            AssetLocation? textureLoc = null;
+            if (_propTextures != null && _propTextures.TryGetValue(textureCode, out CompositeTexture? compTex))
+            {
+                textureLoc = compTex.Base;
+            }
+
+            if (textureLoc == null && _shapeTextures != null)
+            {
+                _shapeTextures.TryGetValue(textureCode, out textureLoc);
+            }
+
+            if (textureLoc != null)
+            {
+                TextureAtlasPosition? texPos = _capi.BlockTextureAtlas[textureLoc];
+                if (texPos == null)
+                {
+                    BitmapRef? bmp = _capi.Assets.TryGet(textureLoc.Clone().WithPathPrefixOnce("textures/").WithPathAppendixOnce(".png"))?.ToBitmap(_capi);
+                    if (bmp != null)
+                    {
+                        _capi.BlockTextureAtlas.GetOrInsertTexture(textureLoc, out _, out texPos, () => bmp);
+                        bmp.Dispose();
+                    }
+                }
+
+                return texPos;
+            }
+
+            if (_content.Class == EnumItemClass.Item)
+            {
+                textureLoc = _content.Item.Textures[textureCode].Base;
+                BitmapRef? bmp = _capi.Assets.TryGet(textureLoc.Clone().WithPathPrefixOnce("textures/").WithPathAppendixOnce(".png"))?.ToBitmap(_capi);
+                if (bmp != null)
+                {
+                    _capi.BlockTextureAtlas.GetOrInsertTexture(textureLoc, out _, out TextureAtlasPosition texPos, () => bmp);
+                    bmp.Dispose();
+                    return texPos;
+                }
+            }
+
+            return _contentTexSource[textureCode];
         }
     }
 }

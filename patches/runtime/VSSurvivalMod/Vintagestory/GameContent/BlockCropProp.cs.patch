@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
-index 772364b..2191873 100644
+index 772364b..8bbf1df 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCropProp.cs
-@@ -47,21 +47,24 @@ public class BlockCropProp : Block, ITexPositionSource
- 		base.OnUnloaded(api);
- 	}
+@@ -49,18 +49,33 @@ public class BlockCropProp : Block, ITexPositionSource
  
  	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
  	{
@@ -12,27 +10,36 @@ index 772364b..2191873 100644
 +		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, "croprop-meshes");
  		string key = itemstack.Attributes.GetString("type", "unknown");
 -		if (orCreate.TryGetValue(key, out var value))
++		MultiTextureMeshRef value;
++		bool found;
 +		lock (orCreate)
  		{
 -			renderinfo.ModelRef = value;
--		}
++			found = orCreate.TryGetValue(key, out value);
+ 		}
 -		else
--		{
++		if (!found)
+ 		{
 -			nowTesselatingType = key;
 -			capi.Tesselator.TesselateShape("croppropinv", Code, Shape, out var modeldata, this, 0, 0, 0);
 -			orCreate[key] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(modeldata));
-+			if (orCreate.TryGetValue(key, out var value))
++			OptimumCropPropInvTexSource texSource = new OptimumCropPropInvTexSource(capi, key);
++			capi.Tesselator.TesselateShape("croppropinv", Code, Shape, out var modeldata, texSource, 0, 0, 0);
++			MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(modeldata);
++			lock (orCreate)
 +			{
-+				renderinfo.ModelRef = value;
-+			}
-+			else
-+			{
-+				OptimumCropPropInvTexSource texSource = new OptimumCropPropInvTexSource(capi, key);
-+				capi.Tesselator.TesselateShape("croppropinv", Code, Shape, out var modeldata, texSource, 0, 0, 0);
-+				orCreate[key] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(modeldata));
++				if (orCreate.TryGetValue(key, out var existing))
++				{
++					uploadedRef.Dispose();
++					value = existing;
++				}
++				else
++				{
++					value = (orCreate[key] = uploadedRef);
++				}
 +			}
  		}
++		renderinfo.ModelRef = value;
  		base.OnBeforeRender(capi, itemstack, target, ref renderinfo);
  	}
  
- 	public override string GetPlacedBlockName(IWorldAccessor world, BlockPos pos)

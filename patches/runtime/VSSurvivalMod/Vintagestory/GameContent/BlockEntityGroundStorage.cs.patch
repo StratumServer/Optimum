@@ -1,0 +1,161 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGroundStorage.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGroundStorage.cs
+index 81e9c1f..c53bd40 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGroundStorage.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGroundStorage.cs
+@@ -70,7 +70,7 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 
+ 	protected virtual int invSlotCount => 4;
+ 
+-	private Dictionary<string, MultiTextureMeshRef> UploadedMeshCache => ObjectCacheUtil.GetOrCreate(Api, "groundStorageUMC", () => new Dictionary<string, MultiTextureMeshRef>());
++	private Dictionary<string, MultiTextureMeshRef> UploadedMeshCache => OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(Api, "groundStorageUMC");
+ 
+ 	public virtual bool CanIgnite
+ 	{
+@@ -1130,7 +1130,10 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 		}
+ 		if (UseRenderer)
+ 		{
+-			updateMeshes();
++			lock (inventoryLock)
++			{
++				updateMeshes();
++			}
+ 			return true;
+ 		}
+ 		if (renderer != null && num < 450f)
+@@ -1246,7 +1249,15 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 				defaultMesh.Scale(modelTransform.Origin.ToVec3f(), modelTransform.ScaleXYZ.X, modelTransform.ScaleXYZ.Y, modelTransform.ScaleXYZ.Z);
+ 				meshData.AddMeshData(defaultMesh, modelTransform.Translation.X, modelTransform.Translation.Y, modelTransform.Translation.Z);
+ 			}
+-			base.MeshCache[meshCacheKey] = meshData;
++			Dictionary<string, MeshData> cache = base.MeshCache;
++			lock (cache)
++			{
++				if (cache.TryGetValue(meshCacheKey, out MeshData existing))
++				{
++					return existing;
++				}
++				cache[meshCacheKey] = meshData;
++			}
+ 			return meshData;
+ 		}
+ 		GroundStorageProperties storageProps2 = StorageProps;
+@@ -1254,11 +1265,19 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 		{
+ 			string key = getMeshCacheKey(slot);
+ 			MeshData mesh2 = getMesh(slot);
+-			if (mesh2 != null && UploadedMeshCache.TryGetValue(key, out MeshRefs[index]))
++			Dictionary<string, MultiTextureMeshRef> uploadedCache = UploadedMeshCache;
++			if (mesh2 != null)
+ 			{
+-				return mesh2;
++				lock (uploadedCache)
++				{
++					if (uploadedCache.TryGetValue(key, out MeshRefs[index]))
++					{
++						return mesh2;
++					}
++				}
+ 			}
+-			if (mesh2 == null)
++			bool replaceUploaded = mesh2 == null;
++			if (replaceUploaded)
+ 			{
+ 				AssetLocation shapePath = StorageProps.StackingModel.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json");
+ 				nowTesselatingShape = Shape.TryGet(capi, shapePath);
+@@ -1269,26 +1288,29 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 					return null;
+ 				}
+ 				capi.Tesselator.TesselateShape("storagePile", nowTesselatingShape, out mesh2, this, null, 0, 0, 0, StorageProps.CuboidsPerModel * ItemModelCount);
+-			}
+-			base.MeshCache[key] = mesh2;
+-			if (UploadedMeshCache.TryGetValue(key, out var value))
+-			{
+-				value.Dispose();
++				Dictionary<string, MeshData> meshCache = base.MeshCache;
++				lock (meshCache)
++				{
++					if (meshCache.TryGetValue(key, out MeshData existingMesh))
++					{
++						mesh2 = existingMesh;
++					}
++					else
++					{
++						meshCache[key] = mesh2;
++					}
++				}
+ 			}
+ 			if (Environment.CurrentManagedThreadId != RuntimeEnv.MainThreadId)
+ 			{
+ 				Api.Event.EnqueueMainThreadTask(delegate
+ 				{
+-					MultiTextureMeshRef multiTextureMeshRef2 = capi.Render.UploadMultiTextureMesh(mesh2);
+-					UploadedMeshCache[key] = multiTextureMeshRef2;
+-					MeshRefs[index] = multiTextureMeshRef2;
++					finishGroundStorageMeshUpload(key, mesh2, index, replaceUploaded);
+ 					Api.World.BlockAccessor.MarkBlockDirty(Pos);
+ 				}, "groundstoragemeshupload");
+ 				return null;
+ 			}
+-			MultiTextureMeshRef multiTextureMeshRef = capi.Render.UploadMultiTextureMesh(mesh2);
+-			UploadedMeshCache[key] = multiTextureMeshRef;
+-			MeshRefs[index] = multiTextureMeshRef;
++			finishGroundStorageMeshUpload(key, mesh2, index, replaceUploaded);
+ 			return mesh2;
+ 		}
+ 		MeshData orCreateMesh = base.getOrCreateMesh(slot, index);
+@@ -1303,6 +1325,40 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 		return orCreateMesh;
+ 	}
+ 
++	private void finishGroundStorageMeshUpload(string key, MeshData mesh, int index, bool replaceExisting)
++	{
++		Dictionary<string, MultiTextureMeshRef> uploadedCache = UploadedMeshCache;
++		if (!replaceExisting)
++		{
++			lock (uploadedCache)
++			{
++				if (uploadedCache.TryGetValue(key, out MultiTextureMeshRef cached))
++				{
++					MeshRefs[index] = cached;
++					return;
++				}
++			}
++		}
++		MultiTextureMeshRef multiTextureMeshRef = capi.Render.UploadMultiTextureMesh(mesh);
++		MultiTextureMeshRef staleRef = null;
++		lock (uploadedCache)
++		{
++			if (uploadedCache.TryGetValue(key, out MultiTextureMeshRef existing))
++			{
++				if (!replaceExisting)
++				{
++					MeshRefs[index] = existing;
++					multiTextureMeshRef.Dispose();
++					return;
++				}
++				staleRef = existing;
++			}
++			uploadedCache[key] = multiTextureMeshRef;
++			MeshRefs[index] = multiTextureMeshRef;
++		}
++		staleRef?.Dispose();
++	}
++
+ 	public virtual void GetOrCreateMealMesh(IBlockMealContainer be, ItemStack stack, int index)
+ 	{
+ 		MealMeshCache modSystem = capi.ModLoader.GetModSystem<MealMeshCache>();
+@@ -1524,7 +1580,12 @@ public class BlockEntityGroundStorage : BlockEntityDisplay, IBlockEntityContaine
+ 		{
+ 			return;
+ 		}
+-		foreach (MultiTextureMeshRef value in dictionary.Values)
++		MultiTextureMeshRef[] snapshot;
++		lock (dictionary)
++		{
++			snapshot = dictionary.Values.ToArray();
++		}
++		foreach (MultiTextureMeshRef value in snapshot)
+ 		{
+ 			value?.Dispose();
+ 		}

@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/Block/BlockLantern.cs b/VSSurvivalMod/Block/BlockLantern.cs
-index 5bc0a13..d6afd30 100644
+index 5bc0a13..02bac0d 100644
 --- a/VSSurvivalMod/Block/BlockLantern.cs
 +++ b/VSSurvivalMod/Block/BlockLantern.cs
-@@ -149,27 +149,28 @@ namespace Vintagestory.GameContent
+@@ -149,27 +149,43 @@ namespace Vintagestory.GameContent
  
          public virtual string baseCacheKey => "blockLantern" + Variant["size"];
  
@@ -21,26 +21,38 @@ index 5bc0a13..d6afd30 100644
              string key = material + "-" + lining + "-" + glass;
 -            if (!meshrefs.TryGetValue(key, out MultiTextureMeshRef meshref))
 +            MultiTextureMeshRef meshref;
++            bool found;
 +            lock (meshrefs)
++            {
++                found = meshrefs.TryGetValue(key, out meshref);
++            }
++
++            if (!found)
              {
--                AssetLocation shapeloc = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
--                Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
-+                if (!meshrefs.TryGetValue(key, out meshref))
-+                {
-+                    AssetLocation shapeloc = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
-+                    Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
+                 AssetLocation shapeloc = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+                 Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
  
--                MeshData mesh = GenMesh(capi, material, lining, glass, shape);
+                 MeshData mesh = GenMesh(capi, material, lining, glass, shape);
 -                meshrefs[key] = meshref = capi.Render.UploadMultiTextureMesh(mesh);
-+                    MeshData mesh = GenMesh(capi, material, lining, glass, shape);
-+                    meshrefs[key] = meshref = capi.Render.UploadMultiTextureMesh(mesh);
++                MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(mesh);
++                lock (meshrefs)
++                {
++                    if (meshrefs.TryGetValue(key, out MultiTextureMeshRef existing))
++                    {
++                        uploadedRef.Dispose();
++                        meshref = existing;
++                    }
++                    else
++                    {
++                        meshref = meshrefs[key] = uploadedRef;
++                    }
 +                }
              }
  
              renderinfo.ModelRef = meshref;
              renderinfo.CullFaces = false;
          }
-@@ -195,11 +196,11 @@ namespace Vintagestory.GameContent
+@@ -195,11 +211,11 @@ namespace Vintagestory.GameContent
  
          public MeshData GenMesh(ICoreClientAPI capi, string material, string lining, string glassMaterial, Shape shape = null, ITesselatorAPI tesselator = null)
          {
@@ -53,7 +65,7 @@ index 5bc0a13..d6afd30 100644
              {
                  shape = API.Common.Shape.TryGet(capi, "shapes/" + this.Shape.Base.Path + ".json");
              }
-@@ -207,17 +208,14 @@ namespace Vintagestory.GameContent
+@@ -207,17 +223,14 @@ namespace Vintagestory.GameContent
              if (shape == null)
              {
                  return null;

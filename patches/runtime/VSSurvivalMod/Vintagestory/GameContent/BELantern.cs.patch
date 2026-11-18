@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs b/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
-index e9bdf82..cdcfec3 100644
+index e9bdf82..0a3362a 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BELantern.cs
-@@ -71,17 +71,21 @@ public class BELantern : BlockEntity
- 	{
- 		if (!(Api.World.BlockAccessor.GetBlock(Pos) is BlockLantern blockLantern))
+@@ -73,13 +73,25 @@ public class BELantern : BlockEntity
  		{
  			return null;
  		}
@@ -20,11 +18,17 @@ index e9bdf82..cdcfec3 100644
 +			{
 +				return value;
 +			}
-+			return orCreate[key] = blockLantern.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
++		}
++		MeshData built = blockLantern.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
++		lock (orCreate)
++		{
++			if (orCreate.TryGetValue(key, out var existing))
++			{
++				return existing;
++			}
++			return orCreate[key] = built;
  		}
 -		return orCreate[material + "-" + lining + "-" + text + "-" + glass] = blockLantern.GenMesh(Api as ICoreClientAPI, material, lining, glass, null, tesselator);
  	}
  
  	public override void ToTreeAttributes(ITreeAttribute tree)
- 	{
- 		base.ToTreeAttributes(tree);

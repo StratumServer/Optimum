@@ -1,0 +1,53 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCrock.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCrock.cs
+index 290191f..69f4ccb 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockCrock.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCrock.cs
+@@ -192,20 +192,38 @@ public class BlockCrock : BlockCookedContainerBase, IBlockMealContainer, IContai
+ 		{
+ 			return;
+ 		}
+-		Dictionary<string, MultiTextureMeshRef> orCreate = ObjectCacheUtil.GetOrCreate(capi, "blockcrockGuiMeshRefs", () => new Dictionary<string, MultiTextureMeshRef>());
++		Dictionary<string, MultiTextureMeshRef> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, "blockcrockGuiMeshRefs");
+ 		string key = Code.ToShortString() + assetLocation.ToShortString() + (flag ? "sealed" : "");
+-		if (!orCreate.TryGetValue(key, out var value))
++		MultiTextureMeshRef value;
++		lock (orCreate)
+ 		{
+-			MeshData meshData = GenMesh(capi, assetLocation, new Vec3f(0f, 270f, 0f));
+-			if (flag)
++			if (orCreate.TryGetValue(key, out value))
+ 			{
+-				MeshData meshData2 = GenSealMesh(capi);
+-				if (meshData2 != null)
+-				{
+-					meshData.AddMeshData(meshData2);
+-				}
++				renderinfo.ModelRef = value;
++				return;
++			}
++		}
++		MeshData meshData = GenMesh(capi, assetLocation, new Vec3f(0f, 270f, 0f));
++		if (flag)
++		{
++			MeshData meshData2 = GenSealMesh(capi);
++			if (meshData2 != null)
++			{
++				meshData.AddMeshData(meshData2);
++			}
++		}
++		value = capi.Render.UploadMultiTextureMesh(meshData);
++		lock (orCreate)
++		{
++			if (orCreate.TryGetValue(key, out MultiTextureMeshRef existing))
++			{
++				value.Dispose();
++				value = existing;
++			}
++			else
++			{
++				orCreate[key] = value;
+ 			}
+-			value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(meshData));
+ 		}
+ 		renderinfo.ModelRef = value;
+ 	}

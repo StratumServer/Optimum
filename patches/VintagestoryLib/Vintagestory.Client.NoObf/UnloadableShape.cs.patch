@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs b/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
-index b0c3fc4..25aafb0 100644
+index b0c3fc4..39d29fe 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs
 @@ -1,7 +1,8 @@
@@ -72,7 +72,7 @@ index b0c3fc4..25aafb0 100644
 +			}
 +			Volatile.Write(ref Loaded, false);
 +			Textures = null;
-+			Elements = null;
++			Volatile.Write(ref Elements, null);
 +			Animations = null;
 +			AnimationsByCrc32 = null;
 +			JointsById = null;
@@ -86,7 +86,7 @@ index b0c3fc4..25aafb0 100644
  		{
 -			game.Platform.Logger.Warning("Failed parsing shape model {0}\n{1}", assetLocation, ex.Message);
 -			return false;
-+			if (Volatile.Read(ref Loaded))
++			if (Volatile.Read(ref Loaded) && Volatile.Read(ref Elements) != null)
 +			{
 +				return true;
 +			}

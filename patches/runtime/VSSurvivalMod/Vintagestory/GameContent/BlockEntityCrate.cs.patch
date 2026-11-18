@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityCrate.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityCrate.cs
-index 83c2e9d..abd04f3 100644
+index 83c2e9d..8a3b748 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityCrate.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityCrate.cs
-@@ -513,19 +513,23 @@ public class BlockEntityCrate : BlockEntityContainer, IRotatable
- 		if (!(base.Block is BlockCrate blockCrate))
- 		{
+@@ -515,15 +515,32 @@ public class BlockEntityCrate : BlockEntityContainer, IRotatable
  			return;
  		}
  		string key = "crateMeshes" + blockCrate.FirstCodePart();
@@ -17,15 +15,26 @@ index 83c2e9d..abd04f3 100644
  			string key2 = type + blockCrate.Subtype + "-" + label + "-" + LidState + "-" + ((LidState == "closed") ? null : (itemStack?.StackSize + "-" + itemStack?.GetHashCode()));
 -			if (!orCreate.TryGetValue(key2, out var value))
 +			MeshData value;
++			bool found;
 +			lock (orCreate)
  			{
 -				value = (orCreate[key2] = blockCrate.GenMesh(Api as ICoreClientAPI, itemStack, type, label, LidState, shape, new Vec3f(shape.rotateX, shape.rotateY, shape.rotateZ)));
-+				if (!orCreate.TryGetValue(key2, out value))
++				found = orCreate.TryGetValue(key2, out value);
++			}
++			if (!found)
++			{
++				value = blockCrate.GenMesh(Api as ICoreClientAPI, itemStack, type, label, LidState, shape, new Vec3f(shape.rotateX, shape.rotateY, shape.rotateZ));
++				lock (orCreate)
 +				{
-+					value = (orCreate[key2] = blockCrate.GenMesh(Api as ICoreClientAPI, itemStack, type, label, LidState, shape, new Vec3f(shape.rotateX, shape.rotateY, shape.rotateZ)));
++					if (orCreate.TryGetValue(key2, out var existing))
++					{
++						value = existing;
++					}
++					else
++					{
++						orCreate[key2] = value;
++					}
 +				}
  			}
  			ownMesh = value.Clone().Rotate(origin, 0f, MeshAngle, 0f).Scale(origin, rndScale, rndScale, rndScale);
  		}
- 	}
- 

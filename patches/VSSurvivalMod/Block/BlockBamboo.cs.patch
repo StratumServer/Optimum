@@ -1,9 +1,10 @@
 diff --git a/VSSurvivalMod/Block/BlockBamboo.cs b/VSSurvivalMod/Block/BlockBamboo.cs
-index 659a658..c408d3c 100644
+index 659a658..fbcd747 100644
 --- a/VSSurvivalMod/Block/BlockBamboo.cs
 +++ b/VSSurvivalMod/Block/BlockBamboo.cs
-@@ -1,8 +1,9 @@
+@@ -1,8 +1,10 @@
  using System;
++using System.Collections.Concurrent;
  using System.Collections.Generic;
  using System.Linq;
 +using System.Threading;
@@ -12,7 +13,27 @@ index 659a658..c408d3c 100644
  using Vintagestory.API.Common;
  using Vintagestory.API.Config;
  using Vintagestory.API.Datastructures;
-@@ -227,29 +228,38 @@ namespace Vintagestory.GameContent
+@@ -215,10 +217,19 @@ namespace Vintagestory.GameContent
+             return capi.World.ApplyColorMapOnRgba("climatePlantTint", SeasonColorMap, color, pos.X, pos.Y, pos.Z);
+         }
+ 
+ 
+         Dictionary<int, int[]> windModeByFlagCount = new Dictionary<int, int[]>();
++        ConcurrentDictionary<int, int[]> optimumWindModeByFlagCount;
++
++        private ConcurrentDictionary<int, int[]> GetWindModeByFlagCount()
++        {
++            var dict = Volatile.Read(ref optimumWindModeByFlagCount);
++            if (dict != null) return dict;
++            Interlocked.CompareExchange(ref optimumWindModeByFlagCount, new ConcurrentDictionary<int, int[]>(), null);
++            return Volatile.Read(ref optimumWindModeByFlagCount);
++        }
+ 
+         public override void OnDecalTesselation(IWorldAccessor world, MeshData decalMesh, BlockPos pos)
+         {
+             bool enableWind = world.BlockAccessor.GetLightLevel(pos, EnumLightLevelType.OnlySunLight) >= 14;
+             windDir.X = Math.Sign(GlobalConstants.CurrentWindSpeedClient.X);
+@@ -227,29 +238,35 @@ namespace Vintagestory.GameContent
              applyWindSwayToMesh(decalMesh, enableWind, pos, windDir);
  
              base.OnDecalTesselation(world, decalMesh, pos);
@@ -41,17 +62,14 @@ index 659a658..c408d3c 100644
              if (lockFreeBa == null) return;
  
 -            if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out int[]? origFlags))
-+            int[]? origFlags;
-+            lock (windModeByFlagCount)
++            var windModes = GetWindModeByFlagCount();
++            if (!windModes.TryGetValue(sourceMesh.FlagsCount, out int[]? origFlags))
              {
 -                origFlags = windModeByFlagCount[sourceMesh.FlagsCount] = new int[sourceMesh.FlagsCount];
 -                for (int i = 0; i < origFlags.Length; i++) origFlags[i] = sourceMesh.Flags[i] & VertexFlags.WindModeBitsMask;
-+                if (!windModeByFlagCount.TryGetValue(sourceMesh.FlagsCount, out origFlags))
-+                {
-+                    int[] computed = new int[sourceMesh.FlagsCount];
-+                    for (int i = 0; i < computed.Length; i++) computed[i] = sourceMesh.Flags[i] & VertexFlags.WindModeBitsMask;
-+                    windModeByFlagCount[sourceMesh.FlagsCount] = origFlags = computed;
-+                }
++                int[] computed = new int[sourceMesh.FlagsCount];
++                for (int i = 0; i < computed.Length; i++) computed[i] = sourceMesh.Flags[i] & VertexFlags.WindModeBitsMask;
++                origFlags = windModes.GetOrAdd(sourceMesh.FlagsCount, computed);
              }
  
              bool sideDisableWindWaveDown = false;

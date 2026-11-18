@@ -1,8 +1,22 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
-index 9f882ee..ee90b8f 100644
+index 9f882ee..9a750c1 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockFenceStackAware.cs
-@@ -26,14 +26,19 @@ public class BlockFenceStackAware : BlockFence
+@@ -2,6 +2,7 @@ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Client.Tesselation;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Util;
+ 
+@@ -21,31 +22,44 @@ public class BlockFenceStackAware : BlockFence
+ 		capi = api as ICoreClientAPI;
+ 		if (capi != null)
+ 		{
+-			continousFenceMeches = ObjectCacheUtil.GetOrCreate(capi, Code.Domain + ":" + FirstCodePart() + "-continousFenceMeches", () => new Dictionary<string, MeshData>());
++			continousFenceMeches = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(capi, Code.Domain + ":" + FirstCodePart() + "-continousFenceMeches");
+ 			cntCode = Code.ToShortString();
  		}
  	}
  
@@ -17,18 +31,38 @@ index 9f882ee..ee90b8f 100644
 +		}
 +		int num = GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, 8) + 1;
 +		MeshData value;
++		bool found;
 +		lock (continousFenceMeches)
 +		{
-+			if (!continousFenceMeches.TryGetValue(cntCode + num, out value))
++			found = continousFenceMeches.TryGetValue(cntCode + num, out value);
++		}
++		if (!found)
++		{
++			AssetLocation assetLocation = Shape.Base.Clone();
++			assetLocation.Path = assetLocation.Path.Replace("-top", "");
++			assetLocation.WithPathAppendixOnce(".json");
++			assetLocation.WithPathPrefixOnce("shapes/");
++			Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, assetLocation);
++			ITexPositionSource texSource = capi.Tesselator.GetTextureSource(this);
++			if (Textures.TryGetValue("wall", out CompositeTexture compositeTexture) && compositeTexture?.Baked?.BakedVariants != null && compositeTexture.Alternates != null && compositeTexture.Alternates.Length > 0)
++			{
++				int overrideSubId = compositeTexture.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, compositeTexture.Alternates.Length)].TextureSubId;
++				TextureAtlasPosition overridePos = capi.BlockTextureAtlas.Positions[overrideSubId];
++				texSource = new OptimumVariantOverrideTexSource(texSource, "wall", overridePos);
++			}
++			capi.Tesselator.TesselateShape("block shape", shape, out value, texSource, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), 0, 0, 0, Shape.QuantityElements, Shape.SelectiveElements);
++			lock (continousFenceMeches)
  			{
- 				AssetLocation assetLocation = Shape.Base.Clone();
- 				assetLocation.Path = assetLocation.Path.Replace("-top", "");
- 				assetLocation.WithPathAppendixOnce(".json");
- 				assetLocation.WithPathPrefixOnce("shapes/");
-@@ -43,9 +48,9 @@ public class BlockFenceStackAware : BlockFence
- 				compositeTexture.Baked.TextureSubId = compositeTexture.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, compositeTexture.Alternates.Length)].TextureSubId;
- 				capi.Tesselator.TesselateShape(this, shape, out value, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), Shape.QuantityElements, Shape.SelectiveElements);
- 				compositeTexture.Baked.TextureSubId = textureSubId;
+-				AssetLocation assetLocation = Shape.Base.Clone();
+-				assetLocation.Path = assetLocation.Path.Replace("-top", "");
+-				assetLocation.WithPathAppendixOnce(".json");
+-				assetLocation.WithPathPrefixOnce("shapes/");
+-				Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, assetLocation);
+-				CompositeTexture compositeTexture = Textures["wall"];
+-				int textureSubId = compositeTexture.Baked.TextureSubId;
+-				compositeTexture.Baked.TextureSubId = compositeTexture.Baked.BakedVariants[GameMath.MurmurHash3Mod(pos.X, pos.Y, pos.Z, compositeTexture.Alternates.Length)].TextureSubId;
+-				capi.Tesselator.TesselateShape(this, shape, out value, new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ), Shape.QuantityElements, Shape.SelectiveElements);
+-				compositeTexture.Baked.TextureSubId = textureSubId;
  				continousFenceMeches[cntCode] = value;
  			}
 -			sourceMesh = value;

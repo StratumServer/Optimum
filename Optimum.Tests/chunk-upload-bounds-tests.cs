@@ -122,4 +122,26 @@ public class ChunkUploadBoundsTests
             OptimumAdaptiveRadiusController.ReleaseActive();
         }
     }
+
+    [Fact]
+    public void WorkerBacklogLimitPacesMultiWorkerWithoutAlteringSingleWorkerOrOverrides()
+    {
+        int previous = OptimumConfig.TesselationUploadQueueCapacity;
+        try
+        {
+            OptimumConfig.TesselationUploadQueueCapacity = 0;
+            Assert.Equal(198, OptimumConfig.GetTesselationWorkerBacklogLimit(264, 1, 80d));
+            Assert.Equal(24, OptimumConfig.GetTesselationWorkerBacklogLimit(264, 4, 0d));
+            Assert.Equal(20, OptimumConfig.GetTesselationWorkerBacklogLimit(264, 4, 80d));
+            Assert.Equal(96, OptimumConfig.GetTesselationWorkerBacklogLimit(264, 4, 600d));
+            Assert.Equal(198, OptimumConfig.GetTesselationWorkerBacklogLimit(264, 4, 5000d));
+
+            OptimumConfig.TesselationUploadQueueCapacity = 96;
+            Assert.Equal(72, OptimumConfig.GetTesselationWorkerBacklogLimit(96, 4, 80d));
+        }
+        finally
+        {
+            OptimumConfig.TesselationUploadQueueCapacity = previous;
+        }
+    }
 }

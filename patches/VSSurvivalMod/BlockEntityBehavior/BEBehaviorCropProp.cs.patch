@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
-index 0ce97c3..07e8b5d 100644
+index 0ce97c3..49d5e38 100644
 --- a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
 +++ b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorCropProp.cs
-@@ -49,22 +49,26 @@ namespace Vintagestory.GameContent
+@@ -49,24 +49,42 @@ namespace Vintagestory.GameContent
              }
          }
  
@@ -14,30 +14,45 @@ index 0ce97c3..07e8b5d 100644
              string type = itemstack.Attributes.GetString("type", "unknown");
  
 -            if (dict.TryGetValue(type, out var meshref))
++            MultiTextureMeshRef meshref;
++            bool found;
 +            lock (dict)
              {
 -                renderinfo.ModelRef = meshref;
 -            } else
--            {
++                found = dict.TryGetValue(type, out meshref);
++            }
++
++            if (!found)
+             {
 -                nowTesselatingType = type;
 -                capi.Tesselator.TesselateShape("croppropinv", Code, this.Shape, out var meshdata, this);
 -                dict[type] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(meshdata);
-+                if (dict.TryGetValue(type, out var meshref))
++                OptimumCropPropInvTexSource invTexSource = new OptimumCropPropInvTexSource(capi, type);
++                capi.Tesselator.TesselateShape("croppropinv", Code, this.Shape, out var meshdata, invTexSource);
++                MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(meshdata);
++                lock (dict)
 +                {
-+                    renderinfo.ModelRef = meshref;
-+                }
-+                else
-+                {
-+                    OptimumCropPropInvTexSource invTexSource = new OptimumCropPropInvTexSource(capi, type);
-+                    capi.Tesselator.TesselateShape("croppropinv", Code, this.Shape, out var meshdata, invTexSource);
-+                    dict[type] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(meshdata);
++                    if (dict.TryGetValue(type, out MultiTextureMeshRef existing))
++                    {
++                        uploadedRef.Dispose();
++                        meshref = existing;
++                    }
++                    else
++                    {
++                        meshref = dict[type] = uploadedRef;
++                    }
 +                }
              }
  
++            renderinfo.ModelRef = meshref;
++
              base.OnBeforeRender(capi, itemstack, target, ref renderinfo);
          }
          public override string GetPlacedBlockName(IWorldAccessor world, BlockPos pos)
-@@ -190,22 +194,25 @@ namespace Vintagestory.GameContent
+         {
+             var beh = GetBEBehavior<BEBehaviorCropProp>(pos);
+@@ -190,22 +208,32 @@ namespace Vintagestory.GameContent
              if (Api == null || Api.Side != EnumAppSide.Client) return;
              capi = Api as ICoreClientAPI;
              if (Type == null) return;
@@ -48,28 +63,77 @@ index 0ce97c3..07e8b5d 100644
  
 -            var cache = ObjectCacheUtil.GetOrCreate(Api, "croppropmeshes", () => new Dictionary<string, MeshData>());
 -            if (cache.TryGetValue(key, out var meshData))
++            string key = getCacheKey();
 +            lock (cache)
              {
 -                this.mesh = meshData;
--            }
--            else
--            {
--                var mesh = genMesh(cropBlock);
--                key = getCacheKey();
--                this.mesh = cache[key] = mesh;
-+                string key = getCacheKey();
 +                if (cache.TryGetValue(key, out var meshData))
 +                {
 +                    this.mesh = meshData;
++                    return;
 +                }
-+                else
+             }
+-            else
++
++            MeshData built = genMesh(cropBlock);
++            key = getCacheKey();
++            lock (cache)
+             {
+-                var mesh = genMesh(cropBlock);
+-                key = getCacheKey();
+-                this.mesh = cache[key] = mesh;
++                if (cache.TryGetValue(key, out var existing))
 +                {
-+                    var built = genMesh(cropBlock);
-+                    key = getCacheKey();
-+                    this.mesh = cache[key] = built;
++                    this.mesh = existing;
++                    return;
 +                }
++                this.mesh = cache[key] = built;
              }
          }
  
          private string getCacheKey()
          {
+@@ -216,18 +244,19 @@ namespace Vintagestory.GameContent
+         }
+ 
+         private MeshData genMesh(Block cropBlock)
+         {
+             var cshape = config.Shape;
++            MeshData built;
+ 
+             if (cshape == null)
+             {
+                 if (cropBlock.Shape.Alternates == null)
+                 {
+-                    mesh = capi.TesselatorManager.GetDefaultBlockMesh(cropBlock).Clone();
+-                    mesh.Translate(0, -1 / 16f, 0);
+-                    return mesh;
++                    built = capi.TesselatorManager.GetDefaultBlockMesh(cropBlock).Clone();
++                    built.Translate(0, -1 / 16f, 0);
++                    return built;
+                 }
+ 
+                 cshape = cropBlock.Shape;
+             }
+             else
+@@ -239,15 +268,16 @@ namespace Vintagestory.GameContent
+             {
+                 config.BakedAlternatesLength = cshape.BakedAlternates.Length;
+                 cshape = cshape.BakedAlternates[GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, cshape.BakedAlternates.Length)];
+             }
+ 
+-            nowTesselatingShape = capi.Assets.TryGet(cshape.Base.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
+-            capi.Tesselator.TesselateShape("croprop", Block.Code, cshape, out mesh, this);
++            Shape shape = capi.Assets.TryGet(cshape.Base.Clone().WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")).ToObject<Shape>();
++            OptimumCropPropTexSource texSource = new OptimumCropPropTexSource(capi, config.Textures, shape?.Textures);
++            capi.Tesselator.TesselateShape("croprop", Block.Code, cshape, out built, texSource);
+ 
+-            mesh.Translate(0, -1 / 16f, 0);
+-            return mesh;
++            built.Translate(0, -1 / 16f, 0);
++            return built;
+         }
+ 
+         private void onTick8s(float dt)
+         {
+             if (config == null) return;
