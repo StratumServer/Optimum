@@ -275,7 +275,13 @@ public static class OptimumConfig
     public static bool GlFinalizerReclaimEnabled = true;
     public static bool MeshPoolReclaimEnabled = true;
     public static bool FrontToBackChunkSortEnabled = true;
-    public static bool ChunkFaceBucketCullEnabled = true;
+
+    /// <summary>
+    /// Issue #607/#629: Opt-in (default false). Improves vertex-bound iGPUs on static views,
+    /// but the per-chunk quad bucketing and extra MultiDraw spans regressed dynamic streaming,
+    /// frametime hitches, and FPS in multi-worker flight benchmarks (NVIDIA MX150 + i7-8550U).
+    /// </summary>
+    public static bool ChunkFaceBucketCullEnabled = false;
     public static bool SsaoDepthPositionEnabled = true;
 
     public static bool GlFinalizerReclaimActive => GlFinalizerReclaimEnabled;
@@ -1712,7 +1718,7 @@ internal sealed class OptimumConfigData
     public bool GlFinalizerReclaim { get; set; } = true;
     public bool MeshPoolReclaim { get; set; } = true;
     public bool FrontToBackChunkSort { get; set; } = true;
-    public bool ChunkFaceBucketCull { get; set; } = true;
+    public bool ChunkFaceBucketCull { get; set; } = false;
     public bool SsaoDepthPosition { get; set; } = true;
 }
 
