@@ -21,6 +21,7 @@ public static class OptimumApiBridge
     private sealed class ChiselLodMarker;
 
     private static readonly ConditionalWeakTable<ModelDataPoolLocation, ChiselLodMarker> ChiselLodLocations = new();
+    private static int chiselLodTrackedCount;
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "playerPos")]
     internal static extern ref BlockPos GetPlayerPos(FrustumCulling culler);
@@ -123,16 +124,22 @@ public static class OptimumApiBridge
     {
         if (enabled)
         {
-            ChiselLodLocations.GetValue(location, static _ => new ChiselLodMarker());
+            if (ChiselLodLocations.TryAdd(location, new ChiselLodMarker()))
+            {
+                Interlocked.Increment(ref chiselLodTrackedCount);
+            }
         }
-        else
+        else if (Volatile.Read(ref chiselLodTrackedCount) > 0 && ChiselLodLocations.Remove(location))
         {
-            ChiselLodLocations.Remove(location);
+            if (Interlocked.Decrement(ref chiselLodTrackedCount) < 0)
+            {
+                Interlocked.Exchange(ref chiselLodTrackedCount, 0);
+            }
         }
     }
 
     internal static bool IsChiselTracked(ModelDataPoolLocation location) =>
-        location != null && ChiselLodLocations.TryGetValue(location, out _);
+        Volatile.Read(ref chiselLodTrackedCount) > 0 && location != null && ChiselLodLocations.TryGetValue(location, out _);
 
     public static bool InFrustum(FrustumCulling culler, Sphere sphere) =>
         OptimumFrustumCullSimd.InFrustum(culler, sphere);
@@ -169,7 +176,7 @@ public static class OptimumApiBridge
         // up close (z-fighting) and both invisible far away (block disappears).
         if (OptimumConfig.ChiselLodEnabled
             && (lodLevel == 2 || lodLevel == 3)
-            && ChiselLodLocations.TryGetValue(location, out _))
+            && IsChiselTracked(location))
         {
             // lodLevel 1 == frustum planes + "distance < ViewDistanceSq", i.e. exactly the
             // base bound the source-tree chisel branch keeps. The vanilla lod2Bias split is
@@ -217,7 +224,7 @@ public static class OptimumApiBridge
         long start = Stopwatch.GetTimestamp();
         try
         {
-            if (!ChiselLodLocations.TryGetValue(location, out _))
+            if (!IsChiselTracked(location))
             {
                 return baseResult;
             }

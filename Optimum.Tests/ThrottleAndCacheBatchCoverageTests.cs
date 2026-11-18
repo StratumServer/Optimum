@@ -12,7 +12,8 @@ public class ThrottleAndCacheBatchCoverageTests
     {
         string source = relativePath.EndsWith(".patch") ? PatchReader.ReadPatch(relativePath) : File.ReadAllText(FindRepositoryFile(relativePath));
 
-        Assert.Contains("blockAccessor.GetChunk(cx, cy, cz)", source);
+        Assert.Contains("lock (worldMap.chunksLock)", source);
+        Assert.Contains("chunks.TryGetValue(key, out ClientChunk chunk)", source);
         Assert.Contains("float lightRadius = 120f;", source);
         Assert.Contains("Array.Clear(_lightScratch, 0, _lightScratchCount);", source);
         Assert.DoesNotContain("LightScanRefreshFrames", source);

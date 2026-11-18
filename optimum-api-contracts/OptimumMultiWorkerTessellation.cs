@@ -177,7 +177,7 @@ public static class OptimumMeshRecyclerBridge
     private const int SmallLimit = 368;
     private const int MediumLimit = 3072;
     private const int Four = 4;
-    private const int MaxReturnQueuePerWorker = 192;
+    private const int MaxReturnQueuePerWorker = 512;
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "game")]
     private static extern ref IClientWorldAccessor GetGame(MeshDataRecycler recycler);
@@ -228,6 +228,7 @@ public static class OptimumMeshRecyclerBridge
         public readonly ConcurrentQueue<MeshData> ReturnQueue = new();
         private long _pad0, _pad1, _pad2, _pad3, _pad4, _pad5, _pad6, _pad7;
         private int _returnQueueCount;
+        private long _lastControlElapsedMs = long.MinValue;
         private float[] _keysScratch = new float[256];
 
         public WorkerBucket(RecyclerHost host)
@@ -268,7 +269,8 @@ public static class OptimumMeshRecyclerBridge
 
             if (newMesh == null)
             {
-                newMesh = new MeshData(minimumVertices);
+                int allocVertices = ((minimumVertices * 41 / 40 + Four - 1) / Four) * Four;
+                newMesh = new MeshData(allocVertices);
             }
             newMesh.Recyclable = true;
             OriginBuckets.AddOrUpdate(newMesh, this);
@@ -283,19 +285,23 @@ public static class OptimumMeshRecyclerBridge
                 return;
             }
 
-            ControlSizeOfLists();
-
             long elapsedMs = Host.Game?.ElapsedMilliseconds ?? 0;
+            if (!ReturnQueue.IsEmpty || elapsedMs - _lastControlElapsedMs >= 1000L || elapsedMs < _lastControlElapsedMs)
+            {
+                _lastControlElapsedMs = elapsedMs;
+                ControlSizeOfLists();
+            }
+
             while (ReturnQueue.TryDequeue(out MeshData? recycled))
             {
                 Interlocked.Decrement(ref _returnQueueCount);
                 if (recycled == null) continue;
-                int entrySize = recycled.VerticesMax / Four;
-                if (entrySize < MinimumSizeForRecycling / Four)
+                if (recycled.VerticesMax * MeshData.BaseSizeInBytes < MinimumSizeForRecycling)
                 {
                     recycled.DisposeBasicData();
                     continue;
                 }
+                int entrySize = recycled.VerticesMax / Four;
                 recycled.RecyclingTime = elapsedMs;
                 if (entrySize >= MediumLimit)
                 {
@@ -427,7 +433,7 @@ public static class OptimumMeshRecyclerBridge
             {
                 idx = ~idx;
             }
-            if (idx < count && _keysScratch[idx] <= entrySize * 1.15f + 4f)
+            if (idx < count && _keysScratch[idx] <= entrySize * 1.25f + 64f)
             {
                 MeshData result = list.GetValueAtIndex(idx);
                 list.RemoveAt(idx);

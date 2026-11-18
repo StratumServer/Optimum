@@ -37,7 +37,7 @@ public sealed class MultiWorkerConfigAndBoundaryTests
             Assert.Equal(1, OptimumConfig.GetEffectiveTesselationWorkers(1));
             Assert.Equal(1, OptimumConfig.GetEffectiveTesselationWorkers(2));
             Assert.Equal(2, OptimumConfig.GetEffectiveTesselationWorkers(4));
-            Assert.Equal(3, OptimumConfig.GetEffectiveTesselationWorkers(6));
+            Assert.Equal(2, OptimumConfig.GetEffectiveTesselationWorkers(6));
             Assert.Equal(4, OptimumConfig.GetEffectiveTesselationWorkers(8));
             Assert.Equal(4, OptimumConfig.GetEffectiveTesselationWorkers(16));
             Assert.Equal(4, OptimumConfig.GetEffectiveTesselationWorkers(32));

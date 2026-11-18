@@ -1,8 +1,86 @@
 diff --git a/VSSurvivalMod/Block/BlockShapeFromAttributes.cs b/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
-index 90aff3f..33f367e 100644
+index 90aff3f..ddcb8bf 100644
 --- a/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
 +++ b/VSSurvivalMod/Block/BlockShapeFromAttributes.cs
-@@ -568,69 +568,86 @@ namespace Vintagestory.GameContent
+@@ -133,13 +133,48 @@ namespace Vintagestory.GameContent
+         public abstract void LoadTypes();
+         public abstract IShapeTypeProps GetTypeProps(string code, ItemStack stack, BEBehaviorShapeFromAttributes be);
+         public Dictionary<string, API.Datastructures.OrderedDictionary<string, CompositeTexture>> OverrideTextureGroups;
+         protected Dictionary<string, MeshData> meshDictionary;
+         protected Dictionary<string, MeshData> meshDictionaryLOD2;
++        protected Dictionary<RotatedMeshKey, MeshData> optimumRotatedMeshDict;
+         protected string inventoryMeshDictionary;
+         protected string blockForLogging;
+ 
++        protected readonly struct RotatedMeshKey : IEquatable<RotatedMeshKey>
++        {
++            public readonly string Code;
++            public readonly string OverrideTextureCode;
++            public readonly bool ForLOD2;
++            public readonly int RotXBits;
++            public readonly int RotYBits;
++            public readonly int RotZBits;
++
++            public RotatedMeshKey(string code, string overrideTextureCode, bool forLOD2, float rotX, float rotY, float rotZ)
++            {
++                Code = code ?? string.Empty;
++                OverrideTextureCode = overrideTextureCode ?? string.Empty;
++                ForLOD2 = forLOD2;
++                RotXBits = BitConverter.SingleToInt32Bits(rotX == 0f ? 0f : rotX);
++                RotYBits = BitConverter.SingleToInt32Bits(rotY == 0f ? 0f : rotY);
++                RotZBits = BitConverter.SingleToInt32Bits(rotZ == 0f ? 0f : rotZ);
++            }
++
++            public bool Equals(RotatedMeshKey other)
++            {
++                return ForLOD2 == other.ForLOD2
++                    && RotXBits == other.RotXBits
++                    && RotYBits == other.RotYBits
++                    && RotZBits == other.RotZBits
++                    && string.Equals(Code, other.Code, StringComparison.Ordinal)
++                    && string.Equals(OverrideTextureCode, other.OverrideTextureCode, StringComparison.Ordinal);
++            }
++
++            public override bool Equals(object obj) => obj is RotatedMeshKey other && Equals(other);
++
++            public override int GetHashCode() => HashCode.Combine(Code, OverrideTextureCode, ForLOD2, RotXBits, RotYBits, RotZBits);
++        }
++
+         public bool AllowRandomizeDims=true;
+ 
+         public SkillItem[] extraWrenchModes;
+ 
+         public override void OnLoaded(ICoreAPI api)
+@@ -159,10 +194,11 @@ namespace Vintagestory.GameContent
+                 extraWrenchModes[1].WithIcon(capi, capi.Gui.LoadSvgWithPadding(new AssetLocation("textures/icons/moveew.svg"), 48, 48, 5, ColorUtil.WhiteArgb));
+                 extraWrenchModes[2].WithIcon(capi, capi.Gui.LoadSvgWithPadding(new AssetLocation("textures/icons/moveud.svg"), 48, 48, 5, ColorUtil.WhiteArgb));
+ 
+                 meshDictionary = ObjectCacheUtil.GetOrCreate(api, ClassType + "Meshes", () => new Dictionary<string, MeshData>());  // Best to access ObjectCacheUtil on the main thread; it's fine to hold a reference to this for the whole game, it won't change, it's only this Block who accesses it
+                 meshDictionaryLOD2 = ObjectCacheUtil.GetOrCreate(api, ClassType + "MeshesLOD2", () => new Dictionary<string, MeshData>());
++                optimumRotatedMeshDict = ObjectCacheUtil.GetOrCreate(api, ClassType + "RotatedMeshes", () => new Dictionary<RotatedMeshKey, MeshData>());
+                 inventoryMeshDictionary = ClassType + "MeshesInventory";
+                 blockForLogging = ClassType + "block";
+ 
+                 capi.Event.RegisterEventBusListener(OnEventBusEvent);
+                 foreach (var type in AllTypes)
+@@ -205,10 +241,16 @@ namespace Vintagestory.GameContent
+                 {
+                     foreach (MeshData mesh in meshDictionaryLOD2.Values) mesh.Dispose();
+                     ObjectCacheUtil.Delete(capi, ClassType + "MeshesLOD2");
+                     meshDictionaryLOD2 = null;
+                 }
++                if (optimumRotatedMeshDict != null)
++                {
++                    foreach (MeshData mesh in optimumRotatedMeshDict.Values) mesh.Dispose();
++                    ObjectCacheUtil.Delete(capi, ClassType + "RotatedMeshes");
++                    optimumRotatedMeshDict = null;
++                }
+                 if (inventoryMeshDictionary != null)
+                 {
+                     Dictionary<string, MultiTextureMeshRef> clutterMeshRefs = ObjectCacheUtil.TryGet<Dictionary<string, MultiTextureMeshRef>>(capi, inventoryMeshDictionary);
+                     if (clutterMeshRefs != null)
+                     {
+@@ -568,75 +610,130 @@ namespace Vintagestory.GameContent
  
          public virtual MeshData GetOrCreateMesh(IShapeTypeProps cprops, ITexPositionSource overrideTexturesource = null, string overrideTextureCode = null, bool forLOD2 = false)
          {
@@ -24,37 +102,19 @@ index 90aff3f..33f367e 100644
                  {
 -                    var stexSource = new ShapeTextureSource(capi, shape, cprops.ShapePath.ToString());
 -                    texSource = stexSource;
--
--                    // Prio 1: Block wide custom textures
--                    if (blockTextures != null)
 +                    if (cMeshes.TryGetValue(dictKey, out mesh))
-                     {
--                        foreach (var val in blockTextures)
--                        {
--                            if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
--                            stexSource.textures[val.Key] = val.Value;
--                        }
++                    {
 +                        return mesh;
-                     }
++                    }
 +                }
 +            }
- 
--                    // Prio 2: Variant textures
--                    if (cprops.Textures != null)
--                    {
--                        foreach (var val in cprops.Textures)
--                        {
--                            var ctex = val.Value.Clone();
--                            ctex.Bake(capi.Assets);
--                            stexSource.textures[val.Key] = ctex;
--                        }
--                    }
++
 +            mesh = new MeshData(4, 3);
 +            var shape = cprops.ShapeResolved;
 +            ITexPositionSource texSource = overrideTexturesource;
  
--                    // Prio 3: Override texture
--                    if (overrideTextureCode != null && cprops.TextureFlipCode != null)
+-                    // Prio 1: Block wide custom textures
+-                    if (blockTextures != null)
 +            // Prio 0: Shape textures
 +            if (texSource == null)
 +            {
@@ -66,70 +126,127 @@ index 90aff3f..33f367e 100644
 +                {
 +                    foreach (var val in blockTextures)
                      {
+-                        foreach (var val in blockTextures)
+-                        {
+-                            if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
+-                            stexSource.textures[val.Key] = val.Value;
+-                        }
++                        if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
++                        stexSource.textures[val.Key] = val.Value;
+                     }
++                }
+ 
+-                    // Prio 2: Variant textures
+-                    if (cprops.Textures != null)
++                // Prio 2: Variant textures
++                if (cprops.Textures != null)
++                {
++                    foreach (var val in cprops.Textures)
+                     {
+-                        foreach (var val in cprops.Textures)
+-                        {
+-                            var ctex = val.Value.Clone();
+-                            ctex.Bake(capi.Assets);
+-                            stexSource.textures[val.Key] = ctex;
+-                        }
++                        var ctex = val.Value.Clone();
++                        ctex.Bake(capi.Assets);
++                        stexSource.textures[val.Key] = ctex;
+                     }
++                }
+ 
+-                    // Prio 3: Override texture
+-                    if (overrideTextureCode != null && cprops.TextureFlipCode != null)
++                // Prio 3: Override texture
++                if (overrideTextureCode != null && cprops.TextureFlipCode != null)
++                {
++                    if (OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var ctex))
+                     {
 -                        if (OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var ctex))
 -                        {
 -                            ctex.Bake(capi.Assets);
 -                            stexSource.textures[cprops.TextureFlipCode] = ctex;
 -                        }
-+                        if (val.Value.Baked == null) val.Value.Bake(capi.Assets);
-+                        stexSource.textures[val.Key] = val.Value;
-                     }
-                 }
- 
--                if (shape == null) return mesh;
--
--
--                capi.Tesselator.TesselateShape(blockForLogging, shape, out mesh, texSource);
--                if (cprops.TexPos == null)
-+                // Prio 2: Variant textures
-+                if (cprops.Textures != null)
-                 {
--                    api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
--                    cprops.TexPos = (texSource as ShapeTextureSource)?.firstTexPos;
--                    cprops.TexPos.RndColors = new int[TextureAtlasPosition.RndColorsLength];
-+                    foreach (var val in cprops.Textures)
-+                    {
-+                        var ctex = val.Value.Clone();
-+                        ctex.Bake(capi.Assets);
-+                        stexSource.textures[val.Key] = ctex;
-+                    }
-                 }
- 
--                if (overrideTexturesource == null)
-+                // Prio 3: Override texture
-+                if (overrideTextureCode != null && cprops.TextureFlipCode != null)
-                 {
--                    cMeshes[cprops.Code + "-" + overrideTextureCode] = mesh;
-+                    if (OverrideTextureGroups[cprops.TextureFlipGroupCode].TryGetValue(overrideTextureCode, out var ctex))
-+                    {
 +                        ctex.Bake(capi.Assets);
 +                        stexSource.textures[cprops.TextureFlipCode] = ctex;
-+                    }
-+                }
+                     }
+                 }
 +            }
-+
+ 
+-                if (shape == null) return mesh;
 +            if (shape == null) return mesh;
-+
-+
+ 
+ 
+-                capi.Tesselator.TesselateShape(blockForLogging, shape, out mesh, texSource);
+-                if (cprops.TexPos == null)
 +            capi.Tesselator.TesselateShape(blockForLogging, shape, out mesh, texSource);
 +            if (cprops.TexPos == null)
 +            {
 +                api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
 +                var fallbackTexPos = (texSource as ShapeTextureSource)?.firstTexPos;
 +                if (fallbackTexPos != null)
-+                {
+                 {
+-                    api.Logger.Warning("No texture previously loaded for clutter block " + cprops.Code);
+-                    cprops.TexPos = (texSource as ShapeTextureSource)?.firstTexPos;
+-                    cprops.TexPos.RndColors = new int[TextureAtlasPosition.RndColorsLength];
 +                    fallbackTexPos.RndColors = new int[TextureAtlasPosition.RndColorsLength];
 +                    cprops.TexPos = fallbackTexPos;
-+                }
+                 }
 +            }
-+
+ 
+-                if (overrideTexturesource == null)
 +            if (overrideTexturesource == null)
 +            {
 +                lock (cMeshes)
-+                {
+                 {
+-                    cMeshes[cprops.Code + "-" + overrideTextureCode] = mesh;
 +                    cMeshes[dictKey] = mesh;
                  }
              }
  
              return mesh;
          }
+ 
++        private static readonly Vec3f OptimumBlockOrigin = new Vec3f(0.5f, 0.5f, 0.5f);
++
++        public MeshData GetOrCreateRotatedMesh(IShapeTypeProps cprops, string overrideTextureCode, bool forLOD2, float rotateX, float angleY, float rotateZ)
++        {
++            MeshData baseMesh = GetOrCreateMesh(cprops, null, overrideTextureCode, forLOD2);
++            if (rotateX == 0f && angleY == 0f && rotateZ == 0f)
++            {
++                return baseMesh;
++            }
++
++            var rotatedDict = optimumRotatedMeshDict;
++            if (rotatedDict == null)
++            {
++                return baseMesh.Clone().Rotate(OptimumBlockOrigin, rotateX, angleY, rotateZ);
++            }
++
++            var key = new RotatedMeshKey(cprops.Code, overrideTextureCode, forLOD2, rotateX, angleY, rotateZ);
++            lock (rotatedDict)
++            {
++                if (rotatedDict.TryGetValue(key, out var cached))
++                {
++                    return cached;
++                }
++            }
++
++            MeshData rotated = baseMesh.Clone().Rotate(OptimumBlockOrigin, rotateX, angleY, rotateZ);
++            lock (rotatedDict)
++            {
++                if (rotatedDict.TryGetValue(key, out var existing))
++                {
++                    rotated.Dispose();
++                    return existing;
++                }
++                rotatedDict[key] = rotated;
++                return rotated;
++            }
++        }
++
+ 
+ 
+         public override EnumBlockMaterial GetBlockMaterial(IBlockAccessor blockAccessor, BlockPos pos, ItemStack stack = null)
+         {
+             if (pos == null)

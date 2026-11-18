@@ -99,3 +99,10 @@ patches/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs.patch
 # Direct streaming JSON serialization and StringComparison.OrdinalIgnoreCase in player data persistence.
 # Disk save path and internal lookups only; no network format changes.
 patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch
+
+# Issue #652: reuse a bounded [ThreadStatic] FastMemoryStream in ToBytes() and start
+# reusableSerializationStream with 16 KB instead of 1 KB to avoid geometric LOH buffer
+# doublings during chunk save serialization. Identical serialized bytes and packet layout.
+patches/VintagestoryLib/Vintagestory.Server/ServerChunk.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs.patch

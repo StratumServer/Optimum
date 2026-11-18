@@ -1,0 +1,120 @@
+diff --git a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorShapeFromAttributes.cs b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorShapeFromAttributes.cs
+index c7a3c21..c12c4a1 100644
+--- a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorShapeFromAttributes.cs
++++ b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorShapeFromAttributes.cs
+@@ -93,10 +93,15 @@ namespace Vintagestory.GameContent
+         protected static Vec3f Origin = new Vec3f(0.5f, 0.5f, 0.5f);
+ 
+         public float offsetX, offsetY, offsetZ;
+ 
+         protected bool loadMeshDuringTesselation;
++        protected float optimumYScale = 1f;
++        protected bool optimumTransformInTesselation;
++
++        [ThreadStatic]
++        private static float[] t_transformMatrix;
+ 
+         public BEBehaviorShapeFromAttributes(BlockEntity blockentity) : base(blockentity)
+         {
+         }
+ 
+@@ -146,36 +151,48 @@ namespace Vintagestory.GameContent
+ 
+             var cprops = clutterBlock?.GetTypeProps(Type, null, this);
+ 
+             if (cprops != null)
+             {
++                if (GetType() == typeof(BEBehaviorShapeFromAttributes))
++                {
++                    float angleY = rotateY + cprops.Rotation.Y * GameMath.DEG2RAD;
++                    optimumYScale = (cprops.RandomizeYSize && clutterBlock?.AllowRandomizeDims != false)
++                        ? (0.98f + GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, 1000) / 1000f * 0.04f)
++                        : 1f;
++                    optimumTransformInTesselation = true;
++                    mesh = clutterBlock.GetOrCreateRotatedMesh(cprops, overrideTextureCode, false, rotateX, angleY, rotateZ);
++                    if (clutterBlock.Lod2Shape != null) lod2mesh = clutterBlock.GetOrCreateRotatedMesh(cprops, overrideTextureCode, true, rotateX, angleY, rotateZ);
++                    return;
++                }
++
++                optimumYScale = 1f;
++                optimumTransformInTesselation = false;
+                 mesh = createMesh(cprops, false);
+                 if (clutterBlock.Lod2Shape != null) lod2mesh = createMesh(cprops, true);
+             }
+         }
+ 
+         public virtual MeshData createMesh(IShapeTypeProps cprops, bool forLOD2 = false)
+         {
+             bool noOffset = offsetX == 0 && offsetY == 0 && offsetZ == 0;
+             float angleY = rotateY + cprops.Rotation.Y * GameMath.DEG2RAD;
+ 
+-            MeshData mesh;
+-            MeshData baseMesh = clutterBlock.GetOrCreateMesh(cprops, null, overrideTextureCode, forLOD2);
+             if (cprops.RandomizeYSize && clutterBlock?.AllowRandomizeDims != false)
+             {
+-                mesh = baseMesh.Clone().Rotate(Origin, rotateX, angleY, rotateZ).Scale(Vec3f.Zero, 1, 0.98f + GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, 1000) / 1000f * 0.04f, 1);
++                MeshData baseMesh = clutterBlock.GetOrCreateRotatedMesh(cprops, overrideTextureCode, forLOD2, rotateX, angleY, rotateZ);
++                MeshData scaledMesh = baseMesh.Clone().Scale(Vec3f.Zero, 1, 0.98f + GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, 1000) / 1000f * 0.04f, 1);
++                if (!noOffset) scaledMesh.Translate(offsetX, offsetY, offsetZ);
++                return scaledMesh;
+             }
+-            else
+-            {
+ 
+-                if (rotateX == 0 && angleY == 0 && rotateZ == 0 && noOffset) mesh = baseMesh;
+-                else mesh = baseMesh.Clone().Rotate(Origin, rotateX, angleY, rotateZ);
+-            }
++            MeshData rotMesh = clutterBlock.GetOrCreateRotatedMesh(cprops, overrideTextureCode, forLOD2, rotateX, angleY, rotateZ);
++            if (noOffset) return rotMesh;
+ 
+-            if (!noOffset) mesh.Translate(offsetX, offsetY, offsetZ);
+-
+-            return mesh;
++            MeshData translatedMesh = rotMesh.Clone();
++            translatedMesh.Translate(offsetX, offsetY, offsetZ);
++            return translatedMesh;
+         }
+ 
+         public override void OnBlockPlaced(ItemStack byItemStack = null)
+         {
+             base.OnBlockPlaced(byItemStack);
+@@ -273,18 +290,36 @@ namespace Vintagestory.GameContent
+ 
+         public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tessThreadTesselator)
+         {
+             MaybeInitialiseMesh_OffThread();
+ 
++            float[] tfMatrix = null;
++            if (optimumTransformInTesselation && (optimumYScale != 1f || offsetX != 0f || offsetY != 0f || offsetZ != 0f))
++            {
++                tfMatrix = t_transformMatrix;
++                if (tfMatrix == null)
++                {
++                    tfMatrix = new float[16];
++                    t_transformMatrix = tfMatrix;
++                }
++                tfMatrix[0] = 1f;
++                tfMatrix[5] = optimumYScale;
++                tfMatrix[10] = 1f;
++                tfMatrix[12] = offsetX;
++                tfMatrix[13] = offsetY;
++                tfMatrix[14] = offsetZ;
++                tfMatrix[15] = 1f;
++            }
++
+             if (lod2mesh == null)
+             {
+-                mesher.AddMeshData(mesh, EnumLodPool.Everywhere);
++                mesher.AddMeshData(mesh, tfMatrix, EnumLodPool.Everywhere);
+             }
+             else
+             {
+-                mesher.AddMeshData(mesh, EnumLodPool.EverywhereExceptFar);
+-                mesher.AddMeshData(lod2mesh, EnumLodPool.FarDistanceOnly);
++                mesher.AddMeshData(mesh, tfMatrix, EnumLodPool.EverywhereExceptFar);
++                mesher.AddMeshData(lod2mesh, tfMatrix, EnumLodPool.FarDistanceOnly);
+             }
+             return true;
+         }
+ 
+         protected void MaybeInitialiseMesh_OnMainThread()

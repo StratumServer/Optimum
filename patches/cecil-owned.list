@@ -95,8 +95,11 @@ patches/VintagestoryLib/Vintagestory.Server/ChunkColumnLoadRequest.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ChunkServerThread.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/PhysicsManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemCompressChunks.cs.patch

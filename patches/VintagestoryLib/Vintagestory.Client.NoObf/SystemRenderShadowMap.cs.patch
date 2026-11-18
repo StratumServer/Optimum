@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
-index f8183c3..afff0d6 100644
+index f8183c3..03990e6 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderShadowMap.cs
 @@ -1,8 +1,12 @@
@@ -72,7 +72,7 @@ index f8183c3..afff0d6 100644
  		AmbientModifier ambientModifier = game.AmbientManager.CurrentModifiers["weather"];
  		double num = -0.1;
  		if (ambientModifier != null)
-@@ -82,25 +121,258 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -82,25 +121,275 @@ public class SystemRenderShadowMap : ClientSystem
  			}
  			game.shUniforms.ToShadowMapSpaceMatrixNear = game.toShadowMapSpaceMatrixNear;
  		}
@@ -308,6 +308,23 @@ index f8183c3..afff0d6 100644
 -			ShadowBox.ShadowBoxZExtend = 100f + 60f * Math.Abs(1f - game.Calendar.SunPositionNormalized.Y);
 +			double shadowDistance = (shadowMapQuality > 1) ? (num / 2.0) : num;
 +			bool reuseEnabled = shadowMapQuality > 1 && OptimumConfig.ShadowFarReuseEnabled;
++			if (reuseEnabled)
++			{
++				EntityPlayer player = game.EntityPlayer;
++				if (player == null)
++				{
++					reuseEnabled = false;
++				}
++				else
++				{
++					OptimumShadowFarReuse cache = optimumShadowFarReuse ??= new OptimumShadowFarReuse();
++					Vec3d camPos = player.CameraPos;
++					if (!cache.UpdateMotionAndShouldPrepareReuse(camPos.X, camPos.Y, camPos.Z))
++					{
++						reuseEnabled = false;
++					}
++				}
++			}
 +			float cullExtraRange = reuseEnabled ? (float)OptimumShadowFarReuse.GuardMarginBlocks : 0f;
 +			double zExtend = 100f + 60f * Math.Abs(1f - game.Calendar.SunPositionNormalized.Y);
 +			ShadowBox.ShadowBoxZExtend = zExtend;
@@ -333,7 +350,7 @@ index f8183c3..afff0d6 100644
  
  	private void PrepareForShadowRendering(double shadowDistance, EnumFrameBuffer fb, float cullExtraRange)
  	{
-@@ -109,13 +381,37 @@ public class SystemRenderShadowMap : ClientSystem
+@@ -109,13 +398,37 @@ public class SystemRenderShadowMap : ClientSystem
  		shadowBox.calculateWidthsAndHeights();
  		shadowBox.update();
  		game.frustumCuller.shadowRangeX = shadowDistance + ShadowBox.ShadowBoxZExtend + (double)cullExtraRange;
@@ -345,7 +362,7 @@ index f8183c3..afff0d6 100644
 +		double boxLength = shadowBox.Length;
 +		if (fb == EnumFrameBuffer.ShadowmapFar)
 +		{
-+			if (ClientSettings.ShadowMapQuality > 1 && OptimumConfig.ShadowFarReuseEnabled)
++			if (cullExtraRange > 0f)
 +			{
 +				const double pad = OptimumShadowFarReuse.GuardMarginBlocks * 2.0;
 +				boxWidth += pad;

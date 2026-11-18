@@ -15,7 +15,7 @@ namespace Cairo
 			if (state.FontFileSource == null && (antialias == Antialias.Default || order == SubpixelOrder.Default)) {
 				var weight = state.FontWeight == FontWeight.Bold ? SKFontStyleWeight.Bold : SKFontStyleWeight.Normal;
 				var slant = state.FontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic : state.FontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;
-				using var resolved = SkiaFontResolver.Resolve(state.FontFamily, weight, slant, out _, out Antialias configuredAntialias, out SubpixelOrder configuredOrder);
+				SkiaFontResolver.ResolveOptions(state.FontFamily, weight, slant, out _, out Antialias configuredAntialias, out SubpixelOrder configuredOrder);
 				if (antialias == Antialias.Default) antialias = configuredAntialias;
 				if (order == SubpixelOrder.Default) order = configuredOrder;
 			}

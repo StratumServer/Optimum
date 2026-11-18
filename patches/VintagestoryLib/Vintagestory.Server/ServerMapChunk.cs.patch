@@ -1,0 +1,50 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs b/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs
+index 672877b..4074bfb 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs
+@@ -1,5 +1,6 @@
++using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
+ using System.IO;
+ using ProtoBuf;
+ using Vintagestory.API.Common;
+@@ -179,14 +180,36 @@ public class ServerMapChunk : IServerMapChunk, IMapChunk, IWithFastSerialize
+ 			serverMapChunk.Moddata = new Dictionary<string, byte[]>();
+ 		}
+ 		return serverMapChunk;
+ 	}
+ 
++	[ThreadStatic]
++	private static FastMemoryStream optimumToBytesStream;
++
+ 	public byte[] ToBytes()
+ 	{
+-		using FastMemoryStream ms = new FastMemoryStream();
+-		return ToBytes(ms);
++		FastMemoryStream ms = optimumToBytesStream;
++		optimumToBytesStream = null;
++		if (ms == null)
++		{
++			ms = new FastMemoryStream(16384);
++		}
++		else
++		{
++			ms.Reset();
++		}
++		try
++		{
++			return ToBytes(ms);
++		}
++		finally
++		{
++			if (optimumToBytesStream == null && ms.GetBuffer().Length <= 1048576)
++			{
++				optimumToBytesStream = ms;
++			}
++		}
+ 	}
+ 
+ 	public byte[] ToBytes(FastMemoryStream ms)
+ 	{
+ 		return ((IWithFastSerialize)this).FastSerialize(ms);

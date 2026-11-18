@@ -354,7 +354,7 @@ public sealed class MeshPoolSortTests
     public void ConfigDiagnosticsAndChunkRendererOpaqueBoundariesMatchDesign()
     {
         OptimumDiagnostics.ResetAllCounters();
-        Assert.True(new OptimumConfigData().FrontToBackChunkSort);
+        Assert.False(new OptimumConfigData().FrontToBackChunkSort);
         Assert.Contains(OptimumConfig.DescribeToggles(), entry => entry.Name == nameof(OptimumConfigData.FrontToBackChunkSort));
 
         OptimumDiagnostics.RecordChunkDrawSort(3, 42);
