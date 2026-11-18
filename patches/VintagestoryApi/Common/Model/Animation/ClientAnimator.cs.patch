@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
-index 9636237e..f85ba174 100644
+index 9636237..11e598b 100644
 --- a/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
 +++ b/VintagestoryApi/Common/Model/Animation/ClientAnimator.cs
 @@ -1,7 +1,8 @@
@@ -27,7 +27,30 @@ index 9636237e..f85ba174 100644
              TransformationMatrices = new float[defaultPoseMatrices.Length];
          }
  
-@@ -321,17 +322,27 @@ namespace Vintagestory.API.Common
+@@ -234,21 +235,11 @@ namespace Vintagestory.API.Common
+             }
+         }
+ 
+         private int getMaxDepth(List<ElementPose> poses, int depth)
+         {
+-            for (int i = 0; i < poses.Count; i++)
+-            {
+-                var pose = poses[i];
+-
+-                if (pose.ChildElementPoses != null)
+-                {
+-                    depth = getMaxDepth(pose.ChildElementPoses, depth);
+-                }
+-            }
+-
+-            return depth + 1;
++            return OptimumApiBridge.ClientAnimatorGetMaxDepth(poses, depth);
+         }
+ 
+         public override ElementPose GetPosebyName(string name, StringComparison stringComparison = StringComparison.InvariantCultureIgnoreCase)
+         {
+             return getPosebyName(RootPoses, name);
+@@ -321,17 +312,27 @@ namespace Vintagestory.API.Common
              base.OnFrame(activeAnimationsByAnimCode, dt);
          }
  
@@ -57,7 +80,7 @@ index 9636237e..f85ba174 100644
  
                  weightsByAnimationAndElement[0][j] = anim.ElementWeights;
  
-@@ -369,25 +380,24 @@ namespace Vintagestory.API.Common
+@@ -369,25 +370,24 @@ namespace Vintagestory.API.Common
              {
                  for (int jointidMul16 = 0; jointidMul16 < TransformationMatrices.Length; jointidMul16 += 16)    // radfast 20.2.25:  jointIdMul16 is (jointId * 16); I think this is the highest performance way to loop through this, taking account of the many array bounds checks
                  {
@@ -90,7 +113,7 @@ index 9636237e..f85ba174 100644
  
  
  
-@@ -422,12 +432,17 @@ namespace Vintagestory.API.Common
+@@ -422,12 +422,17 @@ namespace Vintagestory.API.Common
                  float weightSum = 0f;
  #if DEBUG
                  StringBuilder sb = null;
@@ -109,7 +132,7 @@ index 9636237e..f85ba174 100644
                      ShapeElementWeights sew = weightsByAnimationAndElement[animIndex][childPoseIndex];
  
                      if (sew.BlendMode != EnumAnimationBlendMode.Add)
-@@ -445,12 +460,15 @@ namespace Vintagestory.API.Common
+@@ -445,12 +450,15 @@ namespace Vintagestory.API.Common
                      if (eleWeights.ContainsKey(elem.Name)) eleWeights[elem.Name] += sb.ToString();
                      else eleWeights[elem.Name] = sb.ToString();
                  }
@@ -126,7 +149,7 @@ index 9636237e..f85ba174 100644
                      anim.CalcBlendedWeight(weightSum / sew.Weight, sew.BlendMode);
  
                      ElementPose nowFramePose = nowKeyFrameByAnimation[animIndex][childPoseIndex];
-@@ -487,18 +505,15 @@ namespace Vintagestory.API.Common
+@@ -487,18 +495,15 @@ namespace Vintagestory.API.Common
                          var transformationMatrices = TransformationMatrices;
                          if (index + 16 > transformationMatrices.Length)     // Check we have space for this joint: we normally should, if MaxJointId was correct, but a mod could have modified the shape or something
                          {
