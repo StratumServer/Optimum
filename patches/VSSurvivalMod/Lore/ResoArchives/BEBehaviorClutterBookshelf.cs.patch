@@ -1,0 +1,29 @@
+diff --git a/VSSurvivalMod/Lore/ResoArchives/BEBehaviorClutterBookshelf.cs b/VSSurvivalMod/Lore/ResoArchives/BEBehaviorClutterBookshelf.cs
+index 7f49828..de2ca50 100644
+--- a/VSSurvivalMod/Lore/ResoArchives/BEBehaviorClutterBookshelf.cs
++++ b/VSSurvivalMod/Lore/ResoArchives/BEBehaviorClutterBookshelf.cs
+@@ -56,20 +56,18 @@ namespace Vintagestory.GameContent
+             }
+         }
+ 
+         public override MeshData createMesh(IShapeTypeProps cprops, bool forLOD2 = false)
+         {
+-            MeshData mesh;
+             bool noOffset = offsetX == 0 && offsetY == 0 && offsetZ == 0;
+             float angleY = rotateY + cprops.Rotation.Y * GameMath.DEG2RAD;
+-            MeshData baseMesh = clutterBlock.GetOrCreateMesh(cprops, null, null, forLOD2);
++            MeshData rotMesh = clutterBlock.GetOrCreateRotatedMesh(cprops, null, forLOD2, rotateX, angleY, rotateZ);
+ 
+-            if (rotateX == 0 && angleY == 0 && rotateZ == 0 && noOffset) mesh = baseMesh;
+-            else mesh = baseMesh.Clone().Rotate(Origin, rotateX, angleY, rotateZ);
+-
+-            if (!noOffset) mesh.Translate(offsetX, offsetY, offsetZ);
++            if (noOffset) return rotMesh;
+ 
++            MeshData mesh = rotMesh.Clone();
++            mesh.Translate(offsetX, offsetY, offsetZ);
+             return mesh;
+         }
+ 
+         public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldAccessForResolve)
+         {

@@ -1,0 +1,43 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs b/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs
+index 10bf95f..8c86716 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs
+@@ -333,14 +333,36 @@ public class ServerMapRegion : IMapRegion
+ 			serverMapRegion.BiomeMap = IntDataMap2D.CreateEmpty();
+ 		}
+ 		return serverMapRegion;
+ 	}
+ 
++	[ThreadStatic]
++	private static FastMemoryStream optimumToBytesStream;
++
+ 	public byte[] ToBytes()
+ 	{
+-		using FastMemoryStream ms = new FastMemoryStream();
+-		return ToBytes(ms);
++		FastMemoryStream ms = optimumToBytesStream;
++		optimumToBytesStream = null;
++		if (ms == null)
++		{
++			ms = new FastMemoryStream(16384);
++		}
++		else
++		{
++			ms.Reset();
++		}
++		try
++		{
++			return ToBytes(ms);
++		}
++		finally
++		{
++			if (optimumToBytesStream == null && ms.GetBuffer().Length <= 1048576)
++			{
++				optimumToBytesStream = ms;
++			}
++		}
+ 	}
+ 
+ 	public byte[] ToBytes(FastMemoryStream ms)
+ 	{
+ 		return SerializerUtil.Serialize(this, ms);

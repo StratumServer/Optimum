@@ -14,6 +14,7 @@ public sealed class OptimumShadowFarReuse
     public const double MaxLightTexelShift = 1.0;
     public const double MaxZExtendDrift = 0.5;
     public const double EntityMoveThreshold = 0.25;
+    public const double FastMotionSkipThresholdSq = 0.25 * 0.25;
     public const double EntityMoveThresholdSq = EntityMoveThreshold * EntityMoveThreshold;
     public const double ChunkRangePadding = 64.0;
     public const double LargeEntityMinRadius = 3.5;
@@ -28,6 +29,10 @@ public sealed class OptimumShadowFarReuse
     }
 
     private bool valid;
+    private bool hasPrevObservedCam;
+    private double prevObservedCamX;
+    private double prevObservedCamY;
+    private double prevObservedCamZ;
     private double cachedCamX;
     private double cachedCamY;
     private double cachedCamZ;
@@ -70,6 +75,38 @@ public sealed class OptimumShadowFarReuse
     {
         valid = false;
         cachedEntities.Clear();
+    }
+
+    /// <summary>
+    /// Tracks frame-to-frame camera motion so continuous high-speed movement (e.g. flight)
+    /// does not pay guard-margin shadow frustum inflation or entity snapshot churn when
+    /// cross-frame reuse cannot hit.
+    /// </summary>
+    public bool UpdateMotionAndShouldPrepareReuse(double camX, double camY, double camZ)
+    {
+        if (!hasPrevObservedCam)
+        {
+            hasPrevObservedCam = true;
+            prevObservedCamX = camX;
+            prevObservedCamY = camY;
+            prevObservedCamZ = camZ;
+            return true;
+        }
+
+        double dx = camX - prevObservedCamX;
+        double dy = camY - prevObservedCamY;
+        double dz = camZ - prevObservedCamZ;
+        prevObservedCamX = camX;
+        prevObservedCamY = camY;
+        prevObservedCamZ = camZ;
+
+        if (dx * dx + dy * dy + dz * dz > FastMotionSkipThresholdSq)
+        {
+            Invalidate();
+            return false;
+        }
+
+        return true;
     }
 
     public bool CanReuseMetadata(

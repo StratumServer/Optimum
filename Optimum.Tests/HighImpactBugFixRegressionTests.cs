@@ -768,7 +768,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     public void SystemRenderPlayerEffects_UsesAllocFreeSpatialChunkWalkAndRestoresVanilla120mRadius()
     {
         string patch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs.patch");
-        Assert.Contains("blockAccessor.GetChunk(cx, cy, cz)", patch);
+        Assert.Contains("lock (worldMap.chunksLock)", patch);
+        Assert.Contains("chunks.TryGetValue(key, out ClientChunk chunk)", patch);
         Assert.Contains("float lightRadius = 120f;", patch);
         Assert.Contains("Array.Clear(_lightScratch, 0, _lightScratchCount);", patch);
         Assert.DoesNotContain("LightScanRefreshFrames", patch);

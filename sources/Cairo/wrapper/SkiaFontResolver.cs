@@ -22,9 +22,63 @@ namespace Cairo
 		const int FcHintFull = 3;
 
 		static readonly ConcurrentDictionary<string, string> windowsFamilyCache = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+		static readonly ConcurrentDictionary<(string family, SKFontStyleWeight weight, SKFontStyleSlant slant), LinuxFontMatch> linuxMatchCache = new();
+		static readonly ConcurrentDictionary<(string path, int faceIndex), SKTypeface> linuxTypefaceCache = new();
+		static readonly ConcurrentDictionary<(string family, SKFontStyleWeight weight, SKFontStyleSlant slant), SKTypeface> systemTypefaceCache = new();
+
+		private readonly struct LinuxFontMatch
+		{
+			public LinuxFontMatch(string path, int faceIndex, SKFontHinting hinting, Antialias antialias, SubpixelOrder order)
+			{
+				Path = path;
+				FaceIndex = faceIndex;
+				Hinting = hinting;
+				Antialias = antialias;
+				Order = order;
+			}
+
+			public string Path { get; }
+			public int FaceIndex { get; }
+			public SKFontHinting Hinting { get; }
+			public Antialias Antialias { get; }
+			public SubpixelOrder Order { get; }
+		}
 
 		internal static SKTypeface Resolve(string family, SKFontStyleWeight weight, SKFontStyleSlant slant, out SKFontHinting fontconfigHinting)
 			=> Resolve(family, weight, slant, out fontconfigHinting, out _, out _);
+
+		internal static void ResolveOptions(string family, SKFontStyleWeight weight, SKFontStyleSlant slant,
+			out SKFontHinting fontconfigHinting, out Antialias fontconfigAntialias, out SubpixelOrder fontconfigOrder)
+		{
+			if (!OperatingSystem.IsLinux())
+			{
+				fontconfigHinting = SKFontHinting.Normal;
+				fontconfigAntialias = OperatingSystem.IsWindows() ? Antialias.Subpixel : Antialias.Gray;
+				fontconfigOrder = SubpixelOrder.Rgb;
+				return;
+			}
+			LinuxFontMatch matched = ResolveLinuxMatch(family, weight, slant);
+			fontconfigHinting = matched.Hinting;
+			fontconfigAntialias = matched.Antialias;
+			fontconfigOrder = matched.Order;
+		}
+
+		internal static SKTypeface BorrowTypeface(string family, SKFontStyleWeight weight, SKFontStyleSlant slant, out SKFontHinting fontconfigHinting)
+		{
+			if (!OperatingSystem.IsLinux())
+			{
+				fontconfigHinting = SKFontHinting.Normal;
+				string resolvedFamily = OperatingSystem.IsWindows() ? ResolveWindowsFamilyName(family) : family;
+				return systemTypefaceCache.GetOrAdd((resolvedFamily, weight, slant),
+					static key => SKTypeface.FromFamilyName(key.family, key.weight, SKFontStyleWidth.Normal, key.slant));
+			}
+
+			LinuxFontMatch matched = ResolveLinuxMatch(family, weight, slant);
+			fontconfigHinting = matched.Hinting;
+			return linuxTypefaceCache.GetOrAdd((matched.Path, matched.FaceIndex),
+				static key => SKTypeface.FromFile(key.path, key.faceIndex)
+					?? throw new InvalidOperationException("Skia could not open Fontconfig's match: " + key.path));
+		}
 
 		internal static SKTypeface Resolve(string family, SKFontStyleWeight weight, SKFontStyleSlant slant,
 			out SKFontHinting fontconfigHinting, out Antialias fontconfigAntialias, out SubpixelOrder fontconfigOrder)
@@ -38,6 +92,25 @@ namespace Cairo
 					family = ResolveWindowsFamilyName(family);
 				return SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
 			}
+
+			LinuxFontMatch matched = ResolveLinuxMatch(family, weight, slant);
+			fontconfigHinting = matched.Hinting;
+			fontconfigAntialias = matched.Antialias;
+			fontconfigOrder = matched.Order;
+			return SKTypeface.FromFile(matched.Path, matched.FaceIndex)
+				?? throw new InvalidOperationException("Skia could not open Fontconfig's match for GUI font family '" + family + "': " + matched.Path);
+		}
+
+		private static LinuxFontMatch ResolveLinuxMatch(string family, SKFontStyleWeight weight, SKFontStyleSlant slant)
+		{
+			return linuxMatchCache.GetOrAdd((family, weight, slant), static key => QueryFontconfig(key.family, key.weight, key.slant));
+		}
+
+		private static LinuxFontMatch QueryFontconfig(string family, SKFontStyleWeight weight, SKFontStyleSlant slant)
+		{
+			SKFontHinting fontconfigHinting = SKFontHinting.Normal;
+			Antialias fontconfigAntialias = Antialias.Gray;
+			SubpixelOrder fontconfigOrder = SubpixelOrder.Rgb;
 			if (FcInit() == 0) throw new InvalidOperationException("Fontconfig could not initialize GUI font resolution.");
 
 			IntPtr pattern = FcPatternCreate();
@@ -76,8 +149,7 @@ namespace Cairo
 					if (FcPatternGetBool(match, "antialias", 0, out int antialias) == 0 && antialias == 0) fontconfigAntialias = Antialias.None;
 					string path = Marshal.PtrToStringUTF8(filePointer);
 					if (FcPatternGetInteger(match, "index", 0, out int faceIndex) != 0) faceIndex = 0;
-					return SKTypeface.FromFile(path, faceIndex)
-						?? throw new InvalidOperationException("Skia could not open Fontconfig's match for GUI font family '" + family + "': " + path);
+					return new LinuxFontMatch(path, faceIndex, fontconfigHinting, fontconfigAntialias, fontconfigOrder);
 				}
 				finally { FcPatternDestroy(match); }
 			}

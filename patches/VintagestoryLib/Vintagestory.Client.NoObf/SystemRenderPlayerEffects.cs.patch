@@ -1,9 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-index 2eca300..24e0660 100644
+index 2eca300..b5a7811 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderPlayerEffects.cs
-@@ -1,8 +1,11 @@
+@@ -1,8 +1,12 @@
 +using System;
++using System.Collections.Generic;
  using System.Linq;
  using Vintagestory.API.Client;
 +using Vintagestory.API.Common;
@@ -14,7 +15,7 @@ index 2eca300..24e0660 100644
  namespace Vintagestory.Client.NoObf;
  
  public class SystemRenderPlayerEffects : ClientSystem
-@@ -31,24 +34,107 @@ public class SystemRenderPlayerEffects : ClientSystem
+@@ -31,24 +35,114 @@ public class SystemRenderPlayerEffects : ClientSystem
  	public override void OnOwnPlayerDataReceived()
  	{
  		game.api.Render.PerceptionEffects.OnOwnPlayerDataReceived(game.player.Entity);
@@ -55,54 +56,61 @@ index 2eca300..24e0660 100644
 -		foreach (Entity entity in array)
 +		_lightScratchCount = 0;
 +
-+		var blockAccessor = game.World?.BlockAccessor;
-+		if (blockAccessor != null)
++		ClientWorldMap worldMap = game.WorldMap;
++		if (worldMap != null)
 +		{
-+			int minCx = (int)((plrPos.X - lightRadius) / 32.0);
-+			int maxCx = (int)((plrPos.X + lightRadius) / 32.0);
++			int minCx = Math.Max(0, (int)((plrPos.X - lightRadius) / 32.0));
++			int maxCx = Math.Min(worldMap.MapChunkMapSizeX - 1, (int)((plrPos.X + lightRadius) / 32.0));
 +			int minCy = Math.Max(0, (int)((plrPos.Y - lightRadius) / 32.0));
-+			int maxCy = (int)((plrPos.Y + lightRadius) / 32.0);
-+			int minCz = (int)((plrPos.Z - lightRadius) / 32.0);
-+			int maxCz = (int)((plrPos.Z + lightRadius) / 32.0);
++			int maxCy = Math.Min(worldMap.MapChunkMapSizeY - 1, (int)((plrPos.Y + lightRadius) / 32.0));
++			int minCz = Math.Max(0, (int)((plrPos.Z - lightRadius) / 32.0));
++			int maxCz = Math.Min(worldMap.MapChunkMapSizeZ - 1, (int)((plrPos.Z + lightRadius) / 32.0));
++			int mulX = worldMap.index3dMulX;
++			int mulZ = worldMap.index3dMulZ;
 +
-+			for (int cx = minCx; cx <= maxCx; cx++)
++			lock (worldMap.chunksLock)
 +			{
-+				for (int cy = minCy; cy <= maxCy; cy++)
++				Dictionary<long, ClientChunk> chunks = worldMap.chunks;
++				for (int cx = minCx; cx <= maxCx; cx++)
 +				{
-+					for (int cz = minCz; cz <= maxCz; cz++)
++					for (int cy = minCy; cy <= maxCy; cy++)
 +					{
-+						IWorldChunk chunk = blockAccessor.GetChunk(cx, cy, cz);
-+						Entity[] chunkEntities = chunk?.Entities;
-+						if (chunkEntities == null) continue;
-+						int count = chunk.EntitiesCount;
-+						for (int i = 0; i < count; i++)
++						for (int cz = minCz; cz <= maxCz; cz++)
 +						{
-+							Entity ent = chunkEntities[i];
-+							if (ent == null || ent.State == EnumEntityState.Despawned || ent.Pos == null) continue;
-+							byte[] hsv = ent.LightHsv;
-+							if (hsv == null || hsv[2] <= 0) continue;
-+
-+							double distSq = ent.Pos.SquareDistanceTo(plrPos);
-+							if (distSq > lightRadiusSq) continue;
-+
-+							if (_lightScratchCount < maxDynLights)
++							long key = MapUtil.Index3dL(cx, cy, cz, mulX, mulZ);
++							if (!chunks.TryGetValue(key, out ClientChunk chunk) || chunk == null) continue;
++							Entity[] chunkEntities = chunk.Entities;
++							if (chunkEntities == null) continue;
++							int count = chunk.EntitiesCount;
++							for (int i = 0; i < count; i++)
 +							{
-+								_lightScratch[_lightScratchCount] = ent;
-+								_lightScratchDistSq[_lightScratchCount] = distSq;
-+								_lightScratchCount++;
-+							}
-+							else
-+							{
-+								int farthest = 0;
-+								double farthestDist = _lightScratchDistSq[0];
-+								for (int k = 1; k < _lightScratchCount; k++)
++								Entity ent = chunkEntities[i];
++								if (ent == null || ent.State == EnumEntityState.Despawned || ent.Pos == null) continue;
++								byte[] hsv = ent.LightHsv;
++								if (hsv == null || hsv[2] <= 0) continue;
++
++								double distSq = ent.Pos.SquareDistanceTo(plrPos);
++								if (distSq > lightRadiusSq) continue;
++
++								if (_lightScratchCount < maxDynLights)
 +								{
-+									if (_lightScratchDistSq[k] > farthestDist) { farthest = k; farthestDist = _lightScratchDistSq[k]; }
++									_lightScratch[_lightScratchCount] = ent;
++									_lightScratchDistSq[_lightScratchCount] = distSq;
++									_lightScratchCount++;
 +								}
-+								if (distSq < farthestDist)
++								else
 +								{
-+									_lightScratch[farthest] = ent;
-+									_lightScratchDistSq[farthest] = distSq;
++									int farthest = 0;
++									double farthestDist = _lightScratchDistSq[0];
++									for (int k = 1; k < _lightScratchCount; k++)
++									{
++										if (_lightScratchDistSq[k] > farthestDist) { farthest = k; farthestDist = _lightScratchDistSq[k]; }
++									}
++									if (distSq < farthestDist)
++									{
++										_lightScratch[farthest] = ent;
++										_lightScratchDistSq[farthest] = distSq;
++									}
 +								}
 +							}
 +						}

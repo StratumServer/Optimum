@@ -274,7 +274,7 @@ public static class OptimumConfig
     public static bool KometGuardEnabled = true;
     public static bool GlFinalizerReclaimEnabled = true;
     public static bool MeshPoolReclaimEnabled = true;
-    public static bool FrontToBackChunkSortEnabled = true;
+    public static bool FrontToBackChunkSortEnabled = false;
 
     /// <summary>
     /// Issue #607/#629: Opt-in (default false). Improves vertex-bound iGPUs on static views,
@@ -591,6 +591,8 @@ public static class OptimumConfig
     /// <summary>
     /// Resolves the active chunk meshing worker count for the host processor
     /// count, respecting MultiWorkerTesselationEnabled and TesselationWorkerCap.
+    /// On 6-or-fewer-thread CPUs, cap auto selection at 2 workers so meshing leaves
+    /// headroom for the render thread, server tick/worldgen, and SQLite read pool.
     /// </summary>
     public static int GetEffectiveTesselationWorkers(int logicalProcessors)
     {
@@ -598,7 +600,12 @@ public static class OptimumConfig
         int cap = Math.Max(1, TesselationWorkerCap);
         int requested = TesselationWorkers > 0
             ? Math.Clamp(TesselationWorkers, 1, 8)
-            : Math.Clamp(logicalProcessors / 2, 1, 4);
+            : logicalProcessors switch
+            {
+                <= 3 => 1,
+                <= 6 => 2,
+                _ => Math.Clamp(logicalProcessors / 2, 1, 4)
+            };
         return Math.Min(requested, cap);
     }
 
@@ -1897,7 +1904,7 @@ internal sealed class OptimumConfigData
     public bool KometGuard { get; set; } = true;
     public bool GlFinalizerReclaim { get; set; } = true;
     public bool MeshPoolReclaim { get; set; } = true;
-    public bool FrontToBackChunkSort { get; set; } = true;
+    public bool FrontToBackChunkSort { get; set; } = false;
     public bool ChunkFaceBucketCull { get; set; } = false;
     public bool SsaoDepthPosition { get; set; } = true;
     public bool LegacySsboMigration { get; set; } = true;

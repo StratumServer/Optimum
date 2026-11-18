@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
-index a96b9c9..0e0944e 100644
+index a96b9c9..9fc9737 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
-@@ -1,250 +1,305 @@
+@@ -1,250 +1,313 @@
  ﻿using System;
 -using System.Collections;
  using System.Collections.Concurrent;
@@ -78,7 +78,7 @@ index a96b9c9..0e0944e 100644
 +        private const int smallLimit = 368;
 +        private const int mediumLimit = 3072;
 +        private const int Four = 4;
-+        private const int MaxReturnQueuePerWorker = 192;
++        private const int MaxReturnQueuePerWorker = 512;
 +
 +        private readonly IClientWorldAccessor game;
 +        private volatile bool disposed;
@@ -103,6 +103,7 @@ index a96b9c9..0e0944e 100644
 +            public readonly SortedList<float, MeshData> largeSizes = new SortedList<float, MeshData>();
 +            public readonly ConcurrentQueue<MeshData> forRecycling = new ConcurrentQueue<MeshData>();
 +            private int returnCount;
++            private long lastControlElapsedMs = long.MinValue;
 +            private float[] keysScratch = new float[256];
 +
 +            public WorkerBucket(MeshDataRecycler owner)
@@ -139,13 +140,20 @@ index a96b9c9..0e0944e 100644
 +                {
 +                    DoRecycling();
 +                }
-+
+ 
+-                //if (minimumVertices >= 21250)
+-                //{
+-                //    newMesh = new MeshData(minimumVertices);
+-                //    game.Logger.VerboseDebug("Allocated new large MeshData from LOH: size " + minimumVertices * 34);
+-                //}
+-                //else
 +                int minimumCapacity = (minimumVertices + Four - 1) / Four;
 +                MeshData newMesh;
 +                if (minimumCapacity >= mediumLimit)
-+                {
+                 {
+-                    newMesh = new MeshData(minimumVertices);
 +                    newMesh = TryGet(largeSizes, minimumCapacity);
-+                }
+                 }
 +                else if (minimumCapacity >= smallLimit)
 +                {
 +                    newMesh = TryGet(mediumSizes, minimumCapacity);
@@ -154,17 +162,14 @@ index a96b9c9..0e0944e 100644
 +                {
 +                    newMesh = TryGet(smallSizes, minimumCapacity);
 +                }
- 
--                //if (minimumVertices >= 21250)
--                //{
--                //    newMesh = new MeshData(minimumVertices);
--                //    game.Logger.VerboseDebug("Allocated new large MeshData from LOH: size " + minimumVertices * 34);
--                //}
--                //else
++
 +                if (newMesh == null)
-                 {
-                     newMesh = new MeshData(minimumVertices);
-                 }
++                {
++                    int allocVertices = !Owner.disposed
++                        ? ((minimumVertices * 41 / 40 + Four - 1) / Four) * Four
++                        : ((minimumVertices + Four - 1) / Four) * Four;
++                    newMesh = new MeshData(allocVertices);
++                }
 +                newMesh.Recyclable = true;
 +                originBuckets.AddOrUpdate(newMesh, this);
 +                return newMesh;
@@ -181,20 +186,24 @@ index a96b9c9..0e0944e 100644
 +                    return;
 +                }
 +
-+                ControlSizeOfLists();
-+
 +                long elapsedMs = Owner.game?.ElapsedMilliseconds ?? 0;
++                if (!forRecycling.IsEmpty || elapsedMs - lastControlElapsedMs >= 1000L || elapsedMs < lastControlElapsedMs)
++                {
++                    lastControlElapsedMs = elapsedMs;
++                    ControlSizeOfLists();
++                }
++
 +                while (!forRecycling.IsEmpty && forRecycling.TryDequeue(out MeshData recycled))
                  {
 -                    newMesh.Indices = new int[newMesh.VerticesMax * MeshData.StandardIndicesPerFace / MeshData.StandardVerticesPerFace];
 -                    newMesh.IndicesMax = newMesh.Indices.Length;
 +                    Interlocked.Decrement(ref returnCount);
-+                    int entrySize = recycled.VerticesMax / Four;
-+                    if (entrySize < MinimumSizeForRecycling / Four)
++                    if (recycled.VerticesMax * MeshData.BaseSizeInBytes < MinimumSizeForRecycling)
 +                    {
 +                        recycled.DisposeBasicData();
 +                        continue;
 +                    }
++                    int entrySize = recycled.VerticesMax / Four;
 +                    recycled.RecyclingTime = elapsedMs;
 +                    if (entrySize >= mediumLimit)
 +                    {
@@ -353,7 +362,7 @@ index a96b9c9..0e0944e 100644
 +                {
 +                    idx = ~idx;
 +                }
-+                if (idx < count && keysScratch[idx] <= entrySize * 1.15f + 4f)
++                if (idx < count && keysScratch[idx] <= entrySize * 1.25f + 64f)
 +                {
 +                    MeshData result = list.GetValueAtIndex(idx);
 +                    list.RemoveAt(idx);

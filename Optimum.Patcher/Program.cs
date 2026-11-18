@@ -697,6 +697,18 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumLightingDirtyChunks",
     },
+    ["Vintagestory.Server.ServerChunk"] = new()
+    {
+        "optimumToBytesStream",
+    },
+    ["Vintagestory.Server.ServerMapChunk"] = new()
+    {
+        "optimumToBytesStream",
+    },
+    ["Vintagestory.Server.ServerMapRegion"] = new()
+    {
+        "optimumToBytesStream",
+    },
     // Issue #132: client ray selection reuses its predicates and walks entity
     // chunks directly instead of building a candidate List<Entity>/Entity[].
     ["Vintagestory.Common.GameMain"] = new()
@@ -1384,6 +1396,13 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerMain", "WaitOnBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "BuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "Dispose", 0),
+    new("Vintagestory.Server.ServerChunk", "ToBytes", 0),
+    new("Vintagestory.Server.ServerChunk", "ToBytes", 1),
+    new("Vintagestory.Server.ServerChunk", "ToPacket", 4),
+    new("Vintagestory.Server.ServerChunk", "GetEntitiesPackets", 0),
+    new("Vintagestory.Server.ServerChunk", "GetBlockEntitiesPackets", 0),
+    new("Vintagestory.Server.ServerMapChunk", "ToBytes", 0),
+    new("Vintagestory.Server.ServerMapRegion", "ToBytes", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
-index f9128b4..c3a955e 100644
+index f9128b4..6a2d29f 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataPool.cs
 @@ -1,7 +1,8 @@
@@ -135,7 +135,7 @@ index f9128b4..c3a955e 100644
              return poolLocation;
          }
  
-@@ -319,34 +371,86 @@ namespace Vintagestory.API.Client
+@@ -319,34 +371,96 @@ namespace Vintagestory.API.Client
              if (location.PoolId != poolId)
              {
                  throw new Exception("invalid call");
@@ -175,7 +175,17 @@ index f9128b4..c3a955e 100644
                  }
 +                allocatedIndices -= (location.IndicesEnd - location.IndicesStart);
 +                AllocatedTris = allocatedIndices / 3;
-+                RecomputeTightBounds();
++                Sphere removedSphere = location.FrustumCullSphere;
++                if (!BoundsValid || (removedSphere.radius > 0f &&
++                    (removedSphere.x - removedSphere.radius <= BoundMinX ||
++                     removedSphere.x + removedSphere.radius >= BoundMaxX ||
++                     removedSphere.y - removedSphere.radiusY <= BoundMinY ||
++                     removedSphere.y + removedSphere.radiusY >= BoundMaxY ||
++                     removedSphere.z - removedSphere.radiusZ <= BoundMinZ ||
++                     removedSphere.z + removedSphere.radiusZ >= BoundMaxZ)))
++                {
++                    RecomputeTightBounds();
++                }
              }
  
 -
@@ -224,7 +234,7 @@ index f9128b4..c3a955e 100644
          /// </summary>
          /// <param name="capi">The core client API</param>
          /// <param name="frustumCuller">The area where models can be viewed from the camera.</param>
-@@ -364,51 +468,330 @@ namespace Vintagestory.API.Client
+@@ -364,51 +478,330 @@ namespace Vintagestory.API.Client
          /// <param name="frustumCullMode">The mode of the culling.</param>
          public void FrustumCull(FrustumCulling frustumCuller, EnumFrustumCullMode frustumCullMode)
          {
@@ -569,7 +579,7 @@ index f9128b4..c3a955e 100644
  
          /// <summary>
          /// Is this an empty pool.
-@@ -423,11 +806,11 @@ namespace Vintagestory.API.Client
+@@ -423,11 +816,11 @@ namespace Vintagestory.API.Client
          /// Disposes of the current mesh pool.
          /// </summary>
          /// <param name="capi">The core client API</param>
@@ -582,7 +592,7 @@ index f9128b4..c3a955e 100644
          /// <summary>
          /// Calculates the current fragmentation of the mesh.
          /// </summary>
-@@ -462,11 +845,15 @@ namespace Vintagestory.API.Client
+@@ -462,11 +855,15 @@ namespace Vintagestory.API.Client
              return CurrentFragmentation;
          }
  
@@ -598,7 +608,7 @@ index f9128b4..c3a955e 100644
  
  
      /// <summary>
-@@ -513,10 +900,12 @@ namespace Vintagestory.API.Client
+@@ -513,10 +910,12 @@ namespace Vintagestory.API.Client
  
          public Bools CullVisible = new Bools(true, true);
  
@@ -611,7 +621,7 @@ index f9128b4..c3a955e 100644
          /// <summary>
          /// Used for models with movements (like a door).
          /// </summary>
-@@ -535,17 +924,17 @@ namespace Vintagestory.API.Client
+@@ -535,17 +934,17 @@ namespace Vintagestory.API.Client
              {
                  case EnumFrustumCullMode.CullInstant:
                      return !Hide && CullVisible[VisibleBufIndex] && culler.InFrustum(FrustumCullSphere);

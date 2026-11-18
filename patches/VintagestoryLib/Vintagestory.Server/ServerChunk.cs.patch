@@ -1,0 +1,104 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerChunk.cs b/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
+index 82fead7..48aa5a3 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
+@@ -20,10 +20,13 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 	public static Stopwatch ReadWriteStopWatch;
+ 
+ 	[ThreadStatic]
+ 	private static FastMemoryStream reusableSerializationStream;
+ 
++	[ThreadStatic]
++	private static FastMemoryStream optimumToBytesStream;
++
+ 	[ThreadStatic]
+ 	private static List<Entity> reusableSerializationList;
+ 
+ 	[ProtoMember(6)]
+ 	[CustomFastSerializer]
+@@ -299,12 +302,31 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 		return serverChunk;
+ 	}
+ 
+ 	public byte[] ToBytes()
+ 	{
+-		using FastMemoryStream ms = new FastMemoryStream();
+-		return ToBytes(ms);
++		FastMemoryStream ms = optimumToBytesStream;
++		optimumToBytesStream = null;
++		if (ms == null)
++		{
++			ms = new FastMemoryStream(65536);
++		}
++		else
++		{
++			ms.Reset();
++		}
++		try
++		{
++			return ToBytes(ms);
++		}
++		finally
++		{
++			if (optimumToBytesStream == null && ms.GetBuffer().Length <= 1048576)
++			{
++				optimumToBytesStream = ms;
++			}
++		}
+ 	}
+ 
+ 	public byte[] ToBytes(FastMemoryStream ms)
+ 	{
+ 		lock (packUnpackLock)
+@@ -320,11 +342,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 			}
+ 			savedCompressionVersion = chunkdataVersion;
+ 			BeforeSerializationCommon();
+ 			if (reusableSerializationStream == null)
+ 			{
+-				reusableSerializationStream = new FastMemoryStream();
++				reusableSerializationStream = new FastMemoryStream(16384);
+ 			}
+ 			return ((IWithFastSerialize)this).FastSerialize(ms);
+ 		}
+ 	}
+ 
+@@ -567,11 +589,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 			packet_ServerChunk.SetLight(lightCompressed);
+ 			packet_ServerChunk.SetLightSat(lightSatCompressed);
+ 			packet_ServerChunk.SetLiquids(liquidsCompressed);
+ 			packet_ServerChunk.SetCompver(chunkdataVersion);
+ 		}
+-		packet_ServerChunk.SetModdata(SerializerUtil.Serialize(moddata, reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream())));
++		packet_ServerChunk.SetModdata(SerializerUtil.Serialize(moddata, reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream(16384))));
+ 		if (BlockEntities.Count > 0)
+ 		{
+ 			packet_ServerChunk.SetBlockEntities(GetBlockEntitiesPackets());
+ 		}
+ 		if (LightPositions != null && LightPositions.Count > 0)
+@@ -602,11 +624,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 	internal Packet_Entity[] GetEntitiesPackets()
+ 	{
+ 		Packet_Entity[] array = new Packet_Entity[(Entities != null) ? EntitiesCount : 0];
+ 		if (array.Length != 0)
+ 		{
+-			using FastMemoryStream fastMemoryStream = reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream());
++			using FastMemoryStream fastMemoryStream = reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream(16384));
+ 			fastMemoryStream.Reset();
+ 			BinaryWriter writer = new BinaryWriter(fastMemoryStream);
+ 			int num = 0;
+ 			Entity[] entities = Entities;
+ 			for (int i = 0; i < entities.Length; i++)
+@@ -633,11 +655,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 	}
+ 
+ 	internal Packet_BlockEntity[] GetBlockEntitiesPackets()
+ 	{
+ 		Packet_BlockEntity[] array = new Packet_BlockEntity[BlockEntities.Count];
+-		using FastMemoryStream fastMemoryStream = reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream());
++		using FastMemoryStream fastMemoryStream = reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream(16384));
+ 		fastMemoryStream.Reset();
+ 		BinaryWriter writer = new BinaryWriter(fastMemoryStream);
+ 		int num = 0;
+ 		Dictionary<Type, string> blockEntityTypeToClassnameMapping = ServerMain.ClassRegistry.blockEntityTypeToClassnameMapping;
+ 		foreach (BlockEntity value2 in BlockEntities.Values)

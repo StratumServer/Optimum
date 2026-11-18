@@ -28,9 +28,8 @@ namespace Cairo
 			var slant = fontSlant == FontSlant.Italic ? SKFontStyleSlant.Italic :
 				fontSlant == FontSlant.Oblique ? SKFontStyleSlant.Oblique : SKFontStyleSlant.Upright;
 			SKFontHinting fontconfigHinting = SKFontHinting.Full;
-			SKTypeface typeface = fileSource?.Typeface ?? SkiaFontResolver.Resolve(family, weight, slant, out fontconfigHinting)
+			SKTypeface typeface = fileSource?.Typeface ?? SkiaFontResolver.BorrowTypeface(family, weight, slant, out fontconfigHinting)
 				?? throw new InvalidOperationException("Skia could not resolve GUI font family '" + family + "'; Cairo materialization is disabled for recorded text.");
-			try {
 			var font = new SKFont(typeface, (float)size) {
 				ScaleX = scaleX,
 				Edging = options.Antialias == Antialias.Subpixel ? SKFontEdging.SubpixelAntialias :
@@ -49,7 +48,6 @@ namespace Cairo
 			};
 			fileSource?.ApplyLoadOptions(font, options);
 			return font;
-			} finally { if (fileSource == null) typeface.Dispose(); }
 		}
 	}
 }
