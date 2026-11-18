@@ -747,6 +747,120 @@ public static class OptimumConfig
         ? OptimumGodRaysSampleLimit
         : VanillaGodRaysSampleLimit;
 
+    // Issue #644: One-time migration to enable allowSSBOs for legacy clientsettings.json
+    // files on OpenGL >= 4.3 hardware, skipping macOS and Intel Arc GPUs.
+    public static bool LegacySsboMigrationEnabled = true;
+    public static bool LegacySsboMigrated = false;
+
+    internal static bool IsIntelArcRenderer(string? glRenderer)
+    {
+        return !string.IsNullOrEmpty(glRenderer)
+            && glRenderer.Contains("Arc(TM)", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool TryParseGlMajorMinor(string? versionString, out int major, out int minor)
+    {
+        major = 0;
+        minor = 0;
+        if (string.IsNullOrWhiteSpace(versionString))
+        {
+            return false;
+        }
+        int i = 0;
+        while (i < versionString.Length && !char.IsDigit(versionString[i]))
+        {
+            i++;
+        }
+        int majorStart = i;
+        while (i < versionString.Length && char.IsDigit(versionString[i]))
+        {
+            i++;
+        }
+        if (i == majorStart || i >= versionString.Length || versionString[i] != '.')
+        {
+            return false;
+        }
+        if (!int.TryParse(versionString.AsSpan(majorStart, i - majorStart), NumberStyles.None, CultureInfo.InvariantCulture, out major))
+        {
+            return false;
+        }
+        int minorStart = i + 1;
+        int minorEnd = minorStart;
+        while (minorEnd < versionString.Length && char.IsDigit(versionString[minorEnd]))
+        {
+            minorEnd++;
+        }
+        if (minorEnd == minorStart)
+        {
+            return false;
+        }
+        return int.TryParse(versionString.AsSpan(minorStart, minorEnd - minorStart), NumberStyles.None, CultureInfo.InvariantCulture, out minor);
+    }
+
+    internal static bool TryParseGlslVersion(string? glslVersionString, out int glslVersion)
+    {
+        glslVersion = 0;
+        if (!TryParseGlMajorMinor(glslVersionString, out int major, out int minor))
+        {
+            return false;
+        }
+        glslVersion = minor < 10 ? major * 100 + minor * 10 : major * 100 + minor;
+        return true;
+    }
+
+    public static bool EvaluateLegacySsboMigration(
+        bool currentAllowSsbo,
+        bool isMac,
+        string? glVersionString,
+        string? glslVersionString,
+        string? glRenderer,
+        out bool markMigrated,
+        out string? diagnosticMessage)
+    {
+        markMigrated = false;
+        diagnosticMessage = null;
+
+        if (!LegacySsboMigrationEnabled || LegacySsboMigrated)
+        {
+            return false;
+        }
+
+        if (currentAllowSsbo)
+        {
+            markMigrated = true;
+            return false;
+        }
+
+        if (isMac)
+        {
+            diagnosticMessage = "[Optimum] Legacy allowSSBOs migration skipped: macOS is excluded.";
+            return false;
+        }
+
+        if (!TryParseGlMajorMinor(glVersionString, out int glMajor, out int glMinor)
+            || glMajor < 4 || (glMajor == 4 && glMinor < 3))
+        {
+            diagnosticMessage = $"[Optimum] Legacy allowSSBOs migration skipped: OpenGL '{glVersionString ?? "unknown"}' is below 4.3.";
+            return false;
+        }
+
+        if (TryParseGlslVersion(glslVersionString, out int glslVersion) && glslVersion < 430)
+        {
+            diagnosticMessage = $"[Optimum] Legacy allowSSBOs migration skipped: GLSL {glslVersion} is below 430.";
+            return false;
+        }
+
+        if (IsIntelArcRenderer(glRenderer))
+        {
+            diagnosticMessage = $"[Optimum] Legacy allowSSBOs migration skipped: Intel Arc GPU safeguard ({glRenderer}).";
+            return false;
+        }
+
+        markMigrated = true;
+        diagnosticMessage = $"[Optimum] Migrated legacy clientsettings.json allowSSBOs=false -> true (OpenGL {glMajor}.{glMinor}, renderer '{glRenderer ?? "unknown"}').";
+        return true;
+    }
+
     // Compatibility state comes from the launcher's metadata scan. It stays
     // outside OptimumConfigData so a mod cannot make a runtime fallback
     // persistent by changing its shader files.
@@ -1403,6 +1517,8 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.FrontToBackChunkSort), FrontToBackChunkSortEnabled.ToString()),
         (nameof(OptimumConfigData.ChunkFaceBucketCull), ChunkFaceBucketCullEnabled.ToString()),
         (nameof(OptimumConfigData.SsaoDepthPosition), SsaoDepthPositionEnabled.ToString()),
+        (nameof(OptimumConfigData.LegacySsboMigration), LegacySsboMigrationEnabled.ToString()),
+        (nameof(OptimumConfigData.LegacySsboMigrated), LegacySsboMigrated.ToString()),
     };
 
     /// <summary>
@@ -1534,6 +1650,8 @@ public static class OptimumConfig
             FrontToBackChunkSortEnabled = data.FrontToBackChunkSort;
             ChunkFaceBucketCullEnabled = data.ChunkFaceBucketCull;
             SsaoDepthPositionEnabled = data.SsaoDepthPosition;
+            LegacySsboMigrationEnabled = data.LegacySsboMigration;
+            LegacySsboMigrated = data.LegacySsboMigrated;
         }
         catch (Exception)
         {
@@ -1628,6 +1746,8 @@ public static class OptimumConfig
             FrontToBackChunkSort = FrontToBackChunkSortEnabled,
             ChunkFaceBucketCull = ChunkFaceBucketCullEnabled,
             SsaoDepthPosition = SsaoDepthPositionEnabled,
+            LegacySsboMigration = LegacySsboMigrationEnabled,
+            LegacySsboMigrated = LegacySsboMigrated,
         };
 
         try
@@ -1746,6 +1866,8 @@ internal sealed class OptimumConfigData
     public bool FrontToBackChunkSort { get; set; } = true;
     public bool ChunkFaceBucketCull { get; set; } = false;
     public bool SsaoDepthPosition { get; set; } = true;
+    public bool LegacySsboMigration { get; set; } = true;
+    public bool LegacySsboMigrated { get; set; } = false;
 }
 
 public static class OptimumDiagnostics
