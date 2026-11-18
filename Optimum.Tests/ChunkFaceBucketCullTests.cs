@@ -398,7 +398,7 @@ public sealed class ChunkFaceBucketCullTests
     }
 
     [Fact]
-    public void ChunkFaceBucketCullConfig_PersistsEnabledFlagRoundTrip()
+    public void ChunkFaceBucketCullConfig_DefaultsFalseAndPersistsRoundTrip()
     {
         bool orig = OptimumConfig.ChunkFaceBucketCullEnabled;
         string tempDir = Path.Combine(Path.GetTempPath(), $"optimum-bucket-cfg-{Guid.NewGuid():N}");
@@ -406,13 +406,22 @@ public sealed class ChunkFaceBucketCullTests
         Directory.CreateDirectory(Path.Combine(tempDir, "ModConfig"));
         try
         {
+            Assert.False(new OptimumConfigData().ChunkFaceBucketCull);
+
             OptimumConfig.SetDataPath(tempDir);
-            OptimumConfig.ChunkFaceBucketCullEnabled = false;
-            OptimumConfig.Save();
+            OptimumConfig.Load();
+            Assert.False(OptimumConfig.ChunkFaceBucketCullEnabled);
 
             OptimumConfig.ChunkFaceBucketCullEnabled = true;
+            OptimumConfig.Save();
+            OptimumConfig.ChunkFaceBucketCullEnabled = false;
             OptimumConfig.Load();
+            Assert.True(OptimumConfig.ChunkFaceBucketCullEnabled);
 
+            OptimumConfig.ChunkFaceBucketCullEnabled = false;
+            OptimumConfig.Save();
+            OptimumConfig.ChunkFaceBucketCullEnabled = true;
+            OptimumConfig.Load();
             Assert.False(OptimumConfig.ChunkFaceBucketCullEnabled);
         }
         finally
