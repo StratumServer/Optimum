@@ -1,43 +1,53 @@
 diff --git a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
-index 1a155af..e618ff3 100644
+index 1a155af..93fcd74 100644
 --- a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
 +++ b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
-@@ -227,10 +227,42 @@ public class TcpNetConnection : NetConnection
+@@ -227,10 +227,52 @@ public class TcpNetConnection : NetConnection
  		return SendPreparedPacket(packet, compressed, Logger);
  	}
  
  	public override byte[] PreparePacketForSending(BoxedPacket box, bool compressionAllowed, out bool compressed)
  	{
-+		if (box is BoxedPacket_ServerAssets assetsBox && compressionAllowed)
++		if (box is BoxedPacket_ServerAssets assetsBox)
 +		{
-+			if (!assetsBox.isCompressedCached)
++			if (compressionAllowed)
 +			{
-+				if (assetsBox.compressionLock == null)
++				if (!assetsBox.isCompressedCached)
 +				{
-+					Interlocked.CompareExchange(ref assetsBox.compressionLock, new object(), null);
-+				}
-+				lock (assetsBox.compressionLock)
-+				{
-+					if (!assetsBox.isCompressedCached)
++					if (assetsBox.compressionLock == null)
 +					{
-+						int len = assetsBox.Length;
-+						if (len > 1460)
++						Interlocked.CompareExchange(ref assetsBox.compressionLock, new object(), null);
++					}
++					lock (assetsBox.compressionLock)
++					{
++						if (!assetsBox.isCompressedCached)
 +						{
-+							byte[] comp = Compression.CompressOffset4(assetsBox.buffer, len);
-+							int compLenSent = comp.Length - 4;
-+							NetIncomingMessage.WriteInt(comp, compLenSent | unchecked((int)0x80000000));
-+							assetsBox.compressedLengthSent = compLenSent;
-+							assetsBox.compressedBuffer = comp;
++							int len = assetsBox.Length;
++							if (len > 1460)
++							{
++								byte[] comp = Compression.CompressOffset4(assetsBox.buffer, len);
++								int compLenSent = comp.Length - 4;
++								NetIncomingMessage.WriteInt(comp, compLenSent | unchecked((int)0x80000000));
++								assetsBox.compressedLengthSent = compLenSent;
++								assetsBox.compressedBuffer = comp;
++							}
++							assetsBox.isCompressedCached = true;
 +						}
-+						assetsBox.isCompressedCached = true;
 +					}
 +				}
++				if (assetsBox.compressedBuffer != null)
++				{
++					compressed = true;
++					box.LengthSent = assetsBox.compressedLengthSent;
++					return assetsBox.compressedBuffer;
++				}
 +			}
-+			if (assetsBox.compressedBuffer != null)
++			else if (assetsBox.Length == 0 && assetsBox.compressedBuffer != null)
 +			{
-+				compressed = true;
-+				box.LengthSent = assetsBox.compressedLengthSent;
-+				return assetsBox.compressedBuffer;
++				byte[] raw = assetsBox.DecompressForUncompressedSend(4, out int rawLen);
++				compressed = false;
++				box.LengthSent = rawLen;
++				return raw;
 +			}
 +		}
  		int num = box.Length;

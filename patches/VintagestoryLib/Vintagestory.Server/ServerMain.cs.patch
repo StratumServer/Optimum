@@ -1,8 +1,10 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerMain.cs b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
-index 593f5a4..a197b49 100644
+index 593f5a4..3c3ebfe 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
-@@ -257,6 +257,10 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -255,10 +255,14 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal SortedDictionary<int, int> udpPacketBenchmarkBytes = new SortedDictionary<int, int>();
  
  	private readonly BoxedPacket_ServerAssets serverAssetsPacket = new BoxedPacket_ServerAssets();
  
@@ -13,7 +15,11 @@ index 593f5a4..a197b49 100644
  	private bool serverAssetsSentLocally;
  
  	private bool worldMetaDataPacketAlreadySentToSinglePlayer;
-@@ -415,12 +419,60 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal GameCalendar GameWorldCalendar;
+@@ -413,16 +417,64 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	public string WorldName => SaveGameData.WorldName;
  
  	public Vintagestory.API.Datastructures.OrderedDictionary<AssetLocation, ITreeGenerator> TreeGenerators => TreeGeneratorsByTreeCode;
  
@@ -34,8 +40,7 @@ index 593f5a4..a197b49 100644
 +	private int optimumCachedOnlinePlayersTick;
 +	private IPlayer[] optimumCachedAllPlayers;
 +	private int optimumCachedAllPlayersTick;
- 
--	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
++
 +	public IPlayer[] AllOnlinePlayers
 +	{
 +		get
@@ -62,7 +67,8 @@ index 593f5a4..a197b49 100644
 +			return optimumCachedOnlinePlayers;
 +		}
 +	}
-+
+ 
+-	public IPlayer[] AllPlayers => PlayersByUid.Values.ToArray();
 +	public IPlayer[] AllPlayers
 +	{
 +		get
@@ -79,15 +85,24 @@ index 593f5a4..a197b49 100644
  
  	public bool EntityDebugMode => Config.EntityDebugMode;
  
-@@ -1884,6 +1936,7 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 	IClassRegistryAPI IWorldAccessor.ClassRegistry => api.ClassRegistry;
+ 
+@@ -1882,10 +1934,12 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		Logger.Error(exception);
+ 	}
  
  	public void Dispose()
  	{
 +		OptimumAssetEvents.OnServerAssetsInvalidated -= InvalidateServerAssets;
++		serverAssetsPacket.Invalidate();
  		serverAssetsPacket.Dispose();
  		serverAssetsSentLocally = false;
  		worldMetaDataPacketAlreadySentToSinglePlayer = false;
-@@ -4247,7 +4300,7 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		if (Systems != null)
+ 		{
+@@ -4245,11 +4299,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal void BroadcastArbitraryPacket(byte[] data, params IServerPlayer[] skipPlayers)
  	{
  		foreach (ConnectedClient client in Clients.Values)
  		{
@@ -96,7 +111,11 @@ index 593f5a4..a197b49 100644
  			{
  				SendPacket(client.Player, data);
  			}
-@@ -4261,7 +4314,7 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		}
+ 	}
+@@ -4259,11 +4313,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		Serialize_(packet);
+ 		byte[] array = null;
  		bool compressed = false;
  		foreach (ConnectedClient client in Clients.Values)
  		{
@@ -105,7 +124,11 @@ index 593f5a4..a197b49 100644
  			{
  				if (array == null)
  				{
-@@ -4280,13 +4333,26 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 					array = client.Socket.PreparePacketForSending(reusableBuffer, Config.CompressPackets, out compressed);
+ 				}
+@@ -4278,17 +4332,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
+ 	internal void BroadcastArbitraryUdpPacket(Packet_UdpPacket data, params IServerPlayer[] skipPlayers)
  	{
  		foreach (ConnectedClient client in Clients.Values)
  		{
@@ -133,7 +156,61 @@ index 593f5a4..a197b49 100644
  	private void recordInBenchmark(int packetId, int dataLength)
  	{
  		if (packetBenchmark.ContainsKey(packetId))
-@@ -4505,6 +4571,8 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		{
+ 			packetBenchmark[packetId]++;
+@@ -4477,200 +4544,252 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 	{
+ 		if (player == null || player.ConnectionState == EnumClientState.Offline)
+ 		{
+ 			return;
+ 		}
+-		if (serverAssetsPacket.Length == 0)
++		bool isSinglePlayerClient = Clients.TryGetValue(player.ClientId, out var value) && value.IsSinglePlayerClient;
++		if (isSinglePlayerClient && serverAssetsSentLocally)
++		{
++			return;
++		}
++		if (!serverAssetsPacket.HasPayload())
+ 		{
+ 			if (serverAssetsPacket.packet == null)
+ 			{
+ 				WaitOnBuildServerAssetsPacket();
+ 			}
+-			if (serverAssetsPacket.Length == 0)
++			if (!serverAssetsPacket.HasPayload())
+ 			{
+-				if (Clients.TryGetValue(player.ClientId, out var value) && value.IsSinglePlayerClient)
++				if (isSinglePlayerClient)
+ 				{
+-					if (serverAssetsSentLocally || DummyNetConnection.SendServerAssetsPacketDirectly(serverAssetsPacket.packet))
++					if (serverAssetsSentLocally || (serverAssetsPacket.packet != null && DummyNetConnection.SendServerAssetsPacketDirectly(serverAssetsPacket.packet)))
+ 					{
++						serverAssetsSentLocally = true;
++						if (OptimumConfig.CompactServerAssetsEnabled && serverAssetsPacket.compressedBuffer != null)
++						{
++							serverAssetsPacket.ReleaseUncompressedSource();
++						}
+ 						return;
+ 					}
+ 				}
+-				else
++				else if (serverAssetsPacket.packet != null)
+ 				{
+ 					serverAssetsPacket.Serialize(serverAssetsPacket.packet);
+ 				}
+ 			}
+ 		}
++		if (isSinglePlayerClient && serverAssetsPacket.packet != null && DummyNetConnection.SendServerAssetsPacketDirectly(serverAssetsPacket.packet))
++		{
++			serverAssetsSentLocally = true;
++			if (OptimumConfig.CompactServerAssetsEnabled && serverAssetsPacket.compressedBuffer != null)
++			{
++				serverAssetsPacket.ReleaseUncompressedSource();
++			}
++			return;
++		}
+ 		SendPacket(player.ClientId, serverAssetsPacket);
+ 	}
  
  	private void StartBuildServerAssetsPacket()
  	{
@@ -142,21 +219,22 @@ index 593f5a4..a197b49 100644
  		TyronThreadPool.QueueTask((Action)BuildServerAssetsPacket, "serverassetspacket");
  		Logger.VerboseDebug("Starting to build server assets packet");
  	}
-@@ -4512,11 +4580,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 
  	private void WaitOnBuildServerAssetsPacket()
  	{
  		int num = 500;
 -		while (serverAssetsPacket.Length == 0 && serverAssetsPacket.packet == null && num-- > 0)
-+		while (!serverAssetsPacketBuilt && serverAssetsPacket.Length == 0 && serverAssetsPacket.packet == null && num-- > 0)
++		while (!serverAssetsPacketBuilt && !serverAssetsPacket.HasPayload() && serverAssetsPacket.packet == null && num-- > 0)
  		{
  			Thread.Sleep(20);
  		}
 -		if (serverAssetsPacket.Length == 0 && serverAssetsPacket.packet == null)
-+		if (!serverAssetsPacketBuilt && serverAssetsPacket.Length == 0 && serverAssetsPacket.packet == null)
++		if (!serverAssetsPacketBuilt && !serverAssetsPacket.HasPayload() && serverAssetsPacket.packet == null)
  		{
  			Logger.Error("Waiting on buildServerAssetsPacket thread for longer than 10 seconds timeout, trying again ... this may take a while!");
  			BuildServerAssetsPacket();
-@@ -4525,150 +4593,165 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 		}
+ 	}
  
  	private void BuildServerAssetsPacket()
  	{
@@ -182,54 +260,35 @@ index 593f5a4..a197b49 100644
 -					block.FreeRAMServer();
 -				}
 -				catch (Exception e)
--				{
--					Logger.Fatal("Failed networking encoding block {0}:", block.Code);
--					Logger.Fatal(e);
--					throw new Exception("SendServerAssets failed. See log files.");
--				}
--				if (num++ % 1000 == 999)
--				{
--					Thread.Sleep(5);
--				}
--			}
--			packet_ServerAssets.SetBlocks(list.ToArray());
--			Thread.Sleep(5);
--			List<Packet_ItemType> list2 = new List<Packet_ItemType>();
--			for (int i = 0; i < Items.Count; i++)
--			{
--				Item item = Items[i];
--				if (item != null && !(item.Code == null))
 +				using FastMemoryStream ms = new FastMemoryStream();
 +				Packet_ServerAssets packet_ServerAssets = new Packet_ServerAssets();
 +				List<Packet_BlockType> list = new List<Packet_BlockType>(Blocks.Count);
 +				foreach (Block block in Blocks)
  				{
- 					try
- 					{
--						list2.Add(ItemTypeNet.GetItemTypePacket(item, api.ClassRegistry, ms));
--						item.FreeRAMServer();
+-					Logger.Fatal("Failed networking encoding block {0}:", block.Code);
+-					Logger.Fatal(e);
+-					throw new Exception("SendServerAssets failed. See log files.");
++					try
++					{
 +						list.Add(BlockTypeNet.GetBlockTypePacket(block, api.ClassRegistry, ms));
 +						block.FreeRAMServer();
- 					}
--					catch (Exception e2)
++					}
 +					catch (Exception e)
- 					{
--						Logger.Fatal("Failed network encoding block {0}:", item.Code);
--						Logger.Fatal(e2);
++					{
 +						Logger.Fatal("Failed networking encoding block {0}:", block.Code);
 +						Logger.Fatal(e);
- 						throw new Exception("SendServerAssets failed. See log files.");
- 					}
--					if (i % 1000 == 999)
-+				}
++						throw new Exception("SendServerAssets failed. See log files.");
++					}
+ 				}
+-				if (num++ % 1000 == 999)
 +				packet_ServerAssets.SetBlocks(list.ToArray());
 +				List<Packet_ItemType> list2 = new List<Packet_ItemType>(Items.Count);
 +				for (int i = 0; i < Items.Count; i++)
-+				{
+ 				{
+-					Thread.Sleep(5);
 +					Item item = Items[i];
 +					if (item != null && !(item.Code == null))
- 					{
--						Thread.Sleep(5);
++					{
 +						try
 +						{
 +							list2.Add(ItemTypeNet.GetItemTypePacket(item, api.ClassRegistry, ms));
@@ -241,47 +300,46 @@ index 593f5a4..a197b49 100644
 +							Logger.Fatal(e2);
 +							throw new Exception("SendServerAssets failed. See log files.");
 +						}
- 					}
++					}
  				}
 -			}
--			packet_ServerAssets.SetItems(list2.ToArray());
+-			packet_ServerAssets.SetBlocks(list.ToArray());
 -			Thread.Sleep(5);
--			Packet_EntityType[] array = new Packet_EntityType[EntityTypesByCode.Count];
--			num = 0;
--			foreach (EntityProperties entityType in EntityTypes)
+-			List<Packet_ItemType> list2 = new List<Packet_ItemType>();
+-			for (int i = 0; i < Items.Count; i++)
 -			{
--				try
+-				Item item = Items[i];
+-				if (item != null && !(item.Code == null))
 +				packet_ServerAssets.SetItems(list2.ToArray());
 +				Packet_EntityType[] array = new Packet_EntityType[EntityTypesByCode.Count];
 +				int num = 0;
 +				foreach (EntityProperties entityType in EntityTypes)
  				{
--					array[num++] = EntityTypeNet.EntityPropertiesToPacket(entityType, ms);
--					entityType.Client?.FreeRAMServer();
-+					try
-+					{
+ 					try
+ 					{
+-						list2.Add(ItemTypeNet.GetItemTypePacket(item, api.ClassRegistry, ms));
+-						item.FreeRAMServer();
 +						array[num++] = EntityTypeNet.EntityPropertiesToPacket(entityType, ms);
 +						entityType.Client?.FreeRAMServer();
-+					}
+ 					}
+-					catch (Exception e2)
 +					catch (Exception e3)
-+					{
+ 					{
+-						Logger.Fatal("Failed network encoding block {0}:", item.Code);
+-						Logger.Fatal(e2);
 +						Logger.Fatal("Failed network encoding entity type {0}:", entityType?.Code);
 +						Logger.Fatal(e3);
-+						throw new Exception("SendServerAssets failed. See log files.");
-+					}
- 				}
--				catch (Exception e3)
+ 						throw new Exception("SendServerAssets failed. See log files.");
+ 					}
+-					if (i % 1000 == 999)
++				}
 +				packet_ServerAssets.SetEntities(array);
 +				Packet_Recipes[] array2 = new Packet_Recipes[recipeRegistries.Count];
 +				num = 0;
 +				foreach (KeyValuePair<string, RecipeRegistryBase> recipeRegistry in recipeRegistries)
- 				{
--					Logger.Fatal("Failed network encoding entity type {0}:", entityType?.Code);
--					Logger.Fatal(e3);
--					throw new Exception("SendServerAssets failed. See log files.");
++				{
 +					array2[num++] = RecipesToPacket(recipeRegistry.Value, recipeRegistry.Key, this, ms);
- 				}
--				if (num % 100 == 99)
++				}
 +				packet_ServerAssets.SetRecipes(array2);
 +				Packet_TagRegistry[] array3 = new Packet_TagRegistry[2];
 +				string[] array4 = new string[EntityTagRegistry.nameToTagBitOffset.Count];
@@ -290,8 +348,7 @@ index 593f5a4..a197b49 100644
 +				string key;
 +				ushort value;
 +				foreach (KeyValuePair<string, ushort> item2 in EntityTagRegistry.nameToTagBitOffset)
- 				{
--					Thread.Sleep(5);
++				{
 +					item2.Deconstruct(out key, out value);
 +					string text = key;
 +					ushort num3 = value;
@@ -330,23 +387,46 @@ index 593f5a4..a197b49 100644
 +				Logger.VerboseDebug("Finished building server assets packet");
 +				if (IsDedicatedServer)
 +				{
-+					serverAssetsPacket.Serialize(packet_Server);
-+					if (Config.CompressPackets && serverAssetsPacket.Length > 1460)
++					if (Config.CompressPackets)
+ 					{
+-						Thread.Sleep(5);
++						serverAssetsPacket.CacheCompressedAndRelease(packet_Server, OptimumConfig.CompactServerAssetsEnabled);
+ 					}
++					else
 +					{
-+						byte[] comp = Compression.CompressOffset4(serverAssetsPacket.buffer, serverAssetsPacket.Length);
-+						int compLenSent = comp.Length - 4;
-+						NetIncomingMessage.WriteInt(comp, compLenSent | unchecked((int)0x80000000));
-+						serverAssetsPacket.compressedLengthSent = compLenSent;
-+						serverAssetsPacket.compressedBuffer = comp;
-+						serverAssetsPacket.isCompressedCached = true;
++						serverAssetsPacket.Serialize(packet_Server);
 +					}
 +					serverAssetsPacketBuilt = true;
 +					return;
-+				}
-+				serverAssetsPacket.packet = packet_Server;
-+				serverAssetsPacketBuilt = true;
+ 				}
+-			}
+-			packet_ServerAssets.SetItems(list2.ToArray());
+-			Thread.Sleep(5);
+-			Packet_EntityType[] array = new Packet_EntityType[EntityTypesByCode.Count];
+-			num = 0;
+-			foreach (EntityProperties entityType in EntityTypes)
+-			{
+-				try
++				bool compact = OptimumConfig.CompactServerAssetsEnabled;
++				if (compact)
+ 				{
+-					array[num++] = EntityTypeNet.EntityPropertiesToPacket(entityType, ms);
+-					entityType.Client?.FreeRAMServer();
++					// Serialize and compress into compressedBuffer while this thread holds exclusive ownership
++					serverAssetsPacket.CacheCompressedAndRelease(packet_Server, allowRelease: false);
+ 				}
+-				catch (Exception e3)
++				else
+ 				{
+-					Logger.Fatal("Failed network encoding entity type {0}:", entityType?.Code);
+-					Logger.Fatal(e3);
+-					throw new Exception("SendServerAssets failed. See log files.");
++					serverAssetsPacket.packet = packet_Server;
+ 				}
+-				if (num % 100 == 99)
 +				if (DummyNetConnection.SendServerPacketDirectly(CreatePacketIdentification(controlServerPrivilege: true)))
-+				{
+ 				{
+-					Thread.Sleep(5);
 +					if (DummyNetConnection.SendServerAssetsPacketDirectly(packet_Server))
 +					{
 +						serverAssetsSentLocally = true;
@@ -354,14 +434,13 @@ index 593f5a4..a197b49 100644
 +					}
 +					Logger.VerboseDebug("Single player: sent server assets packet to client");
  				}
- 			}
+-			}
 -			packet_ServerAssets.SetEntities(array);
 -			Thread.Sleep(5);
 -			Packet_Recipes[] array2 = new Packet_Recipes[recipeRegistries.Count];
 -			num = 0;
 -			foreach (KeyValuePair<string, RecipeRegistryBase> recipeRegistry in recipeRegistries)
-+			catch (ThreadAbortException)
- 			{
+-			{
 -				array2[num++] = RecipesToPacket(recipeRegistry.Value, recipeRegistry.Key, this, ms);
 -			}
 -			packet_ServerAssets.SetRecipes(array2);
@@ -420,26 +499,39 @@ index 593f5a4..a197b49 100644
 -			if (DummyNetConnection.SendServerPacketDirectly(CreatePacketIdentification(controlServerPrivilege: true)))
 -			{
 -				if (DummyNetConnection.SendServerAssetsPacketDirectly(packet_Server))
--				{
++				if (compact && serverAssetsSentLocally && serverAssetsPacket.compressedBuffer != null)
+ 				{
 -					serverAssetsSentLocally = true;
 -					worldMetaDataPacketAlreadySentToSinglePlayer = DummyNetConnection.SendServerPacketDirectly(WorldMetaDataPacket());
--				}
++					serverAssetsPacket.ReleaseUncompressedSource();
+ 				}
 -				Logger.VerboseDebug("Single player: sent server assets packet to client");
++				else if (compact)
++				{
++					serverAssetsPacket.packet = packet_Server;
++				}
++				serverAssetsPacketBuilt = true;
  			}
- 		}
--		catch (ThreadAbortException)
++			catch (ThreadAbortException)
++			{
++			}
++		}
 +	}
 +
 +	public void InvalidateServerAssets()
 +	{
 +		if (buildServerAssetsLock == null)
- 		{
-+			Interlocked.CompareExchange(ref buildServerAssetsLock, new object(), null);
-+		}
-+		lock (buildServerAssetsLock)
 +		{
++			Interlocked.CompareExchange(ref buildServerAssetsLock, new object(), null);
+ 		}
+-		catch (ThreadAbortException)
++		lock (buildServerAssetsLock)
+ 		{
 +			serverAssetsPacketBuilt = false;
++			serverAssetsSentLocally = false;
 +			serverAssetsPacket.Invalidate();
  		}
  	}
  
+ 	private static Packet_Recipes RecipesToPacket(RecipeRegistryBase reg, string code, ServerMain world, FastMemoryStream ms)
+ 	{
