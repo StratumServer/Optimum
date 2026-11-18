@@ -132,6 +132,23 @@ public class CecilInjectedFieldInitializerTests
             patch);
         Assert.Contains("positionStack ??= new BlockPos[32];", patch);
         Assert.Contains("vineScratchPos ??= new BlockPos(0);", patch);
+        Assert.DoesNotContain("=>", patch);
+    }
+
+    [Fact]
+    public void ForestFloorSystemScratchFieldsHaveNoInitializer()
+    {
+        string patch = Read("patches/runtime/VSEssentials/Vintagestory/ServerMods/ForestFloorSystem.cs.patch");
+
+        Assert.DoesNotMatch(
+            new Regex(@"floorPosThreadSafe\s*="),
+            patch.Split("floorPosThreadSafe ??=")[0]);
+        Assert.DoesNotMatch(
+            new Regex(@"patchPosThreadSafe\s*="),
+            patch.Split("patchPosThreadSafe ??=")[0]);
+        Assert.Contains("floorPosThreadSafe ??= new BlockPos(pos.dimension);", patch);
+        Assert.Contains("patchPosThreadSafe ??= new BlockPos(pos.dimension);", patch);
+        Assert.DoesNotMatch(new Regex(@"^\+.*=>", RegexOptions.Multiline), patch);
     }
 
     [Fact]

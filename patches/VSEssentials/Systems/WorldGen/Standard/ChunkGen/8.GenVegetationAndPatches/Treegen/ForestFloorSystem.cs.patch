@@ -1,0 +1,250 @@
+diff --git a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/ForestFloorSystem.cs b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/ForestFloorSystem.cs
+index a8451e8..11ee5ad 100644
+--- a/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/ForestFloorSystem.cs
++++ b/VSEssentials/Systems/WorldGen/Standard/ChunkGen/8.GenVegetationAndPatches/Treegen/ForestFloorSystem.cs
+@@ -29,10 +29,16 @@ namespace Vintagestory.ServerMods
+ 
+         // Make the reusable array threadsafe, in case worldgen is ever called from 2 different threads (?background gen, and command execution for regen?)
+         [ThreadStatic]
+         private static short[] outlineThreadSafe;
+ 
++        [ThreadStatic]
++        private static BlockPos floorPosThreadSafe;
++
++        [ThreadStatic]
++        private static BlockPos patchPosThreadSafe;
++
+         int[] forestBlocks;
+ 
+         List<BlockPatch> underTreePatches;
+         List<BlockPatch> onTreePatches;
+ 
+@@ -74,31 +80,35 @@ namespace Vintagestory.ServerMods
+ 
+         internal void ClearOutline()
+         {
+             // Clear the re-usable outline array
+             short[] outline = GetOutline();
+-            for (int i = 0; i < outline.Length; i++) outline[i] = 0;
++            Array.Clear(outline, 0, outline.Length);
+         }
+ 
+         internal void CreateForestFloor(IBlockAccessor blockAccessor, TreeGenConfig config, BlockPos pos, IRandom rnd, int treesInChunkGenerated)
+         {
+             int grassLevelOffset = 0;
+             // More grass coverage for jungles
+             ClimateCondition climate = blockAccessor.GetClimateAt(pos, EnumGetClimateMode.WorldGenValues);
+             if (climate.Temperature > 24 && climate.Rainfall > 160) grassLevelOffset = 2;
+ 
+-            short[] outline = GetOutline();
+-            this.api = blockAccessor;
+-
+             float forestness = climate.ForestDensity * climate.ForestDensity * 4 * (climate.Fertility + 0.25f);
+ 
+ 
+             // Only replace soil with forestFloor in certain climate conditions
+             if (climate.Fertility <= 0.25 || forestness <= 0.4) return;
+ 
++            short[] outline = GetOutline();
++            this.api = blockAccessor;
++
+             // Otherwise adjust the strength of the effect according to forest density and fertility (fertility is higher for tropical forests)
+-            for (int i = 0; i < outline.Length; i++) outline[i] = (short)(outline[i] * forestness + 0.3f);
++            for (int i = 0; i < outline.Length; i++)
++            {
++                short value = outline[i];
++                if (value != 0) outline[i] = (short)(value * forestness + 0.3f);
++            }
+ 
+             // Blend the canopy outline outwards from the center in a way that ensures smoothness
+             for (int pass = 0; pass < 7; pass++)
+             {
+                 bool noChange = true;
+@@ -177,24 +187,29 @@ namespace Vintagestory.ServerMods
+                 }
+                 if (noChange) break;
+             }
+ 
+ 
+-            BlockPos currentPos = new BlockPos(API.Config.Dimensions.NormalWorld);
+-            for (int canopyIndex = 0; canopyIndex < outline.Length; canopyIndex++)
++            BlockPos currentPos = floorPosThreadSafe ??= new BlockPos(pos.dimension);
++            currentPos.dimension = pos.dimension;
++
++            int canopyIndex = 0;
++            for (int dz = -Range; dz <= Range; dz++)
+             {
+-                int intensity = outline[canopyIndex];
+-                if (intensity == 0) continue;
++                int worldZ = pos.Z + dz;
++                for (int dx = -Range; dx <= Range; dx++, canopyIndex++)
++                {
++                    int intensity = outline[canopyIndex];
++                    if (intensity == 0) continue;
+ 
+-                int dz = canopyIndex / GridRowSize - Range;
+-                int dx = canopyIndex % GridRowSize - Range;
+-                currentPos.Set(pos.X + dx, pos.Y, pos.Z + dz);
+-                currentPos.Y = blockAccessor.GetTerrainMapheightAt(currentPos);
++                    currentPos.Set(pos.X + dx, pos.Y, worldZ);
++                    currentPos.Y = blockAccessor.GetTerrainMapheightAt(currentPos);
+ 
+-                if (currentPos.Y - pos.Y < 4)  //Don't place forest floor above approximate height of the canopy of this tree
+-                {
+-                    CheckAndReplaceForestFloor(currentPos, intensity, grassLevelOffset);
++                    if (currentPos.Y - pos.Y < 4)  //Don't place forest floor above approximate height of the canopy of this tree
++                    {
++                        CheckAndReplaceForestFloor(currentPos, intensity, grassLevelOffset);
++                    }
+                 }
+             }
+ 
+             GenPatches(blockAccessor, pos, forestness, config.Treetype, rnd);
+         }
+@@ -204,10 +219,14 @@ namespace Vintagestory.ServerMods
+         private void GenPatches(IBlockAccessor blockAccessor, BlockPos pos, float forestNess, EnumTreeType treetype, IRandom rnd)
+         {
+             var bpc = genPatchesSystem.bpc;
+             int radius = 5;
+             int worldheight = blockAccessor.MapSizeY;
++            IMapRegion mapRegion = null;
++
++            BlockPos patchPos = patchPosThreadSafe ??= new BlockPos(pos.dimension);
++            patchPos.dimension = pos.dimension;
+ 
+             int cnt = underTreePatches?.Count ?? 0;
+             for (int i = 0; i < cnt; i++)
+             {
+                 BlockPatch bPatch = underTreePatches[i];
+@@ -223,30 +242,36 @@ namespace Vintagestory.ServerMods
+                 while (chance-- > rnd.NextFloat())
+                 {
+                     int dx = rnd.NextInt(2 * radius) - radius;
+                     int dz = rnd.NextInt(2 * radius) - radius;
+ 
+-                    tmpPos.Set(pos.X + dx, 0, pos.Z + dz);
++                    patchPos.Set(pos.X + dx, 0, pos.Z + dz);
+ 
+-                    int y = blockAccessor.GetTerrainMapheightAt(tmpPos);
++                    int y = blockAccessor.GetTerrainMapheightAt(patchPos);
+                     if (y <= 0 || y >= worldheight - 8) continue;
+ 
+-                    tmpPos.Y = y;
++                    patchPos.Y = y;
+ 
+-                    var climate = blockAccessor.GetClimateAt(tmpPos, EnumGetClimateMode.WorldGenValues);
++                    var climate = blockAccessor.GetClimateAt(patchPos, EnumGetClimateMode.WorldGenValues);
+                     if (climate == null)
+                     {
+                         continue;
+                     }
+ 
+                     if (bpc.IsPatchSuitableUnderTree(bPatch, worldheight, climate, y))
+                     {
+-                        int regionX = pos.X / blockAccessor.RegionSize;
+-                        int regionZ = pos.Z / blockAccessor.RegionSize;
+-                        if (bPatch.MapCode != null && rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(bPatch.MapCode, tmpPos.X, tmpPos.Z, blockAccessor.GetMapRegion(regionX, regionZ)))
++                        if (bPatch.MapCode != null)
+                         {
+-                            continue;
++                            if (mapRegion == null)
++                            {
++                                int regionSize = blockAccessor.RegionSize;
++                                mapRegion = blockAccessor.GetMapRegion(pos.X / regionSize, pos.Z / regionSize);
++                            }
++                            if (rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(bPatch.MapCode, patchPos.X, patchPos.Z, mapRegion))
++                            {
++                                continue;
++                            }
+                         }
+ 
+                         int firstBlockId = 0;
+                         bool found = true;
+ 
+@@ -254,22 +279,20 @@ namespace Vintagestory.ServerMods
+                         {
+                             found = false;
+                             int dy = 1;
+                             while (dy < 5 && y - dy > 0)
+                             {
+-                                string lastCodePart = blockAccessor.GetBlockBelow(tmpPos, dy, BlockLayersAccess.Solid).LastCodePart();
++                                string lastCodePart = blockAccessor.GetBlockBelow(patchPos, dy, BlockLayersAccess.Solid).LastCodePart();
+                                 if (genPatchesSystem.RockBlockIdsByType.TryGetValue(lastCodePart, out firstBlockId)) { found = true; break; }
+                                 dy++;
+                             }
+                         }
+ 
+                         if (found)
+                         {
+-                            var blockPatchRandom = new LCGRandom(sapi.WorldManager.Seed + i);
+-                            blockPatchRandom.InitPositionSeed(tmpPos.X, tmpPos.Z);
+                             // Pass null - no structure intersection check needed here
+-                            bPatch.Generate(blockAccessor, rnd, tmpPos.X, tmpPos.Y, tmpPos.Z, firstBlockId, null);
++                            bPatch.Generate(blockAccessor, rnd, patchPos.X, patchPos.Y, patchPos.Z, firstBlockId, null);
+                         }
+                     }
+                 }
+             }
+ 
+@@ -288,45 +311,51 @@ namespace Vintagestory.ServerMods
+                 {
+                     int dx = 1 - rnd.NextInt(2) * 2;
+                     int dy = rnd.NextInt(5);
+                     int dz = 1 - rnd.NextInt(2) * 2;
+ 
+-                    tmpPos.Set(pos.X + dx, pos.Y + dy, pos.Z + dz);
++                    patchPos.Set(pos.X + dx, pos.Y + dy, pos.Z + dz);
+ 
+-                    var block = api.GetBlock(tmpPos);
++                    var block = blockAccessor.GetBlock(patchPos);
+                     if (block.Id != 0) continue;
+                     BlockFacing facing = null;
+ 
+                     for (int j = 0; j < 4; j++)
+                     {
+                         var f = BlockFacing.HORIZONTALS[j];
+-                        var nblock = api.GetBlockOnSide(tmpPos, f);
++                        var nblock = blockAccessor.GetBlockOnSide(patchPos, f);
+                         if (nblock is IBlockLog && nblock.Variant["type"] != "resin")
+                         {
+                             facing = f;
+                             break;
+                         }
+                     }
+                     if (facing == null) break;
+ 
+-                    var climate = blockAccessor.GetClimateAt(tmpPos, EnumGetClimateMode.WorldGenValues);
++                    var climate = blockAccessor.GetClimateAt(patchPos, EnumGetClimateMode.WorldGenValues);
+                     if (climate == null)
+                     {
+                         continue;
+                     }
+ 
+-                    if (bpc.IsPatchSuitableUnderTree(blockPatch, worldheight, climate, tmpPos.Y))
++                    if (bpc.IsPatchSuitableUnderTree(blockPatch, worldheight, climate, patchPos.Y))
+                     {
+-                        int regionX = pos.X / blockAccessor.RegionSize;
+-                        int regionZ = pos.Z / blockAccessor.RegionSize;
+-                        if (blockPatch.MapCode != null && rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(blockPatch.MapCode, tmpPos.X, tmpPos.Z, blockAccessor.GetMapRegion(regionX, regionZ)))
++                        if (blockPatch.MapCode != null)
+                         {
+-                            continue;
++                            if (mapRegion == null)
++                            {
++                                int regionSize = blockAccessor.RegionSize;
++                                mapRegion = blockAccessor.GetMapRegion(pos.X / regionSize, pos.Z / regionSize);
++                            }
++                            if (rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(blockPatch.MapCode, patchPos.X, patchPos.Z, mapRegion))
++                            {
++                                continue;
++                            }
+                         }
+ 
+                         int index = rnd.NextInt(blockPatch.Blocks.Length);
+-                        blockPatch.Blocks[index].TryPlaceBlockForWorldGen(blockAccessor, tmpPos, facing, rnd);
++                        blockPatch.Blocks[index].TryPlaceBlockForWorldGen(blockAccessor, patchPos, facing, rnd);
+                     }
+                 }
+             }
+         }
+ 

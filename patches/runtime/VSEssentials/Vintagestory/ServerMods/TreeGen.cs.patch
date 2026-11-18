@@ -1,7 +1,7 @@
-diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
---- a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
-+++ b/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
-@@ -22,6 +22,10 @@ public class TreeGen : ITreeGenerator
+diff --git aa/VSEssentials/Vintagestory/ServerMods/TreeGen.cs bb/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
+--- aa/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
++++ bb/VSEssentials/Vintagestory/ServerMods/TreeGen.cs
+@@ -22,6 +22,24 @@ public class TreeGen : ITreeGenerator
  
  	private readonly ForestFloorSystem forestFloor;
  
@@ -9,10 +9,82 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
 +
 +	private BlockPos[] positionStack;
 +
++	private short[] forestFloorOutline;
++
++	private int lastMossBlockKey;
++
++	private bool lastMossIsWood;
++
++	private int lastDesiredBlockKey;
++
++	private Block lastDesiredBlock;
++
++	private int lastCurrentBlockKey;
++
++	private Block lastCurrentBlock;
++
  	public TreeGen(TreeGenConfig config, int seed, ForestFloorSystem ffs)
  	{
  		this.config = config;
-@@ -76,7 +80,17 @@ public class TreeGen : ITreeGenerator
+@@ -39,22 +57,46 @@ public class TreeGen : ITreeGenerator
+ 		branchesByDepth.Clear();
+ 		branchesByDepth.Add(null);
+ 		branchesByDepth.AddRange(config.branches);
+-		forestFloor.ClearOutline();
+-		TreeGenTrunk treeGenTrunk = config.trunks[0];
+-		float dieAt = Math.Max(0f, treeGenTrunk.dieAt.nextFloat(1f, random));
+-		float trunkWidthLoss = treeGenTrunk.WidthLoss(random);
+-		for (int i = 0; i < trunks.Length; i++)
++		bool skipForestFloor = treeGenParams.skipForestFloor;
++		if (!skipForestFloor)
+ 		{
+-			treeGenTrunk = config.trunks[i];
+-			if (random.NextDouble() <= (double)treeGenTrunk.probability)
++			forestFloor.ClearOutline();
++			forestFloorOutline = forestFloor.GetOutline();
++		}
++		else
++		{
++			forestFloorOutline = null;
++		}
++		lastMossBlockKey = 0;
++		lastDesiredBlockKey = 0;
++		lastCurrentBlockKey = 0;
++		try
++		{
++			TreeGenTrunk treeGenTrunk = config.trunks[0];
++			float dieAt = Math.Max(0f, treeGenTrunk.dieAt.nextFloat(1f, random));
++			float trunkWidthLoss = treeGenTrunk.WidthLoss(random);
++			for (int i = 0; i < trunks.Length; i++)
+ 			{
+-				branchesByDepth[0] = treeGenTrunk;
+-				growBranch(random, 0, pos, treeSubType, treeGenTrunk.dx, 0f, treeGenTrunk.dz, treeGenTrunk.angleVert.nextFloat(1f, random), treeGenTrunk.angleHori.nextFloat(1f, random), size * treeGenTrunk.widthMultiplier, dieAt, trunkWidthLoss, trunks.Length > 1);
++				treeGenTrunk = config.trunks[i];
++				if (random.NextDouble() <= (double)treeGenTrunk.probability)
++				{
++					branchesByDepth[0] = treeGenTrunk;
++					growBranch(random, 0, pos, treeSubType, treeGenTrunk.dx, 0f, treeGenTrunk.dz, treeGenTrunk.angleVert.nextFloat(1f, random), treeGenTrunk.angleHori.nextFloat(1f, random), size * treeGenTrunk.widthMultiplier, dieAt, trunkWidthLoss, trunks.Length > 1);
++				}
++			}
++			if (!skipForestFloor)
++			{
++				forestFloor.CreateForestFloor(ba, config, pos, random, treeGenParams.treesInChunkGenerated);
+ 			}
+ 		}
+-		if (!treeGenParams.skipForestFloor)
++		finally
+ 		{
+-			forestFloor.CreateForestFloor(ba, config, pos, random, treeGenParams.treesInChunkGenerated);
++			forestFloorOutline = null;
++			lastDesiredBlock = null;
++			lastCurrentBlock = null;
++			lastMossBlockKey = 0;
++			lastDesiredBlockKey = 0;
++			lastCurrentBlockKey = 0;
+ 		}
+ 	}
+ 
+@@ -76,7 +118,17 @@ public class TreeGen : ITreeGenerator
  		float num5 = curWidth / num;
  		int num6 = 0;
  		float num7 = 1f / (curWidth / num);
@@ -31,16 +103,97 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
  		while (curWidth > 0f && num6++ < 5000)
  		{
  			curWidth -= num;
-@@ -157,7 +171,7 @@ public class TreeGen : ITreeGenerator
+@@ -157,51 +209,66 @@ public class TreeGen : ITreeGenerator
  	private void PlaceBlockEtc(int blockId, BlockPos currentPos, IRandom rand, float dx, float dz)
  	{
  		blockAccessor.SetBlock(blockId, currentPos);
 -		if (blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood && treeGenParams.mossGrowthChance > 0f && config.treeBlocks.mossDecorBlock != null)
-+		if (treeGenParams.mossGrowthChance > 0f && config.treeBlocks.mossDecorBlock != null && blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood)
++		if (treeGenParams.mossGrowthChance > 0f && config.treeBlocks.mossDecorBlock != null)
  		{
- 			double num = rand.NextDouble();
- 			int num2 = ((treeGenParams.hemisphere != EnumHemisphere.North) ? 2 : 0);
-@@ -201,7 +215,10 @@ public class TreeGen : ITreeGenerator
+-			double num = rand.NextDouble();
+-			int num2 = ((treeGenParams.hemisphere != EnumHemisphere.North) ? 2 : 0);
+-			int num3 = 2;
+-			while (num3 >= 0 && !(num > (double)(treeGenParams.mossGrowthChance * (float)num3)))
++			int mossBlockKey = blockId + 1;
++			if (lastMossBlockKey != mossBlockKey)
++			{
++				lastMossBlockKey = mossBlockKey;
++				lastMossIsWood = blockAccessor.GetBlock(blockId).BlockMaterial == EnumBlockMaterial.Wood;
++			}
++			if (lastMossIsWood)
+ 			{
+-				BlockFacing blockFacing = BlockFacing.HORIZONTALS[num2 % 4];
+-				if (!blockAccessor.GetBlockOnSide(currentPos, blockFacing).SideSolid[blockFacing.Opposite.Index])
++				double num = rand.NextDouble();
++				int num2 = ((treeGenParams.hemisphere != EnumHemisphere.North) ? 2 : 0);
++				int num3 = 2;
++				while (num3 >= 0 && !(num > (double)(treeGenParams.mossGrowthChance * (float)num3)))
+ 				{
+-					blockAccessor.SetDecor(config.treeBlocks.mossDecorBlock, currentPos, blockFacing);
++					BlockFacing blockFacing = BlockFacing.HORIZONTALS[num2 % 4];
++					if (!blockAccessor.GetBlockOnSide(currentPos, blockFacing).SideSolid[blockFacing.Opposite.Index])
++					{
++						blockAccessor.SetDecor(config.treeBlocks.mossDecorBlock, currentPos, blockFacing);
++					}
++					num2 += rand.NextInt(4);
++					num3--;
+ 				}
+-				num2 += rand.NextInt(4);
+-				num3--;
+-			}
+-		}
+-		int num4 = (int)(dz + 16f);
+-		int num5 = (int)(dx + 16f);
+-		if (num4 > 1 && num4 < 31 && num5 > 1 && num5 < 31)
+-		{
+-			short[] outline = forestFloor.GetOutline();
+-			int num6 = num4 * 33 + num5;
+-			outline[num6 - 66 - 2]++;
+-			outline[num6 - 66 - 1]++;
+-			outline[num6 - 66]++;
+-			outline[num6 - 66 + 1]++;
+-			outline[num6 - 66 + 2]++;
+-			outline[num6 - 33 - 2]++;
+-			outline[num6 - 33 - 1] += 2;
+-			outline[num6 - 33] += 2;
+-			outline[num6 - 33 + 1] += 2;
+-			outline[num6 - 33 + 2]++;
+-			outline[num6 - 2]++;
+-			outline[num6 - 1] += 2;
+-			outline[num6] += 3;
+-			outline[num6 + 1] += 2;
+-			outline[num6 + 2]++;
+-			outline[num6 + 33]++;
++			}
++		}
++		if (!treeGenParams.skipForestFloor)
++		{
++			int num4 = (int)(dz + 16f);
++			int num5 = (int)(dx + 16f);
++			if (num4 > 1 && num4 < 31 && num5 > 1 && num5 < 31)
++			{
++				short[] outline = forestFloorOutline ?? forestFloor.GetOutline();
++				int num6 = num4 * 33 + num5;
++				outline[num6 - 66 - 2]++;
++				outline[num6 - 66 - 1]++;
++				outline[num6 - 66]++;
++				outline[num6 - 66 + 1]++;
++				outline[num6 - 66 + 2]++;
++				outline[num6 - 33 - 2]++;
++				outline[num6 - 33 - 1] += 2;
++				outline[num6 - 33] += 2;
++				outline[num6 - 33 + 1] += 2;
++				outline[num6 - 33 + 2]++;
++				outline[num6 - 2]++;
++				outline[num6 - 1] += 2;
++				outline[num6] += 3;
++				outline[num6 + 1] += 2;
++				outline[num6 + 2]++;
++				outline[num6 + 33]++;
++			}
+ 		}
+ 		if (!(treeGenParams.vinesGrowthChance > 0f) || !(rand.NextDouble() < (double)treeGenParams.vinesGrowthChance) || config.treeBlocks.vinesBlock == null)
+ 		{
  			return;
  		}
  		BlockFacing blockFacing2 = BlockFacing.HORIZONTALS[rand.NextInt(4)];
@@ -52,3 +205,36 @@ diff --git a/VSEssentials/Vintagestory/ServerMods/TreeGen.cs b/VSEssentials/Vint
  		float num7 = 1f + (float)rand.NextInt(11) * (treeGenParams.vinesGrowthChance + 0.2f);
  		while (blockAccessor.GetBlockId(blockPos) == 0 && num7-- > 0f)
  		{
+@@ -235,8 +302,30 @@ public class TreeGen : ITreeGenerator
+ 			return PlaceResumeState.CanPlace;
+ 		default:
+ 		{
+-			Block block = blockAccessor.GetBlock(blockId);
+-			Block block2 = blockAccessor.GetBlock(desiredblockId);
++			int num = blockId + 1;
++			Block block;
++			if (lastCurrentBlockKey == num && num > 0)
++			{
++				block = lastCurrentBlock;
++			}
++			else
++			{
++				block = blockAccessor.GetBlock(blockId);
++				lastCurrentBlockKey = num;
++				lastCurrentBlock = block;
++			}
++			int num2 = desiredblockId + 1;
++			Block block2;
++			if (lastDesiredBlockKey == num2 && num2 > 0)
++			{
++				block2 = lastDesiredBlock;
++			}
++			else
++			{
++				block2 = blockAccessor.GetBlock(desiredblockId);
++				lastDesiredBlockKey = num2;
++				lastDesiredBlock = block2;
++			}
+ 			if ((block.Fertility == 0 || block2.BlockMaterial != EnumBlockMaterial.Wood) && block.BlockMaterial != EnumBlockMaterial.Leaves && block.Replaceable < 6000 && !wideTrunk && !config.treeBlocks.blockIds.Contains(block.BlockId))
+ 			{
+ 				return PlaceResumeState.Stop;
