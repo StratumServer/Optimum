@@ -1,10 +1,13 @@
 using System;
 using System.Buffers;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Datastructures;
@@ -1421,5 +1424,52 @@ public static class OptimumApiBridge
                 capi.Logger?.Debug("Texture with texture id {0} is leaking memory, missing call to Dispose. Allocated at {1}.", id, trace);
             }
         }
+    }
+
+    private static readonly JsonLoadSettings IgnoreJsonLineInfoSettings = new()
+    {
+        LineInfoHandling = LineInfoHandling.Ignore,
+    };
+
+    public static JToken ParseJsonToken(string json)
+    {
+        return OptimumConfig.EffectiveIgnoreJsonLineInfo
+            ? JToken.Parse(json, IgnoreJsonLineInfoSettings)
+            : JToken.Parse(json);
+    }
+
+    public static JObject ParseJsonObject(string json)
+    {
+        return OptimumConfig.EffectiveIgnoreJsonLineInfo
+            ? JObject.Parse(json, IgnoreJsonLineInfoSettings)
+            : JObject.Parse(json);
+    }
+
+    public static JToken ReadJsonToken(JsonReader reader)
+    {
+        return OptimumConfig.EffectiveIgnoreJsonLineInfo
+            ? JToken.ReadFrom(reader, IgnoreJsonLineInfoSettings)
+            : JToken.ReadFrom(reader);
+    }
+
+    public static object? TryLoadJsonNoLineInfo(string text, Type targetType, JsonSerializerSettings? settings)
+    {
+        if (settings != null || !OptimumConfig.EffectiveIgnoreJsonLineInfo)
+        {
+            return null;
+        }
+        if (targetType == typeof(JObject))
+        {
+            using var sr = new StringReader(text);
+            using var jr = new JsonTextReader(sr);
+            return JObject.Load(jr, IgnoreJsonLineInfoSettings);
+        }
+        if (targetType == typeof(JToken))
+        {
+            using var sr = new StringReader(text);
+            using var jr = new JsonTextReader(sr);
+            return JToken.Load(jr, IgnoreJsonLineInfoSettings);
+        }
+        return null;
     }
 }

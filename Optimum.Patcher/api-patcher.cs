@@ -248,6 +248,8 @@ public static class ApiPatcher
         int materializationObserver = PatchMaterializationObserver(vanilla.MainModule, contracts.MainModule, cairo.MainModule);
         int queuedGuiContexts = PatchQueuedGuiContexts(vanilla.MainModule, contracts.MainModule);
         if (queuedGuiContexts != 4) throw new InvalidOperationException($"Expected 4 queued GUI context handoffs, applied {queuedGuiContexts}.");
+        int jsonLineInfoPatches = PatchJsonLineInfo(vanilla.MainModule, contracts.MainModule);
+        if (jsonLineInfoPatches != 8) throw new InvalidOperationException($"Expected 8 JSON LineInfo patches, applied {jsonLineInfoPatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -3727,5 +3729,71 @@ public static class ApiPatcher
         if (count > 0)
             Console.WriteLine($"  API PATCHED: {count} type forward(s) to {contractsName.Name}");
         return count;
+    }
+
+    internal static int PatchJsonLineInfo(ModuleDefinition module, ModuleDefinition contracts)
+    {
+        var bridge = contracts.GetType("Vintagestory.API.Config.OptimumApiBridge")
+            ?? throw new InvalidOperationException("OptimumApiBridge is missing from the contracts assembly.");
+        var parseTokenRef = module.ImportReference(bridge.Methods.Single(m =>
+            m.IsStatic && m.Name == "ParseJsonToken" && m.Parameters.Count == 1));
+        var readTokenRef = module.ImportReference(bridge.Methods.Single(m =>
+            m.IsStatic && m.Name == "ReadJsonToken" && m.Parameters.Count == 1));
+
+        int patched = 0;
+
+        var parseTargets = new (string TypeName, string MethodName, int ParamCount)[]
+        {
+            ("Vintagestory.API.Datastructures.JsonObject", "FromJson", 1),
+            ("Vintagestory.API.Common.CraftingRecipeIngredient", "FromBytes", 2),
+            ("Vintagestory.API.Common.RecipeBase", "FromBytes", 2),
+            ("Vintagestory.API.Common.JsonItemStack", "FromBytes", 2),
+            ("Vintagestory.API.Common.AnimationMetaData", "FromBytes", 2),
+            ("Vintagestory.API.Datastructures.TreeAttribute", "FromJson", 1),
+        };
+
+        foreach (var spec in parseTargets)
+        {
+            var type = module.GetType(spec.TypeName)
+                ?? throw new InvalidOperationException($"{spec.TypeName} is missing from the vanilla API.");
+            var methods = type.Methods.Where(m =>
+                m.Name == spec.MethodName && m.Parameters.Count == spec.ParamCount && m.HasBody).ToList();
+            if (methods.Count == 0)
+                throw new InvalidOperationException($"{spec.TypeName}.{spec.MethodName} is missing.");
+
+            foreach (var method in methods)
+            {
+                foreach (var instr in method.Body.Instructions)
+                {
+                    if (instr.OpCode == OpCodes.Call && instr.Operand is MethodReference mr
+                        && mr.DeclaringType.FullName == "Newtonsoft.Json.Linq.JToken"
+                        && mr.Name == "Parse"
+                        && mr.Parameters.Count == 1
+                        && mr.Parameters[0].ParameterType.MetadataType == MetadataType.String)
+                    {
+                        instr.Operand = parseTokenRef;
+                        patched++;
+                    }
+                }
+            }
+        }
+
+        var converterType = module.GetType("Vintagestory.API.Common.JsonAttributesConverter")
+            ?? throw new InvalidOperationException("JsonAttributesConverter is missing from the vanilla API.");
+        var readJsonMethod = converterType.Methods.SingleOrDefault(m => m.Name == "ReadJson" && m.HasBody)
+            ?? throw new InvalidOperationException("JsonAttributesConverter.ReadJson is missing.");
+        foreach (var instr in readJsonMethod.Body.Instructions)
+        {
+            if (instr.OpCode == OpCodes.Call && instr.Operand is MethodReference mr
+                && mr.DeclaringType.FullName == "Newtonsoft.Json.Linq.JToken"
+                && mr.Name == "ReadFrom"
+                && mr.Parameters.Count == 1)
+            {
+                instr.Operand = readTokenRef;
+                patched++;
+            }
+        }
+
+        return patched;
     }
 }

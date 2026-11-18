@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Common/Crafting/CraftingRecipeIngredient.cs b/VintagestoryApi/Common/Crafting/CraftingRecipeIngredient.cs
+index 617453f..2449ed1 100644
+--- a/VintagestoryApi/Common/Crafting/CraftingRecipeIngredient.cs
++++ b/VintagestoryApi/Common/Crafting/CraftingRecipeIngredient.cs
+@@ -525,11 +525,11 @@ public class CraftingRecipeIngredient : IRecipeIngredient, IRecipeOutput
+             ReturnedStack = returnedStack;
+         }
+ 
+         if (reader.ReadBoolean())
+         {
+-            RecipeAttributes = new JsonObject(JToken.Parse(reader.ReadString()));
++            RecipeAttributes = new JsonObject(Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(reader.ReadString()));
+         }
+ 
+         Id = reader.ReadString().DeDuplicate();
+ 
+         Tags = ComplexTagConditionExtensions.FromBytes(reader);

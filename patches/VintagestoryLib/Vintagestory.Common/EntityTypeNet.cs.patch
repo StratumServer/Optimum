@@ -1,0 +1,30 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/EntityTypeNet.cs b/VintagestoryLib/Vintagestory.Common/EntityTypeNet.cs
+index bb04560..2b351be 100644
+--- a/VintagestoryLib/Vintagestory.Common/EntityTypeNet.cs
++++ b/VintagestoryLib/Vintagestory.Common/EntityTypeNet.cs
+@@ -110,11 +110,11 @@ public static class EntityTypeNet
+ 	public static EntityProperties FromPacket(Packet_EntityType packet, IWorldAccessor worldForResolve)
+ 	{
+ 		JsonObject[] array = new JsonObject[packet.BehaviorsCount];
+ 		for (int i = 0; i < array.Length; i++)
+ 		{
+-			array[i] = new JsonObject(JToken.Parse(packet.Behaviors[i].Attributes));
++			array[i] = new JsonObject(Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(packet.Behaviors[i].Attributes));
+ 		}
+ 		Dictionary<string, SoundAttributes> dictionary = new Dictionary<string, SoundAttributes>();
+ 		if (packet.SoundKeys != null)
+ 		{
+ 			for (int j = 0; j < packet.SoundKeysCount; j++)
+@@ -143,11 +143,11 @@ public static class EntityTypeNet
+ 			},
+ 			CollisionBoxSize = new Vec2f((float)CollectibleNet.DeserializePlayerPos(packet.CollisionBoxLength), (float)CollectibleNet.DeserializePlayerPos(packet.CollisionBoxHeight)),
+ 			DeadCollisionBoxSize = new Vec2f((float)CollectibleNet.DeserializePlayerPos(packet.DeadCollisionBoxLength), (float)CollectibleNet.DeserializePlayerPos(packet.DeadCollisionBoxHeight)),
+ 			SelectionBoxSize = new Vec2f(CollectibleNet.DeserializeFloatPrecise(packet.SelectionBoxLength), CollectibleNet.DeserializeFloatPrecise(packet.SelectionBoxHeight)),
+ 			DeadSelectionBoxSize = new Vec2f(CollectibleNet.DeserializeFloatPrecise(packet.DeadSelectionBoxLength), CollectibleNet.DeserializeFloatPrecise(packet.DeadSelectionBoxHeight)),
+-			Attributes = ((packet.Attributes == null) ? null : new JsonObject(JToken.Parse(packet.Attributes))),
++			Attributes = ((packet.Attributes == null) ? null : new JsonObject(Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(packet.Attributes))),
+ 			Sounds = dictionary,
+ 			IdleSoundChance = CollectibleNet.DeserializeFloatPrecise(packet.IdleSoundChance) / 100f,
+ 			EyeHeight = CollectibleNet.DeserializeFloatPrecise(packet.EyeHeight),
+ 			SwimmingEyeHeight = CollectibleNet.DeserializeFloatPrecise(packet.SwimmingEyeHeight),
+ 			Weight = CollectibleNet.DeserializeFloatPrecise(packet.Weight),

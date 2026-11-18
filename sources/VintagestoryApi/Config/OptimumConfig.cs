@@ -752,6 +752,25 @@ public static class OptimumConfig
     public static bool LegacySsboMigrationEnabled = true;
     public static bool LegacySsboMigrated = false;
 
+    // Issue #635: Skip Newtonsoft.Json LineInfoAnnotation allocation in Aggressive RAM mode
+    // when DeveloperMode is off.
+    public static bool IgnoreJsonLineInfoEnabled = true;
+    private static int clientOptimizeRamMode;
+    private static int clientDeveloperMode;
+
+    public static int ClientOptimizeRamMode => Volatile.Read(ref clientOptimizeRamMode);
+    public static bool ClientDeveloperMode => Volatile.Read(ref clientDeveloperMode) != 0;
+    public static bool EffectiveIgnoreJsonLineInfo =>
+        IgnoreJsonLineInfoEnabled
+        && Volatile.Read(ref clientOptimizeRamMode) == 2
+        && Volatile.Read(ref clientDeveloperMode) == 0;
+
+    public static void SetClientJsonLineInfoState(int optimizeRamMode, bool developerMode)
+    {
+        Volatile.Write(ref clientOptimizeRamMode, optimizeRamMode);
+        Volatile.Write(ref clientDeveloperMode, developerMode ? 1 : 0);
+    }
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)
@@ -1519,6 +1538,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.SsaoDepthPosition), SsaoDepthPositionEnabled.ToString()),
         (nameof(OptimumConfigData.LegacySsboMigration), LegacySsboMigrationEnabled.ToString()),
         (nameof(OptimumConfigData.LegacySsboMigrated), LegacySsboMigrated.ToString()),
+        (nameof(OptimumConfigData.IgnoreJsonLineInfo), IgnoreJsonLineInfoEnabled.ToString()),
     };
 
     /// <summary>
@@ -1652,6 +1672,7 @@ public static class OptimumConfig
             SsaoDepthPositionEnabled = data.SsaoDepthPosition;
             LegacySsboMigrationEnabled = data.LegacySsboMigration;
             LegacySsboMigrated = data.LegacySsboMigrated;
+            IgnoreJsonLineInfoEnabled = data.IgnoreJsonLineInfo;
         }
         catch (Exception)
         {
@@ -1748,6 +1769,7 @@ public static class OptimumConfig
             SsaoDepthPosition = SsaoDepthPositionEnabled,
             LegacySsboMigration = LegacySsboMigrationEnabled,
             LegacySsboMigrated = LegacySsboMigrated,
+            IgnoreJsonLineInfo = IgnoreJsonLineInfoEnabled,
         };
 
         try
@@ -1868,6 +1890,7 @@ internal sealed class OptimumConfigData
     public bool SsaoDepthPosition { get; set; } = true;
     public bool LegacySsboMigration { get; set; } = true;
     public bool LegacySsboMigrated { get; set; } = false;
+    public bool IgnoreJsonLineInfo { get; set; } = true;
 }
 
 public static class OptimumDiagnostics

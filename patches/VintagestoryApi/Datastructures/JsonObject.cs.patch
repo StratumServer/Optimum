@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Datastructures/JsonObject.cs b/VintagestoryApi/Datastructures/JsonObject.cs
+index 8e83424..9703025 100644
+--- a/VintagestoryApi/Datastructures/JsonObject.cs
++++ b/VintagestoryApi/Datastructures/JsonObject.cs
+@@ -18,11 +18,11 @@ namespace Vintagestory.API.Datastructures
+     {
+         JToken? token;
+ 
+         public static JsonObject FromJson(string jsonCode)
+         {
+-            return new JsonObject(JToken.Parse(jsonCode));
++            return new JsonObject(OptimumApiBridge.ParseJsonToken(jsonCode));
+         }
+ 
+         /// <summary>
+         /// Create a new instance of a JsonObject
+         /// </summary>

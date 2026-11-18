@@ -1277,6 +1277,10 @@ var targets = new List<MethodTarget>
     // Issue #469: deduplicate consecutive JToken.Parse calls via DeepClone fast path
     new("Vintagestory.Common.BlockTypeNet", "ReadBlockTypePacket", 3),
     new("Vintagestory.Common.ItemTypeNet", "ReadItemTypePacket", 3),
+    // Issue #635: skip JSON LineInfo retention when Aggressive RAM mode is on and DeveloperMode is off
+    new("Vintagestory.Client.NoObf.ClientSettings", "set_OptimizeRamMode", 1),
+    new("Vintagestory.Client.NoObf.ClientSettings", "set_DeveloperMode", 1),
+    new("Vintagestory.Common.EntityTypeNet", "FromPacket", 2),
     // Issue #529: fallback to command name on missing description to prevent mod initialization crashes
     new("Vintagestory.Common.ChatCommandImpl", "ValidateRecursive", 0),
     // SvgLoader: ship the eligible GPU SVG recorder routes and reload SVG asset

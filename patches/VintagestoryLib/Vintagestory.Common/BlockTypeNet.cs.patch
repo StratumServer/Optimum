@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs b/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
-index 4228b4b..0fcb468 100644
+index 4228b4b..e9ac72d 100644
 --- a/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
 +++ b/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs
 @@ -12,10 +12,37 @@ using Vintagestory.Common.Datastructures;
@@ -31,7 +31,7 @@ index 4228b4b..0fcb468 100644
 +			return new JsonObject(lastParsedAttributesToken.DeepClone());
 +		}
 +		lastAttributesJson = json;
-+		lastParsedAttributesToken = JToken.Parse(json);
++		lastParsedAttributesToken = Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(json);
 +		return new JsonObject(lastParsedAttributesToken.DeepClone());
 +	}
 +

@@ -61,5 +61,9 @@
       <HintPath>..\.vanilla\win-x64\vintagestory\VintagestoryAPI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
