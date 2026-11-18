@@ -639,6 +639,113 @@ public sealed class AudioPcmLifecycleTests
         MethodDefinition handover = guiRunning.Methods.Single(m => m.Name == "handOverRenderingToRunningGame");
         Assert.Contains(handover.Body.Instructions,
             ins => ins.Operand is MethodReference mr && mr.Name == "StopAndDisposeIntroMusic");
+
+        TypeDefinition screenMgr = mod.GetType("Vintagestory.Client.ScreenManager");
+        MethodDefinition loadSoundsSlow = screenMgr.Methods.Single(m => m.Name == "LoadSoundsSlow");
+        Assert.Contains(loadSoundsSlow.Body.Instructions,
+            ins => ins.Operand is MethodReference mr && mr.Name == "get_OptimizeRamMode");
+    }
+
+    [Fact]
+    public void Issue643_AggressiveOptimizeSkipsPriorityAndSecondarySoundPredecoding()
+    {
+        string dripPath = FindVanillaOggAsset(
+            ".vanilla/linux-x64/vintagestory/assets/survival/sounds/environment/drip1.ogg",
+            ".vanilla/win-x64/vintagestory/assets/survival/sounds/environment/drip1.ogg");
+        string windPath = FindVanillaOggAsset(
+            ".vanilla/linux-x64/vintagestory/assets/game/sounds/environment/wind.ogg",
+            ".vanilla/win-x64/vintagestory/assets/game/sounds/environment/wind.ogg");
+        Assert.NotNull(dripPath);
+        Assert.NotNull(windPath);
+
+        byte[] dripBytes = File.ReadAllBytes(dripPath);
+        byte[] windBytes = File.ReadAllBytes(windPath);
+
+        string tempDataPath = Path.Combine(Path.GetTempPath(), "optimum-audio-643-test-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDataPath);
+        string prevDataPath = GamePaths.DataPath;
+        ClientPlatformAbstract prevPlatform = ScreenManager.Platform;
+        int prevRamMode = ClientSettings.OptimizeRamMode;
+        bool prevAsyncComplete = ScreenManager.AsyncSoundLoadComplete;
+
+        try
+        {
+            GamePaths.DataPath = tempDataPath;
+            ScreenManager.Platform = new ClientPlatformWindows(null);
+            ClientMain fakeGame = (ClientMain)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(ClientMain));
+
+            var prioShortAsset = new ReloadableOggAsset(new AssetLocation("game", "sounds/environment/drip1.ogg"), dripBytes, startLoaded: false);
+            var prioLongAsset = new ReloadableOggAsset(new AssetLocation("game", "sounds/environment/wind.ogg"), windBytes, startLoaded: false);
+            var regularShortAsset = new ReloadableOggAsset(new AssetLocation("game", "sounds/blocks/dirt.ogg"), dripBytes, startLoaded: false);
+
+            var prioShortMeta = new AudioMetaData(prioShortAsset) { Loaded = 0 };
+            var prioLongMeta = new AudioMetaData(prioLongAsset) { Loaded = 0 };
+            var regularShortMeta = new AudioMetaData(regularShortAsset) { Loaded = 0 };
+
+            // Mode 2 (AggressiveOptimize): skip BOTH pass 1 (<5s priority) and pass 2, plus header scans.
+            ScreenManager.soundAudioDataAsyncLoadTemp.Clear();
+            ScreenManager.soundAudioDataAsyncLoadTemp[prioShortAsset.Location] = prioShortMeta;
+            ScreenManager.soundAudioDataAsyncLoadTemp[prioLongAsset.Location] = prioLongMeta;
+            ScreenManager.soundAudioDataAsyncLoadTemp[regularShortAsset.Location] = regularShortMeta;
+            ScreenManager.AsyncSoundLoadComplete = false;
+            ClientSettings.OptimizeRamMode = (int)EnumOptimizeRamMode.AggressiveOptimize;
+
+            ScreenManager.LoadSoundsSlow(fakeGame);
+
+            Assert.True(ScreenManager.AsyncSoundLoadComplete);
+            Assert.Empty(ScreenManager.soundAudioDataAsyncLoadTemp);
+            Assert.Equal(0, prioShortMeta.Loaded);
+            Assert.Null(prioShortMeta.Pcm);
+            Assert.Equal(0, prioShortAsset.LoadCalls);
+            Assert.Equal(0, prioLongMeta.Loaded);
+            Assert.Null(prioLongMeta.Pcm);
+            Assert.Equal(0, prioLongAsset.LoadCalls);
+            Assert.Equal(0, regularShortMeta.Loaded);
+            Assert.Null(regularShortMeta.Pcm);
+            Assert.Equal(0, regularShortAsset.LoadCalls);
+
+            // On-demand playback still decodes clean PCM and releases managed PCM on upload.
+            Assert.True(prioShortMeta.Load());
+            Assert.Equal(2, prioShortMeta.Loaded);
+            Assert.NotNull(prioShortMeta.Pcm);
+            Assert.Equal(1, prioShortAsset.LoadCalls);
+
+            // Mode 1 (Optimize): still predecodes <5s priority + regular sounds while skipping >=5s priority sound.
+            var prioShortMode1Asset = new ReloadableOggAsset(new AssetLocation("game", "sounds/environment/drip1.ogg"), dripBytes, startLoaded: false);
+            var prioLongMode1Asset = new ReloadableOggAsset(new AssetLocation("game", "sounds/environment/wind.ogg"), windBytes, startLoaded: false);
+            var regularShortMode1Asset = new ReloadableOggAsset(new AssetLocation("game", "sounds/blocks/dirt.ogg"), dripBytes, startLoaded: false);
+
+            var prioShortMode1Meta = new AudioMetaData(prioShortMode1Asset) { Loaded = 0 };
+            var prioLongMode1Meta = new AudioMetaData(prioLongMode1Asset) { Loaded = 0 };
+            var regularShortMode1Meta = new AudioMetaData(regularShortMode1Asset) { Loaded = 0 };
+
+            ScreenManager.soundAudioDataAsyncLoadTemp.Clear();
+            ScreenManager.soundAudioDataAsyncLoadTemp[prioShortMode1Asset.Location] = prioShortMode1Meta;
+            ScreenManager.soundAudioDataAsyncLoadTemp[prioLongMode1Asset.Location] = prioLongMode1Meta;
+            ScreenManager.soundAudioDataAsyncLoadTemp[regularShortMode1Asset.Location] = regularShortMode1Meta;
+            ScreenManager.AsyncSoundLoadComplete = false;
+            ClientSettings.OptimizeRamMode = (int)EnumOptimizeRamMode.Optimize;
+
+            ScreenManager.LoadSoundsSlow(fakeGame);
+
+            Assert.True(ScreenManager.AsyncSoundLoadComplete);
+            Assert.Empty(ScreenManager.soundAudioDataAsyncLoadTemp);
+            Assert.Equal(2, prioShortMode1Meta.Loaded);
+            Assert.NotNull(prioShortMode1Meta.Pcm);
+            Assert.Equal(0, prioLongMode1Meta.Loaded);
+            Assert.Null(prioLongMode1Meta.Pcm);
+            Assert.Equal(2, regularShortMode1Meta.Loaded);
+            Assert.NotNull(regularShortMode1Meta.Pcm);
+        }
+        finally
+        {
+            ScreenManager.soundAudioDataAsyncLoadTemp.Clear();
+            ScreenManager.AsyncSoundLoadComplete = prevAsyncComplete;
+            ClientSettings.OptimizeRamMode = prevRamMode;
+            ScreenManager.Platform = prevPlatform;
+            GamePaths.DataPath = prevDataPath;
+            try { Directory.Delete(tempDataPath, recursive: true); } catch { }
+        }
     }
 #endif
 }

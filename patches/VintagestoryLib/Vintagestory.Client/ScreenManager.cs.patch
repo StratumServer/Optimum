@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
-index b5000e7..1cdaa36 100644
+index b5000e7..a7d088d 100644
 --- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 @@ -38,10 +38,12 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
@@ -31,7 +31,31 @@ index b5000e7..1cdaa36 100644
  
  	public static void LoadSoundsSlow_Async(ClientMain game)
  	{
-@@ -444,10 +449,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -435,19 +440,38 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 		}
+ 	}
+ 
+ 	public static void LoadSoundsSlow(ClientMain game)
+ 	{
++		if (game != null && game.disposed)
++		{
++			soundAudioDataAsyncLoadTemp.Clear();
++			return;
++		}
++		if (ClientSettings.OptimizeRamMode >= 2)
++		{
++			AsyncSoundLoadComplete = true;
++			soundAudioDataAsyncLoadTemp.Clear();
++			return;
++		}
++		if (game == null)
++		{
++			return;
++		}
+ 		bool extendedDebugInfo = ClientSettings.ExtendedDebugInfo;
+ 		foreach (KeyValuePair<AssetLocation, AudioData> item in soundAudioDataAsyncLoadTemp)
+ 		{
+ 			if (game.disposed)
  			{
  				return;
  			}
@@ -46,7 +70,7 @@ index b5000e7..1cdaa36 100644
  					Platform.Logger.VerboseDebug("Load sound asset " + item.Key.ToShortString());
  				}
  				item.Value.Load();
-@@ -466,10 +475,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -466,10 +490,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  			{
  				return;
  			}
@@ -61,7 +85,7 @@ index b5000e7..1cdaa36 100644
  					Platform.Logger.VerboseDebug("Load sound asset " + item2.Key);
  				}
  				item2.Value.Load();
-@@ -481,42 +494,127 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -481,42 +509,127 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  			}
  		}
  		soundAudioDataAsyncLoadTemp.Clear();
@@ -198,7 +222,7 @@ index b5000e7..1cdaa36 100644
  	public void loadMods()
  	{
  		List<string> list = new List<string>(ClientSettings.ModPaths);
-@@ -704,10 +802,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -704,10 +817,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  		}, code);
  	}
  
@@ -213,7 +237,7 @@ index b5000e7..1cdaa36 100644
  		Platform.GlViewport(0, 0, width, height);
  		Platform.ClearFrameBuffer(EnumFrameBuffer.Default);
  		Platform.ClearFrameBuffer(EnumFrameBuffer.Primary);
-@@ -1051,30 +1153,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -1051,30 +1168,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  	public static void PlaySound(string name)
  	{
  		PlaySound(new AssetLocation("sounds/" + name).WithPathAppendixOnce(".ogg"));
