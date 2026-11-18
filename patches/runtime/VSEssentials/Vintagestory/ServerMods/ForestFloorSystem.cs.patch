@@ -1,0 +1,206 @@
+diff --git aa/VSEssentials/Vintagestory/ServerMods/ForestFloorSystem.cs bb/VSEssentials/Vintagestory/ServerMods/ForestFloorSystem.cs
+--- aa/VSEssentials/Vintagestory/ServerMods/ForestFloorSystem.cs
++++ bb/VSEssentials/Vintagestory/ServerMods/ForestFloorSystem.cs
+@@ -23,6 +23,12 @@ public class ForestFloorSystem
+ 	[ThreadStatic]
+ 	private static short[] outlineThreadSafe;
+ 
++	[ThreadStatic]
++	private static BlockPos floorPosThreadSafe;
++
++	[ThreadStatic]
++	private static BlockPos patchPosThreadSafe;
++
+ 	private int[] forestBlocks;
+ 
+ 	private List<BlockPatch> underTreePatches;
+@@ -67,10 +73,7 @@ public class ForestFloorSystem
+ 	internal void ClearOutline()
+ 	{
+ 		short[] outline = GetOutline();
+-		for (int i = 0; i < outline.Length; i++)
+-		{
+-			outline[i] = 0;
+-		}
++		Array.Clear(outline, 0, outline.Length);
+ 	}
+ 
+ 	internal void CreateForestFloor(IBlockAccessor blockAccessor, TreeGenConfig config, BlockPos pos, IRandom rnd, int treesInChunkGenerated)
+@@ -81,16 +84,20 @@ public class ForestFloorSystem
+ 		{
+ 			grassLevelOffset = 2;
+ 		}
+-		short[] outline = GetOutline();
+-		api = blockAccessor;
+ 		float num = climateAt.ForestDensity * climateAt.ForestDensity * 4f * (climateAt.Fertility + 0.25f);
+ 		if ((double)climateAt.Fertility <= 0.25 || (double)num <= 0.4)
+ 		{
+ 			return;
+ 		}
++		short[] outline = GetOutline();
++		api = blockAccessor;
+ 		for (int i = 0; i < outline.Length; i++)
+ 		{
+-			outline[i] = (short)((float)outline[i] * num + 0.3f);
++			short num2 = outline[i];
++			if (num2 != 0)
++			{
++				outline[i] = (short)((float)num2 * num + 0.3f);
++			}
+ 		}
+ 		for (int j = 0; j < 7; j++)
+ 		{
+@@ -175,19 +182,23 @@ public class ForestFloorSystem
+ 				break;
+ 			}
+ 		}
+-		BlockPos blockPos = new BlockPos(0);
+-		for (int n = 0; n < outline.Length; n++)
++		BlockPos blockPos = floorPosThreadSafe ??= new BlockPos(pos.dimension);
++		blockPos.dimension = pos.dimension;
++		int canopyIndex = 0;
++		for (int n = -16; n <= 16; n++)
+ 		{
+-			int num10 = outline[n];
+-			if (num10 != 0)
++			int z = pos.Z + n;
++			for (int dx = -16; dx <= 16; dx++, canopyIndex++)
+ 			{
+-				int num11 = n / 33 - 16;
+-				int num12 = n % 33 - 16;
+-				blockPos.Set(pos.X + num12, pos.Y, pos.Z + num11);
+-				blockPos.Y = blockAccessor.GetTerrainMapheightAt(blockPos);
+-				if (blockPos.Y - pos.Y < 4)
++				int num10 = outline[canopyIndex];
++				if (num10 != 0)
+ 				{
+-					CheckAndReplaceForestFloor(blockPos, num10, grassLevelOffset);
++					blockPos.Set(pos.X + dx, pos.Y, z);
++					blockPos.Y = blockAccessor.GetTerrainMapheightAt(blockPos);
++					if (blockPos.Y - pos.Y < 4)
++					{
++						CheckAndReplaceForestFloor(blockPos, num10, grassLevelOffset);
++					}
+ 				}
+ 			}
+ 		}
+@@ -199,6 +210,9 @@ public class ForestFloorSystem
+ 		BlockPatchConfig bpc = genPatchesSystem.bpc;
+ 		int num = 5;
+ 		int mapSizeY = blockAccessor.MapSizeY;
++		IMapRegion mapRegion = null;
++		BlockPos blockPos = patchPosThreadSafe ??= new BlockPos(pos.dimension);
++		blockPos.dimension = pos.dimension;
+ 		int num2 = underTreePatches?.Count ?? 0;
+ 		for (int i = 0; i < num2; i++)
+ 		{
+@@ -212,23 +226,29 @@ public class ForestFloorSystem
+ 			{
+ 				int num4 = rnd.NextInt(2 * num) - num;
+ 				int num5 = rnd.NextInt(2 * num) - num;
+-				tmpPos.Set(pos.X + num4, 0, pos.Z + num5);
+-				int terrainMapheightAt = blockAccessor.GetTerrainMapheightAt(tmpPos);
++				blockPos.Set(pos.X + num4, 0, pos.Z + num5);
++				int terrainMapheightAt = blockAccessor.GetTerrainMapheightAt(blockPos);
+ 				if (terrainMapheightAt <= 0 || terrainMapheightAt >= mapSizeY - 8)
+ 				{
+ 					continue;
+ 				}
+-				tmpPos.Y = terrainMapheightAt;
+-				ClimateCondition climateAt = blockAccessor.GetClimateAt(tmpPos, EnumGetClimateMode.WorldGenValues);
++				blockPos.Y = terrainMapheightAt;
++				ClimateCondition climateAt = blockAccessor.GetClimateAt(blockPos, EnumGetClimateMode.WorldGenValues);
+ 				if (climateAt == null || !bpc.IsPatchSuitableUnderTree(blockPatch, mapSizeY, climateAt, terrainMapheightAt))
+ 				{
+ 					continue;
+ 				}
+-				int regionX = pos.X / blockAccessor.RegionSize;
+-				int regionZ = pos.Z / blockAccessor.RegionSize;
+-				if (blockPatch.MapCode != null && rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(blockPatch.MapCode, tmpPos.X, tmpPos.Z, blockAccessor.GetMapRegion(regionX, regionZ)))
++				if (blockPatch.MapCode != null)
+ 				{
+-					continue;
++					if (mapRegion == null)
++					{
++						int regionSize = blockAccessor.RegionSize;
++						mapRegion = blockAccessor.GetMapRegion(pos.X / regionSize, pos.Z / regionSize);
++					}
++					if (rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(blockPatch.MapCode, blockPos.X, blockPos.Z, mapRegion))
++					{
++						continue;
++					}
+ 				}
+ 				int value = 0;
+ 				bool flag = true;
+@@ -237,7 +257,7 @@ public class ForestFloorSystem
+ 					flag = false;
+ 					for (int j = 1; j < 5 && terrainMapheightAt - j > 0; j++)
+ 					{
+-						string key = blockAccessor.GetBlockBelow(tmpPos, j, 1).LastCodePart();
++						string key = blockAccessor.GetBlockBelow(blockPos, j, 1).LastCodePart();
+ 						if (genPatchesSystem.RockBlockIdsByType.TryGetValue(key, out value))
+ 						{
+ 							flag = true;
+@@ -247,8 +267,7 @@ public class ForestFloorSystem
+ 				}
+ 				if (flag)
+ 				{
+-					new LCGRandom(sapi.WorldManager.Seed + i).InitPositionSeed(tmpPos.X, tmpPos.Z);
+-					blockPatch.Generate(blockAccessor, rnd, tmpPos.X, tmpPos.Y, tmpPos.Z, value, null);
++					blockPatch.Generate(blockAccessor, rnd, blockPos.X, blockPos.Y, blockPos.Z, value, null);
+ 				}
+ 			}
+ 		}
+@@ -266,8 +285,8 @@ public class ForestFloorSystem
+ 				int num7 = 1 - rnd.NextInt(2) * 2;
+ 				int num8 = rnd.NextInt(5);
+ 				int num9 = 1 - rnd.NextInt(2) * 2;
+-				tmpPos.Set(pos.X + num7, pos.Y + num8, pos.Z + num9);
+-				if (api.GetBlock(tmpPos).Id != 0)
++				blockPos.Set(pos.X + num7, pos.Y + num8, pos.Z + num9);
++				if (blockAccessor.GetBlock(blockPos).Id != 0)
+ 				{
+ 					continue;
+ 				}
+@@ -275,7 +294,7 @@ public class ForestFloorSystem
+ 				for (int l = 0; l < 4; l++)
+ 				{
+ 					BlockFacing blockFacing2 = BlockFacing.HORIZONTALS[l];
+-					Block blockOnSide = api.GetBlockOnSide(tmpPos, blockFacing2);
++					Block blockOnSide = blockAccessor.GetBlockOnSide(blockPos, blockFacing2);
+ 					if (blockOnSide is IBlockLog && blockOnSide.Variant["type"] != "resin")
+ 					{
+ 						blockFacing = blockFacing2;
+@@ -286,17 +305,25 @@ public class ForestFloorSystem
+ 				{
+ 					break;
+ 				}
+-				ClimateCondition climateAt2 = blockAccessor.GetClimateAt(tmpPos, EnumGetClimateMode.WorldGenValues);
+-				if (climateAt2 != null && bpc.IsPatchSuitableUnderTree(blockPatch2, mapSizeY, climateAt2, tmpPos.Y))
++				ClimateCondition climateAt2 = blockAccessor.GetClimateAt(blockPos, EnumGetClimateMode.WorldGenValues);
++				if (climateAt2 == null || !bpc.IsPatchSuitableUnderTree(blockPatch2, mapSizeY, climateAt2, blockPos.Y))
+ 				{
+-					int regionX2 = pos.X / blockAccessor.RegionSize;
+-					int regionZ2 = pos.Z / blockAccessor.RegionSize;
+-					if (blockPatch2.MapCode == null || rnd.NextInt(255) <= genPatchesSystem.GetPatchDensity(blockPatch2.MapCode, tmpPos.X, tmpPos.Z, blockAccessor.GetMapRegion(regionX2, regionZ2)))
++					continue;
++				}
++				if (blockPatch2.MapCode != null)
++				{
++					if (mapRegion == null)
+ 					{
+-						int num10 = rnd.NextInt(blockPatch2.Blocks.Length);
+-						blockPatch2.Blocks[num10].TryPlaceBlockForWorldGen(blockAccessor, tmpPos, blockFacing, rnd);
++						int regionSize = blockAccessor.RegionSize;
++						mapRegion = blockAccessor.GetMapRegion(pos.X / regionSize, pos.Z / regionSize);
++					}
++					if (rnd.NextInt(255) > genPatchesSystem.GetPatchDensity(blockPatch2.MapCode, blockPos.X, blockPos.Z, mapRegion))
++					{
++						continue;
+ 					}
+ 				}
++				int num10 = rnd.NextInt(blockPatch2.Blocks.Length);
++				blockPatch2.Blocks[num10].TryPlaceBlockForWorldGen(blockAccessor, blockPos, blockFacing, rnd);
+ 			}
+ 		}
+ 	}

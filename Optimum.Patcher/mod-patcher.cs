@@ -153,6 +153,18 @@ public static class ModPatcher
                 [
                     "vineScratchPos",
                     "positionStack",
+                    "forestFloorOutline",
+                    "lastMossBlockKey",
+                    "lastMossIsWood",
+                    "lastDesiredBlockKey",
+                    "lastDesiredBlock",
+                    "lastCurrentBlockKey",
+                    "lastCurrentBlock",
+                ],
+                ["Vintagestory.ServerMods.ForestFloorSystem"] =
+                [
+                    "floorPosThreadSafe",
+                    "patchPosThreadSafe",
                 ],
                 ["Vintagestory.Essentials.PathNodeSet"] =
                 [
@@ -251,8 +263,13 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.ChunkMapLayer", "Render", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "loadFromChunkPixels", 2),
                 new("Vintagestory.GameContent.ChunkMapLayer", "OnViewChangedClient", 2),
+                new("Vintagestory.ServerMods.TreeGen", "GrowTree", 4),
                 new("Vintagestory.ServerMods.TreeGen", "growBranch", 13),
                 new("Vintagestory.ServerMods.TreeGen", "PlaceBlockEtc", 5),
+                new("Vintagestory.ServerMods.TreeGen", "getPlaceResumeState", 3),
+                new("Vintagestory.ServerMods.ForestFloorSystem", "ClearOutline", 0),
+                new("Vintagestory.ServerMods.ForestFloorSystem", "CreateForestFloor", 5),
+                new("Vintagestory.ServerMods.ForestFloorSystem", "GenPatches", 5),
                 new("Vintagestory.ServerMods.GenCaves", "SetBlocks", 11),
                 new("Vintagestory.ServerMods.NoObf.BlockPatch", "Generate", 7),
                 new("Vintagestory.ServerMods.LerpedWeightedIndex2DMap", "WeightsAt", 3),
