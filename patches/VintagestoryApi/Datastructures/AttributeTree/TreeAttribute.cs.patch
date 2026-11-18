@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
-index ac15150..ecd0ed3 100644
+index ac15150..d2d76a8 100644
 --- a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
 +++ b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
 @@ -155,13 +155,75 @@ namespace Vintagestory.API.Datastructures
@@ -92,6 +92,19 @@ index ac15150..ecd0ed3 100644
                  {
                      ((TreeAttribute)attr).depth = depth + 1;
                  }
+@@ -962,11 +1023,11 @@ namespace Vintagestory.API.Datastructures
+             return ToJsonToken(attributes);
+         }
+ 
+         public static IAttribute FromJson(string json)
+         {
+-            return new JsonObject(JToken.Parse(json)).ToAttribute();
++            return new JsonObject(OptimumApiBridge.ParseJsonToken(json)).ToAttribute();
+         }
+ 
+         public static string ToJsonToken(IEnumerable<KeyValuePair<string, IAttribute>> attributes)
+         {
+             StringBuilder sb = new StringBuilder();
 @@ -1035,14 +1096,14 @@ namespace Vintagestory.API.Datastructures
              {
                  dstTree.attributes[srcKey] = srcAttr.Clone();

@@ -1,7 +1,20 @@
 diff --git a/VSEssentials/Loading/JsonPatchLoader.cs b/VSEssentials/Loading/JsonPatchLoader.cs
-index 4ce7ff9..810eecd 100644
+index 4ce7ff9..dae5b2c 100644
 --- a/VSEssentials/Loading/JsonPatchLoader.cs
 +++ b/VSEssentials/Loading/JsonPatchLoader.cs
+@@ -260,11 +260,11 @@ namespace Vintagestory.ServerMods.NoObf
+                         IAttribute attr = worldConfig[patch.Condition.When];
+                         if (attr == null) continue;
+ 
+                         if (patch.Condition.useValue)
+                         {
+-                            patch.Value = new JsonObject(JToken.Parse(attr.ToJsonToken()));
++                            patch.Value = new JsonObject(Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(attr.ToJsonToken()));
+                         }
+                         else if (!patch.Condition.IsValue.Equals(attr.GetValue() + "", StringComparison.InvariantCultureIgnoreCase))
+                         {
+                             api.Logger.VerboseDebug("Patch file {0}, patch {1}: Unmet IsValue condition ({2}!={3})",
+                                 asset.Location, j, patch.Condition.IsValue, attr.GetValue() + "");
 @@ -306,10 +306,11 @@ namespace Vintagestory.ServerMods.NoObf
              totalCount = validPatches.Count;
  
@@ -96,3 +109,29 @@ index 4ce7ff9..810eecd 100644
              processedFiles?.Clear();
              validPatches?.Clear();
              entries?.Clear();
+@@ -440,11 +451,11 @@ namespace Vintagestory.ServerMods.NoObf
+                 // Parse JSON
+                 JToken token;
+                 try
+                 {
+                     var jsonText = asset.ToText();
+-                    token = JToken.Parse(jsonText);
++                    token = Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(jsonText);
+                 }
+                 catch (Exception e)
+                 {
+                     errorCount++;
+                     api.World.Logger.Error("Patch {0} (target: {2}) in {1} failed probably because the syntax of the value is broken:",
+@@ -688,11 +699,11 @@ namespace Vintagestory.ServerMods.NoObf
+ 
+             PatchDocument patchdoc = new PatchDocument(op);
+             JToken token;
+             try
+             {
+-                token = JToken.Parse(asset.ToText());
++                token = Vintagestory.API.Config.OptimumApiBridge.ParseJsonToken(asset.ToText());
+             }
+             catch (Exception e)
+             {
+                 api.World.Logger.Error("Patch {0} (target: {2}) in {1} failed probably because the syntax of the value is broken:", patchIndex, patchSourcefile, loc);
+                 api.World.Logger.Error(e);

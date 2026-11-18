@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Common/Crafting/RecipeBase.cs b/VintagestoryApi/Common/Crafting/RecipeBase.cs
-index 21b4330..2ca2c7a 100644
+index 21b4330..ebfa6c2 100644
 --- a/VintagestoryApi/Common/Crafting/RecipeBase.cs
 +++ b/VintagestoryApi/Common/Crafting/RecipeBase.cs
 @@ -1,8 +1,9 @@
@@ -12,6 +12,19 @@ index 21b4330..2ca2c7a 100644
  using System.Linq;
  using System.Text.RegularExpressions;
  using Vintagestory.API.Config;
+@@ -163,11 +164,11 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
+         AverageDurability = reader.ReadBoolean();
+ 
+         if (!reader.ReadBoolean())
+         {
+             string json = reader.ReadString();
+-            Attributes = new JsonObject(JToken.Parse(json));
++            Attributes = new JsonObject(OptimumApiBridge.ParseJsonToken(json));
+         }
+ 
+         if (reader.ReadBoolean())
+         {
+             RequiresTrait = reader.ReadString().DeDuplicate();
 @@ -501,14 +502,27 @@ public abstract class RecipeBase : IRecipeBase, IConcreteCloneable<RecipeBase>
  
          ingredient.Name ??= ingredient.Code;

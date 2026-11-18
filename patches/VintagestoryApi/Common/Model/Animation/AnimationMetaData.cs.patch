@@ -1,0 +1,21 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/AnimationMetaData.cs b/VintagestoryApi/Common/Model/Animation/AnimationMetaData.cs
+index f299ffe..edd7c46 100644
+--- a/VintagestoryApi/Common/Model/Animation/AnimationMetaData.cs
++++ b/VintagestoryApi/Common/Model/Animation/AnimationMetaData.cs
+@@ -497,14 +497,14 @@ namespace Vintagestory.API.Common
+             if (version != "" && GameVersion.IsAtLeastVersion(version, "1.19.0-dev.20"))
+             {
+                 string attributes = reader.ReadString();
+                 if (attributes != "")
+                 {
+-                    animdata.Attributes = new JsonObject(JToken.Parse(attributes));
++                    animdata.Attributes = new JsonObject(OptimumApiBridge.ParseJsonToken(attributes));
+                 } else
+                 {
+-                    animdata.Attributes = new JsonObject(JToken.Parse("{}"));
++                    animdata.Attributes = new JsonObject(OptimumApiBridge.ParseJsonToken("{}"));
+                 }
+             }
+             if (version != "" && GameVersion.IsAtLeastVersion(version, "1.19.0-rc.6"))
+             {
+                 animdata.WeightCapFactor = reader.ReadSingle();

@@ -1,8 +1,34 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-index bdaa84a..ff60170 100644
+index bdaa84a..29de5e8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs
-@@ -2207,4 +2207,22 @@ public class ClientSettings : SettingsBase
+@@ -307,10 +307,11 @@ public class ClientSettings : SettingsBase
+ 			return Inst.GetIntSetting("optimizeRamMode");
+ 		}
+ 		set
+ 		{
+ 			Inst.Int["optimizeRamMode"] = value;
++			Vintagestory.API.Config.OptimumConfig.SetClientJsonLineInfoState(value, DeveloperMode);
+ 		}
+ 	}
+ 
+ 	public static int LeftDialogMargin
+ 	{
+@@ -619,10 +620,11 @@ public class ClientSettings : SettingsBase
+ 			return Inst.GetBoolSetting("developerMode");
+ 		}
+ 		set
+ 		{
+ 			Inst.Bool["developerMode"] = value;
++			Vintagestory.API.Config.OptimumConfig.SetClientJsonLineInfoState(OptimizeRamMode, value);
+ 		}
+ 	}
+ 
+ 	public static int ViewDistance
+ 	{
+@@ -2205,6 +2207,24 @@ public class ClientSettings : SettingsBase
+ 
+ 	public virtual bool DefaultSSBOsSetting()
  	{
  		return RuntimeEnv.OS != OS.Mac;
  	}

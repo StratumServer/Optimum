@@ -1,0 +1,17 @@
+diff --git a/VintagestoryApi/Common/Collectible/JsonItemStack.cs b/VintagestoryApi/Common/Collectible/JsonItemStack.cs
+index 3ae96dc..4a7bd69 100644
+--- a/VintagestoryApi/Common/Collectible/JsonItemStack.cs
++++ b/VintagestoryApi/Common/Collectible/JsonItemStack.cs
+@@ -228,11 +228,11 @@ namespace Vintagestory.API.Common
+                 ResolvedItemStack = new ItemStack(reader);
+             }
+ 
+             if (reader.ReadBoolean())
+             {
+-                Attributes = new JsonObject(JToken.Parse(reader.ReadString()));
++                Attributes = new JsonObject(OptimumApiBridge.ParseJsonToken(reader.ReadString()));
+             }
+         }
+ 
+         /// <summary>
+         /// Loads the ItemStack from the reader.

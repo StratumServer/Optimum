@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Loading/RegistryObjectType.cs b/VSEssentials/Loading/RegistryObjectType.cs
-index 7c78fc7c..59ae0fea 100644
+index 7c78fc7..e01e252 100644
 --- a/VSEssentials/Loading/RegistryObjectType.cs
 +++ b/VSEssentials/Loading/RegistryObjectType.cs
 @@ -71,11 +71,11 @@ namespace Vintagestory.ServerMods.NoObf
@@ -55,6 +55,19 @@ index 7c78fc7c..59ae0fea 100644
          public static bool WildCardMatches(AssetLocation blockCode, List<AssetLocation> wildCards, out AssetLocation matchingWildcard)
          {
              foreach (AssetLocation wildcard in wildCards)
+@@ -236,11 +236,11 @@ namespace Vintagestory.ServerMods.NoObf
+                 var asset = api.Assets.TryGet(inheritFrom);
+                 if (asset != null)
+                 {
+                     try
+                     {
+-                        var inheritedObj = JObject.Parse(asset.ToText());
++                        var inheritedObj = Vintagestory.API.Config.OptimumApiBridge.ParseJsonObject(asset.ToText());
+                         loadInherits(api, ref inheritedObj, entryDomain, inheritFrom.ToShortString());
+ 
+                         inheritedObj.Merge(entityTypeObject, new JsonMergeSettings()
+                         {
+                             MergeArrayHandling = MergeArrayHandling.Replace,
 @@ -260,16 +260,16 @@ namespace Vintagestory.ServerMods.NoObf
                  }
              }
