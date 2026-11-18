@@ -776,6 +776,10 @@ public static class OptimumConfig
     // Packet_ServerAssets tree and uncompressed buffer to eliminate heap retention.
     public static bool CompactServerAssetsEnabled = true;
 
+    // Issue #641: Skip FirepitContentsRenderer registration and idle client ticks
+    // on empty or static cold firepits until dynamic contents become active.
+    public static bool FirepitIdleRendererEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)
@@ -1546,6 +1550,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.LegacySsboMigrated), LegacySsboMigrated.ToString()),
         (nameof(OptimumConfigData.IgnoreJsonLineInfo), IgnoreJsonLineInfoEnabled.ToString()),
         (nameof(OptimumConfigData.CompactServerAssets), CompactServerAssetsEnabled.ToString()),
+        (nameof(OptimumConfigData.FirepitIdleRenderer), FirepitIdleRendererEnabled.ToString()),
     };
 
     /// <summary>
@@ -1682,6 +1687,7 @@ public static class OptimumConfig
             LegacySsboMigrated = data.LegacySsboMigrated;
             IgnoreJsonLineInfoEnabled = data.IgnoreJsonLineInfo;
             CompactServerAssetsEnabled = data.CompactServerAssets;
+            FirepitIdleRendererEnabled = data.FirepitIdleRenderer;
         }
         catch (Exception)
         {
@@ -1781,6 +1787,7 @@ public static class OptimumConfig
             LegacySsboMigrated = LegacySsboMigrated,
             IgnoreJsonLineInfo = IgnoreJsonLineInfoEnabled,
             CompactServerAssets = CompactServerAssetsEnabled,
+            FirepitIdleRenderer = FirepitIdleRendererEnabled,
         };
 
         try
@@ -1904,6 +1911,7 @@ internal sealed class OptimumConfigData
     public bool LegacySsboMigrated { get; set; } = false;
     public bool IgnoreJsonLineInfo { get; set; } = true;
     public bool CompactServerAssets { get; set; } = true;
+    public bool FirepitIdleRenderer { get; set; } = true;
 }
 
 public static class OptimumDiagnostics

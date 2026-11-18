@@ -1,6 +1,53 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
+index 5991b75..4feaf5f 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
-@@ -565,6 +565,7 @@
+@@ -41,6 +41,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 
+ 	private FirepitContentsRenderer renderer;
+ 
++	private bool rendererRegistered;
++
++	private long burnTickListenerId;
++
+ 	private bool shouldRedraw;
+ 
+ 	public float emptyFirepitBurnTimeMulBonus = 4f;
+@@ -165,13 +169,20 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 		base.Initialize(api);
+ 		inventory.pos = Pos;
+ 		inventory.LateInitialize("smelting-" + Pos.X + "/" + Pos.Y + "/" + Pos.Z, api);
+-		RegisterGameTickListener(OnBurnTick, 100);
+-		RegisterGameTickListener(On500msTick, 500);
++		bool flag = api.Side == EnumAppSide.Client && Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
++		if (!flag)
++		{
++			burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++			RegisterGameTickListener(On500msTick, 500);
++		}
+ 		if (api is ICoreClientAPI coreClientAPI)
+ 		{
+ 			capi = coreClientAPI;
+-			renderer = new FirepitContentsRenderer(coreClientAPI, Pos);
+-			coreClientAPI.Event.RegisterRenderer(renderer, EnumRenderStage.Opaque, "firepit");
++			if (!flag)
++			{
++				EnsureRenderer();
++				SyncClientRendererAndTickState(idleOpt: false);
++			}
+ 			coreClientAPI.Event.RegisterEventBusListener(OnSetTransform, 0.5, "onsettransform");
+ 			UpdateRenderer();
+ 		}
+@@ -193,7 +204,7 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 			}
+ 			collectible.Attributes.Token["inFirePitProps"]["transform"] = JToken.FromObject(modelTransform);
+ 		}
+-		renderer.Transform = modelTransform;
++		EnsureRenderer().Transform = modelTransform;
+ 	}
+ 
+ 	private void OnSlotModified(int slotid)
+@@ -565,6 +576,7 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
  		{
  			Inventory.AfterBlocksLoaded(Api.World);
  		}
@@ -8,7 +55,7 @@
  		furnaceTemperature = tree.GetFloat("furnaceTemperature");
  		maxTemperature = tree.GetInt("maxTemperature");
  		inputStackCookingTime = tree.GetFloat("oreCookingTime");
-@@ -576,6 +577,10 @@
+@@ -576,6 +588,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
  		ICoreAPI api = Api;
  		if (api != null && api.Side == EnumAppSide.Client)
  		{
@@ -19,32 +66,146 @@
  			UpdateRenderer();
  			if (clientDialog != null)
  			{
-@@ -599,13 +604,22 @@
+@@ -592,36 +608,118 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 		}
+ 	}
+ 
+-	private void UpdateRenderer()
++	private FirepitContentsRenderer EnsureRenderer()
+ 	{
+ 		if (renderer == null)
++		{
++			renderer = new FirepitContentsRenderer(capi, Pos);
++		}
++		return renderer;
++	}
++
++	private void SyncClientRendererAndTickState(bool idleOpt)
++	{
++		if (capi == null)
++		{
++			return;
++		}
++		bool flag = renderer != null && renderer.HasActiveContent();
++		if (!idleOpt || flag)
++		{
++			if (renderer != null && !rendererRegistered)
++			{
++				capi.Event.RegisterRenderer(renderer, EnumRenderStage.Opaque, "firepit");
++				rendererRegistered = true;
++			}
++		}
++		else
++		{
++			DisposeIdleRenderer();
++		}
++		if (!idleOpt || (renderer != null && renderer.contentStackRenderer != null))
++		{
++			if (burnTickListenerId == 0L)
++			{
++				burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++			}
++		}
++		else if (burnTickListenerId != 0L)
++		{
++			UnregisterGameTickListener(burnTickListenerId);
++			burnTickListenerId = 0L;
++		}
++	}
++
++	private void ClearIdleRenderer(bool idleOpt)
++	{
++		if (renderer != null)
++		{
++			renderer.contentStackRenderer?.Dispose();
++			renderer.contentStackRenderer = null;
++			renderer.SetContents(null, null);
++		}
++		SyncClientRendererAndTickState(idleOpt);
++	}
++
++	private void DisposeIdleRenderer()
++	{
++		if (renderer != null)
++		{
++			rendererRegistered = false;
++			renderer.Dispose();
++			renderer = null;
++		}
++	}
++
++	private void UpdateRenderer()
++	{
++		if (capi == null)
+ 		{
  			return;
  		}
++		bool firepitIdleRendererEnabled = Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
++		if (!firepitIdleRendererEnabled && renderer == null)
++		{
++			EnsureRenderer();
++			SyncClientRendererAndTickState(idleOpt: false);
++		}
  		ItemStack itemStack = ((inputStack == null) ? outputStack : inputStack);
 -		if (renderer.ContentStack != null && renderer.contentStackRenderer != null && itemStack?.Collectible is IInFirepitRendererSupplier && renderer.ContentStack.Equals(Api.World, itemStack, GlobalConstants.IgnoredStackAttributes))
 +		bool isPot = itemStack?.Collectible is IInFirepitRendererSupplier;
 +		bool isColdPot = isPot && furnaceTemperature < 50f && InputStackTemp < 50f;
 +		if (isColdPot)
+ 		{
++			ClearIdleRenderer(firepitIdleRendererEnabled);
+ 			return;
+ 		}
+-		renderer.contentStackRenderer?.Dispose();
+-		renderer.contentStackRenderer = null;
+-		if (itemStack?.Collectible is IInFirepitRendererSupplier)
++		if (renderer != null && renderer.ContentStack != null && renderer.contentStackRenderer != null && isPot && renderer.ContentStack.Equals(Api.World, itemStack, GlobalConstants.IgnoredStackAttributes))
++		{
++			SyncClientRendererAndTickState(firepitIdleRendererEnabled);
++			return;
++		}
++		if (renderer != null)
 +		{
 +			renderer.contentStackRenderer?.Dispose();
 +			renderer.contentStackRenderer = null;
-+		renderer.SetContents(null, null);
-+			return;
 +		}
-+		if (renderer.ContentStack != null && renderer.contentStackRenderer != null && isPot && renderer.ContentStack.Equals(Api.World, itemStack, GlobalConstants.IgnoredStackAttributes))
- 		{
- 			return;
- 		}
- 		renderer.contentStackRenderer?.Dispose();
- 		renderer.contentStackRenderer = null;
--		if (itemStack?.Collectible is IInFirepitRendererSupplier)
 +		if (isPot)
  		{
  			IInFirepitRenderer rendererWhenInFirepit = (itemStack?.Collectible as IInFirepitRendererSupplier).GetRendererWhenInFirepit(itemStack, this, itemStack == outputStack);
  			if (rendererWhenInFirepit != null)
-@@ -773,6 +787,10 @@
+ 			{
+-				renderer.SetChildRenderer(itemStack, rendererWhenInFirepit);
++				EnsureRenderer().SetChildRenderer(itemStack, rendererWhenInFirepit);
++				SyncClientRendererAndTickState(firepitIdleRendererEnabled);
+ 				return;
+ 			}
+ 		}
+ 		InFirePitProps renderProps = GetRenderProps(itemStack);
+-		if (itemStack?.Collectible != null && !(itemStack?.Collectible is IInFirepitMeshSupplier) && renderProps != null)
++		if (itemStack?.Collectible != null && itemStack.Class != EnumItemClass.Block && !(itemStack?.Collectible is IInFirepitMeshSupplier) && renderProps != null)
+ 		{
+-			renderer.SetContents(itemStack, renderProps.Transform);
++			EnsureRenderer().SetContents(itemStack, renderProps.Transform);
++			SyncClientRendererAndTickState(firepitIdleRendererEnabled);
+ 		}
+ 		else
+ 		{
+-			renderer.SetContents(null, null);
++			ClearIdleRenderer(firepitIdleRendererEnabled);
+ 		}
+ 	}
+ 
+@@ -666,8 +764,8 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 	public override void OnBlockRemoved()
+ 	{
+ 		base.OnBlockRemoved();
+-		renderer?.Dispose();
+-		renderer = null;
++		burnTickListenerId = 0L;
++		DisposeIdleRenderer();
+ 		if (clientDialog != null)
+ 		{
+ 			clientDialog.TryClose();
+@@ -773,6 +871,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
  		{
  			EnumFirepitModel desiredFirepitModel = (contentStack.Collectible as IInFirepitRendererSupplier).GetDesiredFirepitModel(contentStack, this, contentStack == outputStack);
  			CurrentModel = desiredFirepitModel;
@@ -55,7 +216,15 @@
  			return null;
  		}
  		InFirePitProps renderProps = GetRenderProps(contentStack);
-@@ -798,6 +816,50 @@
+@@ -791,17 +893,62 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+ 			}
+ 			return null;
+ 		}
+-		if (renderer.RequireSpit)
++		if (renderer?.RequireSpit == true)
+ 		{
+ 			CurrentModel = EnumFirepitModel.Spit;
+ 		}
  		return null;
  	}
  
@@ -106,3 +275,9 @@
  	public override void OnBlockUnloaded()
  	{
  		base.OnBlockUnloaded();
+-		renderer?.Dispose();
++		burnTickListenerId = 0L;
++		DisposeIdleRenderer();
+ 	}
+ 
+ 	public static InFirePitProps GetRenderProps(ItemStack contentStack)
