@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
-index a7c0784..50400c0 100644
+index a7c0784..3a0b203 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockLantern.cs
-@@ -167,21 +167,25 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
- 		return base.GetLightHsv(blockAccessor, pos, stack);
- 	}
+@@ -169,17 +169,35 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
  
  	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
  	{
@@ -16,27 +14,34 @@ index a7c0784..50400c0 100644
  		string key = text + "-" + text2 + "-" + text3;
 -		if (!orCreate.TryGetValue(key, out var value))
 +		MultiTextureMeshRef value;
++		bool found;
 +		lock (orCreate)
++		{
++			found = orCreate.TryGetValue(key, out value);
++		}
++		if (!found)
  		{
--			AssetLocation shapePath = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
--			Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
--			MeshData data = GenMesh(capi, text, text2, text3, shape);
+ 			AssetLocation shapePath = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
+ 			Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
+ 			MeshData data = GenMesh(capi, text, text2, text3, shape);
 -			value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(data));
-+			if (!orCreate.TryGetValue(key, out value))
++			MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(data);
++			lock (orCreate)
 +			{
-+				AssetLocation shapePath = Shape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
-+				Shape shape = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
-+				MeshData data = GenMesh(capi, text, text2, text3, shape);
-+				value = (orCreate[key] = capi.Render.UploadMultiTextureMesh(data));
++				if (orCreate.TryGetValue(key, out var existing))
++				{
++					uploadedRef.Dispose();
++					value = existing;
++				}
++				else
++				{
++					value = (orCreate[key] = uploadedRef);
++				}
 +			}
  		}
  		renderinfo.ModelRef = value;
  		renderinfo.CullFaces = false;
- 	}
- 
-@@ -202,25 +206,23 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
- 	{
- 		if (tesselator == null)
+@@ -204,7 +222,7 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
  		{
  			tesselator = capi.Tesselator;
  		}
@@ -45,8 +50,7 @@ index a7c0784..50400c0 100644
  		if (shape == null)
  		{
  			shape = Vintagestory.API.Common.Shape.TryGet(capi, "shapes/" + Shape.Base.Path + ".json");
- 		}
- 		if (shape == null)
+@@ -213,12 +231,10 @@ public class BlockLantern : Block, ITexPositionSource, IAttachableToEntity, ICon
  		{
  			return null;
  		}
@@ -62,5 +66,3 @@ index a7c0784..50400c0 100644
  		return modeldata;
  	}
  
- 	public override bool DoPlaceBlock(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ItemStack byItemStack)
- 	{

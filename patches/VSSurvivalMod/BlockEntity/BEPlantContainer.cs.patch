@@ -1,5 +1,5 @@
 diff --git a/VSSurvivalMod/BlockEntity/BEPlantContainer.cs b/VSSurvivalMod/BlockEntity/BEPlantContainer.cs
-index f9d66d2..bda8f0c 100644
+index f9d66d2..e751898 100644
 --- a/VSSurvivalMod/BlockEntity/BEPlantContainer.cs
 +++ b/VSSurvivalMod/BlockEntity/BEPlantContainer.cs
 @@ -203,23 +203,24 @@ namespace Vintagestory.GameContent
@@ -33,7 +33,7 @@ index f9d66d2..bda8f0c 100644
                  CompositeShape compshape = Block.Attributes["filledShape"].AsObject<CompositeShape>(null, Block.Code.Domain);
                  Shape shape = null;
                  if (compshape != null)
-@@ -238,101 +239,108 @@ namespace Vintagestory.GameContent
+@@ -238,37 +239,44 @@ namespace Vintagestory.GameContent
              } else
              {
                  mesh = capi.TesselatorManager.GetDefaultBlockMesh(Block);
@@ -69,137 +69,118 @@ index f9d66d2..bda8f0c 100644
              string containersize = this.ContainerSize;
              string key = content?.ToString() + "-" + containersize + "f" + fillHeight;
  
--            int rndIndex = -1;
+             int rndIndex = -1;
 -            if (meshes.TryGetValue(key, out MeshData[] meshwithVariants))
 +            lock (meshes)
              {
 -                rndIndex = meshwithVariants.Length == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, meshwithVariants.Length);
 -                var mesh = meshwithVariants[rndIndex];
 -                if (mesh != null) return mesh;
--            }
--
--            CompositeShape compoShape = curContProps.Shape;   // Here it doesn't matter not to .Clone() the shape, because the shape in the curContProps is not used for any other purpose
--            if (compoShape == null)
--            {
--                compoShape = content.Class == EnumItemClass.Block ? content.Block.Shape.Clone() : content.Item.Shape.Clone();   // We must .Clone() the shape here, because it would otherwise be the same shape object that is held in the Block / Item.  Later code in this method will made modifications to composhape.Path and we don't want to modify the .Path for all instances of this Block / Item: see Github #6813
--            }
--            ModelTransform transform = curContProps.Transform;
--            if (transform == null)
--            {
--                transform = new ModelTransform().EnsureDefaultValues();
--                transform.Translation.Y = fillHeight;
--            }
--
++                if (meshes.TryGetValue(key, out MeshData[] cachedVariants))
++                {
++                    rndIndex = cachedVariants.Length == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, cachedVariants.Length);
++                    var cachedMesh = cachedVariants[rndIndex];
++                    if (cachedMesh != null) return cachedMesh;
++                }
+             }
+ 
+             CompositeShape compoShape = curContProps.Shape;   // Here it doesn't matter not to .Clone() the shape, because the shape in the curContProps is not used for any other purpose
+             if (compoShape == null)
+             {
+@@ -279,11 +287,11 @@ namespace Vintagestory.GameContent
+             {
+                 transform = new ModelTransform().EnsureDefaultValues();
+                 transform.Translation.Y = fillHeight;
+             }
+ 
 -            contentTexSource = content.Class == EnumItemClass.Block ? capi.Tesselator.GetTextureSource(content.Block) : capi.Tesselator.GetTextureSource(content.Item);
--            List<IAsset> assets;
--            if (compoShape.Base.Path.EndsWith('*'))
--            {
--                assets = Api.Assets.GetManyInCategory("shapes", compoShape.Base.Path.Substring(0, compoShape.Base.Path.Length - 1), compoShape.Base.Domain);
--            }
--            else
--            {
--                assets = new List<IAsset>();
--                assets.Add(Api.Assets.TryGet(compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")));
--            }
--
++            ITexPositionSource localContentTexSource = content.Class == EnumItemClass.Block ? capi.Tesselator.GetTextureSource(content.Block) : capi.Tesselator.GetTextureSource(content.Item);
+             List<IAsset> assets;
+             if (compoShape.Base.Path.EndsWith('*'))
+             {
+                 assets = Api.Assets.GetManyInCategory("shapes", compoShape.Base.Path.Substring(0, compoShape.Base.Path.Length - 1), compoShape.Base.Domain);
+             }
+@@ -291,48 +299,57 @@ namespace Vintagestory.GameContent
+             {
+                 assets = new List<IAsset>();
+                 assets.Add(Api.Assets.TryGet(compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")));
+             }
+ 
 -            if (assets != null && assets.Count > 0)
--            {
++            if (assets == null || assets.Count == 0)
+             {
 -                ShapeElement.locationForLogging = compoShape.Base;
 -
 -                if (meshwithVariants == null)
-+                int rndIndex = -1;
-+                if (meshes.TryGetValue(key, out MeshData[] meshwithVariants))
-                 {
+-                {
 -                    meshes[key] = meshwithVariants = new MeshData[assets.Count];
-                     rndIndex = meshwithVariants.Length == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, meshwithVariants.Length);
-+                    var cachedMesh = meshwithVariants[rndIndex];
-+                    if (cachedMesh != null) return cachedMesh;
-                 }
+-                    rndIndex = meshwithVariants.Length == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, meshwithVariants.Length);
+-                }
++                Api.World.Logger.Error("Plant container, content asset {0} not found,", compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
++                return null;
++            }
  
 -                IAsset asset = assets[rndIndex];
 -                Shape shape = asset.ToObject<Shape>();
 -                shapeTextures = shape.Textures;
 -                MeshData mesh;
--
++            int variantCount = assets.Count;
++            if (rndIndex < 0)
++            {
++                rndIndex = variantCount == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, variantCount);
++            }
+ 
 -                try
-+                CompositeShape compoShape = curContProps.Shape;   // Here it doesn't matter not to .Clone() the shape, because the shape in the curContProps is not used for any other purpose
-+                if (compoShape == null)
-                 {
+-                {
 -                    byte climateColorMapId = content.Block?.ClimateColorMapResolved == null ? (byte)0 : (byte)(content.Block.ClimateColorMapResolved.RectIndex + 1);
 -                    byte seasonColorMapId = content.Block?.SeasonColorMapResolved == null ? (byte)0 : (byte)(content.Block.SeasonColorMapResolved.RectIndex + 1);
--
++            ShapeElement.locationForLogging = compoShape.Base;
++            IAsset asset = assets[rndIndex];
++            Shape shape = asset.ToObject<Shape>();
++            OptimumPlantContentTexSource texSource = new OptimumPlantContentTexSource(capi, content, curContProps.Textures, shape.Textures, localContentTexSource);
++            MeshData mesh;
+ 
 -                    tesselator.TesselateShape("plant container content shape", shape, out mesh, this, null, 0, climateColorMapId, seasonColorMapId);
-+                    compoShape = content.Class == EnumItemClass.Block ? content.Block.Shape.Clone() : content.Item.Shape.Clone();   // We must .Clone() the shape here, because it would otherwise be the same shape object that is held in the Block / Item.  Later code in this method will made modifications to composhape.Path and we don't want to modify the .Path for all instances of this Block / Item: see Github #6813
-                 }
+-                }
 -                catch (Exception e)
-+                ModelTransform transform = curContProps.Transform;
-+                if (transform == null)
-                 {
+-                {
 -                    Api.Logger.Error(e.Message + " (when tesselating " + compoShape.Base.WithPathPrefixOnce("shapes/") + ")");
 -                    Api.Logger.Error(e);
 -                    return null;
-+                    transform = new ModelTransform().EnsureDefaultValues();
-+                    transform.Translation.Y = fillHeight;
-                 }
+-                }
++            try
++            {
++                byte climateColorMapId = content.Block?.ClimateColorMapResolved == null ? (byte)0 : (byte)(content.Block.ClimateColorMapResolved.RectIndex + 1);
++                byte seasonColorMapId = content.Block?.SeasonColorMapResolved == null ? (byte)0 : (byte)(content.Block.SeasonColorMapResolved.RectIndex + 1);
  
 -                mesh.ModelTransform(transform);
 -                meshwithVariants[rndIndex] = mesh;
--            }
++                tesselator.TesselateShape("plant container content shape", shape, out mesh, texSource, null, 0, climateColorMapId, seasonColorMapId);
+             }
 -            else
--            {
++            catch (Exception e)
+             {
 -                Api.World.Logger.Error("Plant container, content asset {0} not found,", compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
--            }
-+                contentTexSource = content.Class == EnumItemClass.Block ? capi.Tesselator.GetTextureSource(content.Block) : capi.Tesselator.GetTextureSource(content.Item);
-+                List<IAsset> assets;
-+                if (compoShape.Base.Path.EndsWith('*'))
-+                {
-+                    assets = Api.Assets.GetManyInCategory("shapes", compoShape.Base.Path.Substring(0, compoShape.Base.Path.Length - 1), compoShape.Base.Domain);
-+                }
-+                else
-+                {
-+                    assets = new List<IAsset>();
-+                    assets.Add(Api.Assets.TryGet(compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json")));
-+                }
++                Api.Logger.Error(e.Message + " (when tesselating " + compoShape.Base.WithPathPrefixOnce("shapes/") + ")");
++                Api.Logger.Error(e);
++                return null;
+             }
  
 -            return meshwithVariants[rndIndex];
-+                if (assets != null && assets.Count > 0)
++            mesh.ModelTransform(transform);
++
++            lock (meshes)
++            {
++                if (!meshes.TryGetValue(key, out MeshData[] meshwithVariants))
 +                {
-+                    ShapeElement.locationForLogging = compoShape.Base;
-+
-+                    if (meshwithVariants == null)
-+                    {
-+                        meshes[key] = meshwithVariants = new MeshData[assets.Count];
-+                        rndIndex = meshwithVariants.Length == 1 ? 0 : GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, meshwithVariants.Length);
-+                    }
-+
-+                    IAsset asset = assets[rndIndex];
-+                    Shape shape = asset.ToObject<Shape>();
-+                    shapeTextures = shape.Textures;
-+                    MeshData mesh;
-+
-+                    try
-+                    {
-+                        byte climateColorMapId = content.Block?.ClimateColorMapResolved == null ? (byte)0 : (byte)(content.Block.ClimateColorMapResolved.RectIndex + 1);
-+                        byte seasonColorMapId = content.Block?.SeasonColorMapResolved == null ? (byte)0 : (byte)(content.Block.SeasonColorMapResolved.RectIndex + 1);
-+
-+                        tesselator.TesselateShape("plant container content shape", shape, out mesh, this, null, 0, climateColorMapId, seasonColorMapId);
-+                    }
-+                    catch (Exception e)
-+                    {
-+                        Api.Logger.Error(e.Message + " (when tesselating " + compoShape.Base.WithPathPrefixOnce("shapes/") + ")");
-+                        Api.Logger.Error(e);
-+                        return null;
-+                    }
-+
-+                    mesh.ModelTransform(transform);
-+                    meshwithVariants[rndIndex] = mesh;
++                    meshes[key] = meshwithVariants = new MeshData[variantCount];
 +                }
-+                else
++                int slotIndex = Math.Min(rndIndex, meshwithVariants.Length - 1);
++                if (meshwithVariants[slotIndex] == null)
 +                {
-+                    Api.World.Logger.Error("Plant container, content asset {0} not found,", compoShape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json"));
++                    meshwithVariants[slotIndex] = mesh;
 +                }
-+
-+                return meshwithVariants[rndIndex];
++                return meshwithVariants[slotIndex];
 +            }
          }
  

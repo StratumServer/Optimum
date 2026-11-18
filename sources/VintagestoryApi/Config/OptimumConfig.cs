@@ -451,6 +451,9 @@ public static class OptimumConfig
     private const int DefaultChunkMapSizeY = 8;
     private const int MinTesselationUploadCapacity = 64;
     private const int MaxTesselationUploadCapacity = 2048;
+    private const int MinMultiWorkerBacklog = 20;
+    private const int InitialMultiWorkerBacklog = 24;
+    private const double TargetMultiWorkerBacklogSeconds = 0.16;
 
     /// <summary>
     /// Meshes the tessellation worker may leave waiting for upload before it pauses. One strip of
@@ -470,6 +473,29 @@ public static class OptimumConfig
         int columns = 2 * radiusChunks + 1;
         int sizeY = chunkMapSizeY > 0 ? chunkMapSizeY : DefaultChunkMapSizeY;
         return Math.Clamp(columns * sizeY, MinTesselationUploadCapacity, MaxTesselationUploadCapacity);
+    }
+
+    /// <summary>
+    /// Computes how many completed meshes background tessellation workers may stage in the upload
+    /// queue ahead of the render thread. Single-worker and explicit overrides keep the legacy 3/4
+    /// upload-capacity watermark; multi-worker runs pace the ready queue to ~160 ms of observed
+    /// GPU upload throughput so workers do not build a multi-hundred-chunk backlog that ages
+    /// in-frustum meshes past 250 ms or retains large MeshData graphs across GC cycles.
+    /// </summary>
+    public static int GetTesselationWorkerBacklogLimit(int uploadCapacity, int workerCount, double smoothedUploadsPerSecond)
+    {
+        int normalizedUploadCap = Math.Max(1, uploadCapacity);
+        int legacyWatermark = Math.Max(1, normalizedUploadCap - normalizedUploadCap / 4);
+        if (workerCount <= 1 || TesselationUploadQueueCapacity > 0)
+        {
+            return legacyWatermark;
+        }
+
+        int maxMultiWorkerWatermark = Math.Max(MinMultiWorkerBacklog, legacyWatermark);
+        int paced = smoothedUploadsPerSecond > 0d && double.IsFinite(smoothedUploadsPerSecond)
+            ? (int)Math.Ceiling(smoothedUploadsPerSecond * TargetMultiWorkerBacklogSeconds)
+            : InitialMultiWorkerBacklog;
+        return Math.Clamp(paced, Math.Min(MinMultiWorkerBacklog, normalizedUploadCap), maxMultiWorkerWatermark);
     }
 
     /// <summary>

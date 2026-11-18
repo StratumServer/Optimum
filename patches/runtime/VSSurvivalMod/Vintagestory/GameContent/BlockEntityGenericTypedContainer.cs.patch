@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGenericTypedContainer.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGenericTypedContainer.cs
-index 077b387..df38000 100644
+index 077b387..e79e93e 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGenericTypedContainer.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGenericTypedContainer.cs
-@@ -330,35 +330,42 @@ public class BlockEntityGenericTypedContainer : BlockEntityOpenableContainer, IR
- 		{
- 			return null;
+@@ -332,7 +332,7 @@ public class BlockEntityGenericTypedContainer : BlockEntityOpenableContainer, IR
  		}
  		int num = (base.Block.Attributes?["rndTexNum"][type]?.AsInt()).GetValueOrDefault();
  		string text = "typedContainerMeshes" + base.Block.Code.ToShortString();
@@ -13,9 +11,7 @@ index 077b387..df38000 100644
  		string text2 = base.Block.Attributes?["shape"][type].AsString();
  		if (text2 == null)
  		{
- 			return null;
- 		}
- 		Shape value = null;
+@@ -342,21 +342,37 @@ public class BlockEntityGenericTypedContainer : BlockEntityOpenableContainer, IR
  		if (animUtil != null)
  		{
  			string key = "typedContainerShapes";
@@ -23,12 +19,21 @@ index 077b387..df38000 100644
 +			Dictionary<string, Shape> orCreate2 = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, Shape>>(Api, key);
  			string key2 = base.Block.FirstCodePart() + type + blockGenericTypedContainer.Subtype + "--" + text2 + "-" + num;
 -			if (!orCreate2.TryGetValue(key2, out value))
++			bool shapeFound;
 +			lock (orCreate2)
  			{
 -				value = (orCreate2[key2] = blockGenericTypedContainer.GetShape(Api as ICoreClientAPI, text2));
-+				if (!orCreate2.TryGetValue(key2, out value))
++				shapeFound = orCreate2.TryGetValue(key2, out value);
++			}
++			if (!shapeFound)
++			{
++				Shape loadedShape = blockGenericTypedContainer.GetShape(Api as ICoreClientAPI, text2);
++				lock (orCreate2)
 +				{
-+					value = (orCreate2[key2] = blockGenericTypedContainer.GetShape(Api as ICoreClientAPI, text2));
++					if (!orCreate2.TryGetValue(key2, out value))
++					{
++						value = (orCreate2[key2] = loadedShape);
++					}
 +				}
  			}
  		}
@@ -51,32 +56,26 @@ index 077b387..df38000 100644
  		}
  		if (num > 0)
  		{
- 			num = GameMath.MurmurHash3Mod(Pos.X, Pos.Y, Pos.Z, num);
- 		}
-@@ -371,14 +378,24 @@ public class BlockEntityGenericTypedContainer : BlockEntityOpenableContainer, IR
- 					blockTextureSource = tesselator.GetTextureSource(base.Block, num),
- 					curType = type
+@@ -373,10 +389,20 @@ public class BlockEntityGenericTypedContainer : BlockEntityOpenableContainer, IR
  				};
  				value2 = animUtil.InitializeAnimator(type + "-" + text + "-" + blockGenericTypedContainer.Subtype, value, texSource, rendererRot);
  			}
+-			return orCreate[key3] = value2;
 +			lock (orCreate)
 +			{
 +				return orCreate[key3] = value2;
 +			}
-+		}
+ 		}
+ 		value2 = blockGenericTypedContainer.GenMesh(Api as ICoreClientAPI, type, text2, tesselator, new Vec3f(), num);
+-		return orCreate[key3] = value2;
 +		lock (orCreate)
 +		{
 +			if (orCreate.TryGetValue(key3, out var value3) && value3 != null)
 +			{
 +				return value3;
 +			}
-+			value2 = blockGenericTypedContainer.GenMesh(Api as ICoreClientAPI, type, text2, tesselator, new Vec3f(), num);
- 			return orCreate[key3] = value2;
- 		}
--		value2 = blockGenericTypedContainer.GenMesh(Api as ICoreClientAPI, type, text2, tesselator, new Vec3f(), num);
--		return orCreate[key3] = value2;
++			return orCreate[key3] = value2;
++		}
  	}
  
  	public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tesselator)
- 	{
- 		if (!base.OnTesselation(mesher, tesselator))

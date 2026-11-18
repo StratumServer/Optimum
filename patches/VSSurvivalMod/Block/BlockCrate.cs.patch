@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/Block/BlockCrate.cs b/VSSurvivalMod/Block/BlockCrate.cs
-index e4ed98c..e87d543 100644
+index e4ed98c..7be531e 100644
 --- a/VSSurvivalMod/Block/BlockCrate.cs
 +++ b/VSSurvivalMod/Block/BlockCrate.cs
-@@ -502,28 +502,31 @@ namespace Vintagestory.GameContent
+@@ -502,28 +502,46 @@ namespace Vintagestory.GameContent
  
  
          public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
@@ -19,33 +19,48 @@ index e4ed98c..e87d543 100644
 -                string type = itemstack.Attributes.GetString("type", Props.DefaultType);
 -                string label = itemstack.Attributes.GetString("label");
 -                string lidState = itemstack.Attributes.GetString("lidState", "closed");
-+                if (!meshrefs.TryGetValue(key, out renderinfo.ModelRef))
++                if (meshrefs.TryGetValue(key, out renderinfo.ModelRef))
 +                {
-+                    string type = itemstack.Attributes.GetString("type", Props.DefaultType);
-+                    string label = itemstack.Attributes.GetString("label");
-+                    string lidState = itemstack.Attributes.GetString("lidState", "closed");
++                    return;
++                }
++            }
  
 -                CompositeShape cshape = Props[type].Shape;
 -                var rot = ShapeInventory == null ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ);
-+                    CompositeShape cshape = Props[type].Shape;
-+                    var rot = ShapeInventory == null ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ);
++            string type = itemstack.Attributes.GetString("type", Props.DefaultType);
++            string label = itemstack.Attributes.GetString("label");
++            string lidState = itemstack.Attributes.GetString("lidState", "closed");
  
 -                var contentStacks = GetNonEmptyContents(capi.World, itemstack);
 -                var contentStack = contentStacks == null || contentStacks.Length == 0 ? null : contentStacks[0];
-+                    var contentStacks = GetNonEmptyContents(capi.World, itemstack);
-+                    var contentStack = contentStacks == null || contentStacks.Length == 0 ? null : contentStacks[0];
++            CompositeShape cshape = Props[type].Shape;
++            var rot = ShapeInventory == null ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ);
  
 -                var mesh = GenMesh(capi, contentStack, type, label, lidState, cshape, rot);
 -                meshrefs[key] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(mesh);
-+                    var mesh = GenMesh(capi, contentStack, type, label, lidState, cshape, rot);
-+                    meshrefs[key] = renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(mesh);
++            var contentStacks = GetNonEmptyContents(capi.World, itemstack);
++            var contentStack = contentStacks == null || contentStacks.Length == 0 ? null : contentStacks[0];
++
++            var mesh = GenMesh(capi, contentStack, type, label, lidState, cshape, rot);
++            MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(mesh);
++
++            lock (meshrefs)
++            {
++                if (meshrefs.TryGetValue(key, out MultiTextureMeshRef existing))
++                {
++                    uploadedRef.Dispose();
++                    renderinfo.ModelRef = existing;
++                }
++                else
++                {
++                    meshrefs[key] = renderinfo.ModelRef = uploadedRef;
 +                }
              }
          }
  
  
  
-@@ -571,30 +574,37 @@ namespace Vintagestory.GameContent
+@@ -571,30 +589,51 @@ namespace Vintagestory.GameContent
              {
                  cshape = cshape.Clone();
                  cshape.Base.Path = cshape.Base.Path.Replace("closed", "opened");
@@ -68,16 +83,29 @@ index e4ed98c..e87d543 100644
 -            if (!meshCache.TryGetValue(meshkey, out MeshData mesh))
 +            var meshCache = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(capi, CrateBaseMeshesCache);
 +            MeshData mesh;
++            bool found;
 +            lock (meshCache)
++            {
++                found = meshCache.TryGetValue(meshkey, out mesh);
++            }
++
++            if (!found)
              {
--                // Only generate the base crate mesh if necessary, otherwise we can simply clone it
+                 // Only generate the base crate mesh if necessary, otherwise we can simply clone it
 -                tesselator.TesselateShape("crate", shape, out mesh, this, rot);
 -                meshCache[meshkey] = mesh;
-+                if (!meshCache.TryGetValue(meshkey, out mesh))
++                tesselator.TesselateShape("crate", shape, out mesh, texSource, rot);
++
++                lock (meshCache)
 +                {
-+                    // Only generate the base crate mesh if necessary, otherwise we can simply clone it
-+                    tesselator.TesselateShape("crate", shape, out mesh, texSource, rot);
-+                    meshCache[meshkey] = mesh;
++                    if (meshCache.TryGetValue(meshkey, out MeshData existing))
++                    {
++                        mesh = existing;
++                    }
++                    else
++                    {
++                        meshCache[meshkey] = mesh;
++                    }
 +                }
              }
  
@@ -91,7 +119,7 @@ index e4ed98c..e87d543 100644
                  meshcloned = true;
              }
  
-@@ -621,16 +631,14 @@ namespace Vintagestory.GameContent
+@@ -621,16 +660,14 @@ namespace Vintagestory.GameContent
              AssetLocation shapeloc = (editableVariant ? labelProps.EditableShape : labelProps.Shape).Base.Clone().WithPathAppendixOnce(".json").WithPathPrefixOnce("shapes/");
              Shape shape = API.Common.Shape.TryGet(capi, shapeloc);
  

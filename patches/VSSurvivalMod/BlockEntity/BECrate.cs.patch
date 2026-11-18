@@ -1,5 +1,5 @@
 diff --git a/VSSurvivalMod/BlockEntity/BECrate.cs b/VSSurvivalMod/BlockEntity/BECrate.cs
-index 2d95550..71bffa2 100644
+index 2d95550..31e4bee 100644
 --- a/VSSurvivalMod/BlockEntity/BECrate.cs
 +++ b/VSSurvivalMod/BlockEntity/BECrate.cs
 @@ -513,11 +513,11 @@ namespace Vintagestory.GameContent
@@ -15,7 +15,7 @@ index 2d95550..71bffa2 100644
              CompositeShape cshape = ownBlock.Props[type].Shape;
              if (cshape?.Base == null)
              {
-@@ -526,14 +526,18 @@ namespace Vintagestory.GameContent
+@@ -526,14 +526,32 @@ namespace Vintagestory.GameContent
  
              var firstStack = inventory.FirstNonEmptySlot?.Itemstack;
  
@@ -23,14 +23,27 @@ index 2d95550..71bffa2 100644
  
 -            if (!meshes.TryGetValue(meshKey, out MeshData mesh))
 +            MeshData mesh;
++            bool found;
 +            lock (meshes)
++            {
++                found = meshes.TryGetValue(meshKey, out mesh);
++            }
++
++            if (!found)
              {
--                mesh = block.GenMesh(Api as ICoreClientAPI, firstStack, type, label, LidState, cshape, new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ));
+                 mesh = block.GenMesh(Api as ICoreClientAPI, firstStack, type, label, LidState, cshape, new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ));
 -                meshes[meshKey] = mesh;
-+                if (!meshes.TryGetValue(meshKey, out mesh))
++
++                lock (meshes)
 +                {
-+                    mesh = block.GenMesh(Api as ICoreClientAPI, firstStack, type, label, LidState, cshape, new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ));
-+                    meshes[meshKey] = mesh;
++                    if (meshes.TryGetValue(meshKey, out MeshData existing))
++                    {
++                        mesh = existing;
++                    }
++                    else
++                    {
++                        meshes[meshKey] = mesh;
++                    }
 +                }
              }
  

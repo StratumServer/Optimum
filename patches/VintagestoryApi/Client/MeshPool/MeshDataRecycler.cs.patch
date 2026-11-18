@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
-index a96b9c9..9b200bb 100644
+index a96b9c9..0e0944e 100644
 --- a/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
 +++ b/VintagestoryApi/Client/MeshPool/MeshDataRecycler.cs
-@@ -1,250 +1,292 @@
+@@ -1,250 +1,305 @@
  ﻿using System;
 -using System.Collections;
  using System.Collections.Concurrent;
@@ -303,12 +303,25 @@ index a96b9c9..9b200bb 100644
 +            private static void TryAdd(SortedList<float, MeshData> list, int intkey, MeshData entry)
              {
 -                forRecycling.Enqueue(meshData);
++                const int maxPerBucket = 16;
 +                float key = intkey;
-+                while (list.ContainsKey(key))
++                float upperBound = intkey + 1;
++                for (int attempt = 0; attempt < maxPerBucket && key < upperBound; attempt++)
 +                {
-+                    key += 0.0001f;
++                    if (!list.ContainsKey(key))
++                    {
++                        list.Add(key, entry);
++                        return;
++                    }
++                    float next = key + 0.05f;
++                    if (next == key)
++                    {
++                        next = MathF.BitIncrement(key);
++                    }
++                    key = next;
 +                }
-+                list.Add(key, entry);
++
++                entry.DisposeBasicData();
              }
 -        }
  

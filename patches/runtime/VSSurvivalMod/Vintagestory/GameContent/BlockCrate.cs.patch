@@ -1,10 +1,8 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockCrate.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockCrate.cs
-index cd56e73..1692877 100644
+index cd56e73..05cc2cd 100644
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockCrate.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockCrate.cs
-@@ -228,23 +228,26 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
- 	}
- 
+@@ -230,19 +230,35 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
  	public override void OnBeforeRender(ICoreClientAPI capi, ItemStack itemstack, EnumItemRenderTarget target, ref ItemRenderInfo renderinfo)
  	{
  		string key = "crateMeshRefs" + FirstCodePart() + SubtypeInventory;
@@ -23,26 +21,35 @@ index cd56e73..1692877 100644
 -			ItemStack contentStack = ((nonEmptyContents == null || nonEmptyContents.Length == 0) ? null : nonEmptyContents[0]);
 -			MeshData data = GenMesh(capi, contentStack, type, label, lidState, shape, rotation);
 -			orCreate[key2] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(data));
-+			if (!orCreate.TryGetValue(key2, out renderinfo.ModelRef))
++			if (orCreate.TryGetValue(key2, out renderinfo.ModelRef))
 +			{
-+				string type = itemstack.Attributes.GetString("type", Props.DefaultType);
-+				string label = itemstack.Attributes.GetString("label");
-+				string lidState = itemstack.Attributes.GetString("lidState", "closed");
-+				CompositeShape shape = Props[type].Shape;
-+				Vec3f rotation = ((ShapeInventory == null) ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ));
-+				ItemStack[] nonEmptyContents = GetNonEmptyContents(capi.World, itemstack);
-+				ItemStack contentStack = ((nonEmptyContents == null || nonEmptyContents.Length == 0) ? null : nonEmptyContents[0]);
-+				MeshData data = GenMesh(capi, contentStack, type, label, lidState, shape, rotation);
-+				orCreate[key2] = (renderinfo.ModelRef = capi.Render.UploadMultiTextureMesh(data));
++				return;
++			}
++		}
++		string type = itemstack.Attributes.GetString("type", Props.DefaultType);
++		string label = itemstack.Attributes.GetString("label");
++		string lidState = itemstack.Attributes.GetString("lidState", "closed");
++		CompositeShape shape = Props[type].Shape;
++		Vec3f rotation = ((ShapeInventory == null) ? null : new Vec3f(ShapeInventory.rotateX, ShapeInventory.rotateY, ShapeInventory.rotateZ));
++		ItemStack[] nonEmptyContents = GetNonEmptyContents(capi.World, itemstack);
++		ItemStack contentStack = ((nonEmptyContents == null || nonEmptyContents.Length == 0) ? null : nonEmptyContents[0]);
++		MeshData data = GenMesh(capi, contentStack, type, label, lidState, shape, rotation);
++		MultiTextureMeshRef uploadedRef = capi.Render.UploadMultiTextureMesh(data);
++		lock (orCreate)
++		{
++			if (orCreate.TryGetValue(key2, out var existing))
++			{
++				uploadedRef.Dispose();
++				renderinfo.ModelRef = existing;
++			}
++			else
++			{
++				orCreate[key2] = (renderinfo.ModelRef = uploadedRef);
 +			}
  		}
  	}
  
- 	public override void OnUnloaded(ICoreAPI api)
- 	{
-@@ -284,17 +287,23 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
- 		if (lidState == "opened")
- 		{
+@@ -286,13 +302,19 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
  			cshape = cshape.Clone();
  			cshape.Base.Path = cshape.Base.Path.Replace("closed", "opened");
  		}
@@ -64,11 +71,7 @@ index cd56e73..1692877 100644
  		Vec3f vec3f = ((rotation == null) ? new Vec3f(Shape.rotateX, Shape.rotateY, Shape.rotateZ) : rotation);
  		string key = string.Concat(new string[11]
  		{
- 			cshape.Base,
- 			"-",
-@@ -306,20 +315,24 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
- 			"-y",
- 			vec3f.Y.ToString(),
+@@ -308,16 +330,32 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
  			"-y",
  			vec3f.Z.ToString()
  		});
@@ -76,14 +79,26 @@ index cd56e73..1692877 100644
 -		if (!orCreate.TryGetValue(key, out var value))
 +		Dictionary<string, MeshData> orCreate = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MeshData>>(capi, "cratebasemeshes");
 +		MeshData value;
++		bool found;
 +		lock (orCreate)
  		{
 -			tesselator.TesselateShape("crate", shape, out value, this, vec3f, 0, 0, 0);
 -			orCreate[key] = value;
-+			if (!orCreate.TryGetValue(key, out value))
++			found = orCreate.TryGetValue(key, out value);
++		}
++		if (!found)
++		{
++			tesselator.TesselateShape("crate", shape, out value, optimumCrateTexSource, vec3f, 0, 0, 0);
++			lock (orCreate)
 +			{
-+				tesselator.TesselateShape("crate", shape, out value, optimumCrateTexSource, vec3f, 0, 0, 0);
-+				orCreate[key] = value;
++				if (orCreate.TryGetValue(key, out var existing))
++				{
++					value = existing;
++				}
++				else
++				{
++					orCreate[key] = value;
++				}
 +			}
  		}
  		bool flag = false;
@@ -94,11 +109,7 @@ index cd56e73..1692877 100644
  			value = value.Clone();
  			value.AddMeshData(sourceMesh);
  			flag = true;
- 		}
- 		if (contentStack != null && lidState != "closed")
-@@ -346,15 +359,13 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
- 			throw new ArgumentException("No label props found for this label");
- 		}
+@@ -348,11 +386,9 @@ public class BlockCrate : BlockContainer, ITexPositionSource, IAttachableToEntit
  		AssetLocation shapePath = (editableVariant ? value.EditableShape : value.Shape).Base.Clone().WithPathAppendixOnce(".json").WithPathPrefixOnce("shapes/");
  		Shape shapeBase = Vintagestory.API.Common.Shape.TryGet(capi, shapePath);
  		Vec3f meshRotationDeg = ((rotation == null) ? new Vec3f(value.Shape.rotateX, value.Shape.rotateY, value.Shape.rotateZ) : rotation);
@@ -113,5 +124,3 @@ index cd56e73..1692877 100644
  		return modeldata;
  	}
  
- 	protected MeshData genContentMesh(ICoreClientAPI capi, ItemStack contentStack, Vec3f rotation = null)
- 	{

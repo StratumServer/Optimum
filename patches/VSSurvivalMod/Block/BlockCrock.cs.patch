@@ -1,0 +1,51 @@
+diff --git a/VSSurvivalMod/Block/BlockCrock.cs b/VSSurvivalMod/Block/BlockCrock.cs
+index 9b7924a..1b25694 100644
+--- a/VSSurvivalMod/Block/BlockCrock.cs
++++ b/VSSurvivalMod/Block/BlockCrock.cs
+@@ -209,21 +209,38 @@ namespace Vintagestory.GameContent
+             ItemStack[] contents = GetNonEmptyContents(capi.World, itemstack);
+             string recipeCode = itemstack.Attributes.GetString("recipeCode");
+             AssetLocation loc = LabelForContents(recipeCode, contents);
+             if (loc == null) return;
+ 
+-            Dictionary<string, MultiTextureMeshRef> meshrefs = ObjectCacheUtil.GetOrCreate(capi, "blockcrockGuiMeshRefs", () =>
+-            {
+-                return new Dictionary<string, MultiTextureMeshRef>();
+-            });
++            Dictionary<string, MultiTextureMeshRef> meshrefs = OptimumCacheHelper.GetOrCreateDefault<Dictionary<string, MultiTextureMeshRef>>(capi, "blockcrockGuiMeshRefs");
+ 
+             string key = Code.ToShortString() + loc.ToShortString() + (isSealed ? "sealed" : "");
+-            if (!meshrefs.TryGetValue(key, out MultiTextureMeshRef? meshref))
++            MultiTextureMeshRef? meshref;
++            lock (meshrefs)
++            {
++                if (meshrefs.TryGetValue(key, out meshref))
++                {
++                    renderinfo.ModelRef = meshref;
++                    return;
++                }
++            }
++
++            MeshData mesh = GenMesh(capi, loc, new Vec3f(0, 270, 0));
++            if (isSealed && GenSealMesh(capi) is MeshData sealMesh) mesh.AddMeshData(sealMesh);
++            meshref = capi.Render.UploadMultiTextureMesh(mesh);
++
++            lock (meshrefs)
+             {
+-                MeshData mesh = GenMesh(capi, loc, new Vec3f(0, 270, 0));
+-                if (isSealed && GenSealMesh(capi) is MeshData sealMesh) mesh.AddMeshData(sealMesh);
+-                meshrefs[key] = meshref = capi.Render.UploadMultiTextureMesh(mesh);
++                if (meshrefs.TryGetValue(key, out MultiTextureMeshRef? existing))
++                {
++                    meshref.Dispose();
++                    meshref = existing;
++                }
++                else
++                {
++                    meshrefs[key] = meshref;
++                }
+             }
+ 
+             renderinfo.ModelRef = meshref;
+         }
+ 

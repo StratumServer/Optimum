@@ -262,6 +262,47 @@ public sealed class MultiWorkerConcurrencyStressTests
     }
 
     [Fact]
+    public void MeshDataRecyclerAndBridge_LargeEntrySizesAboveFloatPrecisionCliff_DoNotHangTryAdd()
+    {
+        long elapsedMs = 1000L;
+        var world = CreateProxy<IClientWorldAccessor>((method, _) =>
+            method.Name == "get_ElapsedMilliseconds" ? elapsedMs : null);
+        var recycler = new MeshDataRecycler(world);
+        var bridgeRecycler = new MeshDataRecycler(world);
+
+        // VerticesMax = 8192 -> entrySize = 2048, where ULP((float)2048) = 0.000244f > 0.0001f.
+        // Storing multiple identical capacities >= 2048 previously spun infinitely in TryAdd.
+        int[] largeCapacities = [8192, 16384, 32768];
+        foreach (int capacity in largeCapacities)
+        {
+            for (int i = 0; i < 18; i++)
+            {
+                recycler.Recycle(new MeshData(capacity) { Recyclable = true });
+                OptimumMeshRecyclerBridge.Recycle(bridgeRecycler, new MeshData(capacity) { Recyclable = true });
+            }
+        }
+
+        recycler.DoRecycling();
+        OptimumMeshRecyclerBridge.DoRecycling(bridgeRecycler);
+
+        foreach (int capacity in largeCapacities)
+        {
+            MeshData reused = recycler.GetOrCreateMesh(capacity);
+            Assert.NotNull(reused);
+            Assert.True(reused.VerticesMax >= capacity);
+            reused.DisposeBasicData();
+
+            MeshData bridgeReused = OptimumMeshRecyclerBridge.GetOrCreateMesh(bridgeRecycler, capacity);
+            Assert.NotNull(bridgeReused);
+            Assert.True(bridgeReused.VerticesMax >= capacity);
+            bridgeReused.DisposeBasicData();
+        }
+
+        recycler.Dispose();
+        OptimumMeshRecyclerBridge.Dispose(bridgeRecycler);
+    }
+
+    [Fact]
     public void ObjectCacheUtilAndBridge_HandleConcurrentReadsWritesDeletesAndReentrantFactories()
     {
         var backing = new Dictionary<string, object>();
@@ -481,6 +522,108 @@ public sealed class MultiWorkerPatchAndIlWiringTests
         Assert.Contains("Vintagestory.GameContent.BlockSmoothTextureTransition", modPatcherSource);
         Assert.Contains("Vintagestory.GameContent.BEBehaviorDisplay", modPatcherSource);
         Assert.Contains("Vintagestory.GameContent.BlockEntityDisplay", modPatcherSource);
+        Assert.Contains("Vintagestory.GameContent.BlockEntityGroundStorage", modPatcherSource);
+        Assert.Contains("Vintagestory.GameContent.MealMeshCache", modPatcherSource);
+        Assert.Contains("finishGroundStorageMeshUpload", modPatcherSource);
+        Assert.Contains("optimumWindModeByFlagCount", modPatcherSource);
+        Assert.Contains("GetWindModeByFlagCount", modPatcherSource);
+        Assert.Contains("Volatile.Read(ref Elements) != null",
+            PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/UnloadableShape.cs.patch"));
+        Assert.Contains("BlockEntityGroundStorage.cs", File.ReadAllText(PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityGroundStorage.cs.patch")));
+        Assert.Contains("MealMeshCache.cs", File.ReadAllText(PatchReader.FindRepositoryFile("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/MealMeshCache.cs.patch")));
+    }
+
+    [Fact]
+    public void OptimumCacheHelper_GetOrAdd_RunsFactoryOutsideLockWithoutDeadlock()
+    {
+        var cache = new Dictionary<string, object>();
+        const int keyCount = 16;
+        using var start = new ManualResetEventSlim(false);
+        var errors = new ConcurrentQueue<Exception>();
+        var observedByThread = new object[8][];
+        var threads = new Thread[8];
+
+        for (int t = 0; t < threads.Length; t++)
+        {
+            int workerIndex = t;
+            threads[t] = new Thread(() =>
+            {
+                try
+                {
+                    observedByThread[workerIndex] = new object[keyCount];
+                    start.Wait();
+                    for (int i = 0; i < keyCount; i++)
+                    {
+                        int k = (i + workerIndex) % keyCount;
+                        observedByThread[workerIndex][k] = OptimumCacheHelper.GetOrAdd(
+                            cache,
+                            "outer-" + k,
+                            (cache, k),
+                            static state =>
+                            {
+                                // Nested lookup must succeed without deadlocking cache lock.
+                                object nested = OptimumCacheHelper.GetOrAdd(
+                                    state.cache,
+                                    "inner-" + state.k,
+                                    state.k,
+                                    static innerKey => "val-" + innerKey);
+                                return new object[] { nested };
+                            });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Enqueue(ex);
+                }
+            });
+            threads[t].Start();
+        }
+
+        start.Set();
+        foreach (Thread thread in threads) thread.Join();
+
+        Assert.Empty(errors);
+        for (int k = 0; k < keyCount; k++)
+        {
+            object canonical = observedByThread[0][k];
+            Assert.NotNull(canonical);
+            for (int t = 1; t < threads.Length; t++)
+            {
+                Assert.Same(canonical, observedByThread[t][k]);
+            }
+        }
+    }
+
+    [Fact]
+    public void OptimumVariantOverrideTexSource_OverridesOnlyTargetCode()
+    {
+        TextureAtlasPosition defaultPos = new() { x1 = 0.1f, y1 = 0.2f };
+        TextureAtlasPosition wallPos = new() { x1 = 0.5f, y1 = 0.6f };
+        var inner = new StubTexPositionSource(new()
+        {
+            ["wall"] = defaultPos,
+            ["top"] = defaultPos,
+        });
+
+        var texSource = new OptimumVariantOverrideTexSource(inner, "wall", wallPos);
+        Assert.Same(wallPos, texSource["wall"]);
+        Assert.Same(defaultPos, texSource["top"]);
+        Assert.Same(inner.AtlasSize, texSource.AtlasSize);
+    }
+
+    private sealed class StubTexPositionSource : ITexPositionSource
+    {
+        private readonly Dictionary<string, TextureAtlasPosition> _positions;
+
+        public StubTexPositionSource(Dictionary<string, TextureAtlasPosition> positions)
+        {
+            _positions = positions;
+        }
+
+        public Size2i AtlasSize { get; } = new(512, 512);
+
+        public TextureAtlasPosition? this[string textureCode] =>
+            _positions.TryGetValue(textureCode, out var pos) ? pos : null;
     }
 
     [Fact]
