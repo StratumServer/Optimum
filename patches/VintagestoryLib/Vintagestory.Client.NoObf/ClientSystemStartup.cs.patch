@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..bd6a978 100644
+index f4374589..35432a03 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 @@ -226,23 +226,27 @@ public class ClientSystemStartup : ClientSystem
@@ -115,3 +115,15 @@ index f437458..bd6a978 100644
  	}
  
  	internal void BeginItemTesselation()
+@@ -1037,10 +1048,11 @@ public class ClientSystemStartup : ClientSystem
+ 		game.BlocksReceivedAndLoaded = true;
+ 		CompositeTexture.basicTexturesCache = null;
+ 		CompositeTexture.wildcardsCache = null;
+ 		game.Platform.AssetManager.UnloadAssets(AssetCategory.textures);
+ 		game.TesselatorManager.LoadDone();
++		game.TesselatorManager.BeginInitialInventoryMeshPrefetch();
+ 		TyronThreadPool.QueueTask((Action)Lang.InitialiseSearch, "Lang.InitialiseSearch");
+ 		logger.Debug("Unique crafting ingredients count: " + game.FastSearchRecipesByIngredient.Count);
+ 		logger.VerboseDebug("All clientside asset loading complete, game launch can proceed");
+ 	}
+ 

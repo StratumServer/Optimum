@@ -242,4 +242,252 @@ public class OptimumLazyInventoryMeshesTests
             OptimumConfig.LazyInventoryMeshesEnabled = prev;
         }
     }
+
+    [Fact]
+    public void LazyInventoryMeshPrep_DefaultsTrue_ConfigAndDiagnosticsRoundTrip()
+    {
+        Assert.True(OptimumConfig.LazyInventoryMeshPrepEnabled);
+        Assert.Contains(OptimumConfig.DescribeToggles(), t => t.Name == nameof(OptimumConfigData.LazyInventoryMeshPrep));
+
+        string dir = Path.Combine(Path.GetTempPath(), "optimum-lazy-inv-prep-cfg-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(dir);
+        bool prevEnabled = OptimumConfig.LazyInventoryMeshPrepEnabled;
+        OptimumDiagnostics.ResetInventoryMeshPrep();
+        try
+        {
+            OptimumConfig.SetDataPath(dir);
+            OptimumConfig.LazyInventoryMeshPrepEnabled = false;
+            OptimumConfig.Save();
+            OptimumConfig.LazyInventoryMeshPrepEnabled = true;
+            OptimumConfig.Load();
+            Assert.False(OptimumConfig.LazyInventoryMeshPrepEnabled);
+
+            OptimumConfig.LazyInventoryMeshPrepEnabled = true;
+            OptimumConfig.Save();
+            OptimumConfig.LazyInventoryMeshPrepEnabled = false;
+            OptimumConfig.Load();
+            Assert.True(OptimumConfig.LazyInventoryMeshPrepEnabled);
+
+            OptimumDiagnostics.RecordInventoryMeshPreparedHit();
+            OptimumDiagnostics.RecordInventoryMeshBatchPrep();
+            OptimumDiagnostics.RecordInventoryMeshLookaheadPrep();
+            OptimumDiagnostics.RecordInventoryMeshSyncFallback();
+
+            var metrics = OptimumDiagnostics.CaptureBenchmarkMetrics();
+            Assert.Equal(1d, metrics["inventory.meshPrep.hits.count"]);
+            Assert.Equal(1d, metrics["inventory.meshPrep.batchPreps.count"]);
+            Assert.Equal(1d, metrics["inventory.meshPrep.lookaheadPreps.count"]);
+            Assert.Equal(1d, metrics["inventory.meshPrep.syncFallbacks.count"]);
+
+            OptimumDiagnostics.ResetInventoryMeshPrep();
+            var cleared = OptimumDiagnostics.CaptureBenchmarkMetrics();
+            Assert.Equal(0d, cleared["inventory.meshPrep.hits.count"]);
+            Assert.Equal(0d, cleared["inventory.meshPrep.batchPreps.count"]);
+            Assert.Equal(0d, cleared["inventory.meshPrep.lookaheadPreps.count"]);
+            Assert.Equal(0d, cleared["inventory.meshPrep.syncFallbacks.count"]);
+        }
+        finally
+        {
+            OptimumConfig.LazyInventoryMeshPrepEnabled = prevEnabled;
+            OptimumDiagnostics.ResetInventoryMeshPrep();
+            try { Directory.Delete(dir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void InventorySearchBridge_AsciiAndUnicodeWeightsAndOrder_MatchSemantics()
+    {
+        var inv = new InventoryGeneric(6, "searchtest", "0", null);
+        for (int i = 0; i < 6; i++)
+        {
+            inv[i].Itemstack = new ItemStack(new Item(i + 1) { Code = new AssetLocation($"game:item-{i}") });
+        }
+
+        var available = new Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot>();
+        var rendered = new Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot>();
+        for (int i = 0; i < 6; i++)
+        {
+            available.Add(i, inv[i]);
+        }
+
+        var names = new System.Collections.Generic.Dictionary<int, string>
+        {
+            [0] = "cast iron ingot",
+            [1] = "iron",
+            [2] = "ironwood plank",
+            [3] = "raw iron",
+            [4] = "bronze pickaxe",
+            [5] = "медная кирка",
+        };
+        var cached = new System.Collections.Generic.Dictionary<int, string>
+        {
+            [0] = "forged cast iron ingot",
+            [1] = "pure iron",
+            [2] = "dense ironwood plank",
+            [3] = "raw iron ore",
+            [4] = "iron-tipped bronze pickaxe",
+            [5] = "прочная медная кирка",
+        };
+
+        string? searchText = null;
+        int rows = 0;
+        OptimumApiBridge.FilterSlotGridItems(
+            ref searchText,
+            available,
+            rendered,
+            inv,
+            null,
+            5,
+            ref rows,
+            "iron",
+            cached,
+            names);
+
+        // Expected weight order: [1] exact=0, [3] end-word=0.25, [0] mid-word=0.5, [2] prefix=0.75, [4] desc-contains=3.
+        Assert.Equal(new[] { 1, 3, 0, 2, 4 }, rendered.Keys.ToArray());
+
+        OptimumApiBridge.FilterSlotGridItems(
+            ref searchText,
+            available,
+            rendered,
+            inv,
+            null,
+            5,
+            ref rows,
+            "КИРКА",
+            cached,
+            names);
+
+        Assert.Equal(new[] { 5 }, rendered.Keys.ToArray());
+    }
+
+    [Fact]
+    public void InventoryMeshPreparer_PinCompositeShape_RefCountsAcrossOverlappingBatches()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type stmType = donorAsm.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager")!;
+        Type clientMainType = donorAsm.GetType("Vintagestory.Client.NoObf.ClientMain")!;
+        Type unloadableShapeType = donorAsm.GetType("Vintagestory.Client.NoObf.UnloadableShape")!;
+
+        object stm = RuntimeHelpers.GetUninitializedObject(stmType);
+        object game = RuntimeHelpers.GetUninitializedObject(clientMainType);
+        stmType.GetField("game", BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(stm, game);
+
+        var loadedField = unloadableShapeType.GetField("Loaded", BindingFlags.Instance | BindingFlags.Public)!;
+        var keepLoadedField = unloadableShapeType.GetField("keepLoaded", BindingFlags.Instance | BindingFlags.Public)!;
+        var elementsField = unloadableShapeType.GetField("Elements", BindingFlags.Instance | BindingFlags.Public)!;
+
+        object sharedShape = Activator.CreateInstance(unloadableShapeType)!;
+        loadedField.SetValue(sharedShape, true);
+        keepLoadedField.SetValue(sharedShape, false);
+        elementsField.SetValue(sharedShape, Array.Empty<ShapeElement>());
+
+        object transientShape = Activator.CreateInstance(unloadableShapeType)!;
+        loadedField.SetValue(transientShape, true);
+        keepLoadedField.SetValue(transientShape, false);
+        elementsField.SetValue(transientShape, Array.Empty<ShapeElement>());
+
+        var dictType = typeof(Vintagestory.API.Datastructures.OrderedDictionary<,>).MakeGenericType(typeof(AssetLocation), unloadableShapeType);
+        object shapesDict = Activator.CreateInstance(dictType)!;
+        var setItem = dictType.GetProperty("Item", new[] { typeof(AssetLocation) })!;
+        var sharedLoc = new AssetLocation("game:block/basic/cube");
+        var transientLoc = new AssetLocation("game:block/basic/transient");
+        setItem.SetValue(shapesDict, sharedShape, new object[] { sharedLoc });
+        setItem.SetValue(shapesDict, transientShape, new object[] { transientLoc });
+        stmType.GetField("shapes", BindingFlags.Instance | BindingFlags.Public)!.SetValue(stm, shapesDict);
+
+        MethodInfo prepMethod = stmType.GetMethod("EnsureInventoryMeshPreparer", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        object preparer = prepMethod.Invoke(stm, null)!;
+        MethodInfo pinMethod = preparer.GetType().GetMethod("PinCompositeShape", BindingFlags.Instance | BindingFlags.Public)!;
+        MethodInfo unpinMethod = preparer.GetType().GetMethod("UnpinShapes", BindingFlags.Instance | BindingFlags.Public)!;
+        MethodInfo unloadUnpinnedMethod = preparer.GetType().GetMethod("UnloadAllUnpinnedTemporaryShapes", BindingFlags.Instance | BindingFlags.Public)!;
+        FieldInfo overrideField = preparer.GetType().GetField("ShapePinningModeOverride", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)!;
+
+        int prevOverride = (int)overrideField.GetValue(preparer)!;
+        try
+        {
+            overrideField.SetValue(preparer, 2);
+            var composite = new CompositeShape { Base = sharedLoc, Format = EnumShapeFormat.VintageStory };
+            var listType = typeof(System.Collections.Generic.List<>).MakeGenericType(unloadableShapeType);
+            System.Collections.IList batchA = (System.Collections.IList)Activator.CreateInstance(listType)!;
+            System.Collections.IList batchB = (System.Collections.IList)Activator.CreateInstance(listType)!;
+
+            pinMethod.Invoke(preparer, new object?[] { composite, batchA });
+            pinMethod.Invoke(preparer, new object?[] { composite, batchB });
+            Assert.Single(batchA);
+            Assert.Single(batchB);
+
+            // LoadDone() must unload unpinned transientShape while leaving pinned sharedShape loaded.
+            unloadUnpinnedMethod.Invoke(preparer, null);
+            Assert.False((bool)loadedField.GetValue(transientShape)!);
+            Assert.True((bool)loadedField.GetValue(sharedShape)!);
+
+            // Unpinning batchA keeps sharedShape loaded while batchB still holds a pin.
+            unpinMethod.Invoke(preparer, new object?[] { batchA });
+            Assert.True((bool)loadedField.GetValue(sharedShape)!);
+
+            // Unpinning batchB drops the refcount to zero and unloads sharedShape.
+            unpinMethod.Invoke(preparer, new object?[] { batchB });
+            Assert.False((bool)loadedField.GetValue(sharedShape)!);
+        }
+        finally
+        {
+            overrideField.SetValue(preparer, prevOverride);
+        }
+    }
+
+    [Fact]
+    public void PatchedAssemblies_WireIssue651InventoryMeshPrepAndSlotGrid_WhenBuilt()
+    {
+        string patchedLib = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll");
+        string patchedApi = Path.Combine(RepoRoot(), "bin/Release/net10.0/VintagestoryAPI-patched.dll");
+        if (!File.Exists(patchedLib) || !File.Exists(patchedApi))
+        {
+            return;
+        }
+
+        using (var libAsm = AssemblyDefinition.ReadAssembly(patchedLib))
+        {
+            var libMod = libAsm.MainModule;
+            Assert.NotNull(libMod.GetType("Vintagestory.Client.NoObf.OptimumInventoryMeshPreparer"));
+
+            var stmType = libMod.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager");
+            Assert.NotNull(stmType);
+            Assert.Contains(stmType!.Methods, m => m.Name == "PrepareSlotGridWindow");
+            Assert.Contains(stmType.Methods, m => m.Name == "BeginInitialInventoryMeshPrefetch");
+
+            var startupType = libMod.GetType("Vintagestory.Client.NoObf.ClientSystemStartup");
+            var onJoined = startupType!.Methods.Single(m => m.Name == "OnAllAssetsLoadedAndClientJoined");
+            Assert.Contains(onJoined.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "BeginInitialInventoryMeshPrefetch");
+
+            var guiMgr = libMod.GetType("Vintagestory.Client.NoObf.GuiManager");
+            var onPlayerData = guiMgr!.Methods.Single(m => m.Name == "OnOwnPlayerDataReceived");
+            Assert.Contains(onPlayerData.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "BeginInitialInventoryMeshPrefetch");
+        }
+
+        using (var apiAsm = AssemblyDefinition.ReadAssembly(patchedApi))
+        {
+            var apiMod = apiAsm.MainModule;
+            var gridType = apiMod.GetType("Vintagestory.API.Client.GuiElementItemSlotGridBase");
+            Assert.NotNull(gridType);
+
+            var renderMethod = gridType!.Methods.Single(m => m.Name == "RenderInteractiveElements");
+            Assert.Contains(renderMethod.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "PrepareSlotGridInventoryMeshes");
+
+            var filterMethod = gridType.Methods.Single(m => m.Name == "FilterItemsBySearchText");
+            Assert.Contains(filterMethod.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "TryComposeFilteredSlotGrid");
+
+            var postRender = gridType.Methods.Single(m => m.Name == "PostRenderInteractiveElements");
+            Assert.Contains(postRender.Body.Instructions, i => i.Operand is FieldReference fr && fr.Name == "renderedSlots");
+
+            var composeOverlays = gridType.Methods.Single(m => m.Name == "ComposeSlotOverlays");
+            Assert.Contains(composeOverlays.Body.Instructions, i => i.Operand is FieldReference fr && fr.Name == "renderedSlots");
+        }
+    }
 }

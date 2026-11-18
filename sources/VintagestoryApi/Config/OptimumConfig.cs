@@ -400,6 +400,7 @@ public static class OptimumConfig
     /// *ModelRefsInventory arrays directly without calling GetDefaultBlockMeshRef/GetDefaultItemMeshRef.
     /// </summary>
     public static bool LazyInventoryMeshesEnabled = true;
+    public static bool LazyInventoryMeshPrepEnabled = true;
 
     // Settings that live in VintagestoryLib (read per-frame from ClientSettings).
     // Mirrored here for persistence only.
@@ -1491,6 +1492,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.MeshPartPool), MeshPartPoolEnabled.ToString()),
         (nameof(OptimumConfigData.ItemRenderInfoReuse), ItemRenderInfoReuseEnabled.ToString()),
         (nameof(OptimumConfigData.LazyInventoryMeshes), LazyInventoryMeshesEnabled.ToString()),
+        (nameof(OptimumConfigData.LazyInventoryMeshPrep), LazyInventoryMeshPrepEnabled.ToString()),
         (nameof(OptimumConfigData.DynamicLightCache), DynamicLightCacheEnabled.ToString()),
         (nameof(OptimumConfigData.EntityLightBatch), EntityLightBatchEnabled.ToString()),
         (nameof(OptimumConfigData.EntityShaderStateCache), EntityShaderStateCacheEnabled.ToString()),
@@ -1611,6 +1613,7 @@ public static class OptimumConfig
             MeshPartPoolEnabled = data.MeshPartPool;
             ItemRenderInfoReuseEnabled = data.ItemRenderInfoReuse;
             LazyInventoryMeshesEnabled = data.LazyInventoryMeshes;
+            LazyInventoryMeshPrepEnabled = data.LazyInventoryMeshPrep;
             DynamicLightCacheEnabled = data.DynamicLightCache;
             EntityLightBatchEnabled = data.EntityLightBatch;
             EntityShaderStateCacheEnabled = data.EntityShaderStateCache;
@@ -1724,6 +1727,7 @@ public static class OptimumConfig
             MeshPartPool = MeshPartPoolEnabled,
             ItemRenderInfoReuse = ItemRenderInfoReuseEnabled,
             LazyInventoryMeshes = LazyInventoryMeshesEnabled,
+            LazyInventoryMeshPrep = LazyInventoryMeshPrepEnabled,
             DynamicLightCache = DynamicLightCacheEnabled,
             EntityLightBatch = EntityLightBatchEnabled,
             EntityShaderStateCache = EntityShaderStateCacheEnabled,
@@ -1846,6 +1850,7 @@ internal sealed class OptimumConfigData
     public bool MeshPartPool { get; set; } = true;
     public bool ItemRenderInfoReuse { get; set; } = true;
     public bool LazyInventoryMeshes { get; set; } = true;
+    public bool LazyInventoryMeshPrep { get; set; } = true;
     public bool DynamicLightCache { get; set; } = true;
     public bool EntityLightBatch { get; set; } = true;
     public bool EntityShaderStateCache { get; set; } = true;
@@ -2477,6 +2482,11 @@ public static class OptimumDiagnostics
             ["worldgen.columns.count"] = Interlocked.Read(ref _worldgenTotalColumns),
             ["chunkDeserializeParallel.columns.count"] = Interlocked.Read(ref _chunkDeserializeParallelColumns),
             ["chunkDeserializeParallel.chunks.count"] = Interlocked.Read(ref _chunkDeserializeParallelChunks),
+
+            ["inventory.meshPrep.hits.count"] = Interlocked.Read(ref _inventoryMeshPreparedHits),
+            ["inventory.meshPrep.batchPreps.count"] = Interlocked.Read(ref _inventoryMeshBatchPreps),
+            ["inventory.meshPrep.lookaheadPreps.count"] = Interlocked.Read(ref _inventoryMeshLookaheadPreps),
+            ["inventory.meshPrep.syncFallbacks.count"] = Interlocked.Read(ref _inventoryMeshSyncFallbacks),
         };
 
         foreach (var (name, counter) in Counters)
@@ -3763,6 +3773,29 @@ public static class OptimumDiagnostics
     private static long _dynamicFsrFallbacks;
     private static long _dynamicSceneGpuMsBits;
     private static long _dynamicUpscaleGpuMsBits;
+
+    private static long _inventoryMeshPreparedHits;
+    private static long _inventoryMeshBatchPreps;
+    private static long _inventoryMeshLookaheadPreps;
+    private static long _inventoryMeshSyncFallbacks;
+
+    public static long InventoryMeshPreparedHits => Interlocked.Read(ref _inventoryMeshPreparedHits);
+    public static long InventoryMeshBatchPreps => Interlocked.Read(ref _inventoryMeshBatchPreps);
+    public static long InventoryMeshLookaheadPreps => Interlocked.Read(ref _inventoryMeshLookaheadPreps);
+    public static long InventoryMeshSyncFallbacks => Interlocked.Read(ref _inventoryMeshSyncFallbacks);
+
+    public static void RecordInventoryMeshPreparedHit() => Interlocked.Increment(ref _inventoryMeshPreparedHits);
+    public static void RecordInventoryMeshBatchPrep() => Interlocked.Increment(ref _inventoryMeshBatchPreps);
+    public static void RecordInventoryMeshLookaheadPrep() => Interlocked.Increment(ref _inventoryMeshLookaheadPreps);
+    public static void RecordInventoryMeshSyncFallback() => Interlocked.Increment(ref _inventoryMeshSyncFallbacks);
+
+    public static void ResetInventoryMeshPrep()
+    {
+        Interlocked.Exchange(ref _inventoryMeshPreparedHits, 0);
+        Interlocked.Exchange(ref _inventoryMeshBatchPreps, 0);
+        Interlocked.Exchange(ref _inventoryMeshLookaheadPreps, 0);
+        Interlocked.Exchange(ref _inventoryMeshSyncFallbacks, 0);
+    }
 
     public static float DynamicRenderScaleCurrent => Volatile.Read(ref _dynamicScaleKey) / 100f;
     public static OptimumDynamicUpscalerKind DynamicRenderScaleActiveUpscaler =>

@@ -255,6 +255,12 @@ public static class ApiPatcher
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(itemStackMatchesSearchText),
             vanilla.MainModule.ImportReference(filterSlotGridItems));
+        int guiSlotGridPerformancePatches = PatchGuiSlotGridPerformance(vanilla.MainModule, contracts.MainModule);
+        if (guiSlotGridPerformancePatches != 4)
+        {
+            throw new InvalidOperationException(
+                $"Expected 4 GuiElementItemSlotGridBase performance patches, applied {guiSlotGridPerformancePatches}.");
+        }
         int guiHoverTextPatches = PatchGuiHoverTextSameText(vanilla.MainModule);
         int guiStatbarPatches = PatchGuiStatbarOnDemand(vanilla.MainModule);
         int linkTextGpuUploads = PatchLinkTextGpuUploads(vanilla.MainModule);
@@ -4078,6 +4084,248 @@ public static class ApiPatcher
         instruction.OpCode == OpCodes.Stloc_3 && variable.Index == 3 ||
         (instruction.OpCode == OpCodes.Stloc || instruction.OpCode == OpCodes.Stloc_S) &&
         instruction.Operand is VariableDefinition storedVariable && storedVariable == variable;
+
+    /// <summary>
+    /// Issue #651: Hooks lazy inventory mesh preparation into GuiElementItemSlotGridBase.RenderInteractiveElements,
+    /// fast-paths filtered re-composition in FilterItemsBySearchText through OptimumApiBridge.TryComposeFilteredSlotGrid,
+    /// aligns ComposeSlotOverlays/PostRenderInteractiveElements to renderedSlots with bounds checking, and skips
+    /// empty-texture Dispose/reallocation when slotQuantityTextures[slotIndex].TextureId == 0.
+    /// </summary>
+    internal static int PatchGuiSlotGridPerformance(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string gridTypeName = "Vintagestory.API.Client.GuiElementItemSlotGridBase";
+        const string elementTypeName = "Vintagestory.API.Client.GuiElement";
+        const string textureTypeName = "Vintagestory.API.Client.LoadedTexture";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumApiBridge";
+
+        var grid = module.GetType(gridTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName} is missing from the vanilla API.");
+        var element = module.GetType(elementTypeName)
+            ?? throw new InvalidOperationException($"{elementTypeName} is missing from the vanilla API.");
+        var textureType = module.GetType(textureTypeName)
+            ?? throw new InvalidOperationException($"{textureTypeName} is missing from the vanilla API.");
+        var bridgeType = contractsModule.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from Optimum.Api.Contracts.");
+
+        var prepareMethodDef = bridgeType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "PrepareSlotGridInventoryMeshes" && m.Parameters.Count == 4)
+            ?? throw new InvalidOperationException($"{bridgeTypeName}.PrepareSlotGridInventoryMeshes is missing.");
+        var tryComposeFastDef = bridgeType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "TryComposeFilteredSlotGrid" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{bridgeTypeName}.TryComposeFilteredSlotGrid is missing.");
+
+        var prepareMethodRef = module.ImportReference(prepareMethodDef);
+        var tryComposeFastRef = module.ImportReference(tryComposeFastDef);
+
+        var apiField = element.Fields.SingleOrDefault(f => f.Name == "api")
+            ?? throw new InvalidOperationException($"{elementTypeName}.api is missing.");
+        var boundsField = element.Fields.SingleOrDefault(f => f.Name == "Bounds")
+            ?? throw new InvalidOperationException($"{elementTypeName}.Bounds is missing.");
+        var renderedSlotsField = grid.Fields.SingleOrDefault(f => f.Name == "renderedSlots")
+            ?? throw new InvalidOperationException($"{gridTypeName}.renderedSlots is missing.");
+        var availableSlotsField = grid.Fields.SingleOrDefault(f => f.Name == "availableSlots")
+            ?? throw new InvalidOperationException($"{gridTypeName}.availableSlots is missing.");
+        var slotBoundsField = grid.Fields.SingleOrDefault(f => f.Name == "SlotBounds")
+            ?? throw new InvalidOperationException($"{gridTypeName}.SlotBounds is missing.");
+        var slotQuantityTexturesField = grid.Fields.SingleOrDefault(f => f.Name == "slotQuantityTextures")
+            ?? throw new InvalidOperationException($"{gridTypeName}.slotQuantityTextures is missing.");
+        var textureIdField = textureType.Fields.SingleOrDefault(f => f.Name == "TextureId" && f.FieldType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{textureTypeName}.TextureId is missing.");
+
+        int patchesApplied = 0;
+
+        // 1. RenderInteractiveElements: prepare visible + lookahead slot meshes before drawing.
+        var renderMethod = grid.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "RenderInteractiveElements" && m.Parameters.Count == 1 && m.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.RenderInteractiveElements is missing.");
+        if (!renderMethod.Body.Instructions.Any(i => i.Operand is MethodReference mr && mr.Name == "PrepareSlotGridInventoryMeshes"))
+        {
+            ClearDebugInformation(renderMethod);
+            renderMethod.Body.MaxStackSize = Math.Max(renderMethod.Body.MaxStackSize, 8);
+            var il = renderMethod.Body.GetILProcessor();
+            var first = renderMethod.Body.Instructions[0];
+            var prepInstrs = new[]
+            {
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, apiField),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, renderedSlotsField),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, boundsField),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, slotBoundsField),
+                Instruction.Create(OpCodes.Call, prepareMethodRef),
+            };
+            RetargetBranches(renderMethod.Body.Instructions, first, prepInstrs[0]);
+            foreach (var instr in prepInstrs)
+            {
+                il.InsertBefore(first, instr);
+            }
+            patchesApplied++;
+        }
+
+        // 2. FilterItemsBySearchText: skip full ComposeInteractiveElements re-composition when fast compose succeeds.
+        var filterMethod = grid.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "FilterItemsBySearchText" && m.Parameters.Count == 3 && m.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.FilterItemsBySearchText is missing.");
+        if (!filterMethod.Body.Instructions.Any(i => i.Operand is MethodReference mr && mr.Name == "TryComposeFilteredSlotGrid"))
+        {
+            var composeCall = filterMethod.Body.Instructions.FirstOrDefault(i =>
+                i.OpCode == OpCodes.Call &&
+                i.Operand is MethodReference mr &&
+                mr.Name == "ComposeInteractiveElements" &&
+                mr.Parameters.Count == 0)
+                ?? throw new InvalidOperationException($"{gridTypeName}.FilterItemsBySearchText does not call ComposeInteractiveElements.");
+            var ldArgBeforeCall = composeCall.Previous;
+            var retAfterCall = composeCall.Next;
+            if (ldArgBeforeCall == null || ldArgBeforeCall.OpCode != OpCodes.Ldarg_0 ||
+                retAfterCall == null || retAfterCall.OpCode != OpCodes.Ret)
+            {
+                throw new InvalidOperationException($"{gridTypeName}.FilterItemsBySearchText ComposeInteractiveElements tail shape mismatch.");
+            }
+
+            ClearDebugInformation(filterMethod);
+            var il = filterMethod.Body.GetILProcessor();
+            var fastInstrs = new[]
+            {
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Call, tryComposeFastRef),
+                Instruction.Create(OpCodes.Brtrue, retAfterCall),
+            };
+            foreach (var instr in fastInstrs)
+            {
+                il.InsertBefore(ldArgBeforeCall, instr);
+            }
+            patchesApplied++;
+        }
+
+        // 3. PostRenderInteractiveElements: look up dirty slots in renderedSlots so filtered grids never index out of bounds.
+        var postRenderMethod = grid.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "PostRenderInteractiveElements" && m.Parameters.Count == 1 && m.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.PostRenderInteractiveElements is missing.");
+        ClearDebugInformation(postRenderMethod);
+        int postReplaced = 0;
+        foreach (var instr in postRenderMethod.Body.Instructions)
+        {
+            if (instr.OpCode == OpCodes.Ldfld &&
+                instr.Operand is FieldReference fr &&
+                fr.Name == availableSlotsField.Name &&
+                instr.Next?.Next?.Operand is MethodReference nextCall &&
+                nextCall.Name == "IndexOfKey")
+            {
+                instr.Operand = renderedSlotsField;
+                postReplaced++;
+            }
+        }
+        if (postReplaced == 0)
+        {
+            throw new InvalidOperationException($"{gridTypeName}.PostRenderInteractiveElements availableSlots.IndexOfKey site not found.");
+        }
+        patchesApplied++;
+
+        // 4. ComposeSlotOverlays: check renderedSlots + bounds guard, and skip Dispose/new LoadedTexture when TextureId == 0.
+        var composeOverlays = grid.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "ComposeSlotOverlays" && m.Parameters.Count == 3 && m.HasBody)
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays is missing.");
+        ClearDebugInformation(composeOverlays);
+        int overlayFieldReplaced = 0;
+        foreach (var instr in composeOverlays.Body.Instructions)
+        {
+            if (instr.OpCode == OpCodes.Ldfld &&
+                instr.Operand is FieldReference fr &&
+                fr.Name == availableSlotsField.Name)
+            {
+                instr.Operand = renderedSlotsField;
+                overlayFieldReplaced++;
+            }
+        }
+        if (overlayFieldReplaced == 0)
+        {
+            throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays availableSlots lookup site not found.");
+        }
+
+        var disposeCall = composeOverlays.Body.Instructions.FirstOrDefault(i =>
+            (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+            i.Operand is MethodReference mr &&
+            mr.Name == "Dispose" &&
+            mr.DeclaringType.FullName == textureTypeName)
+            ?? throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays LoadedTexture.Dispose call not found.");
+
+        var loadElem = disposeCall.Previous;
+        var loadArg3 = loadElem?.Previous;
+        var loadQtyArr = loadArg3?.Previous;
+        var loadArg0 = loadQtyArr?.Previous;
+        if (loadArg0 == null || loadArg0.OpCode != OpCodes.Ldarg_0 ||
+            loadQtyArr!.OpCode != OpCodes.Ldfld ||
+            loadArg3!.OpCode != OpCodes.Ldarg_3 ||
+            loadElem!.OpCode != OpCodes.Ldelem_Ref)
+        {
+            throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays Dispose sequence mismatch.");
+        }
+
+        var earlyRet = disposeCall.Next;
+        while (earlyRet != null && earlyRet.OpCode != OpCodes.Ret)
+        {
+            earlyRet = earlyRet.Next;
+        }
+        if (earlyRet?.Previous == null || earlyRet.Previous.OpCode != OpCodes.Ldc_I4_1)
+        {
+            throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays early return after Dispose not found.");
+        }
+        var earlyTrue = earlyRet.Previous;
+
+        var ovIl = composeOverlays.Body.GetILProcessor();
+        var skipEmptyInstrs = new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, slotQuantityTexturesField),
+            Instruction.Create(OpCodes.Ldarg_3),
+            Instruction.Create(OpCodes.Ldelem_Ref),
+            Instruction.Create(OpCodes.Ldfld, textureIdField),
+            Instruction.Create(OpCodes.Brfalse, earlyTrue),
+        };
+        RetargetBranches(composeOverlays.Body.Instructions, loadArg0, skipEmptyInstrs[0]);
+        foreach (var instr in skipEmptyInstrs)
+        {
+            ovIl.InsertBefore(loadArg0, instr);
+        }
+
+        var ovFirst = composeOverlays.Body.Instructions[0];
+        var boundsGuardInstrs = new[]
+        {
+            Instruction.Create(OpCodes.Ldarg_3),
+            Instruction.Create(OpCodes.Ldarg_0),
+            Instruction.Create(OpCodes.Ldfld, slotQuantityTexturesField),
+            Instruction.Create(OpCodes.Ldlen),
+            Instruction.Create(OpCodes.Conv_I4),
+            Instruction.Create(OpCodes.Blt_Un, ovFirst),
+            Instruction.Create(OpCodes.Ldc_I4_0),
+            Instruction.Create(OpCodes.Ret),
+        };
+        RetargetBranches(composeOverlays.Body.Instructions, ovFirst, boundsGuardInstrs[0]);
+        foreach (var instr in boundsGuardInstrs)
+        {
+            ovIl.InsertBefore(ovFirst, instr);
+        }
+        patchesApplied++;
+
+        Console.WriteLine($"  API PATCHED: {gridTypeName} window mesh prep, fast filtered compose, renderedSlots alignment, empty overlay skip");
+        return patchesApplied;
+    }
+
+    private static void RetargetBranches(
+        Mono.Collections.Generic.Collection<Instruction> instructions,
+        Instruction oldTarget,
+        Instruction newTarget)
+    {
+        foreach (var instruction in instructions)
+        {
+            if (ReferenceEquals(instruction.Operand, oldTarget))
+            {
+                instruction.Operand = newTarget;
+            }
+        }
+    }
 
     /// <summary>
     /// Injects type-forwarding entries (ExportedType rows) into the vanilla API assembly
