@@ -1250,6 +1250,45 @@ public static class OptimumApiBridge
         animator.TransformationMatrices = new float[defaultPoseMatrices.Length];
     }
 
+    private const int LargeKeyFrameElementThreshold = 16;
+
+    /// <summary>
+    /// Computes the deepest element-pose nesting level without accumulating depth across siblings.
+    /// </summary>
+    public static int ClientAnimatorGetMaxDepth(System.Collections.Generic.List<ElementPose>? poses, int depth)
+    {
+        if (poses == null)
+        {
+            return depth;
+        }
+
+        int maxDepth = depth;
+        for (int i = 0; i < poses.Count; i++)
+        {
+            ElementPose pose = poses[i];
+            if (pose.ChildElementPoses != null)
+            {
+                int childDepth = ClientAnimatorGetMaxDepth(pose.ChildElementPoses, depth + 1);
+                if (childDepth > maxDepth)
+                {
+                    maxDepth = childDepth;
+                }
+            }
+        }
+
+        return maxDepth;
+    }
+
+    /// <summary>
+    /// Uses a pre-sized hash Dictionary once keyframe element count exceeds small-array scan size.
+    /// </summary>
+    public static System.Collections.Generic.IDictionary<ShapeElement, AnimationKeyFrameElement> CreateKeyFrameElementDictionary(int capacity)
+    {
+        return capacity > LargeKeyFrameElementThreshold
+            ? new System.Collections.Generic.Dictionary<ShapeElement, AnimationKeyFrameElement>(capacity)
+            : new FastSmallDictionary<ShapeElement, AnimationKeyFrameElement>(capacity);
+    }
+
     public static void AssetLocationResolveToDomainAndPath(string? domainAndPath, out string? domain, out string? path)
     {
         if (domainAndPath == null)

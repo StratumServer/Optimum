@@ -1,0 +1,26 @@
+diff --git a/VintagestoryApi/Common/Model/Animation/AnimationKeyFrame.cs b/VintagestoryApi/Common/Model/Animation/AnimationKeyFrame.cs
+index df5ff4f..badd714 100644
+--- a/VintagestoryApi/Common/Model/Animation/AnimationKeyFrame.cs
++++ b/VintagestoryApi/Common/Model/Animation/AnimationKeyFrame.cs
+@@ -1,7 +1,8 @@
+ ﻿using Newtonsoft.Json;
+ using System.Collections.Generic;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.Common
+@@ -51,11 +52,11 @@ namespace Vintagestory.API.Common
+         /// <param name="allElements"></param>
+         public void Resolve(Dictionary<string, ShapeElement> allElements)
+         {
+             if (Elements == null) return;
+ 
+-            ElementsByShapeElement = new FastSmallDictionary<ShapeElement, AnimationKeyFrameElement>(Elements.Count);
++            ElementsByShapeElement = OptimumApiBridge.CreateKeyFrameElementDictionary(Elements.Count);
+             foreach (var val in Elements)
+             {
+                 AnimationKeyFrameElement kelem = val.Value;
+                 kelem.Frame = Frame;
+                 allElements.TryGetValue(val.Key, out ShapeElement elem);

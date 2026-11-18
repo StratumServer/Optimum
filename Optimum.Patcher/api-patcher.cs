@@ -120,6 +120,10 @@ public static class ApiPatcher
             method.Name == "EvolvingNatFloatEquals" && method.Parameters.Count == 2);
         var clientAnimatorInitMatrices = bridge.Methods.Single(method =>
             method.Name == "ClientAnimatorInitMatrices" && method.Parameters.Count == 2);
+        var clientAnimatorGetMaxDepth = bridge.Methods.Single(method =>
+            method.Name == "ClientAnimatorGetMaxDepth" && method.Parameters.Count == 2);
+        var createKeyFrameElementDict = bridge.Methods.Single(method =>
+            method.Name == "CreateKeyFrameElementDictionary" && method.Parameters.Count == 1);
         var assetLocationResolveToDomainAndPath = bridge.Methods.Single(method =>
             method.Name == "AssetLocationResolveToDomainAndPath" && method.Parameters.Count == 3);
         var colorUtilGetIncandescence3 = bridge.Methods.Single(method =>
@@ -191,6 +195,12 @@ public static class ApiPatcher
         int clientAnimatorPatched = PatchClientAnimator(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(clientAnimatorInitMatrices));
+        int clientAnimatorGetMaxDepthPatched = PatchClientAnimatorGetMaxDepth(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(clientAnimatorGetMaxDepth));
+        int animationKeyFramePatched = PatchAnimationKeyFrame(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(createKeyFrameElementDict));
         int colorUtilMethods = PatchColorUtil(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(colorUtilGetIncandescence3),
@@ -341,6 +351,16 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 4 ClientAnimator patches (1 initMatrices + 3 clamps), applied {clientAnimatorPatched}.");
+        }
+        if (clientAnimatorGetMaxDepthPatched != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 ClientAnimator.getMaxDepth patch, applied {clientAnimatorGetMaxDepthPatched}.");
+        }
+        if (animationKeyFramePatched != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 AnimationKeyFrame.Resolve patch, applied {animationKeyFramePatched}.");
         }
         if (colorUtilMethods != 4)
         {
@@ -890,6 +910,85 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.initMatrices -> OptimumApiBridge + {clampedSites} activeAnimCount clamps");
         return 1 + clampedSites;
+    }
+
+    internal static int PatchClientAnimatorGetMaxDepth(ModuleDefinition module, MethodReference getMaxDepthBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.ClientAnimator";
+        var clientAnimator = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var getMaxDepth = clientAnimator.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "getMaxDepth" &&
+            method.Parameters.Count == 2 &&
+            method.ReturnType.MetadataType == MetadataType.Int32)
+            ?? throw new InvalidOperationException($"{typeName}.getMaxDepth(List<ElementPose>, int) is missing from the vanilla API.");
+
+        ClearDebugInformation(getMaxDepth);
+        var body = new MethodBody(getMaxDepth)
+        {
+            InitLocals = false,
+        };
+        var processor = body.GetILProcessor();
+        processor.Append(Instruction.Create(OpCodes.Ldarg_1));
+        processor.Append(Instruction.Create(OpCodes.Ldarg_2));
+        processor.Append(Instruction.Create(OpCodes.Call, getMaxDepthBridge));
+        processor.Append(Instruction.Create(OpCodes.Ret));
+        getMaxDepth.Body = body;
+
+        Console.WriteLine($"  API PATCHED: {typeName}.getMaxDepth -> OptimumApiBridge");
+        return 1;
+    }
+
+    internal static int PatchAnimationKeyFrame(ModuleDefinition module, MethodReference createMapBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.AnimationKeyFrame";
+        var keyFrame = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+
+        var resolveDict = keyFrame.Methods.SingleOrDefault(method =>
+            !method.IsStatic &&
+            method.Name == "Resolve" &&
+            method.Parameters.Count == 1 &&
+            method.Parameters[0].ParameterType.Name.StartsWith("Dictionary", StringComparison.Ordinal))
+            ?? throw new InvalidOperationException($"{typeName}.Resolve(Dictionary<string, ShapeElement>) is missing from the vanilla API.");
+
+        if (!resolveDict.HasBody)
+        {
+            throw new InvalidOperationException($"{resolveDict.FullName} has no method body.");
+        }
+
+        ClearDebugInformation(resolveDict);
+        var instructions = resolveDict.Body.Instructions;
+        if (instructions.Any(ins =>
+            ins.OpCode == OpCodes.Call &&
+            ins.Operand is MethodReference existing &&
+            existing.FullName == createMapBridge.FullName))
+        {
+            return 1;
+        }
+
+        var fastDictCtors = instructions
+            .Where(ins =>
+                ins.OpCode == OpCodes.Newobj &&
+                ins.Operand is MethodReference ctor &&
+                ctor.Name == ".ctor" &&
+                ctor.Parameters.Count == 1 &&
+                ctor.DeclaringType.FullName.StartsWith("Vintagestory.API.Datastructures.FastSmallDictionary", StringComparison.Ordinal))
+            .ToArray();
+
+        if (fastDictCtors.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"{resolveDict.FullName}: expected 1 FastSmallDictionary(int) construction, found {fastDictCtors.Length}.");
+        }
+
+        fastDictCtors[0].OpCode = OpCodes.Call;
+        fastDictCtors[0].Operand = createMapBridge;
+
+        Console.WriteLine($"  API PATCHED: {typeName}.Resolve(Dictionary<string, ShapeElement>) -> OptimumApiBridge");
+        return 1;
     }
 
     private static void RewriteTwoArgNegatedForwarder(MethodDefinition target, MethodReference bridgeMethod)
