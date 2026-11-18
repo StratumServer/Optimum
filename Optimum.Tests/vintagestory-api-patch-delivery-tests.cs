@@ -26,7 +26,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Client/UI/CairoFont.cs.patch"] = ["PatchFontMeasurementMetrics"],
             ["Client/UI/Elements/Impl/Interactive/GuiElementConfigList.cs.patch"] = ["PatchGuiTextureDisposal"],
             ["Client/UI/Elements/Impl/Interactive/GuiElementStatbar.cs.patch"] = ["PatchGuiStatbarOnDemand", "PatchQueuedGuiContexts"],
-            ["Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs.patch"] = ["PatchGuiTextureDisposal", "PatchGuiSlotNotifiedSubscription", "PatchInventorySearch"],
+            ["Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs.patch"] = ["PatchGuiTextureDisposal", "PatchGuiSlotNotifiedSubscription", "PatchInventorySearch", "PatchGuiSlotGridPerformance"],
             ["Client/UI/Elements/Impl/Interactive/Text/GuiElementDynamicText.cs.patch"] = ["PatchQueuedGuiContexts"],
             ["Client/UI/Elements/Impl/Interactive/Text/GuiElementHoverText.cs.patch"] = ["PatchGuiHoverTextSameText"],
             ["Client/UI/Elements/Impl/Interactive/Text/GuiElementItemstackInfo.cs.patch"] = ["PatchQueuedGuiContexts"],

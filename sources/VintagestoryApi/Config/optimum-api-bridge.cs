@@ -171,4 +171,26 @@ public static class OptimumApiBridge
         GetIncandescenceColorFloats(temperature, out float r, out float g, out float b, out float a);
         return new float[] { r, g, b, a };
     }
+
+    public delegate void InventoryMeshWindowPreparerDelegate(
+        ICoreClientAPI api,
+        OrderedDictionary<int, ItemSlot> renderedSlots,
+        int visibleStartIndex,
+        int visibleCount,
+        int lookaheadStartIndex,
+        int lookaheadCount);
+
+    public static void RegisterInventoryMeshPreparer(
+        ICoreClientAPI? api,
+        InventoryMeshWindowPreparerDelegate? preparer) { }
+
+    public static void UnregisterInventoryMeshPreparer(ICoreClientAPI? api) { }
+
+    public static void PrepareSlotGridInventoryMeshes(
+        ICoreClientAPI? api,
+        OrderedDictionary<int, ItemSlot>? renderedSlots,
+        ElementBounds? elementBounds,
+        ElementBounds[]? slotBounds) { }
+
+    public static bool TryComposeFilteredSlotGrid(GuiElementItemSlotGridBase? grid) => false;
 }

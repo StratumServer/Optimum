@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..cd5a56e 100644
+index dae3e901..cf767340 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -14,7 +14,7 @@ index dae3e90..cd5a56e 100644
  using Vintagestory.API.Server;
  using Vintagestory.API.Util;
  using Vintagestory.Server;
-@@ -60,19 +61,47 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -60,19 +61,82 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  
  	private Dictionary<AssetLocation, UnloadableShape> shapes4;
  
@@ -23,6 +23,41 @@ index dae3e90..cd5a56e 100644
 +	// Optimum issue #611: lazily-initialized scratch list tracking unloaded shapes reloaded
 +	// under OptimizeRamMode == 2 during lazy inventory tessellation so finally re-unloads them.
 +	private List<UnloadableShape> lazyReloadedShapes;
++
++	private OptimumInventoryMeshPreparer inventoryMeshPreparer;
++
++	internal OptimumInventoryMeshPreparer EnsureInventoryMeshPreparer()
++	{
++		OptimumInventoryMeshPreparer existing = Volatile.Read(ref inventoryMeshPreparer);
++		if (existing == null)
++		{
++			if (game == null)
++			{
++				return null;
++			}
++			OptimumInventoryMeshPreparer created = new OptimumInventoryMeshPreparer(this, game);
++			OptimumInventoryMeshPreparer prior = Interlocked.CompareExchange(ref inventoryMeshPreparer, created, null);
++			existing = prior ?? created;
++		}
++		existing.EnsureBridgeRegistered();
++		return existing;
++	}
++
++	internal void PrepareSlotGridWindow(
++		ICoreClientAPI api,
++		Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot> renderedSlots,
++		int visibleStartIndex,
++		int visibleCount,
++		int lookaheadStartIndex,
++		int lookaheadCount)
++	{
++		EnsureInventoryMeshPreparer()?.PrepareSlotGridWindow(renderedSlots, visibleStartIndex, visibleCount, lookaheadStartIndex, lookaheadCount);
++	}
++
++	internal void BeginInitialInventoryMeshPrefetch()
++	{
++		EnsureInventoryMeshPreparer()?.BeginInitialPrefetch();
++	}
 +
  	public ShapeTesselator Tesselator => TLTesselator ?? (TLTesselator = new ShapeTesselator(game, shapes, objs, gltfs));
  
@@ -65,7 +100,7 @@ index dae3e90..cd5a56e 100644
  	internal void ReloadTesselator()
  	{
  		TLTesselator = null;
-@@ -101,15 +130,23 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -101,29 +165,47 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		TesselateBlocks_Pre();
  		TyronThreadPool.QueueTask(delegate
  		{
@@ -91,7 +126,39 @@ index dae3e90..cd5a56e 100644
  		{
  			Thread.Sleep(30);
  		}
-@@ -231,11 +268,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		LoadDone();
++		if (game.BlocksReceivedAndLoaded)
++		{
++			BeginInitialInventoryMeshPrefetch();
++		}
+ 	}
+ 
+ 	public void LoadDone()
+ 	{
+ 		if (ClientSettings.OptimizeRamMode != 2)
+ 		{
+ 			return;
+ 		}
++		OptimumInventoryMeshPreparer preparer = EnsureInventoryMeshPreparer();
++		if (preparer != null)
++		{
++			preparer.UnloadAllUnpinnedTemporaryShapes();
++			return;
++		}
+ 		foreach (KeyValuePair<AssetLocation, UnloadableShape> shape in shapes)
+ 		{
+ 			if (!shape.Value.keepLoaded)
+ 			{
+ 				shape.Value.Unload();
+@@ -224,18 +306,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		blockModelDatas = new MeshData[count + 1];
+ 		altblockModelDatasLod0 = new MeshData[count + 1][];
+ 		altblockModelDatasLod1 = new MeshData[count + 1][];
+ 		altblockModelDatasLod2 = new MeshData[count + 1][];
+ 		blockModelRefsInventory = new MultiTextureMeshRef[count + 1];
++		EnsureInventoryMeshPreparer()?.ResetBlocks(count + 1);
+ 		CompositeShape basicCube = new CompositeShape
+ 		{
  			Base = new AssetLocation("block/basic/cube")
  		};
  		int val = Environment.ProcessorCount / 2 - 3;
@@ -104,7 +171,7 @@ index dae3e90..cd5a56e 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -723,10 +760,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +806,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		return i;
  	}
  
@@ -120,7 +187,7 @@ index dae3e90..cd5a56e 100644
  			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
  		}
  		MeshData[] meshes = new MeshData[blocks.Count];
-@@ -856,31 +898,48 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -856,31 +944,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			}
  		}
  	}
@@ -128,17 +195,24 @@ index dae3e90..cd5a56e 100644
  	public void TesselateItems_Pre(IList<Item> itemtypes)
 +	{
 +		EnsureUnknownItemModelRef();
++		bool allocated = false;
 +		if (itemModelRefsInventory == null)
 +		{
 +			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
++			allocated = true;
 +		}
 +		if (altItemModelRefsInventory == null)
 +		{
 +			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++			allocated = true;
++		}
++		if (allocated)
++		{
++			EnsureInventoryMeshPreparer()?.ResetItems(itemtypes.Count);
 +		}
 +	}
 +
-+	private void EnsureUnknownItemModelRef()
++	internal void EnsureUnknownItemModelRef()
  	{
  		if (unknownItemModelRef == null)
  		{
@@ -155,7 +229,7 @@ index dae3e90..cd5a56e 100644
 -		if (altItemModelRefsInventory == null)
 +	}
 +
-+	private void EnsureUnknownBlockModelRef()
++	internal void EnsureUnknownBlockModelRef()
 +	{
 +		if (unknownBlockModelRef == null)
  		{
@@ -175,7 +249,7 @@ index dae3e90..cd5a56e 100644
  		int num = 0;
  		int i;
  		for (i = offset; i < maxCount; i++)
-@@ -953,15 +1012,16 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -953,17 +1065,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			{
  				setLod0Flag(array[num3]);
  				num3++;
@@ -190,10 +264,27 @@ index dae3e90..cd5a56e 100644
 +		Volatile.Write(ref blockModelDatas[block.BlockId], mainMesh);
  	}
  
++	internal MeshData OptimumTesselateBlockForInventory(Block block) => TesselateBlockForInventory(block);
++
  	private MeshData TesselateBlockForInventory(Block block)
  	{
  		if (block.IsMissing)
-@@ -1110,16 +1170,336 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		{
+ 			return unknownBlockModelData;
+@@ -1081,10 +1196,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		}
+ 	}
+ 
+ 	internal void Dispose()
+ 	{
++		inventoryMeshPreparer?.Dispose();
++		OptimumApiBridge.UnregisterInventoryMeshPreparer(game?.api);
+ 		IDisposable[] refs = blockModelRefsInventory;
+ 		DisposeArray(refs);
+ 		refs = itemModelRefsInventory;
+ 		DisposeArray(refs);
+ 		int num = 0;
+@@ -1110,16 +1227,409 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -326,6 +417,16 @@ index dae3e90..cd5a56e 100644
 +			Volatile.Write(ref blockModelRefsInventory[blockId], unknownBlockModelRef);
 +			return unknownBlockModelRef;
 +		}
++		OptimumInventoryMeshPreparer preparer = EnsureInventoryMeshPreparer();
++		OptimumPreparedInventoryMesh prepared = preparer?.TryConsumePreparedBlock(blockId);
++		if (prepared != null)
++		{
++			MultiTextureMeshRef uploadedPrepared = preparer.UploadPreparedOnMainThread(prepared, unknownBlockModelRef);
++			Volatile.Write(ref blockModelRefsInventory[blockId], uploadedPrepared);
++			OptimumDiagnostics.RecordInventoryMeshPreparedHit();
++			return uploadedPrepared;
++		}
++		OptimumDiagnostics.RecordInventoryMeshSyncFallback();
 +		List<UnloadableShape> reloaded = null;
 +		try
 +		{
@@ -333,7 +434,15 @@ index dae3e90..cd5a56e 100644
 +			{
 +				reloaded = lazyReloadedShapes ??= new List<UnloadableShape>(4);
 +				reloaded.Clear();
-+				EnsureCompositeShapeLoaded(block.ShapeInventory ?? block.Shape, reloaded);
++				CompositeShape cshape = block.ShapeInventory ?? block.Shape;
++				if (preparer != null)
++				{
++					preparer.PinCompositeShape(cshape, reloaded);
++				}
++				else
++				{
++					EnsureCompositeShapeLoaded(cshape, reloaded);
++				}
 +			}
 +			MeshData data = TesselateBlockForInventory(block);
 +			MultiTextureMeshRef uploaded = (data == null || data == unknownBlockModelData)
@@ -351,7 +460,14 @@ index dae3e90..cd5a56e 100644
 +		}
 +		finally
 +		{
-+			ReUnloadTemporaryShapes(reloaded);
++			if (preparer != null)
++			{
++				preparer.UnpinShapes(reloaded);
++			}
++			else
++			{
++				ReUnloadTemporaryShapes(reloaded);
++			}
 +		}
 +	}
 +
@@ -367,6 +483,7 @@ index dae3e90..cd5a56e 100644
 +			return null;
 +		}
 +		EnsureUnknownItemModelRef();
++		OptimumInventoryMeshPreparer preparer = EnsureInventoryMeshPreparer();
 +		if (renderVariant == 0)
 +		{
 +			MultiTextureMeshRef cached = Volatile.Read(ref itemModelRefsInventory[itemId]);
@@ -379,6 +496,15 @@ index dae3e90..cd5a56e 100644
 +				Volatile.Write(ref itemModelRefsInventory[itemId], unknownItemModelRef);
 +				return unknownItemModelRef;
 +			}
++			OptimumPreparedInventoryMesh prepared = preparer?.TryConsumePreparedItem(itemId, 0);
++			if (prepared != null)
++			{
++				MultiTextureMeshRef uploadedPrepared = preparer.UploadPreparedOnMainThread(prepared, unknownItemModelRef);
++				Volatile.Write(ref itemModelRefsInventory[itemId], uploadedPrepared);
++				OptimumDiagnostics.RecordInventoryMeshPreparedHit();
++				return uploadedPrepared;
++			}
++			OptimumDiagnostics.RecordInventoryMeshSyncFallback();
 +			List<UnloadableShape> reloaded = null;
 +			try
 +			{
@@ -386,7 +512,14 @@ index dae3e90..cd5a56e 100644
 +				{
 +					reloaded = lazyReloadedShapes ??= new List<UnloadableShape>(4);
 +					reloaded.Clear();
-+					EnsureCompositeShapeLoaded(item.Shape, reloaded);
++					if (preparer != null)
++					{
++						preparer.PinCompositeShape(item.Shape, reloaded);
++					}
++					else
++					{
++						EnsureCompositeShapeLoaded(item.Shape, reloaded);
++					}
 +				}
 +				Tesselator.TesselateItem(item, item.Shape, out var modeldata);
 +				MultiTextureMeshRef uploaded = (modeldata == null || modeldata == unknownItemModelData)
@@ -404,7 +537,14 @@ index dae3e90..cd5a56e 100644
 +			}
 +			finally
 +			{
-+				ReUnloadTemporaryShapes(reloaded);
++				if (preparer != null)
++				{
++					preparer.UnpinShapes(reloaded);
++				}
++				else
++				{
++					ReUnloadTemporaryShapes(reloaded);
++				}
 +			}
 +		}
 +		CompositeShape[] alternates = item.Shape?.BakedAlternates;
@@ -428,6 +568,15 @@ index dae3e90..cd5a56e 100644
 +		{
 +			return cachedAlt;
 +		}
++		OptimumPreparedInventoryMesh preparedAlt = preparer?.TryConsumePreparedItem(itemId, renderVariant);
++		if (preparedAlt != null)
++		{
++			MultiTextureMeshRef uploadedAltPrepared = preparer.UploadPreparedOnMainThread(preparedAlt, unknownItemModelRef);
++			Volatile.Write(ref altRefs[altIdx], uploadedAltPrepared);
++			OptimumDiagnostics.RecordInventoryMeshPreparedHit();
++			return uploadedAltPrepared;
++		}
++		OptimumDiagnostics.RecordInventoryMeshSyncFallback();
 +		List<UnloadableShape> reloadedAlt = null;
 +		try
 +		{
@@ -436,7 +585,14 @@ index dae3e90..cd5a56e 100644
 +			{
 +				reloadedAlt = lazyReloadedShapes ??= new List<UnloadableShape>(4);
 +				reloadedAlt.Clear();
-+				EnsureCompositeShapeLoaded(altShape, reloadedAlt);
++				if (preparer != null)
++				{
++					preparer.PinCompositeShape(altShape, reloadedAlt);
++				}
++				else
++				{
++					EnsureCompositeShapeLoaded(altShape, reloadedAlt);
++				}
 +			}
 +			Tesselator.TesselateItem(item, altShape, out var altModeldata);
 +			MultiTextureMeshRef uploadedAlt = (altModeldata == null || altModeldata == unknownItemModelData)
@@ -454,7 +610,14 @@ index dae3e90..cd5a56e 100644
 +		}
 +		finally
 +		{
-+			ReUnloadTemporaryShapes(reloadedAlt);
++			if (preparer != null)
++			{
++				preparer.UnpinShapes(reloadedAlt);
++			}
++			else
++			{
++				ReUnloadTemporaryShapes(reloadedAlt);
++			}
 +		}
 +	}
 +
@@ -471,6 +634,7 @@ index dae3e90..cd5a56e 100644
 +			}
 +		}
 +		altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++		EnsureInventoryMeshPreparer()?.ResetItems(itemtypes.Count);
 +	}
 +
 +	private void EnsureCompositeShapeLoaded(CompositeShape cshape, List<UnloadableShape> reloaded)
@@ -532,7 +696,7 @@ index dae3e90..cd5a56e 100644
  	public Shape GetCachedShape(AssetLocation location)
  	{
  		shapes.TryGetValue(location, out var value);
-@@ -1140,11 +1520,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1140,11 +1650,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  		if (texSource == null)
  		{

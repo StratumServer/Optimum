@@ -81,6 +81,13 @@ var typesToInject = new List<string>
     "Vintagestory.Client.NoObf.OptimumPendingPlaySound",
     // Issue #611: lambda-free main-thread marshal request for lazy inventory meshes
     "Vintagestory.Client.NoObf.OptimumLazyInventoryMeshRequest",
+    // Issue #651: bounded parallel + background lookahead inventory mesh preparation
+    "Vintagestory.Client.NoObf.OptimumPreparedInventoryMesh",
+    "Vintagestory.Client.NoObf.OptimumInventoryPrepTarget",
+    "Vintagestory.Client.NoObf.OptimumInventoryParallelBatchState",
+    "Vintagestory.Client.NoObf.OptimumInventoryParallelWorkerTask",
+    "Vintagestory.Client.NoObf.OptimumInventoryLookaheadTask",
+    "Vintagestory.Client.NoObf.OptimumInventoryMeshPreparer",
     // Issue #612: lambda-free main-thread tasks & worker wrapper for multi-worker meshing
     "Vintagestory.Client.NoObf.OptimumMainThreadTextureUploadTask",
     "Vintagestory.Client.NoObf.OptimumMainThreadMipmapTask",
@@ -604,6 +611,11 @@ var membersToInject = new Dictionary<string, List<string>>
         "ReUnloadTemporaryShapes",
         "defaultBlockMeshLock",
         "GetDefaultBlockMeshLock",
+        "inventoryMeshPreparer",
+        "EnsureInventoryMeshPreparer",
+        "PrepareSlotGridWindow",
+        "BeginInitialInventoryMeshPrefetch",
+        "OptimumTesselateBlockForInventory",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's
@@ -1142,6 +1154,13 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultItemMeshRef", 1),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultBlockMesh", 1),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateBlock", 2),
+    // Issue #651: shape-pinning LoadDone, cleanup Dispose, initial prefetch on asset/client join,
+    // and skipping duplicate GuiDialogInventory re-filter
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "LoadDone", 0),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "Dispose", 0),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "OnAllAssetsLoadedAndClientJoined", 0),
+    new("Vintagestory.Client.NoObf.GuiDialogInventory", "update", 0),
+    new("Vintagestory.Client.NoObf.GuiDialogInventory", "OnTabClicked", 2),
     // Texture atlas overflow recovery, decode worker scaling, and multi-worker synchronization.
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "RuntimeCreateNewAtlas", 1),
     new("Vintagestory.Client.NoObf.TextureAtlasManager", "PopulateTextureAtlassesFromTextures", 0),

@@ -438,6 +438,11 @@ public static class OptimumApiBridge
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float ComputeSlotSearchWeight(string? name, string? cachedText, string normalizedSearch)
     {
+        if (System.Text.Ascii.IsValid(normalizedSearch))
+        {
+            return ComputeSlotSearchWeightAsciiFast(name, cachedText, normalizedSearch);
+        }
+
         int index = name != null
             ? name.IndexOf(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)
             : -1;
@@ -450,6 +455,34 @@ public static class OptimumApiBridge
         if (index > 0) return 1f;
         if (cachedText != null && cachedText.StartsWith(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)) return 2f;
         if (cachedText != null && cachedText.CaseInsensitiveContains(normalizedSearch, StringComparison.InvariantCultureIgnoreCase)) return 3f;
+        return -1f;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float ComputeSlotSearchWeightAsciiFast(string? name, string? cachedText, string normalizedSearch)
+    {
+        StringComparison nameComparison = (name == null || System.Text.Ascii.IsValid(name))
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.InvariantCultureIgnoreCase;
+        int index = name != null
+            ? name.IndexOf(normalizedSearch, nameComparison)
+            : -1;
+
+        if (index == 0 && name!.Length == normalizedSearch.Length) return 0f;
+        if (index == 0 && name!.Length > normalizedSearch.Length && name[normalizedSearch.Length] == ' ') return 0.125f;
+        if (index > 0 && name![index - 1] == ' ' && index + normalizedSearch.Length == name.Length) return 0.25f;
+        if (index > 0 && name![index - 1] == ' ') return 0.5f;
+        if (index == 0) return 0.75f;
+        if (index > 0) return 1f;
+
+        if (cachedText != null)
+        {
+            StringComparison textComparison = System.Text.Ascii.IsValid(cachedText)
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.InvariantCultureIgnoreCase;
+            if (cachedText.StartsWith(normalizedSearch, textComparison)) return 2f;
+            if (cachedText.IndexOf(normalizedSearch, textComparison) >= 0) return 3f;
+        }
         return -1f;
     }
 
@@ -1541,5 +1574,283 @@ public static class OptimumApiBridge
             return JToken.Load(jr, IgnoreJsonLineInfoSettings);
         }
         return null;
+    }
+
+    public delegate void InventoryMeshWindowPreparerDelegate(
+        ICoreClientAPI api,
+        Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot> renderedSlots,
+        int visibleStartIndex,
+        int visibleCount,
+        int lookaheadStartIndex,
+        int lookaheadCount);
+
+    private static readonly object InventoryMeshPreparerGate = new();
+    private static readonly ConditionalWeakTable<ICoreClientAPI, InventoryMeshWindowPreparerDelegate> InventoryMeshPreparers = new();
+    private static ICoreClientAPI? lastInventoryMeshApi;
+    private static InventoryMeshWindowPreparerDelegate? lastInventoryMeshPreparer;
+
+    public static void RegisterInventoryMeshPreparer(
+        ICoreClientAPI? api,
+        InventoryMeshWindowPreparerDelegate? preparer)
+    {
+        if (api == null)
+        {
+            return;
+        }
+
+        lock (InventoryMeshPreparerGate)
+        {
+            if (preparer == null)
+            {
+                InventoryMeshPreparers.Remove(api);
+                if (ReferenceEquals(lastInventoryMeshApi, api))
+                {
+                    lastInventoryMeshApi = null;
+                    lastInventoryMeshPreparer = null;
+                }
+                return;
+            }
+
+            InventoryMeshPreparers.Remove(api);
+            InventoryMeshPreparers.Add(api, preparer);
+            lastInventoryMeshApi = api;
+            lastInventoryMeshPreparer = preparer;
+        }
+    }
+
+    public static void UnregisterInventoryMeshPreparer(ICoreClientAPI? api)
+    {
+        RegisterInventoryMeshPreparer(api, null);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static InventoryMeshWindowPreparerDelegate? GetInventoryMeshPreparer(ICoreClientAPI api)
+    {
+        if (ReferenceEquals(api, Volatile.Read(ref lastInventoryMeshApi)))
+        {
+            return Volatile.Read(ref lastInventoryMeshPreparer);
+        }
+
+        lock (InventoryMeshPreparerGate)
+        {
+            if (InventoryMeshPreparers.TryGetValue(api, out InventoryMeshWindowPreparerDelegate? preparer))
+            {
+                lastInventoryMeshApi = api;
+                lastInventoryMeshPreparer = preparer;
+                return preparer;
+            }
+            return null;
+        }
+    }
+
+    public static void PrepareSlotGridInventoryMeshes(
+        ICoreClientAPI? api,
+        Vintagestory.API.Datastructures.OrderedDictionary<int, ItemSlot>? renderedSlots,
+        ElementBounds? elementBounds,
+        ElementBounds[]? slotBounds)
+    {
+        if (!OptimumConfig.LazyInventoryMeshesEnabled || !OptimumConfig.LazyInventoryMeshPrepEnabled)
+        {
+            return;
+        }
+
+        if (api == null || renderedSlots == null || renderedSlots.Count == 0)
+        {
+            return;
+        }
+
+        InventoryMeshWindowPreparerDelegate? preparer = GetInventoryMeshPreparer(api);
+        if (preparer == null)
+        {
+            return;
+        }
+
+        ElementBounds? parentBounds = elementBounds?.ParentBounds;
+        int slotCount = renderedSlots.Count;
+        if (parentBounds == null || slotBounds == null || slotBounds.Length == 0)
+        {
+            int visible = Math.Min(slotCount, 135);
+            int lookahead = Math.Min(135, slotCount - visible);
+            preparer(api, renderedSlots, 0, visible, visible, lookahead);
+            return;
+        }
+
+        int count = Math.Min(slotCount, slotBounds.Length);
+        double parentTop = parentBounds.absY;
+        int startIndex = 0;
+        if (count > 32 && slotBounds[0] != null && slotBounds[count - 1] != null && slotBounds[0].absY <= slotBounds[count - 1].absY)
+        {
+            int lo = 0;
+            int hi = count;
+            while (lo < hi)
+            {
+                int mid = lo + ((hi - lo) >> 1);
+                ElementBounds? midBounds = slotBounds[mid];
+                if (midBounds != null && midBounds.absY + midBounds.absInnerHeight < parentTop)
+                {
+                    lo = mid + 1;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+            if (lo > 0 && slotBounds[lo - 1] != null && slotBounds[lo - 1].absY + slotBounds[lo - 1].absInnerHeight >= parentTop)
+            {
+                lo = 0;
+            }
+            startIndex = lo;
+        }
+
+        int firstVisible = -1;
+        int lastVisibleExclusive = startIndex;
+        for (int i = startIndex; i < count; i++)
+        {
+            ElementBounds? slotBound = slotBounds[i];
+            if (slotBound == null)
+            {
+                continue;
+            }
+
+            if (slotBound.absY + slotBound.absInnerHeight < parentTop)
+            {
+                continue;
+            }
+
+            if (slotBound.PartiallyInside(parentBounds))
+            {
+                if (firstVisible < 0)
+                {
+                    firstVisible = i;
+                }
+                lastVisibleExclusive = i + 1;
+            }
+            else if (firstVisible >= 0)
+            {
+                break;
+            }
+        }
+
+        if (firstVisible < 0)
+        {
+            return;
+        }
+
+        int visibleCount = lastVisibleExclusive - firstVisible;
+        int lookaheadStart = lastVisibleExclusive;
+        int lookaheadCount = Math.Min(135, count - lookaheadStart);
+        preparer(api, renderedSlots, firstVisible, visibleCount, lookaheadStart, lookaheadCount);
+    }
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "api")]
+    private static extern ref ICoreClientAPI GetGuiElementApi(GuiElement element);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "cols")]
+    private static extern ref int GetSlotGridCols(GuiElementItemSlotGridBase grid);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "inventory")]
+    private static extern ref IInventory GetSlotGridInventory(GuiElementItemSlotGridBase grid);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "scissorBounds")]
+    private static extern ref ElementBounds[]? GetSlotGridScissorBounds(GuiElementItemSlotGridBase grid);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "ComposeSlotOverlays")]
+    private static extern bool InvokeComposeSlotOverlays(GuiElementItemSlotGridBase grid, ItemSlot slot, int slotId, int slotIndex);
+
+    /// <summary>
+    /// Fast re-compose path after FilterItemsBySearchText: when static slot textures and font
+    /// metrics already match the current GUI scale, rebuilds bounds and durability overlays ONLY
+    /// for renderedSlots instead of disposing and reallocating textures for all availableSlots.
+    /// </summary>
+    public static bool TryComposeFilteredSlotGrid(GuiElementItemSlotGridBase? grid)
+    {
+        if (grid == null || grid.Bounds == null)
+        {
+            return false;
+        }
+
+        ICoreClientAPI api = GetGuiElementApi(grid);
+        int cols = GetSlotGridCols(grid);
+        IInventory inventory = GetSlotGridInventory(grid);
+        if (api == null || cols <= 0 || inventory == null)
+        {
+            return false;
+        }
+
+        double absSlotSize = GuiElement.scaled(GuiElementPassiveItemSlot.unscaledSlotSize);
+        int expectedPx = (int)absSlotSize;
+        LoadedTexture? slotTex = grid.slotTexture;
+        LoadedTexture? hiTex = grid.highlightSlotTexture;
+        LoadedTexture? crossTex = grid.crossedOutTexture;
+        LoadedTexture[]? oldQuantityTextures = grid.slotQuantityTextures;
+        if (slotTex == null || slotTex.Disposed || slotTex.TextureId == 0 ||
+            slotTex.Width != expectedPx || slotTex.Height != expectedPx ||
+            hiTex == null || hiTex.Disposed || hiTex.TextureId == 0 ||
+            crossTex == null || crossTex.Disposed || crossTex.TextureId == 0 ||
+            grid.textComposer == null || oldQuantityTextures == null)
+        {
+            return false;
+        }
+
+        int count = grid.renderedSlots.Count;
+        ElementBounds[] newSlotBounds = count == 0 ? Array.Empty<ElementBounds>() : new ElementBounds[count];
+        ElementBounds[] newScissorBounds = count == 0 ? Array.Empty<ElementBounds>() : new ElementBounds[count];
+        LoadedTexture[] newQuantityTextures = count == 0 ? Array.Empty<LoadedTexture>() : new LoadedTexture[count];
+
+        int reusableLimit = Math.Min(count, oldQuantityTextures.Length);
+        for (int i = 0; i < reusableLimit; i++)
+        {
+            LoadedTexture? existing = oldQuantityTextures[i];
+            if (existing != null && !existing.Disposed && existing.TextureId == 0)
+            {
+                newQuantityTextures[i] = existing;
+            }
+            else
+            {
+                existing?.Dispose();
+                newQuantityTextures[i] = new LoadedTexture(api);
+            }
+        }
+        for (int i = reusableLimit; i < oldQuantityTextures.Length; i++)
+        {
+            oldQuantityTextures[i]?.Dispose();
+        }
+        for (int i = reusableLimit; i < count; i++)
+        {
+            newQuantityTextures[i] = new LoadedTexture(api);
+        }
+
+        grid.SlotBounds = newSlotBounds;
+        GetSlotGridScissorBounds(grid) = newScissorBounds;
+        grid.slotQuantityTextures = newQuantityTextures;
+
+        grid.Bounds.CalcWorldBounds();
+
+        double unscaledSize = GuiElementPassiveItemSlot.unscaledSlotSize;
+        double unscaledPadding = GuiElementItemSlotGridBase.unscaledSlotPadding;
+        for (int idx = 0; idx < count; idx++)
+        {
+            int col = idx % cols;
+            int row = idx / cols;
+            double x = col * (unscaledSize + unscaledPadding);
+            double y = row * (unscaledSize + unscaledPadding);
+
+            ElementBounds slotBound = ElementBounds.Fixed(x, y, unscaledSize, unscaledSize).WithParent(grid.Bounds);
+            slotBound.CalcWorldBounds();
+            newSlotBounds[idx] = slotBound;
+
+            ElementBounds scissorBound = ElementBounds.Fixed(x + 1.75, y + 1.5, unscaledSize - 4.0, unscaledSize - 4.0).WithParent(grid.Bounds);
+            scissorBound.CalcWorldBounds();
+            newScissorBounds[idx] = scissorBound;
+
+            int key = grid.renderedSlots.GetKeyAtIndex(idx);
+            ItemSlot? slot = inventory[key];
+            if (slot?.Itemstack != null && slot.Itemstack.Collectible.ShouldDisplayItemDamage(slot.Itemstack))
+            {
+                InvokeComposeSlotOverlays(grid, slot, key, idx);
+            }
+        }
+
+        return true;
     }
 }

@@ -1,0 +1,44 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
+index cbf79883..89f338e8 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiDialogInventory.cs
+@@ -266,22 +266,37 @@ public class GuiDialogInventory : GuiDialog
+ 		}
+ 	}
+ 
+ 	private void update()
+ 	{
+-		OnTextChanged(creativeInvDialog.GetTextInput("searchbox").GetText());
++		GuiElementTextInput searchBox = creativeInvDialog.GetTextInput("searchbox");
++		string text = searchBox.GetText();
++		if (string.IsNullOrEmpty(text))
++		{
++			GuiElementItemSlotGrid slotGrid = creativeInvDialog.GetSlotGrid("slotgrid");
++			if (slotGrid != null && slotGrid.SlotBounds != null && slotGrid.renderedSlots.Count == slotGrid.availableSlots.Count)
++			{
++				int rows = (int)Math.Ceiling((float)slotGrid.renderedSlots.Count / (float)cols);
++				ElementBounds elementBounds = ElementStdBounds.SlotGrid(EnumDialogArea.None, 0.0, 0.0, cols, rows);
++				creativeInvDialog.GetScrollbar("scrollbar").SetNewTotalHeight((float)(elementBounds.fixedHeight + 3.0));
++				creativeInvDialog.GetScrollbar("scrollbar").SetScrollbarPosition(0);
++				creativeInvDialog.GetDynamicText("searchResults").SetNewText(Lang.Get("creative-searchresults", slotGrid.renderedSlots.Count));
++				return;
++			}
++		}
++		OnTextChanged(text);
+ 	}
+ 
+ 	private void OnTabClicked(int index, GuiTab tab)
+ 	{
+ 		currentTabIndex = tab.DataInt;
+ 		creativeInv.SetTab(tab.DataInt);
+ 		creativeInvDialog.GetSlotGrid("slotgrid").DetermineAvailableSlots();
+ 		GuiElementItemSlotGrid slotGrid = creativeInvDialog.GetSlotGrid("slotgrid");
+ 		ElementBounds elementBounds = ElementStdBounds.SlotGrid(rows: (int)Math.Ceiling((float)slotGrid.renderedSlots.Count / (float)cols), alignment: EnumDialogArea.None, x: 0.0, y: 0.0, cols: cols);
+ 		slotGrid.Bounds.fixedHeight = elementBounds.fixedHeight;
+-		update();
++		OnTextChanged(creativeInvDialog.GetTextInput("searchbox").GetText());
+ 	}
+ 
+ 	private void SendInvPacket(object packet)
+ 	{
+ 		capi.Network.SendPacketClient(packet);
