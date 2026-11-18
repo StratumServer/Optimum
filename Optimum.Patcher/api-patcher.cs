@@ -122,6 +122,8 @@ public static class ApiPatcher
             method.Name == "ClientAnimatorInitMatrices" && method.Parameters.Count == 2);
         var clientAnimatorGetMaxDepth = bridge.Methods.Single(method =>
             method.Name == "ClientAnimatorGetMaxDepth" && method.Parameters.Count == 2);
+        var clientAnimatorComputeFrameLerps = bridge.Methods.Single(method =>
+            method.Name == "ComputeClientAnimatorFrameLerps" && method.Parameters.Count == 5);
         var createKeyFrameElementDict = bridge.Methods.Single(method =>
             method.Name == "CreateKeyFrameElementDictionary" && method.Parameters.Count == 1);
         var assetLocationResolveToDomainAndPath = bridge.Methods.Single(method =>
@@ -198,6 +200,9 @@ public static class ApiPatcher
         int clientAnimatorGetMaxDepthPatched = PatchClientAnimatorGetMaxDepth(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(clientAnimatorGetMaxDepth));
+        int clientAnimatorFrameLerpPatched = PatchClientAnimatorFrameLerp(
+            vanilla.MainModule,
+            vanilla.MainModule.ImportReference(clientAnimatorComputeFrameLerps));
         int animationKeyFramePatched = PatchAnimationKeyFrame(
             vanilla.MainModule,
             vanilla.MainModule.ImportReference(createKeyFrameElementDict));
@@ -356,6 +361,11 @@ public static class ApiPatcher
         {
             throw new InvalidOperationException(
                 $"Expected 1 ClientAnimator.getMaxDepth patch, applied {clientAnimatorGetMaxDepthPatched}.");
+        }
+        if (clientAnimatorFrameLerpPatched != 1)
+        {
+            throw new InvalidOperationException(
+                $"Expected 1 ClientAnimator.calculateMatrices frame-lerp patch, applied {clientAnimatorFrameLerpPatched}.");
         }
         if (animationKeyFramePatched != 1)
         {
@@ -989,6 +999,302 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {typeName}.Resolve(Dictionary<string, ShapeElement>) -> OptimumApiBridge");
         return 1;
+    }
+
+    internal static int PatchClientAnimatorFrameLerp(ModuleDefinition module, MethodReference computeLerpsBridge)
+    {
+        const string typeName = "Vintagestory.API.Common.ClientAnimator";
+        var clientAnimator = module.GetType(typeName)
+            ?? throw new InvalidOperationException($"{typeName} is missing from the vanilla API.");
+        var animatorBase = clientAnimator.BaseType?.Resolve()
+            ?? throw new InvalidOperationException($"{typeName} base type could not be resolved.");
+
+        var floatArrayType = new ArrayType(module.TypeSystem.Single);
+        var frameLerpsField = clientAnimator.Fields.FirstOrDefault(field => field.Name == "frameLerps");
+        if (frameLerpsField == null)
+        {
+            frameLerpsField = new FieldDefinition("frameLerps", FieldAttributes.Private, floatArrayType);
+            clientAnimator.Fields.Add(frameLerpsField);
+        }
+
+        var prevFrameField = clientAnimator.Fields.SingleOrDefault(f => f.Name == "prevFrame")
+            ?? throw new InvalidOperationException($"{typeName}.prevFrame is missing from the vanilla API.");
+        var nextFrameField = clientAnimator.Fields.SingleOrDefault(f => f.Name == "nextFrame")
+            ?? throw new InvalidOperationException($"{typeName}.nextFrame is missing from the vanilla API.");
+        var curAnimsField = animatorBase.Fields.SingleOrDefault(f => f.Name == "CurAnims")
+            ?? throw new InvalidOperationException("AnimatorBase.CurAnims is missing from the vanilla API.");
+
+        var outerCalc = clientAnimator.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "calculateMatrices" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{typeName}.calculateMatrices(float) is missing from the vanilla API.");
+        var innerCalc = clientAnimator.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "calculateMatrices" && m.Parameters.Count == 8)
+            ?? throw new InvalidOperationException($"{typeName}.calculateMatrices(8 params) is missing from the vanilla API.");
+
+        if (!outerCalc.HasBody || !innerCalc.HasBody)
+        {
+            throw new InvalidOperationException($"{typeName}.calculateMatrices has no method body.");
+        }
+
+        ClearDebugInformation(outerCalc);
+        var outerIns = outerCalc.Body.Instructions;
+        if (!outerIns.Any(ins =>
+            ins.OpCode == OpCodes.Call &&
+            ins.Operand is MethodReference mr &&
+            mr.FullName == computeLerpsBridge.FullName))
+        {
+            int recursiveIdx = -1;
+            for (int i = 0; i < outerIns.Count; i++)
+            {
+                if (outerIns[i].OpCode == OpCodes.Call &&
+                    outerIns[i].Operand is MethodReference mr &&
+                    mr.Name == "calculateMatrices" &&
+                    mr.Parameters.Count == 8)
+                {
+                    recursiveIdx = i;
+                    break;
+                }
+            }
+            if (recursiveIdx < 1)
+            {
+                throw new InvalidOperationException($"{outerCalc.FullName}: recursive calculateMatrices call not found.");
+            }
+
+            int loopBranchIdx = -1;
+            for (int i = recursiveIdx - 1; i >= 0; i--)
+            {
+                if (outerIns[i].OpCode.Code is Code.Blt or Code.Blt_S)
+                {
+                    loopBranchIdx = i;
+                    break;
+                }
+            }
+            if (loopBranchIdx < 0 || loopBranchIdx + 1 >= outerIns.Count)
+            {
+                throw new InvalidOperationException($"{outerCalc.FullName}: activeAnimCount loop branch not found.");
+            }
+
+            VariableDefinition? loopCountVar = null;
+            for (int i = loopBranchIdx - 1; i >= 2; i--)
+            {
+                if (outerIns[i].OpCode == OpCodes.Ldfld &&
+                    outerIns[i].Operand is FieldReference fr &&
+                    fr.Name == "activeAnimCount" &&
+                    outerIns[i - 1].OpCode == OpCodes.Ldarg_0)
+                {
+                    loopCountVar = ResolveLdlocVariable(outerCalc.Body, outerIns[i - 2]);
+                    break;
+                }
+            }
+            if (loopCountVar == null)
+            {
+                throw new InvalidOperationException($"{outerCalc.FullName}: activeAnimCount loop counter variable not found.");
+            }
+
+            Instruction insertTarget = outerIns[loopBranchIdx + 1];
+            Instruction[] precompute =
+            [
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, module.ImportReference(curAnimsField)),
+                CreateLdloc(loopCountVar),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, prevFrameField),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, nextFrameField),
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldflda, frameLerpsField),
+                Instruction.Create(OpCodes.Call, computeLerpsBridge),
+            ];
+            var outerProc = outerCalc.Body.GetILProcessor();
+            for (int i = 0; i < precompute.Length; i++)
+            {
+                outerProc.InsertBefore(insertTarget, precompute[i]);
+            }
+            RetargetJumpTargets(outerIns, insertTarget, precompute[0]);
+        }
+
+        ClearDebugInformation(innerCalc);
+        var innerIns = innerCalc.Body.Instructions;
+        if (!innerIns.Any(ins =>
+            ins.OpCode == OpCodes.Ldfld &&
+            ins.Operand is FieldReference fr &&
+            fr.Name == "frameLerps"))
+        {
+            var prevLoads = innerIns.Where(ins =>
+                ins.OpCode == OpCodes.Ldfld &&
+                ins.Operand is FieldReference fr &&
+                fr.Name == "prevFrame").ToArray();
+            if (prevLoads.Length != 1)
+            {
+                throw new InvalidOperationException($"{innerCalc.FullName}: expected 1 prevFrame read, found {prevLoads.Length}.");
+            }
+
+            int prevLoadIdx = innerIns.IndexOf(prevLoads[0]);
+            int startIdx = prevLoadIdx - 1;
+            if (startIdx < 0 || innerIns[startIdx].OpCode != OpCodes.Ldarg_0)
+            {
+                throw new InvalidOperationException($"{innerCalc.FullName}: expected ldarg.0 before prevFrame read.");
+            }
+
+            VariableDefinition animIndexVar = ResolveLdlocVariable(innerCalc.Body, innerIns[prevLoadIdx + 1])
+                ?? throw new InvalidOperationException($"{innerCalc.FullName}: expected animIndex ldloc after prevFrame.");
+
+            int addIdx = -1;
+            for (int i = prevLoadIdx + 1; i < Math.Min(innerIns.Count, prevLoadIdx + 64); i++)
+            {
+                if (innerIns[i].OpCode == OpCodes.Callvirt &&
+                    innerIns[i].Operand is MethodReference mr &&
+                    mr.DeclaringType.FullName == "Vintagestory.API.Common.ElementPose" &&
+                    mr.Name == "Add")
+                {
+                    addIdx = i;
+                    break;
+                }
+            }
+            if (addIdx < 0)
+            {
+                throw new InvalidOperationException($"{innerCalc.FullName}: ElementPose.Add call not found after prevFrame.");
+            }
+
+            int stLerpIdx = -1;
+            VariableDefinition? lerpVar = null;
+            for (int i = prevLoadIdx + 2; i < addIdx; i++)
+            {
+                if (innerIns[i].OpCode == OpCodes.Div && i + 1 < addIdx)
+                {
+                    VariableDefinition? v = ResolveStlocVariable(innerCalc.Body, innerIns[i + 1]);
+                    if (v != null)
+                    {
+                        stLerpIdx = i + 1;
+                        lerpVar = v;
+                        break;
+                    }
+                }
+            }
+            if (stLerpIdx < 0 || lerpVar == null)
+            {
+                throw new InvalidOperationException($"{innerCalc.FullName}: div + stloc lerp pattern not found.");
+            }
+
+            var removedInnerSet = new HashSet<Instruction>();
+            for (int i = startIdx + 1; i <= stLerpIdx; i++)
+            {
+                removedInnerSet.Add(innerIns[i]);
+            }
+            for (int i = 0; i < innerIns.Count; i++)
+            {
+                if (i >= startIdx && i <= stLerpIdx) continue;
+                object? op = innerIns[i].Operand;
+                if (op is Instruction target && removedInnerSet.Contains(target))
+                {
+                    throw new InvalidOperationException($"{innerCalc.FullName}: unexpected external branch into lerp block.");
+                }
+                if (op is Instruction[] targets && targets.Any(removedInnerSet.Contains))
+                {
+                    throw new InvalidOperationException($"{innerCalc.FullName}: unexpected external switch into lerp block.");
+                }
+            }
+
+            Instruction startIns = innerIns[startIdx];
+            Instruction[] replacement =
+            [
+                Instruction.Create(OpCodes.Ldarg_0),
+                Instruction.Create(OpCodes.Ldfld, frameLerpsField),
+                CreateLdloc(animIndexVar),
+                Instruction.Create(OpCodes.Ldelem_R4),
+                CreateStloc(lerpVar),
+            ];
+            var innerProc = innerCalc.Body.GetILProcessor();
+            for (int i = 0; i < replacement.Length; i++)
+            {
+                innerProc.InsertBefore(startIns, replacement[i]);
+            }
+            RetargetJumpTargets(innerIns, startIns, replacement[0]);
+            for (int i = stLerpIdx + replacement.Length; i >= startIdx + replacement.Length; i--)
+            {
+                innerProc.Remove(innerIns[i]);
+            }
+        }
+
+        Console.WriteLine($"  API PATCHED: {typeName}.calculateMatrices precomputed frameLerps");
+        return 1;
+    }
+
+    private static void RetargetJumpTargets(
+        Mono.Collections.Generic.Collection<Instruction> instructions,
+        Instruction oldTarget,
+        Instruction newTarget)
+    {
+        for (int i = 0; i < instructions.Count; i++)
+        {
+            var ins = instructions[i];
+            if (ReferenceEquals(ins.Operand, oldTarget))
+            {
+                ins.Operand = newTarget;
+            }
+            else if (ins.Operand is Instruction[] targets)
+            {
+                for (int t = 0; t < targets.Length; t++)
+                {
+                    if (ReferenceEquals(targets[t], oldTarget))
+                    {
+                        targets[t] = newTarget;
+                    }
+                }
+            }
+        }
+    }
+
+    private static VariableDefinition? ResolveLdlocVariable(MethodBody body, Instruction ins)
+    {
+        return ins.OpCode.Code switch
+        {
+            Code.Ldloc_0 => body.Variables[0],
+            Code.Ldloc_1 => body.Variables[1],
+            Code.Ldloc_2 => body.Variables[2],
+            Code.Ldloc_3 => body.Variables[3],
+            Code.Ldloc_S or Code.Ldloc => ins.Operand as VariableDefinition,
+            _ => null,
+        };
+    }
+
+    private static VariableDefinition? ResolveStlocVariable(MethodBody body, Instruction ins)
+    {
+        return ins.OpCode.Code switch
+        {
+            Code.Stloc_0 => body.Variables[0],
+            Code.Stloc_1 => body.Variables[1],
+            Code.Stloc_2 => body.Variables[2],
+            Code.Stloc_3 => body.Variables[3],
+            Code.Stloc_S or Code.Stloc => ins.Operand as VariableDefinition,
+            _ => null,
+        };
+    }
+
+    private static Instruction CreateLdloc(VariableDefinition variable)
+    {
+        return variable.Index switch
+        {
+            0 => Instruction.Create(OpCodes.Ldloc_0),
+            1 => Instruction.Create(OpCodes.Ldloc_1),
+            2 => Instruction.Create(OpCodes.Ldloc_2),
+            3 => Instruction.Create(OpCodes.Ldloc_3),
+            <= byte.MaxValue => Instruction.Create(OpCodes.Ldloc_S, variable),
+            _ => Instruction.Create(OpCodes.Ldloc, variable),
+        };
+    }
+
+    private static Instruction CreateStloc(VariableDefinition variable)
+    {
+        return variable.Index switch
+        {
+            0 => Instruction.Create(OpCodes.Stloc_0),
+            1 => Instruction.Create(OpCodes.Stloc_1),
+            2 => Instruction.Create(OpCodes.Stloc_2),
+            3 => Instruction.Create(OpCodes.Stloc_3),
+            <= byte.MaxValue => Instruction.Create(OpCodes.Stloc_S, variable),
+            _ => Instruction.Create(OpCodes.Stloc, variable),
+        };
     }
 
     private static void RewriteTwoArgNegatedForwarder(MethodDefinition target, MethodReference bridgeMethod)

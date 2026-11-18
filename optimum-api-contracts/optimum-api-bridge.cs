@@ -1289,6 +1289,37 @@ public static class OptimumApiBridge
             : new FastSmallDictionary<ShapeElement, AnimationKeyFrameElement>(capacity);
     }
 
+    /// <summary>
+    /// Precomputes normalized keyframe interpolation factors once per active animation
+    /// before recursive bone matrix traversal in ClientAnimator.calculateMatrices.
+    /// </summary>
+    public static void ComputeClientAnimatorFrameLerps(
+        RunningAnimation[] curAnims,
+        int animCount,
+        int[] prevFrames,
+        int[] nextFrames,
+        ref float[]? frameLerps)
+    {
+        int count = Math.Min(animCount, Math.Min(curAnims.Length, Math.Min(prevFrames.Length, nextFrames.Length)));
+        float[]? lerps = frameLerps;
+        if (lerps == null || lerps.Length < count)
+        {
+            lerps = new float[Math.Max(count, ClientAnimator.MaxConcurrentAnimations)];
+            frameLerps = lerps;
+        }
+
+        for (int i = 0; i < count; i++)
+        {
+            RunningAnimation anim = curAnims[i];
+            int pf = prevFrames[i];
+            int nf = nextFrames[i];
+            int quantityFrames = anim.Animation.QuantityFrames;
+            float keyFrameDist = nf > pf ? (nf - pf) : (quantityFrames - pf + nf);
+            float curFrameDist = anim.CurrentFrame >= pf ? (anim.CurrentFrame - pf) : (quantityFrames - pf + anim.CurrentFrame);
+            lerps[i] = keyFrameDist > 0f ? (curFrameDist / keyFrameDist) : 0f;
+        }
+    }
+
     public static void AssetLocationResolveToDomainAndPath(string? domainAndPath, out string? domain, out string? path)
     {
         if (domainAndPath == null)
