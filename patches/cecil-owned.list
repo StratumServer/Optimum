@@ -78,6 +78,7 @@ patches/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Compression.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/BlockTypeNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CreativeTab.cs.patch
+patches/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EntityTypeNet.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/EventManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/GameDatabase.cs.patch

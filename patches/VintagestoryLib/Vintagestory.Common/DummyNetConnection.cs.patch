@@ -1,0 +1,22 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs b/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
+index 691b55e..82dbe46 100644
+--- a/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
++++ b/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
+@@ -28,10 +28,17 @@ public class DummyNetConnection : NetConnection
+ 		return SendPreparedPacket(packet, compressed, Logger);
+ 	}
+ 
+ 	public override byte[] PreparePacketForSending(BoxedPacket box, bool compressionAllowed, out bool compressed)
+ 	{
++		if (box is Vintagestory.Server.BoxedPacket_ServerAssets assetsBox && assetsBox.Length == 0 && assetsBox.compressedBuffer != null)
++		{
++			byte[] raw = assetsBox.DecompressForUncompressedSend(0, out int rawLen);
++			box.LengthSent = rawLen;
++			compressed = false;
++			return raw;
++		}
+ 		int length = box.Length;
+ 		box.LengthSent = length;
+ 		compressed = false;
+ 		return box.Clone(0);
+ 	}

@@ -1,13 +1,14 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
-index 7a2bf10..23a6aeb 100644
+index 7a2bf10..161647b 100644
 --- a/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
 +++ b/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs
-@@ -1,3 +1,4 @@
+@@ -1,8 +1,103 @@
++using System;
 +using System.Threading;
  using Vintagestory.Common;
  
  namespace Vintagestory.Server;
-@@ -5,4 +6,26 @@ namespace Vintagestory.Server;
+ 
  internal class BoxedPacket_ServerAssets : BoxedPacket
  {
  	internal Packet_Server packet;
@@ -15,6 +16,77 @@ index 7a2bf10..23a6aeb 100644
 +	internal int compressedLengthSent;
 +	internal object compressionLock;
 +	internal volatile bool isCompressedCached;
++
++	internal bool HasPayload()
++	{
++		return Length > 0 || (isCompressedCached && compressedBuffer != null);
++	}
++
++	internal void CacheCompressedAndRelease(Packet_Server srcPacket, bool allowRelease)
++	{
++		if (compressionLock == null)
++		{
++			Interlocked.CompareExchange(ref compressionLock, new object(), null);
++		}
++		lock (compressionLock)
++		{
++			if (!isCompressedCached)
++			{
++				if (Length == 0 && srcPacket != null)
++				{
++					Serialize(srcPacket);
++				}
++				if (Length > 1460 && buffer != null)
++				{
++					byte[] comp = Compression.CompressOffset4(buffer, Length);
++					int compLenSent = comp.Length - 4;
++					NetIncomingMessage.WriteInt(comp, compLenSent | unchecked((int)0x80000000));
++					compressedLengthSent = compLenSent;
++					compressedBuffer = comp;
++				}
++				isCompressedCached = true;
++			}
++			if (allowRelease && compressedBuffer != null)
++			{
++				packet = null;
++				buffer = null;
++				Length = 0;
++			}
++		}
++	}
++
++	internal void ReleaseUncompressedSource()
++	{
++		if (compressionLock == null)
++		{
++			Interlocked.CompareExchange(ref compressionLock, new object(), null);
++		}
++		lock (compressionLock)
++		{
++			packet = null;
++			buffer = null;
++			Length = 0;
++		}
++	}
++
++	internal byte[] DecompressForUncompressedSend(int destOffset, out int rawLength)
++	{
++		byte[] comp = compressedBuffer;
++		if (comp == null)
++		{
++			rawLength = Length;
++			return Clone(destOffset);
++		}
++		byte[] raw = Compression.Decompress(comp, 4, comp.Length - 4);
++		rawLength = raw.Length;
++		if (destOffset == 0)
++		{
++			return raw;
++		}
++		byte[] framed = new byte[raw.Length + destOffset];
++		Buffer.BlockCopy(raw, 0, framed, destOffset, raw.Length);
++		return framed;
++	}
 +
 +	internal void Invalidate()
 +	{

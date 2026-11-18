@@ -771,6 +771,10 @@ public static class OptimumConfig
         Volatile.Write(ref clientDeveloperMode, developerMode ? 1 : 0);
     }
 
+    // Issue #637: Serialize and compress ServerAssets once, releasing the unserialized
+    // Packet_ServerAssets tree and uncompressed buffer to eliminate heap retention.
+    public static bool CompactServerAssetsEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)
@@ -1539,6 +1543,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.LegacySsboMigration), LegacySsboMigrationEnabled.ToString()),
         (nameof(OptimumConfigData.LegacySsboMigrated), LegacySsboMigrated.ToString()),
         (nameof(OptimumConfigData.IgnoreJsonLineInfo), IgnoreJsonLineInfoEnabled.ToString()),
+        (nameof(OptimumConfigData.CompactServerAssets), CompactServerAssetsEnabled.ToString()),
     };
 
     /// <summary>
@@ -1673,6 +1678,7 @@ public static class OptimumConfig
             LegacySsboMigrationEnabled = data.LegacySsboMigration;
             LegacySsboMigrated = data.LegacySsboMigrated;
             IgnoreJsonLineInfoEnabled = data.IgnoreJsonLineInfo;
+            CompactServerAssetsEnabled = data.CompactServerAssets;
         }
         catch (Exception)
         {
@@ -1770,6 +1776,7 @@ public static class OptimumConfig
             LegacySsboMigration = LegacySsboMigrationEnabled,
             LegacySsboMigrated = LegacySsboMigrated,
             IgnoreJsonLineInfo = IgnoreJsonLineInfoEnabled,
+            CompactServerAssets = CompactServerAssetsEnabled,
         };
 
         try
@@ -1891,6 +1898,7 @@ internal sealed class OptimumConfigData
     public bool LegacySsboMigration { get; set; } = true;
     public bool LegacySsboMigrated { get; set; } = false;
     public bool IgnoreJsonLineInfo { get; set; } = true;
+    public bool CompactServerAssets { get; set; } = true;
 }
 
 public static class OptimumDiagnostics

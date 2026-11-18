@@ -757,13 +757,17 @@ var membersToInject = new Dictionary<string, List<string>>
         "serverAssetsPacketBuilt",
         "InvalidateServerAssets",
     },
-    // Issue #466: cache compressed BoxedPacket_ServerAssets payload
+    // Issue #466 & #637: cache compressed BoxedPacket_ServerAssets payload and release uncompressed source
     ["Vintagestory.Server.BoxedPacket_ServerAssets"] = new()
     {
         "compressedBuffer",
         "compressedLengthSent",
         "compressionLock",
         "isCompressedCached",
+        "HasPayload",
+        "CacheCompressedAndRelease",
+        "ReleaseUncompressedSource",
+        "DecompressForUncompressedSend",
         "Invalidate",
     },
     // Issue #612: multi-worker chunk meshing thread-safety members
@@ -1353,11 +1357,14 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.PlayerDataManager", "OnCheckRequireSave", 1),
     new("Vintagestory.Server.PlayerDataManager", "Load", 0),
     new("Vintagestory.Server.PlayerDataManager", "GetPlayerEntry", 3),
-    // Issue #466: cache compressed BoxedPacket_ServerAssets payload and remove BuildServerAssetsPacket sleeps
+    // Issue #466 & #637: cache compressed BoxedPacket_ServerAssets payload and release uncompressed source
     new("Vintagestory.Server.Network.TcpNetConnection", "PreparePacketForSending", 3),
+    new("Vintagestory.Common.DummyNetConnection", "PreparePacketForSending", 3),
+    new("Vintagestory.Server.ServerMain", "SendServerAssets", 1),
     new("Vintagestory.Server.ServerMain", "StartBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "WaitOnBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "BuildServerAssetsPacket", 0),
+    new("Vintagestory.Server.ServerMain", "Dispose", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(
