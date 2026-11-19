@@ -11,6 +11,7 @@
   <ItemGroup>
     <Compile Include="..\sources\VintagestoryApi\Client\optimum-entity-render-batch.cs" Link="Client\optimum-entity-render-batch.cs" />
     <Compile Include="OptimumGuiGpuProbe.cs" />
+    <Compile Include="OptimumShapeStringPool.cs" />
     <Compile Include="OptimumChunkUploadPriority.cs" />
     <Compile Include="OptimumAudioBufferHelper.cs" />
     <Compile Include="OptimumGlReclaimQueue.cs" />

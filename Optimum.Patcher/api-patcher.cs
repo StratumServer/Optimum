@@ -273,6 +273,8 @@ public static class ApiPatcher
         if (jsonLineInfoPatches != 8) throw new InvalidOperationException($"Expected 8 JSON LineInfo patches, applied {jsonLineInfoPatches}.");
         int soundAttributePatches = PatchSoundAttributes(vanilla.MainModule, contracts.MainModule);
         if (soundAttributePatches != 3) throw new InvalidOperationException($"Expected 3 SoundAttributes patches, applied {soundAttributePatches}.");
+        int shapeStringDedupPatches = PatchShapeStringDeduplication(vanilla.MainModule, contracts.MainModule);
+        if (shapeStringDedupPatches != 5) throw new InvalidOperationException($"Expected 5 Shape string deduplication patches, applied {shapeStringDedupPatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -4573,5 +4575,189 @@ public static class ApiPatcher
 
         Console.WriteLine($"  API PATCHED: {soundTypeName} + {converterTypeName} common NatFloat reuse ({patched}/3)");
         return patched;
+    }
+
+    internal static int PatchShapeStringDeduplication(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string shapeTypeName = "Vintagestory.API.Common.Shape";
+        const string shapeElementTypeName = "Vintagestory.API.Common.ShapeElement";
+        const string attachmentPointTypeName = "Vintagestory.API.Common.AttachmentPoint";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumApiBridge";
+        const string stringExtDeDuplicateFullName =
+            "System.String Vintagestory.API.Util.StringExtensions::DeDuplicate(System.String)";
+
+        var bridgeType = contractsModule.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from contracts.");
+        var dedupStrRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "DeduplicateShapeString" && m.Parameters.Count == 1));
+        var concatDedupRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "ConcatAndDeduplicateShapeString" && m.Parameters.Count == 2));
+        var dedupAnimsRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "DeduplicateShapeAnimations" && m.Parameters.Count == 1));
+        var dedupAllRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "DeduplicateShapeStrings" && m.Parameters.Count == 1));
+
+        var shapeType = module.GetType(shapeTypeName)
+            ?? throw new InvalidOperationException($"{shapeTypeName} is missing from the vanilla API.");
+        var elementType = module.GetType(shapeElementTypeName)
+            ?? throw new InvalidOperationException($"{shapeElementTypeName} is missing from the vanilla API.");
+        var attachmentType = module.GetType(attachmentPointTypeName)
+            ?? throw new InvalidOperationException($"{attachmentPointTypeName} is missing from the vanilla API.");
+
+        int patched = 0;
+
+        // 1. ShapeElement.TrimTextureNamesAndResolveFaces(): route 3 DeDuplicate() calls to session pool.
+        var elemTrim = elementType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "TrimTextureNamesAndResolveFaces" && m.Parameters.Count == 0 && m.HasBody)
+            ?? throw new InvalidOperationException($"{shapeElementTypeName}.TrimTextureNamesAndResolveFaces() is missing.");
+        ClearDebugInformation(elemTrim);
+        patched += ReplaceCallTargets(elemTrim, stringExtDeDuplicateFullName, dedupStrRef, 3);
+
+        // 2. AttachmentPoint.DeDuplicate(): route 1 DeDuplicate() call to session pool.
+        var apDedup = attachmentType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "DeDuplicate" && m.Parameters.Count == 0 && m.HasBody)
+            ?? throw new InvalidOperationException($"{attachmentPointTypeName}.DeDuplicate() is missing.");
+        ClearDebugInformation(apDedup);
+        patched += ReplaceCallTargets(apDedup, stringExtDeDuplicateFullName, dedupStrRef, 1);
+
+        // 3. Shape.TrimTextureNamesAndResolveFaces(StreamingContext): null-guard Elements and deduplicate Animations.
+        var shapeTrim = shapeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "TrimTextureNamesAndResolveFaces" && m.Parameters.Count == 1 && m.HasBody)
+            ?? throw new InvalidOperationException($"{shapeTypeName}.TrimTextureNamesAndResolveFaces(StreamingContext) is missing.");
+        ClearDebugInformation(shapeTrim);
+        if (shapeTrim.Body.Instructions.Any(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == dedupAnimsRef.FullName))
+        {
+            patched++;
+        }
+        else
+        {
+            var il = shapeTrim.Body.GetILProcessor();
+            var rets = shapeTrim.Body.Instructions.Where(i => i.OpCode == OpCodes.Ret).ToArray();
+            if (rets.Length != 1)
+            {
+                throw new InvalidOperationException($"{shapeTrim.FullName}: expected 1 Ret instruction, found {rets.Length}.");
+            }
+
+            // Rewrite the single Ret in-place to Ldarg_0 so any branches pointing to it stay valid.
+            var callHookAnchor = rets[0];
+            callHookAnchor.OpCode = OpCodes.Ldarg_0;
+            callHookAnchor.Operand = null;
+            var callDedup = il.Create(OpCodes.Call, dedupAnimsRef);
+            var finalRet = il.Create(OpCodes.Ret);
+            il.InsertAfter(callHookAnchor, callDedup);
+            il.InsertAfter(callDedup, finalRet);
+
+            // Guard Elements == null right after Elements is stored in loc.0.
+            var stloc0 = shapeTrim.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Stloc_0);
+            if (stloc0 != null)
+            {
+                var ldNullCheck = il.Create(OpCodes.Ldloc_0);
+                var brFalse = il.Create(OpCodes.Brfalse_S, callHookAnchor);
+                il.InsertAfter(stloc0, ldNullCheck);
+                il.InsertAfter(ldNullCheck, brFalse);
+            }
+            patched++;
+        }
+
+        // 4. Shape.CollectAndResolveReferences(ILogger, string, string[]): deduplicate elements and keyframe keys at entry.
+        var collectMethod = shapeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "CollectAndResolveReferences" && m.Parameters.Count == 3 && m.HasBody)
+            ?? throw new InvalidOperationException($"{shapeTypeName}.CollectAndResolveReferences(ILogger, string, string[]) is missing.");
+        ClearDebugInformation(collectMethod);
+        if (collectMethod.Body.Instructions.Any(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == dedupAllRef.FullName))
+        {
+            patched++;
+        }
+        else
+        {
+            var il = collectMethod.Body.GetILProcessor();
+            var first = collectMethod.Body.Instructions[0];
+            var callAll = il.Create(OpCodes.Call, dedupAllRef);
+            il.InsertBefore(first, callAll);
+            il.InsertBefore(callAll, il.Create(OpCodes.Ldarg_0));
+            patched++;
+        }
+
+        // 5. Shape.SubclassForStepParenting(string, float) + closure: route 5 string.Concat(string, string) calls through pool.
+        var subclassMethod = shapeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "SubclassForStepParenting" && m.Parameters.Count == 2 && m.HasBody)
+            ?? throw new InvalidOperationException($"{shapeTypeName}.SubclassForStepParenting(string, float) is missing.");
+        var subclassTargets = new List<MethodDefinition> { subclassMethod };
+        foreach (var nested in shapeType.NestedTypes)
+        {
+            foreach (var nm in nested.Methods)
+            {
+                if (nm.HasBody && nm.Name.Contains("<SubclassForStepParenting>", StringComparison.Ordinal))
+                {
+                    subclassTargets.Add(nm);
+                }
+            }
+        }
+        int existingConcatDedup = 0;
+        int replacedConcat = 0;
+        foreach (var target in subclassTargets)
+        {
+            ClearDebugInformation(target);
+            foreach (var ins in target.Body.Instructions)
+            {
+                if (ins.OpCode == OpCodes.Call && ins.Operand is MethodReference mr)
+                {
+                    if (mr.FullName == concatDedupRef.FullName)
+                    {
+                        existingConcatDedup++;
+                    }
+                    else if (mr.FullName == "System.String System.String::Concat(System.String,System.String)")
+                    {
+                        ins.Operand = concatDedupRef;
+                        replacedConcat++;
+                    }
+                }
+            }
+        }
+        if (existingConcatDedup != 5 && replacedConcat != 5)
+        {
+            throw new InvalidOperationException(
+                $"{subclassMethod.FullName}: expected 5 string.Concat(string, string) calls across method + lambda, found {replacedConcat}.");
+        }
+        patched++;
+
+        Console.WriteLine($"  API PATCHED: Shape / ShapeElement / AttachmentPoint string deduplication ({patched}/5)");
+        return patched;
+    }
+
+    private static int ReplaceCallTargets(MethodDefinition method, string originalFullName, MethodReference replacement, int expectedCount)
+    {
+        int existing = 0;
+        int replaced = 0;
+        foreach (var ins in method.Body.Instructions)
+        {
+            if (ins.OpCode == OpCodes.Call && ins.Operand is MethodReference mr)
+            {
+                if (mr.FullName == replacement.FullName)
+                {
+                    existing++;
+                }
+                else if (mr.FullName == originalFullName)
+                {
+                    ins.Operand = replacement;
+                    replaced++;
+                }
+            }
+        }
+
+        if (existing == expectedCount)
+        {
+            return 1;
+        }
+
+        if (replaced != expectedCount)
+        {
+            throw new InvalidOperationException(
+                $"{method.FullName}: expected {expectedCount} calls to {originalFullName}, found {replaced}.");
+        }
+
+        return 1;
     }
 }

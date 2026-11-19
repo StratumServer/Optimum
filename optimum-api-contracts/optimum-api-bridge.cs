@@ -2016,4 +2016,149 @@ public static class OptimumApiBridge
 
         return sound.Location == null ? null : sound;
     }
+
+    /// <summary>
+    /// Deduplicates a single shape or animation bone/element string against the session-scoped pool.
+    /// </summary>
+    public static string? DeduplicateShapeString(string? value)
+    {
+        return OptimumShapeStringPool.Shared.Deduplicate(value);
+    }
+
+    /// <summary>
+    /// Concatenates a step-parenting prefix with a shape/keyframe name and returns a canonical
+    /// session-scoped string instance without intermediate string allocation on cache hit.
+    /// </summary>
+    public static string ConcatAndDeduplicateShapeString(string? prefix, string? value)
+    {
+        return OptimumShapeStringPool.Shared.ConcatAndDeduplicate(prefix, value);
+    }
+
+    /// <summary>
+    /// Deduplicates animation codes, names, and keyframe element dictionary keys on a loaded shape.
+    /// Skips dictionary rebuild when every key already points to its canonical pooled instance.
+    /// </summary>
+    public static void DeduplicateShapeAnimations(Shape? shape)
+    {
+        Animation[]? animations = shape?.Animations;
+        if (animations == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < animations.Length; i++)
+        {
+            Animation anim = animations[i];
+            if (anim == null)
+            {
+                continue;
+            }
+
+            anim.Code = DeduplicateShapeString(anim.Code);
+            anim.Name = DeduplicateShapeString(anim.Name);
+            DeduplicateKeyFrames(anim.KeyFrames);
+        }
+    }
+
+    /// <summary>
+    /// Deduplicates element names, step-parent names, attachment point codes, and animation
+    /// keyframe dictionary keys on a shape assembled or modified at runtime.
+    /// </summary>
+    public static void DeduplicateShapeStrings(Shape? shape)
+    {
+        if (shape == null)
+        {
+            return;
+        }
+
+        DeduplicateShapeElementsRecursive(shape.Elements);
+        DeduplicateShapeAnimations(shape);
+    }
+
+    /// <summary>
+    /// Releases all pooled shape and animation strings on asset reload or world exit.
+    /// </summary>
+    public static void ClearShapeStringPool()
+    {
+        OptimumShapeStringPool.Shared.Clear();
+    }
+
+    private static void DeduplicateShapeElementsRecursive(ShapeElement[]? elements)
+    {
+        if (elements == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < elements.Length; i++)
+        {
+            ShapeElement elem = elements[i];
+            if (elem == null)
+            {
+                continue;
+            }
+
+            elem.Name = DeduplicateShapeString(elem.Name);
+            elem.StepParentName = DeduplicateShapeString(elem.StepParentName);
+
+            AttachmentPoint[]? attachmentPoints = elem.AttachmentPoints;
+            if (attachmentPoints != null)
+            {
+                for (int j = 0; j < attachmentPoints.Length; j++)
+                {
+                    AttachmentPoint ap = attachmentPoints[j];
+                    if (ap != null)
+                    {
+                        ap.Code = DeduplicateShapeString(ap.Code);
+                    }
+                }
+            }
+
+            if (elem.Children != null)
+            {
+                DeduplicateShapeElementsRecursive(elem.Children);
+            }
+        }
+    }
+
+    private static void DeduplicateKeyFrames(AnimationKeyFrame[]? keyFrames)
+    {
+        if (keyFrames == null)
+        {
+            return;
+        }
+
+        for (int i = 0; i < keyFrames.Length; i++)
+        {
+            AnimationKeyFrame kf = keyFrames[i];
+            System.Collections.Generic.Dictionary<string, AnimationKeyFrameElement>? elements = kf?.Elements;
+            if (elements == null || elements.Count == 0)
+            {
+                continue;
+            }
+
+            bool needsRebuild = false;
+            foreach (System.Collections.Generic.KeyValuePair<string, AnimationKeyFrameElement> entry in elements)
+            {
+                string? canonical = DeduplicateShapeString(entry.Key);
+                if (!object.ReferenceEquals(canonical, entry.Key))
+                {
+                    needsRebuild = true;
+                    break;
+                }
+            }
+
+            if (!needsRebuild)
+            {
+                continue;
+            }
+
+            var deduplicated = new System.Collections.Generic.Dictionary<string, AnimationKeyFrameElement>(elements.Count, elements.Comparer);
+            foreach (System.Collections.Generic.KeyValuePair<string, AnimationKeyFrameElement> entry in elements)
+            {
+                deduplicated[DeduplicateShapeString(entry.Key)!] = entry.Value;
+            }
+            kf!.Elements = deduplicated;
+        }
+    }
 }

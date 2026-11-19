@@ -1,0 +1,23 @@
+diff --git a/VintagestoryApi/Common/Model/Shape/AttachmentPoint.cs b/VintagestoryApi/Common/Model/Shape/AttachmentPoint.cs
+index 44d4559..24abda9 100644
+--- a/VintagestoryApi/Common/Model/Shape/AttachmentPoint.cs
++++ b/VintagestoryApi/Common/Model/Shape/AttachmentPoint.cs
+@@ -1,6 +1,7 @@
+ ﻿using Newtonsoft.Json;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Util;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.Common
+@@ -58,9 +59,9 @@ namespace Vintagestory.API.Common
+         [JsonProperty]
+         public double RotationZ;
+ 
+         public void DeDuplicate()
+         {
+-            Code = Code.DeDuplicate();
++            Code = OptimumApiBridge.DeduplicateShapeString(Code);
+         }
+     }
+ }
