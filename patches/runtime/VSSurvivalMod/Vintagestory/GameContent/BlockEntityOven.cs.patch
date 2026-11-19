@@ -1,0 +1,97 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityOven.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityOven.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityOven.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityOven.cs
+@@ -39,6 +39,16 @@
+ 
+ 	internal InventoryOven ovenInv;
+ 
++	private bool optimumHasVisualState;
++
++	private int optimumLastContentMode;
++
++	private int optimumLastRotationDeg;
++
++	private string[] optimumLastSlotMeshKeys;
++
++	private float[] optimumLastSlotHeightMuls;
++
+ 	public virtual float maxTemperature => 300f;
+ 
+ 	public virtual int bakeableCapacity => 4;
+@@ -133,6 +143,10 @@
+ 		RegisterGameTickListener(OnBurnTick, 100);
+ 		prng = new Random(Pos.GetHashCode());
+ 		SetRotation();
++		if (api.Side == EnumAppSide.Client)
++		{
++			UpdateOptimumVisualState();
++		}
+ 	}
+ 
+ 	private void SetRotation()
+@@ -622,18 +636,62 @@
+ 		ICoreAPI api = Api;
+ 		if (api != null && api.Side == EnumAppSide.Client)
+ 		{
+-			MarkMeshesDirty();
++			bool flag = UpdateOptimumVisualState();
+ 			if (clientSidePrevBurning != IsBurning)
+ 			{
++				MarkMeshesDirty();
+ 				ToggleAmbientSounds(IsBurning);
+ 				clientSidePrevBurning = IsBurning;
+ 				MarkDirty(redrawOnClient: true);
+ 			}
+-			else
+-			{
++			else if (flag)
++			{
++				MarkMeshesDirty();
+ 				Api.World.BlockAccessor.MarkBlockDirty(Pos);
+ 			}
+ 		}
++	}
++
++	private bool UpdateOptimumVisualState()
++	{
++		int contentMode = (int)OvenContentMode;
++		int displayedItems = DisplayedItems;
++		int currentRotation = rotationDeg;
++		bool changed = !optimumHasVisualState
++			|| optimumLastContentMode != contentMode
++			|| optimumLastRotationDeg != currentRotation
++			|| optimumLastSlotMeshKeys == null
++			|| optimumLastSlotMeshKeys.Length != displayedItems
++			|| optimumLastSlotHeightMuls == null
++			|| optimumLastSlotHeightMuls.Length != displayedItems;
++		if (optimumLastSlotMeshKeys == null || optimumLastSlotMeshKeys.Length != displayedItems)
++		{
++			optimumLastSlotMeshKeys = new string[displayedItems];
++		}
++		if (optimumLastSlotHeightMuls == null || optimumLastSlotHeightMuls.Length != displayedItems)
++		{
++			optimumLastSlotHeightMuls = new float[displayedItems];
++		}
++		for (int i = 0; i < displayedItems; i++)
++		{
++			ItemSlot itemSlot = ((i < Inventory.Count) ? Inventory[i] : null);
++			string text = ((itemSlot != null && !itemSlot.Empty && itemSlot.Itemstack?.Collectible?.Code != null) ? getMeshCacheKey(itemSlot) : null);
++			float num = ((contentMode == 0) ? 0.9f : ((i < bakingData.Length && bakingData[i] != null) ? bakingData[i].CurHeightMul : 1f));
++			if (!string.Equals(optimumLastSlotMeshKeys[i], text, StringComparison.Ordinal))
++			{
++				optimumLastSlotMeshKeys[i] = text;
++				changed = true;
++			}
++			if (BitConverter.SingleToInt32Bits(optimumLastSlotHeightMuls[i]) != BitConverter.SingleToInt32Bits(num))
++			{
++				optimumLastSlotHeightMuls[i] = num;
++				changed = true;
++			}
++		}
++		optimumLastContentMode = contentMode;
++		optimumLastRotationDeg = currentRotation;
++		optimumHasVisualState = true;
++		return changed;
+ 	}
+ 
+ 	public override void ToTreeAttributes(ITreeAttribute tree)
