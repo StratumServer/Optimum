@@ -92,7 +92,9 @@ public class WindowsRuntimeConfigFrameworksTests
         JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
         Assert.True(props["System.GC.Server"]!.GetValue<bool>());
         Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
-        Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
+        Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.False(props.ContainsKey("System.GC.DATAs"));
+        Assert.False(props.ContainsKey("System.GC.HighMemoryPercent"));
     }
 
     [PwshFact]
@@ -104,7 +106,7 @@ public class WindowsRuntimeConfigFrameworksTests
         Assert.True(props["System.GC.Server"]!.GetValue<bool>());
         Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
         Assert.False(props.ContainsKey("System.GC.DATAs"));
-        Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
         Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
     }
 
@@ -115,7 +117,7 @@ public class WindowsRuntimeConfigFrameworksTests
 
         JsonObject props = JsonNode.Parse(result)!["runtimeOptions"]!["configProperties"]!.AsObject();
         Assert.False(props.ContainsKey("System.GC.DATAs"));
-        Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
         Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
     }
 
@@ -126,26 +128,50 @@ public class WindowsRuntimeConfigFrameworksTests
         try
         {
             string cfgPath = Path.Combine(tempDir, "Vintagestory.runtimeconfig.json");
-            File.WriteAllText(cfgPath, LauncherConfig);
+            File.WriteAllText(cfgPath, """
+                {
+                  "runtimeOptions": {
+                    "tfm": "net10.0",
+                    "framework": { "name": "Microsoft.NETCore.App", "version": "10.0.0" },
+                    "configProperties": {
+                      "System.GC.DATAs": 1,
+                      "System.GC.DynamicAdaptationMode": 0
+                    }
+                  }
+                }
+                """);
 
             Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=aggressive"]);
             string updated = File.ReadAllText(cfgPath);
             JsonObject props = JsonNode.Parse(updated)!["runtimeOptions"]!["configProperties"]!.AsObject();
-            Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
             Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
             Assert.False(props.ContainsKey("System.GC.DATAs"));
 
             Program.CalibrateRuntimeConfigForMemory(tempDir, ["--optimum-memory-profile=throughput"]);
             updated = File.ReadAllText(cfgPath);
             props = JsonNode.Parse(updated)!["runtimeOptions"]!["configProperties"]!.AsObject();
-            Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
-            Assert.False(props.ContainsKey("System.GC.DynamicAdaptationMode"));
+            Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DATAs"));
             Assert.False(props.ContainsKey("System.GC.HighMemoryPercent"));
         }
         finally
         {
             Directory.Delete(tempDir, recursive: true);
         }
+    }
+
+    [Fact]
+    public void BuiltLauncherRuntimeConfigUsesDynamicAdaptationModeAndOmitsUnusedDatasKey()
+    {
+        string runtimeConfigPath = Path.Combine(AppContext.BaseDirectory, "Optimum.runtimeconfig.json");
+        Assert.True(File.Exists(runtimeConfigPath), $"Expected launcher runtimeconfig at {runtimeConfigPath}");
+
+        JsonObject props = JsonNode.Parse(File.ReadAllText(runtimeConfigPath))!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.True(props["System.GC.Server"]!.GetValue<bool>());
+        Assert.True(props["System.GC.Concurrent"]!.GetValue<bool>());
+        Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.False(props.ContainsKey("System.GC.DATAs"));
     }
 
     [PwshFact]

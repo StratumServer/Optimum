@@ -22,7 +22,6 @@
   <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" />
     <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
-    <RuntimeHostConfigurationOption Include="System.GC.DATAs" Value="1" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Mono.Cecil" Version="0.11.6" />

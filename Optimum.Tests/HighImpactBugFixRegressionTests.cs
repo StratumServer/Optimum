@@ -1004,7 +1004,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-    public void RuntimeConfig_LowMemoryCalibrationDisablesDatasAndBindsHighMemoryPercent()
+    public void RuntimeConfig_LowMemoryCalibrationKeepsDatasAndBindsHighMemoryPercent()
     {
         // 1. Verify sync-runtimeconfig-frameworks.ps1 handles low memory calibration
         string script = File.ReadAllText(
@@ -1020,7 +1020,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("DynamicAdaptationMode", deployerSource);
         Assert.Contains("HighMemoryPercent", deployerSource);
 
-        // 3. Verify Launcher calibration logic
+        // 3. Verify Launcher calibration logic removes legacy System.GC.DATAs and keeps DATAS enabled
         string tempDir = Directory.CreateTempSubdirectory("optimum-launcher-gc-").FullName;
         try
         {
@@ -1031,7 +1031,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
                     "tfm": "net10.0",
                     "configProperties": {
                       "System.GC.Server": true,
-                      "System.GC.DATAs": 1
+                      "System.GC.DATAs": 1,
+                      "System.GC.DynamicAdaptationMode": 0
                     }
                   }
                 }
@@ -1041,7 +1042,7 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             string content = File.ReadAllText(cfgPath);
             var node = System.Text.Json.Nodes.JsonNode.Parse(content);
             var props = node!["runtimeOptions"]!["configProperties"]!.AsObject();
-            Assert.Equal(0, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
             Assert.Equal(75, props["System.GC.HighMemoryPercent"]!.GetValue<int>());
             Assert.False(props.ContainsKey("System.GC.DATAs"));
 
@@ -1049,8 +1050,8 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
             content = File.ReadAllText(cfgPath);
             node = System.Text.Json.Nodes.JsonNode.Parse(content);
             props = node!["runtimeOptions"]!["configProperties"]!.AsObject();
-            Assert.Equal(1, props["System.GC.DATAs"]!.GetValue<int>());
-            Assert.False(props.ContainsKey("System.GC.DynamicAdaptationMode"));
+            Assert.Equal(1, props["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+            Assert.False(props.ContainsKey("System.GC.DATAs"));
             Assert.False(props.ContainsKey("System.GC.HighMemoryPercent"));
         }
         finally

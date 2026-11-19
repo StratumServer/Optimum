@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Platform;
@@ -593,5 +594,39 @@ public sealed class DeployRoundTripTests : IDisposable
         Assert.False(result.Ok);
         Assert.Equal(FailureReason.BadInput, result.Reason);
         Assert.True(File.Exists(Path.Combine(bare, "important.txt")));
+    }
+
+    [Fact]
+    public void CalibrateRuntimeConfigsWritesDynamicAdaptationModeAndRemovesUnusedDatasKey()
+    {
+        string dir = Path.Combine(_root, "gc-calibrate");
+        Directory.CreateDirectory(dir);
+        string cfgPath = Path.Combine(dir, "Vintagestory.runtimeconfig.json");
+        File.WriteAllText(cfgPath, """
+            {
+              "runtimeOptions": {
+                "tfm": "net10.0",
+                "configProperties": {
+                  "System.GC.Server": true,
+                  "System.GC.DATAs": 1,
+                  "System.GC.DynamicAdaptationMode": 0
+                }
+              }
+            }
+            """);
+
+        PackageDeployer.CalibrateRuntimeConfigs(dir, overrideMemoryBytes: 8L * 1024 * 1024 * 1024);
+        JsonObject lowRamProps = JsonNode.Parse(File.ReadAllText(cfgPath))!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.True(lowRamProps["System.Runtime.TieredPGO"]!.GetValue<bool>());
+        Assert.Equal(1, lowRamProps["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.Equal(75, lowRamProps["System.GC.HighMemoryPercent"]!.GetValue<int>());
+        Assert.False(lowRamProps.ContainsKey("System.GC.DATAs"));
+
+        PackageDeployer.CalibrateRuntimeConfigs(dir, overrideMemoryBytes: 16L * 1024 * 1024 * 1024);
+        JsonObject standardProps = JsonNode.Parse(File.ReadAllText(cfgPath))!["runtimeOptions"]!["configProperties"]!.AsObject();
+        Assert.True(standardProps["System.Runtime.TieredPGO"]!.GetValue<bool>());
+        Assert.Equal(1, standardProps["System.GC.DynamicAdaptationMode"]!.GetValue<int>());
+        Assert.False(standardProps.ContainsKey("System.GC.DATAs"));
+        Assert.False(standardProps.ContainsKey("System.GC.HighMemoryPercent"));
     }
 }
