@@ -469,6 +469,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetDynamicRenderScaleSummary());
         sb.AppendLine(OptimumDiagnostics.GetCommonNatFloatSummary());
         sb.AppendLine(OptimumDiagnostics.GetOpenDoorBakeSummary());
+        sb.AppendLine(OptimumDiagnostics.GetFirepitServerTickSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }
@@ -546,6 +547,8 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Common NatFloat reuse: ON");
         if (OptimumConfig.BakeOpenDoorsEnabled)
             api.Logger.Debug("[Optimum] Open door static mesh bake: ON");
+        if (OptimumConfig.FirepitIdleServerTickEnabled)
+            api.Logger.Debug("[Optimum] Firepit idle server tick pause: ON");
 
         if (OptimumConfig.OptiTimeDetected)
             api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);

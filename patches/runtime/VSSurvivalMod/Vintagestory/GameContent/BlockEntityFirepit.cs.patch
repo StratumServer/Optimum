@@ -1,8 +1,6 @@
-diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
-index 5991b75..4feaf5f 100644
---- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
-+++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs
-@@ -41,6 +41,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs	2026-11-19 07:59:17.421352806 -0300
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFirepit.cs	2026-11-19 08:00:43.938617968 -0300
+@@ -41,6 +41,12 @@
  
  	private FirepitContentsRenderer renderer;
  
@@ -10,20 +8,40 @@ index 5991b75..4feaf5f 100644
 +
 +	private long burnTickListenerId;
 +
++	private long syncTickListenerId;
++
  	private bool shouldRedraw;
  
  	public float emptyFirepitBurnTimeMulBonus = 4f;
-@@ -165,13 +169,20 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -165,13 +171,38 @@
  		base.Initialize(api);
  		inventory.pos = Pos;
  		inventory.LateInitialize("smelting-" + Pos.X + "/" + Pos.Y + "/" + Pos.Z, api);
 -		RegisterGameTickListener(OnBurnTick, 100);
 -		RegisterGameTickListener(On500msTick, 500);
 +		bool flag = api.Side == EnumAppSide.Client && Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
-+		if (!flag)
++		if (api.Side == EnumAppSide.Server)
++		{
++			if (!Vintagestory.API.Config.OptimumConfig.FirepitIdleServerTickEnabled || !SupportsIdleServerTickPause())
++			{
++				Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickDynamicOrSkipped();
++				burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++				syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++			}
++			else if (IsServerIdleAtRest())
++			{
++				Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickPaused();
++			}
++			else
++			{
++				burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++				syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++			}
++		}
++		else if (!flag)
 +		{
 +			burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
-+			RegisterGameTickListener(On500msTick, 500);
++			syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
 +		}
  		if (api is ICoreClientAPI coreClientAPI)
  		{
@@ -38,7 +56,7 @@ index 5991b75..4feaf5f 100644
  			coreClientAPI.Event.RegisterEventBusListener(OnSetTransform, 0.5, "onsettransform");
  			UpdateRenderer();
  		}
-@@ -193,7 +204,7 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -193,7 +224,7 @@
  			}
  			collectible.Attributes.Token["inFirePitProps"]["transform"] = JToken.FromObject(modelTransform);
  		}
@@ -47,7 +65,72 @@ index 5991b75..4feaf5f 100644
  	}
  
  	private void OnSlotModified(int slotid)
-@@ -565,6 +576,7 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -207,6 +238,10 @@
+ 			SetDialogValues(clientDialog.Attributes);
+ 		}
+ 		Api.World.BlockAccessor.GetChunkAtBlockPos(Pos)?.MarkModified();
++		if (Api != null && Api.Side == EnumAppSide.Server)
++		{
++			SyncServerTickState();
++		}
+ 	}
+ 
+ 	private void On500msTick(float dt)
+@@ -216,12 +251,20 @@
+ 			MarkDirty();
+ 		}
+ 		prevFurnaceTemperature = furnaceTemperature;
++		if (Api != null && Api.Side == EnumAppSide.Server && !IsBurning && !canIgniteFuel && inputStackCookingTime <= 0f)
++		{
++			SyncServerTickState();
++		}
+ 	}
+ 
+ 	private void OnBurnTick(float dt)
+ 	{
+ 		if (base.Block.Code.Path.Contains("construct"))
+ 		{
++			if (Api != null && Api.Side == EnumAppSide.Server)
++			{
++				SyncServerTickState();
++			}
+ 			return;
+ 		}
+ 		if (Api is ICoreClientAPI)
+@@ -277,6 +320,10 @@
+ 		{
+ 			furnaceTemperature = changeTemperature(furnaceTemperature, enviromentTemperature(), dt);
+ 		}
++		if (Api != null && Api.Side == EnumAppSide.Server && !IsBurning && !canIgniteFuel && inputStackCookingTime <= 0f)
++		{
++			SyncServerTickState();
++		}
+ 	}
+ 
+ 	public EnumIgniteState GetIgnitableState(float secondsIgniting)
+@@ -398,6 +445,10 @@
+ 			maxFuelBurnTime = 0f;
+ 		}
+ 		MarkDirty(redrawOnClient: true);
++		if (Api != null && Api.Side == EnumAppSide.Server)
++		{
++			SyncServerTickState();
++		}
+ 	}
+ 
+ 	private float GetTemp(ItemStack stack)
+@@ -462,6 +513,10 @@
+ 		smokeLevel = combustibleProperties.SmokeLevel;
+ 		setBlockState("lit");
+ 		MarkDirty(redrawOnClient: true);
++		if (Api != null && Api.Side == EnumAppSide.Server)
++		{
++			SyncServerTickState();
++		}
+ 	}
+ 
+ 	public void setBlockState(string state)
+@@ -565,6 +620,7 @@
  		{
  			Inventory.AfterBlocksLoaded(Api.World);
  		}
@@ -55,7 +138,7 @@ index 5991b75..4feaf5f 100644
  		furnaceTemperature = tree.GetFloat("furnaceTemperature");
  		maxTemperature = tree.GetInt("maxTemperature");
  		inputStackCookingTime = tree.GetFloat("oreCookingTime");
-@@ -576,6 +588,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -576,6 +632,10 @@
  		ICoreAPI api = Api;
  		if (api != null && api.Side == EnumAppSide.Client)
  		{
@@ -66,15 +149,112 @@ index 5991b75..4feaf5f 100644
  			UpdateRenderer();
  			if (clientDialog != null)
  			{
-@@ -592,36 +608,118 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -590,38 +650,215 @@
+ 			MarkDirty(redrawOnClient: true);
+ 			shouldRedraw = false;
  		}
++		if (Api != null && Api.Side == EnumAppSide.Server)
++		{
++			SyncServerTickState();
++		}
  	}
  
 -	private void UpdateRenderer()
++	private bool SupportsIdleServerTickPause()
++	{
++		Type type = GetType();
++		if (!(type == typeof(BlockEntityFirepit)))
++		{
++			return type == typeof(BlockEntityStove);
++		}
++		return true;
++	}
++
++	private bool IsServerIdleAtRest()
++	{
++		if (fuelBurnTime > 0f || canIgniteFuel || inputStackCookingTime > 0f)
++		{
++			return false;
++		}
++		if (!inputSlot.Empty || !outputSlot.Empty)
++		{
++			return false;
++		}
++		Block block = Api?.World?.BlockAccessor?.GetBlock(Pos) ?? base.Block;
++		if (block != null)
++		{
++			base.Block = block;
++		}
++		string text = block?.Code?.Path;
++		if (text != null && text.Contains("construct"))
++		{
++			return furnaceTemperature == prevFurnaceTemperature;
++		}
++		string text2 = ((block?.Variant != null) ? block.Variant["burnstate"] : null);
++		if (text2 == "extinct" || text2 == "lit")
++		{
++			return false;
++		}
++		float num = enviromentTemperature();
++		if (furnaceTemperature != num || prevFurnaceTemperature != furnaceTemperature)
++		{
++			return false;
++		}
++		return true;
++	}
++
++	private void SyncServerTickState()
++	{
++		if (Api == null || Api.Side != EnumAppSide.Server)
++		{
++			return;
++		}
++		if (Vintagestory.API.Config.OptimumConfig.FirepitIdleServerTickEnabled && SupportsIdleServerTickPause() && IsServerIdleAtRest())
++		{
++			bool num = burnTickListenerId != 0L || syncTickListenerId != 0L;
++			if (burnTickListenerId != 0L)
++			{
++				UnregisterGameTickListener(burnTickListenerId);
++				burnTickListenerId = 0L;
++			}
++			if (syncTickListenerId != 0L)
++			{
++				UnregisterGameTickListener(syncTickListenerId);
++				syncTickListenerId = 0L;
++			}
++			if (num)
++			{
++				Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickPaused();
++			}
++			return;
++		}
++		bool flag = burnTickListenerId == 0L || syncTickListenerId == 0L;
++		if (burnTickListenerId == 0L)
++		{
++			burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++		}
++		if (syncTickListenerId == 0L)
++		{
++			syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++		}
++		if (flag && (burnTickListenerId != 0L || syncTickListenerId != 0L))
++		{
++			Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickWoken();
++		}
++	}
++
++	public void WakeIdleServerTicks()
++	{
++		if (Api != null && Api.Side == EnumAppSide.Server)
++		{
++			SyncServerTickState();
++		}
++	}
++
 +	private FirepitContentsRenderer EnsureRenderer()
  	{
  		if (renderer == null)
-+		{
+ 		{
 +			renderer = new FirepitContentsRenderer(capi, Pos);
 +		}
 +		return renderer;
@@ -137,7 +317,7 @@ index 5991b75..4feaf5f 100644
 +	private void UpdateRenderer()
 +	{
 +		if (capi == null)
- 		{
++		{
  			return;
  		}
 +		bool firepitIdleRendererEnabled = Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
@@ -194,18 +374,19 @@ index 5991b75..4feaf5f 100644
  		}
  	}
  
-@@ -666,8 +764,8 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -666,8 +903,9 @@
  	public override void OnBlockRemoved()
  	{
  		base.OnBlockRemoved();
 -		renderer?.Dispose();
 -		renderer = null;
 +		burnTickListenerId = 0L;
++		syncTickListenerId = 0L;
 +		DisposeIdleRenderer();
  		if (clientDialog != null)
  		{
  			clientDialog.TryClose();
-@@ -773,6 +871,10 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -773,6 +1011,10 @@
  		{
  			EnumFirepitModel desiredFirepitModel = (contentStack.Collectible as IInFirepitRendererSupplier).GetDesiredFirepitModel(contentStack, this, contentStack == outputStack);
  			CurrentModel = desiredFirepitModel;
@@ -216,7 +397,7 @@ index 5991b75..4feaf5f 100644
  			return null;
  		}
  		InFirePitProps renderProps = GetRenderProps(contentStack);
-@@ -791,17 +893,62 @@ public class BlockEntityFirepit : BlockEntityOpenableContainer, IHeatSource, IFi
+@@ -791,17 +1033,63 @@
  			}
  			return null;
  		}
@@ -277,6 +458,7 @@ index 5991b75..4feaf5f 100644
  		base.OnBlockUnloaded();
 -		renderer?.Dispose();
 +		burnTickListenerId = 0L;
++		syncTickListenerId = 0L;
 +		DisposeIdleRenderer();
  	}
  

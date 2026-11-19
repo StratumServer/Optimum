@@ -787,6 +787,10 @@ public static class OptimumConfig
     // on empty or static cold firepits until dynamic contents become active.
     public static bool FirepitIdleRendererEnabled = true;
 
+    // Issue #645: Pause BlockEntityFirepit 100 ms / 500 ms server ticks when cold,
+    // extinguished, and empty at ambient temperature until interacted with or ignited.
+    public static bool FirepitIdleServerTickEnabled = true;
+
     // Issue #640: Reuse SoundAttributes.NatFloatOne and RandomPitch (plus static
     // Packet_NatFloat equivalents) when avg, var, dist, and zero offset match.
     public static bool ReuseCommonNatFloatEnabled = true;
@@ -1574,6 +1578,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.IgnoreJsonLineInfo), IgnoreJsonLineInfoEnabled.ToString()),
         (nameof(OptimumConfigData.CompactServerAssets), CompactServerAssetsEnabled.ToString()),
         (nameof(OptimumConfigData.FirepitIdleRenderer), FirepitIdleRendererEnabled.ToString()),
+        (nameof(OptimumConfigData.FirepitIdleServerTick), FirepitIdleServerTickEnabled.ToString()),
         (nameof(OptimumConfigData.ReuseCommonNatFloat), ReuseCommonNatFloatEnabled.ToString()),
         (nameof(OptimumConfigData.BakeOpenDoors), BakeOpenDoorsEnabled.ToString()),
     };
@@ -1713,6 +1718,7 @@ public static class OptimumConfig
             IgnoreJsonLineInfoEnabled = data.IgnoreJsonLineInfo;
             CompactServerAssetsEnabled = data.CompactServerAssets;
             FirepitIdleRendererEnabled = data.FirepitIdleRenderer;
+            FirepitIdleServerTickEnabled = data.FirepitIdleServerTick;
             ReuseCommonNatFloatEnabled = data.ReuseCommonNatFloat;
             BakeOpenDoorsEnabled = data.BakeOpenDoors;
         }
@@ -1815,6 +1821,7 @@ public static class OptimumConfig
             IgnoreJsonLineInfo = IgnoreJsonLineInfoEnabled,
             CompactServerAssets = CompactServerAssetsEnabled,
             FirepitIdleRenderer = FirepitIdleRendererEnabled,
+            FirepitIdleServerTick = FirepitIdleServerTickEnabled,
             ReuseCommonNatFloat = ReuseCommonNatFloatEnabled,
             BakeOpenDoors = BakeOpenDoorsEnabled,
         };
@@ -1941,6 +1948,7 @@ internal sealed class OptimumConfigData
     public bool IgnoreJsonLineInfo { get; set; } = true;
     public bool CompactServerAssets { get; set; } = true;
     public bool FirepitIdleRenderer { get; set; } = true;
+    public bool FirepitIdleServerTick { get; set; } = true;
     public bool ReuseCommonNatFloat { get; set; } = true;
     public bool BakeOpenDoors { get; set; } = true;
 }
@@ -2898,6 +2906,7 @@ public static class OptimumDiagnostics
         ResetDynamicRenderScaleDiagnostics();
         ResetCommonNatFloatCounters();
         ResetOpenDoorBakeCounters();
+        ResetFirepitServerTickCounters();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3974,6 +3983,33 @@ public static class OptimumDiagnostics
         return string.Create(
             CultureInfo.InvariantCulture,
             $"Optimum open-door bake: enabled={OptimumConfig.BakeOpenDoorsEnabled}, bakedTotal={bakedTotal} (transition={bakedTransition}, load={bakedLoad}), reopened={reopened}, dynamicOrSkipped={skipped}");
+    }
+
+    // Issue #645: BlockEntityFirepit idle server tick pause/wake diagnostics.
+    private static long _firepitServerTicksPaused;
+    private static long _firepitServerTicksWoken;
+    private static long _firepitServerTicksDynamicOrSkipped;
+
+    public static long FirepitServerTicksPaused => Interlocked.Read(ref _firepitServerTicksPaused);
+    public static long FirepitServerTicksWoken => Interlocked.Read(ref _firepitServerTicksWoken);
+    public static long FirepitServerTicksDynamicOrSkipped => Interlocked.Read(ref _firepitServerTicksDynamicOrSkipped);
+
+    public static void RecordFirepitServerTickPaused() => Interlocked.Increment(ref _firepitServerTicksPaused);
+    public static void RecordFirepitServerTickWoken() => Interlocked.Increment(ref _firepitServerTicksWoken);
+    public static void RecordFirepitServerTickDynamicOrSkipped() => Interlocked.Increment(ref _firepitServerTicksDynamicOrSkipped);
+
+    public static void ResetFirepitServerTickCounters()
+    {
+        Interlocked.Exchange(ref _firepitServerTicksPaused, 0);
+        Interlocked.Exchange(ref _firepitServerTicksWoken, 0);
+        Interlocked.Exchange(ref _firepitServerTicksDynamicOrSkipped, 0);
+    }
+
+    public static string GetFirepitServerTickSummary()
+    {
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"Optimum firepit idle server tick: enabled={OptimumConfig.FirepitIdleServerTickEnabled}, paused={FirepitServerTicksPaused}, woken={FirepitServerTicksWoken}, dynamicOrSkipped={FirepitServerTicksDynamicOrSkipped}");
     }
 }
 

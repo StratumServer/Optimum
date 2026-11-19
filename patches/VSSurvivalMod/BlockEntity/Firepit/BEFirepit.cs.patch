@@ -1,8 +1,8 @@
 diff --git a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
-index 613b86f..c349ca3 100644
+index 613b86f..d4dd0e6 100644
 --- a/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
 +++ b/VSSurvivalMod/BlockEntity/Firepit/BEFirepit.cs
-@@ -47,10 +47,12 @@ namespace Vintagestory.GameContent
+@@ -47,10 +47,13 @@ namespace Vintagestory.GameContent
  
          GuiDialogBlockEntityFirepit clientDialog;
          bool clientSidePrevBurning;
@@ -10,12 +10,13 @@ index 613b86f..c349ca3 100644
          FirepitContentsRenderer renderer;
 +        bool rendererRegistered;
 +        long burnTickListenerId;
++        long syncTickListenerId;
  
          bool shouldRedraw;
  
          public bool IsHot => IsBurning;
          public float emptyFirepitBurnTimeMulBonus = 4f;
-@@ -114,19 +116,26 @@ namespace Vintagestory.GameContent
+@@ -114,19 +117,44 @@ namespace Vintagestory.GameContent
          {
              base.Initialize(api);
  
@@ -25,11 +26,29 @@ index 613b86f..c349ca3 100644
 -            RegisterGameTickListener(OnBurnTick, 100);
 -            RegisterGameTickListener(On500msTick, 500);
 +
-+            bool idleOpt = api.Side == EnumAppSide.Client && Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
-+            if (!idleOpt)
++            bool idleClientOpt = api.Side == EnumAppSide.Client && Vintagestory.API.Config.OptimumConfig.FirepitIdleRendererEnabled;
++            if (api.Side == EnumAppSide.Server)
++            {
++                if (!Vintagestory.API.Config.OptimumConfig.FirepitIdleServerTickEnabled || !SupportsIdleServerTickPause())
++                {
++                    Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickDynamicOrSkipped();
++                    burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++                    syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++                }
++                else if (IsServerIdleAtRest())
++                {
++                    Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickPaused();
++                }
++                else
++                {
++                    burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++                    syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++                }
++            }
++            else if (!idleClientOpt)
 +            {
 +                burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
-+                RegisterGameTickListener(On500msTick, 500);
++                syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
 +            }
  
              if (api is ICoreClientAPI capi)
@@ -37,7 +56,7 @@ index 613b86f..c349ca3 100644
                  this.capi = capi;
 -                renderer = new FirepitContentsRenderer(capi, Pos);
 -                capi.Event.RegisterRenderer(renderer, EnumRenderStage.Opaque, "firepit");
-+                if (!idleOpt)
++                if (!idleClientOpt)
 +                {
 +                    EnsureRenderer();
 +                    SyncClientRendererAndTickState(false);
@@ -47,7 +66,7 @@ index 613b86f..c349ca3 100644
              }
          }
  
-@@ -146,11 +155,11 @@ namespace Vintagestory.GameContent
+@@ -146,11 +174,11 @@ namespace Vintagestory.GameContent
              {
                  if (collObj.Attributes == null) collObj.Attributes = new JsonObject(new JObject());
                  collObj.Attributes.Token["inFirePitProps"]["transform"] = JToken.FromObject(tf);
@@ -60,7 +79,102 @@ index 613b86f..c349ca3 100644
  
          private void OnSlotModified(int slotid)
          {
-@@ -616,10 +625,11 @@ namespace Vintagestory.GameContent
+@@ -164,10 +192,15 @@ namespace Vintagestory.GameContent
+             {
+                 SetDialogValues(clientDialog.Attributes);
+             }
+ 
+             Api.World.BlockAccessor.GetChunkAtBlockPos(Pos)?.MarkModified();
++
++            if (Api != null && Api.Side == EnumAppSide.Server)
++            {
++                SyncServerTickState();
++            }
+         }
+ 
+ 
+         public bool IsSmoldering => canIgniteFuel;
+ 
+@@ -184,18 +217,30 @@ namespace Vintagestory.GameContent
+             {
+                 MarkDirty();
+             }
+ 
+             prevFurnaceTemperature = furnaceTemperature;
++
++            if (Api != null && Api.Side == EnumAppSide.Server && !IsBurning && !canIgniteFuel && inputStackCookingTime <= 0f)
++            {
++                SyncServerTickState();
++            }
+         }
+ 
+ 
+ 
+ 
+         private void OnBurnTick(float dt)
+         {
+-            if (Block.Code.Path.Contains("construct")) return;
++            if (Block.Code.Path.Contains("construct"))
++            {
++                if (Api != null && Api.Side == EnumAppSide.Server)
++                {
++                    SyncServerTickState();
++                }
++                return;
++            }
+ 
+             // Only tick on the server and merely sync to client
+             if (Api is ICoreClientAPI)
+             {
+                 renderer?.contentStackRenderer?.OnUpdate(InputStackTemp);
+@@ -267,10 +312,14 @@ namespace Vintagestory.GameContent
+             if (!IsBurning)
+             {
+                 furnaceTemperature = changeTemperature(furnaceTemperature, enviromentTemperature(), dt);
+             }
+ 
++            if (Api != null && Api.Side == EnumAppSide.Server && !IsBurning && !canIgniteFuel && inputStackCookingTime <= 0f)
++            {
++                SyncServerTickState();
++            }
+         }
+ 
+ 
+         public EnumIgniteState GetIgnitableState(float secondsIgniting)
+         {
+@@ -410,10 +459,15 @@ namespace Vintagestory.GameContent
+                 fuelBurnTime = 0;
+                 maxFuelBurnTime = 0;
+             }
+ 
+             MarkDirty(true);
++
++            if (Api != null && Api.Side == EnumAppSide.Server)
++            {
++                SyncServerTickState();
++            }
+         }
+ 
+ 
+ 
+ 
+@@ -511,10 +565,15 @@ namespace Vintagestory.GameContent
+             maxFuelBurnTime = fuelBurnTime = fuelCopts.BurnDuration * BurnDurationModifier;
+             maxTemperature = (int)(fuelCopts.BurnTemperature * HeatModifier);
+             smokeLevel = fuelCopts.SmokeLevel;
+             setBlockState("lit");
+             MarkDirty(true);
++
++            if (Api != null && Api.Side == EnumAppSide.Server)
++            {
++                SyncServerTickState();
++            }
+         }
+ 
+ 
+ 
+ 
+@@ -616,10 +675,11 @@ namespace Vintagestory.GameContent
              {
                  Inventory.AfterBlocksLoaded(Api.World);
              }
@@ -72,7 +186,7 @@ index 613b86f..c349ca3 100644
              inputStackCookingTime = tree.GetFloat("oreCookingTime");
              fuelBurnTime = tree.GetFloat("fuelBurnTime");
              maxFuelBurnTime = tree.GetFloat("maxFuelBurnTime");
-@@ -627,10 +637,14 @@ namespace Vintagestory.GameContent
+@@ -627,10 +687,14 @@ namespace Vintagestory.GameContent
              canIgniteFuel = tree.GetBool("canIgniteFuel", true);
              cachedFuel = tree.GetFloat("cachedFuel", 0);
  
@@ -87,12 +201,101 @@ index 613b86f..c349ca3 100644
                  if (clientDialog != null) SetDialogValues(clientDialog.Attributes);
              }
  
-@@ -643,46 +657,133 @@ namespace Vintagestory.GameContent
+@@ -640,49 +704,222 @@ namespace Vintagestory.GameContent
+                 GetBehavior<BEBehaviorFirepitAmbient>()?.ToggleAmbientSounds(IsBurning);
+                 clientSidePrevBurning = IsBurning;
+                 MarkDirty(true);
                  shouldRedraw = false;
              }
++
++            if (Api != null && Api.Side == EnumAppSide.Server)
++            {
++                SyncServerTickState();
++            }
++        }
++
++        bool SupportsIdleServerTickPause()
++        {
++            Type entityType = GetType();
++            return entityType == typeof(BlockEntityFirepit) || entityType == typeof(BlockEntityStove);
++        }
++
++        bool IsServerIdleAtRest()
++        {
++            if (fuelBurnTime > 0f || canIgniteFuel || inputStackCookingTime > 0f) return false;
++            if (!inputSlot.Empty || !outputSlot.Empty) return false;
++
++            Block liveBlock = Api?.World?.BlockAccessor?.GetBlock(Pos) ?? Block;
++            if (liveBlock != null)
++            {
++                Block = liveBlock;
++            }
++
++            string path = liveBlock?.Code?.Path;
++            if (path != null && path.Contains("construct"))
++            {
++                return furnaceTemperature == prevFurnaceTemperature;
++            }
++
++            string burnState = liveBlock?.Variant != null ? liveBlock.Variant["burnstate"] : null;
++            if (burnState == "extinct" || burnState == "lit") return false;
++
++            float envTemp = enviromentTemperature();
++            if (furnaceTemperature != envTemp || prevFurnaceTemperature != furnaceTemperature) return false;
++
++            return true;
          }
  
- 
++        void SyncServerTickState()
++        {
++            if (Api == null || Api.Side != EnumAppSide.Server) return;
++
++            if (Vintagestory.API.Config.OptimumConfig.FirepitIdleServerTickEnabled
++                && SupportsIdleServerTickPause()
++                && IsServerIdleAtRest())
++            {
++                bool hadListeners = burnTickListenerId != 0L || syncTickListenerId != 0L;
++                if (burnTickListenerId != 0L)
++                {
++                    UnregisterGameTickListener(burnTickListenerId);
++                    burnTickListenerId = 0L;
++                }
++                if (syncTickListenerId != 0L)
++                {
++                    UnregisterGameTickListener(syncTickListenerId);
++                    syncTickListenerId = 0L;
++                }
++                if (hadListeners)
++                {
++                    Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickPaused();
++                }
++                return;
++            }
++
++            bool wasPaused = burnTickListenerId == 0L || syncTickListenerId == 0L;
++            if (burnTickListenerId == 0L)
++            {
++                burnTickListenerId = RegisterGameTickListener(OnBurnTick, 100);
++            }
++            if (syncTickListenerId == 0L)
++            {
++                syncTickListenerId = RegisterGameTickListener(On500msTick, 500);
++            }
++            if (wasPaused && (burnTickListenerId != 0L || syncTickListenerId != 0L))
++            {
++                Vintagestory.API.Config.OptimumDiagnostics.RecordFirepitServerTickWoken();
++            }
++        }
++
++        public void WakeIdleServerTicks()
++        {
++            if (Api != null && Api.Side == EnumAppSide.Server)
++            {
++                SyncServerTickState();
++            }
++        }
++
++
 +        FirepitContentsRenderer EnsureRenderer()
 +        {
 +            if (renderer == null)
@@ -155,7 +358,7 @@ index 613b86f..c349ca3 100644
 +                renderer = null;
 +            }
 +        }
-+
+ 
          void UpdateRenderer()
          {
 -            if (renderer == null) return;
@@ -231,7 +434,7 @@ index 613b86f..c349ca3 100644
  
  
          void SetDialogValues(ITreeAttribute dialogTree)
-@@ -736,12 +837,12 @@ namespace Vintagestory.GameContent
+@@ -736,12 +973,13 @@ namespace Vintagestory.GameContent
  
          public override void OnBlockRemoved()
          {
@@ -239,14 +442,15 @@ index 613b86f..c349ca3 100644
  
 -            renderer?.Dispose();
 -            renderer = null;
-+            burnTickListenerId = 0;
++            burnTickListenerId = 0L;
++            syncTickListenerId = 0L;
 +            DisposeIdleRenderer();
  
              if (clientDialog != null)
              {
                  clientDialog.TryClose();
                  clientDialog?.Dispose();
-@@ -910,10 +1011,14 @@ namespace Vintagestory.GameContent
+@@ -910,10 +1148,14 @@ namespace Vintagestory.GameContent
              
              if (contentStack.Collectible is IInFirepitRendererSupplier)
              {
@@ -261,7 +465,7 @@ index 613b86f..c349ca3 100644
  
              InFirePitProps renderProps = GetRenderProps(contentStack);
              
-@@ -935,24 +1040,64 @@ namespace Vintagestory.GameContent
+@@ -935,24 +1177,65 @@ namespace Vintagestory.GameContent
  
                  return null;
              }
@@ -321,7 +525,8 @@ index 613b86f..c349ca3 100644
              base.OnBlockUnloaded();
  
 -            renderer?.Dispose();
-+            burnTickListenerId = 0;
++            burnTickListenerId = 0L;
++            syncTickListenerId = 0L;
 +            DisposeIdleRenderer();
          }
  

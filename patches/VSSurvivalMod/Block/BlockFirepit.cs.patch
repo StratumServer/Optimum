@@ -1,0 +1,26 @@
+diff --git a/VSSurvivalMod/Block/BlockFirepit.cs b/VSSurvivalMod/Block/BlockFirepit.cs
+index fb0916a..f8ee55e 100644
+--- a/VSSurvivalMod/Block/BlockFirepit.cs
++++ b/VSSurvivalMod/Block/BlockFirepit.cs
+@@ -186,14 +186,18 @@ namespace Vintagestory.GameContent
+         }
+ 
+         public void OnTryIgniteBlockOver(EntityAgent byEntity, BlockPos pos, float secondsIgniting, ref EnumHandling handling)
+         {
+             BlockEntityFirepit bef = api.World.BlockAccessor.GetBlockEntity(pos) as BlockEntityFirepit;
+-            if (bef != null && !bef.canIgniteFuel)
++            if (bef != null)
+             {
+-                bef.canIgniteFuel = true;
+-                bef.extinguishedTotalHours = api.World.Calendar.TotalHours;
++                if (!bef.canIgniteFuel)
++                {
++                    bef.canIgniteFuel = true;
++                    bef.extinguishedTotalHours = api.World.Calendar.TotalHours;
++                }
++                bef.WakeIdleServerTicks();
+             }
+ 
+             handling = EnumHandling.PreventDefault;
+         }
+ 
