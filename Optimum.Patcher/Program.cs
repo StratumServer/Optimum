@@ -100,6 +100,8 @@ var typesToInject = new List<string>
     // docs/implementation-plans/server-worldgen-chunk-pool-cecil-wiring-plan-2026-08-11.md):
     // parallel SQLite read pool used by ChunkServerThread/ServerSystemSupplyChunks.
     "Vintagestory.Server.OptimumChunkReadPool",
+    // Issue #646: secondary hash index for O(1) ban and whitelist lookups in PlayerDataManager.
+    "Vintagestory.Server.OptimumPlayerEntryIndex",
 };
 
 // --- Phase 2b: Members to inject into existing types ---
@@ -709,6 +711,13 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Server.ServerMapRegion"] = new()
     {
         "optimumToBytesStream",
+    },
+    ["Vintagestory.Server.PlayerDataManager"] = new()
+    {
+        "optimumBanIndex",
+        "optimumWhitelistIndex",
+        "GetIndexForList",
+        "GetModerationEntry",
     },
     // Issue #132: client ray selection reuses its predicates and walks entity
     // chunks directly instead of building a candidate List<Entity>/Entity[].
@@ -1393,6 +1402,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerEventManager", "TriggerGameWorldBeingSaved", 0),
     new("Vintagestory.Server.PlayerDataManager", "OnCheckRequireSave", 1),
     new("Vintagestory.Server.PlayerDataManager", "Load", 0),
+    new("Vintagestory.Server.PlayerDataManager", "BanPlayer", 5),
+    new("Vintagestory.Server.PlayerDataManager", "UnbanPlayer", 3),
+    new("Vintagestory.Server.PlayerDataManager", "UnWhitelistPlayer", 2),
+    new("Vintagestory.Server.PlayerDataManager", "WhitelistPlayer", 5),
+    new("Vintagestory.Server.PlayerDataManager", "GetPlayerBan", 2),
+    new("Vintagestory.Server.PlayerDataManager", "GetPlayerWhitelist", 2),
     new("Vintagestory.Server.PlayerDataManager", "GetPlayerEntry", 3),
     // Issue #466 & #637: cache compressed BoxedPacket_ServerAssets payload and release uncompressed source
     new("Vintagestory.Server.Network.TcpNetConnection", "PreparePacketForSending", 3),

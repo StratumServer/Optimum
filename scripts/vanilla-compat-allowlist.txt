@@ -96,8 +96,8 @@ patches/VintagestoryLib/Vintagestory.Server/ServerEventManager.cs.patch
 # Server asset distribution logic unchanged; no wire protocol modification.
 patches/VintagestoryLib/Vintagestory.Server/BoxedPacket_ServerAssets.cs.patch
 
-# Direct streaming JSON serialization and StringComparison.OrdinalIgnoreCase in player data persistence.
-# Disk save path and internal lookups only; no network format changes.
+# Direct streaming JSON serialization, StringComparison.OrdinalIgnoreCase, and secondary O(1)
+# ban/whitelist indexes in PlayerDataManager. Disk/internal lookups only; no network format changes.
 patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch
 
 # Issue #652: reuse a bounded [ThreadStatic] FastMemoryStream in ToBytes() and start
