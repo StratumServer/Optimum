@@ -232,18 +232,27 @@ public sealed class FirepitIdleRendererTests
                 Assert.Equal(1, optOutHarness.CountTickListeners(500));
                 Assert.Equal(3, optOutHarness.ActiveTickListenerCount);
 
-                // 3. Enabled on Server: always registers both 100 ms and 500 ms tick listeners and 0 renderers.
+                // 3. Client-only FirepitIdleRendererEnabled with server idle tick paused disabled: registers both 100 ms and 500 ms server listeners and 0 renderers.
+                bool origServerTick = OptimumConfig.FirepitIdleServerTickEnabled;
                 OptimumConfig.FirepitIdleRendererEnabled = true;
-                var serverHarness = new FirepitApiHarness(EnumAppSide.Server);
-                var beServer = (BlockEntity)Activator.CreateInstance(firepitType)!;
-                beServer.Pos = new BlockPos(12, 64, 12, 0);
-                beServer.Block = new Block { Code = new AssetLocation("game", "firepit-cold") };
-                beServer.Initialize(serverHarness.CreateServerApi());
+                OptimumConfig.FirepitIdleServerTickEnabled = false;
+                try
+                {
+                    var serverHarness = new FirepitApiHarness(EnumAppSide.Server);
+                    var beServer = (BlockEntity)Activator.CreateInstance(firepitType)!;
+                    beServer.Pos = new BlockPos(12, 64, 12, 0);
+                    beServer.Block = new Block { Code = new AssetLocation("game", "firepit-cold") };
+                    beServer.Initialize(serverHarness.CreateServerApi());
 
-                Assert.Equal(0, serverHarness.ActiveRendererCount);
-                Assert.Equal(1, serverHarness.CountTickListeners(100));
-                Assert.Equal(1, serverHarness.CountTickListeners(500));
-                Assert.Equal(3, serverHarness.ActiveTickListenerCount);
+                    Assert.Equal(0, serverHarness.ActiveRendererCount);
+                    Assert.Equal(1, serverHarness.CountTickListeners(100));
+                    Assert.Equal(1, serverHarness.CountTickListeners(500));
+                    Assert.Equal(3, serverHarness.ActiveTickListenerCount);
+                }
+                finally
+                {
+                    OptimumConfig.FirepitIdleServerTickEnabled = origServerTick;
+                }
             }
             finally
             {

@@ -1,0 +1,20 @@
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockFirepit.cs	2026-11-19 07:59:17.414518683 -0300
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockFirepit.cs	2026-11-19 08:00:43.938731098 -0300
+@@ -164,10 +164,14 @@
+ 
+ 	public void OnTryIgniteBlockOver(EntityAgent byEntity, BlockPos pos, float secondsIgniting, ref EnumHandling handling)
+ 	{
+-		if (api.World.BlockAccessor.GetBlockEntity(pos) is BlockEntityFirepit { canIgniteFuel: false } blockEntityFirepit)
++		if (api.World.BlockAccessor.GetBlockEntity(pos) is BlockEntityFirepit blockEntityFirepit)
+ 		{
+-			blockEntityFirepit.canIgniteFuel = true;
+-			blockEntityFirepit.extinguishedTotalHours = api.World.Calendar.TotalHours;
++			if (!blockEntityFirepit.canIgniteFuel)
++			{
++				blockEntityFirepit.canIgniteFuel = true;
++				blockEntityFirepit.extinguishedTotalHours = api.World.Calendar.TotalHours;
++			}
++			blockEntityFirepit.WakeIdleServerTicks();
+ 		}
+ 		handling = EnumHandling.PreventDefault;
+ 	}
