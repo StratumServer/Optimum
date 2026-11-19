@@ -193,4 +193,12 @@ public static class OptimumApiBridge
         ElementBounds[]? slotBounds) { }
 
     public static bool TryComposeFilteredSlotGrid(GuiElementItemSlotGridBase? grid) => false;
+
+    public static void RegisterUnknownBlockModelData(ITesselatorManager? tesselatorManager, MeshData? unknownBlockModelData) { }
+
+    public static void UnregisterUnknownBlockModelData(ITesselatorManager? tesselatorManager) { }
+
+    public static bool IsEligibleChiselLodBlock(Block? block) => false;
+
+    public static bool IsPlaceholderChiselLodMesh(ICoreClientAPI? capi, MeshData? mesh) => true;
 }

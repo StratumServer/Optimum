@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..a5aa372 100644
+index dae3e90..c831723 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -150,19 +150,20 @@ index dae3e90..a5aa372 100644
  			if (!shape.Value.keepLoaded)
  			{
  				shape.Value.Unload();
-@@ -132,10 +214,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -132,10 +214,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  	}
  
  	public void PrepareToLoadShapes()
  	{
  		ResetThreading();
 +		OptimumApiBridge.ClearShapeStringPool();
++		OptimumApiBridge.RegisterUnknownBlockModelData(this, unknownBlockModelData);
  		shapes = new Vintagestory.API.Datastructures.OrderedDictionary<AssetLocation, UnloadableShape>();
  		shapes2 = new Dictionary<AssetLocation, UnloadableShape>();
  		shapes3 = new Dictionary<AssetLocation, UnloadableShape>();
  		shapes4 = new Dictionary<AssetLocation, UnloadableShape>();
  		itemshapes = new Dictionary<AssetLocation, UnloadableShape>();
-@@ -224,18 +307,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -224,18 +308,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		blockModelDatas = new MeshData[count + 1];
  		altblockModelDatasLod0 = new MeshData[count + 1][];
  		altblockModelDatasLod1 = new MeshData[count + 1][];
@@ -183,7 +184,7 @@ index dae3e90..a5aa372 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -723,10 +807,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +808,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		return i;
  	}
  
@@ -199,7 +200,7 @@ index dae3e90..a5aa372 100644
  			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
  		}
  		MeshData[] meshes = new MeshData[blocks.Count];
-@@ -856,31 +945,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -856,31 +946,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			}
  		}
  	}
@@ -261,7 +262,21 @@ index dae3e90..a5aa372 100644
  		int num = 0;
  		int i;
  		for (i = offset; i < maxCount; i++)
-@@ -953,17 +1066,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -928,11 +1042,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 
+ 	private void TesselateBlock(Block block, bool lazyLoad)
+ 	{
+ 		if (block.IsMissing)
+ 		{
+-			blockModelDatas[block.BlockId] = unknownBlockModelData;
++			OptimumApiBridge.RegisterUnknownBlockModelData(this, unknownBlockModelData);
++			Volatile.Write(ref blockModelDatas[block.BlockId], unknownBlockModelData);
+ 			return;
+ 		}
+ 		int num = Tesselator.AltTexturesCount(block);
+ 		int val = ((block.Shape.BakedAlternates != null) ? block.Shape.BakedAlternates.Length : 0);
+ 		int num2 = Tesselator.TileTexturesCount(block);
+@@ -953,17 +1068,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			{
  				setLod0Flag(array[num3]);
  				num3++;
@@ -283,7 +298,7 @@ index dae3e90..a5aa372 100644
  		if (block.IsMissing)
  		{
  			return unknownBlockModelData;
-@@ -1081,10 +1197,13 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1081,10 +1199,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -292,12 +307,13 @@ index dae3e90..a5aa372 100644
 +		inventoryMeshPreparer?.Dispose();
 +		OptimumApiBridge.UnregisterInventoryMeshPreparer(game?.api);
 +		OptimumApiBridge.ClearShapeStringPool();
++		OptimumApiBridge.UnregisterUnknownBlockModelData(this);
  		IDisposable[] refs = blockModelRefsInventory;
  		DisposeArray(refs);
  		refs = itemModelRefsInventory;
  		DisposeArray(refs);
  		int num = 0;
-@@ -1110,16 +1229,409 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1110,16 +1232,409 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -709,7 +725,7 @@ index dae3e90..a5aa372 100644
  	public Shape GetCachedShape(AssetLocation location)
  	{
  		shapes.TryGetValue(location, out var value);
-@@ -1140,11 +1652,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1140,11 +1655,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  		if (texSource == null)
  		{

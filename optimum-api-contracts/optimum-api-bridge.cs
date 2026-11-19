@@ -21,6 +21,7 @@ public static class OptimumApiBridge
     private sealed class ChiselLodMarker;
 
     private static readonly ConditionalWeakTable<ModelDataPoolLocation, ChiselLodMarker> ChiselLodLocations = new();
+    private static readonly ConditionalWeakTable<ITesselatorManager, MeshData> UnknownBlockModelDataByTesselator = new();
     private static int chiselLodTrackedCount;
 
     [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "playerPos")]
@@ -2216,5 +2217,154 @@ public static class OptimumApiBridge
             }
         }
         return OptimumTreeAttributeCodec.TreeToBytes(tree);
+    }
+
+    public static void RegisterUnknownBlockModelData(ITesselatorManager? tesselatorManager, MeshData? unknownBlockModelData)
+    {
+        if (tesselatorManager == null || unknownBlockModelData == null)
+        {
+            return;
+        }
+
+        UnknownBlockModelDataByTesselator.AddOrUpdate(tesselatorManager, unknownBlockModelData);
+    }
+
+    public static void UnregisterUnknownBlockModelData(ITesselatorManager? tesselatorManager)
+    {
+        if (tesselatorManager == null)
+        {
+            return;
+        }
+
+        UnknownBlockModelDataByTesselator.Remove(tesselatorManager);
+    }
+
+    public static bool IsEligibleChiselLodBlock(Block? block)
+    {
+        if (block == null || block.IsMissing || block.Id <= 0 || block.BlockId <= 0)
+        {
+            return false;
+        }
+
+        if (block.Code == null || string.Equals(block.Code.Path, "unknown", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (block.DrawType == EnumDrawType.Empty ||
+            block.BlockMaterial == EnumBlockMaterial.Air ||
+            block.BlockMaterial == EnumBlockMaterial.Meta)
+        {
+            return false;
+        }
+
+        return block.RenderPass == EnumChunkRenderPass.Opaque &&
+               (block.VertexFlags == null || block.VertexFlags.GlowLevel == 0);
+    }
+
+    public static bool IsPlaceholderChiselLodMesh(ICoreClientAPI? capi, MeshData? mesh)
+    {
+        if (mesh == null ||
+            mesh.VerticesCount <= 0 ||
+            mesh.IndicesCount <= 0 ||
+            mesh.XyzFaces == null ||
+            mesh.XyzFacesCount <= 0 ||
+            mesh.Uv == null ||
+            mesh.TextureIds == null ||
+            mesh.TextureIds.Length == 0)
+        {
+            return true;
+        }
+
+        ITesselatorManager? tesselatorManager = capi?.TesselatorManager;
+        if (tesselatorManager != null &&
+            UnknownBlockModelDataByTesselator.TryGetValue(tesselatorManager, out MeshData? unknownMesh) &&
+            object.ReferenceEquals(mesh, unknownMesh))
+        {
+            return true;
+        }
+
+        TextureAtlasPosition? unknownTex = capi?.BlockTextureAtlas?.UnknownTexturePosition;
+        if (unknownTex != null && MeshUsesAtlasPosition(mesh, unknownTex))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool MeshUsesAtlasPosition(MeshData mesh, TextureAtlasPosition pos)
+    {
+        int[]? texIds = mesh.TextureIds;
+        float[]? uv = mesh.Uv;
+        if (texIds == null || texIds.Length == 0 || uv == null)
+        {
+            return false;
+        }
+
+        float minU = Math.Min(pos.x1, pos.x2);
+        float maxU = Math.Max(pos.x1, pos.x2);
+        float minV = Math.Min(pos.y1, pos.y2);
+        float maxV = Math.Max(pos.y1, pos.y2);
+        if (maxU <= minU || maxV <= minV)
+        {
+            return false;
+        }
+
+        int targetAtlasId = pos.atlasTextureId;
+        bool hasTargetAtlas = false;
+        for (int i = 0; i < texIds.Length; i++)
+        {
+            if (texIds[i] == targetAtlasId)
+            {
+                hasTargetAtlas = true;
+                break;
+            }
+        }
+
+        if (!hasTargetAtlas)
+        {
+            return false;
+        }
+
+        int vpf = mesh.VerticesPerFace;
+        if (vpf <= 0)
+        {
+            return false;
+        }
+
+        int faceCount = Math.Min(mesh.XyzFacesCount, mesh.VerticesCount / vpf);
+        faceCount = Math.Min(faceCount, uv.Length / (vpf * 2));
+        byte[]? texIndices = mesh.TextureIndices;
+        int texIndicesLimit = texIndices != null ? Math.Min(mesh.TextureIndicesCount, texIndices.Length) : 0;
+
+        for (int f = 0; f < faceCount; f++)
+        {
+            byte texIdx = (texIndices != null && f < texIndicesLimit) ? texIndices[f] : (byte)0;
+            if ((uint)texIdx >= (uint)texIds.Length || texIds[texIdx] != targetAtlasId)
+            {
+                continue;
+            }
+
+            int baseUv = f * vpf * 2;
+            bool allVerticesInUnknownBox = true;
+            for (int v = 0; v < vpf; v++)
+            {
+                float u = uv[baseUv + v * 2];
+                float w = uv[baseUv + v * 2 + 1];
+                if (u < minU || u > maxU || w < minV || w > maxV)
+                {
+                    allVerticesInUnknownBox = false;
+                    break;
+                }
+            }
+
+            if (allVerticesInUnknownBox)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
