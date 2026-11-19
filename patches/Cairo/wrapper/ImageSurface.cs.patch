@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/ImageSurface.cs b/Cairo/wrapper/ImageSurface.cs
-index 8014c9e..04803ad 100644
+index 8014c9e..a7765be 100644
 --- a/Cairo/wrapper/ImageSurface.cs
 +++ b/Cairo/wrapper/ImageSurface.cs
-@@ -31,42 +31,452 @@
+@@ -31,42 +31,453 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -285,6 +285,7 @@ index 8014c9e..04803ad 100644
 +		internal void CheckpointManagedPixels ()
 +		{
 +			if (!IsManagedOnly || managedStorage == null || managedStorage.Width == 0 || managedStorage.Height == 0) return;
++			if (IsFlushedWithNoPendingCommands ()) return;
 +			EnsureRecordingOwnerThreadForPixelAccess ();
 +			if (!HasPendingRecordedCommands) return;
 +			using SurfaceRecorderSnapshot snapshot = CaptureRecordedSource ();
@@ -460,7 +461,7 @@ index 8014c9e..04803ad 100644
              int stride = StrideForWidth(format, width);
              return new ImageSurface(data, format, width, height, stride);
          }
-@@ -75,23 +485,36 @@ namespace Cairo {
+@@ -75,23 +486,36 @@ namespace Cairo {
  
  
          public int Width {
@@ -500,7 +501,7 @@ index 8014c9e..04803ad 100644
  				byte[] data = new byte[length];
  				Marshal.Copy (ptr, data, 0, length);
  				return data;
-@@ -99,24 +522,290 @@ namespace Cairo {
+@@ -99,24 +523,290 @@ namespace Cairo {
  		}
  
  		public IntPtr DataPtr {

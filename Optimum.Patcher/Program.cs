@@ -472,7 +472,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "centerOptimumChiselModeldataByRenderPassByLodLevel",
         "edgeOptimumChiselModeldataByRenderPassByLodLevel",
         "MergeTesselatedChunkParts",
-        "populateTesselatedChunkPart",
+        "populateOptimumChiselTesselatedChunkPart",
         "OptimumCloneChunkMesh",
         "optimumManager",
         "optimumWorkerAtlasEpoch",
@@ -1355,6 +1355,7 @@ var targets = new List<MethodTarget>
     // Chisel LOD: route microblock meshes into separate LOD pools and propagate distance flags
     new("Vintagestory.Client.NoObf.ChunkTesselator", "UpdateForAtlasses", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "NowProcessChunk", 5),
+    new("Vintagestory.Client.NoObf.ChunkTesselator", "populateTesselatedChunkPart", 2),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons", 3),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildBlockPolygons_EdgeOnly", 3),
     new("Vintagestory.Client.NoObf.ChunkTesselator", "BuildDecorPolygons", 5),

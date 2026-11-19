@@ -75,8 +75,8 @@ public class ChiselLodCoverageTests
         Assert.Contains("centerOptimumChiselModeldataByRenderPassByLodLevel", source);
         Assert.Contains("edgeOptimumChiselModeldataByRenderPassByLodLevel", source);
         Assert.Contains("OptimumConfig.RouteChiselLodMeshes", source);
-        Assert.Contains("centerOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] centerOptimumChiselParts, true", source);
-        Assert.Contains("edgeOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] edgeOptimumChiselParts, true", source);
+        Assert.Contains("populateOptimumChiselTesselatedChunkPart(centerOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] centerOptimumChiselParts)", source);
+        Assert.Contains("populateOptimumChiselTesselatedChunkPart(edgeOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] edgeOptimumChiselParts)", source);
     }
 
     [Fact]
@@ -111,12 +111,13 @@ public class ChiselLodCoverageTests
 
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"UpdateForAtlasses\", 1", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"NowProcessChunk\", 5", programSource);
+        Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"populateTesselatedChunkPart\", 2", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"BuildBlockPolygons\", 3", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"BuildBlockPolygons_EdgeOnly\", 3", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"BuildDecorPolygons\", 5", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.ChunkTesselator\", \"GetMeshPoolForPass\", 3", programSource);
         Assert.Contains("\"Vintagestory.Client.NoObf.TesselatedChunkPart\", \"AddModelAndStoreLocation\", 8", programSource);
-        Assert.Contains("\"populateTesselatedChunkPart\"", programSource);
+        Assert.Contains("\"populateOptimumChiselTesselatedChunkPart\"", programSource);
         Assert.Contains("\"MergeTesselatedChunkParts\"", programSource);
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch", cecilList);
         Assert.Contains("patches/VintagestoryLib/Vintagestory.Client.NoObf/TesselatedChunkPart.cs.patch", cecilList);
