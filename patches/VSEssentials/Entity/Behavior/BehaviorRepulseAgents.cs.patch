@@ -1,7 +1,10 @@
 diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
+index a571d72..e35cb50 100644
 --- a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
 +++ b/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs
-@@ -3,6 +3,7 @@ using Vintagestory.API;
+@@ -1,10 +1,11 @@
+ using System;
+ using Vintagestory.API;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
@@ -9,58 +12,69 @@ diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssential
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  
-@@ -67,6 +68,7 @@ namespace Vintagestory.GameContent
+ #nullable disable
  
-         public override void UpdateColSelBoxes()
+@@ -185,19 +186,35 @@ namespace Vintagestory.GameContent
+         public override void AfterInitialized(bool onFirstSpawn)
          {
-+            base.UpdateColSelBoxes();
-             touchdist = Math.Max(radius.X, radius.Z);
+             touchdist = entity.touchDistance;
+             entity.BHRepulseAgents = this;
+             entity.AfterPhysicsTick = AfterPhysicsTick;
++            UpdateMaxRepulseDistSq();
          }
  
-@@ -193,9 +195,31 @@ namespace Vintagestory.GameContent
+         public double ownPosRepulseX, ownPosRepulseY, ownPosRepulseZ;
          public float mySize;
          protected int dimension;
  
-+        private bool isWithinRepulseRange = true;
++        private double maxRepulseDistSq;
++
++        private void UpdateMaxRepulseDistSq()
++        {
++            Cuboidf collisionBox = entity?.CollisionBox;
++            double halfWidth = collisionBox != null ? Math.Max(0.0, (collisionBox.X2 - collisionBox.X1) * 0.5) : 0.0;
++            if (touchdist > halfWidth)
++            {
++                halfWidth = touchdist;
++            }
++            double maxRepulseDist = halfWidth + 4.0;
++            maxRepulseDistSq = maxRepulseDist * maxRepulseDist;
++        }
 +
          public override void UpdateColSelBoxes()
          {
              touchdist = entity.touchDistance;
-+            if (entity.World?.Side == EnumAppSide.Client && cworld != null)
-+            {
-+                var plr = cworld.Player?.Entity;
-+                if (plr != null && entity != plr)
-+                {
-+                    double dx = entity.Pos.X - plr.Pos.X;
-+                    double dz = entity.Pos.Z - plr.Pos.Z;
-+                    double maxRepulseDist = (entity.CollisionBox.X2 - entity.CollisionBox.X1) * 0.5 + 4.0;
-+                    double maxRepulseDistSq = maxRepulseDist * maxRepulseDist;
-+                    isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);
-+                }
-+                else
-+                {
-+                    isWithinRepulseRange = true;
-+                }
-+            }
-+            else
-+            {
-+                isWithinRepulseRange = true;
-+            }
++            UpdateMaxRepulseDistSq();
          }
  
          public void AfterPhysicsTick()
-@@ -215,6 +239,18 @@ namespace Vintagestory.GameContent
+         {
+             var entity = this.entity;
+@@ -213,21 +230,45 @@ namespace Vintagestory.GameContent
+         {
+             var entity = this.entity;
              if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable) return;
              EntityAgent eagent = entity as EntityAgent;
              if (eagent?.MountedOn != null) return;
 +
-+            // Optimum: skip repulsion physics for entities beyond the configured distance (client side only).
++            // Optimum: skip repulsion physics for entities beyond the player proximity threshold (client side only).
 +            if (OptimumConfig.RepulsionGateEnabled && entity.World?.Side == EnumAppSide.Client && cworld != null)
 +            {
-+                if (!isWithinRepulseRange && entity != cworld.Player?.Entity)
++                var plr = cworld.Player?.Entity;
++                if (plr != null && entity != plr)
 +                {
-+                    OptimumDiagnostics.RepulseAgents.Skip();
-+                    return;
++                    if (maxRepulseDistSq <= 0.0)
++                    {
++                        UpdateMaxRepulseDistSq();
++                    }
++
++                    double dx = entity.Pos.X - plr.Pos.X;
++                    double dz = entity.Pos.Z - plr.Pos.Z;
++                    if (entity.Pos.Dimension != plr.Pos.Dimension || dx * dx + dz * dz > maxRepulseDistSq)
++                    {
++                        OptimumDiagnostics.RepulseAgents.Skip();
++                        return;
++                    }
 +                }
 +            }
 +            OptimumDiagnostics.RepulseAgents.Hit();
@@ -68,3 +82,19 @@ diff --git a/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs b/VSEssential
              if (entity.World.ElapsedMilliseconds < 2000) return;
  
              var pushVector = this.pushVector;
+             pushVector.Set(0, 0, 0);
+ 
+             mySize = entity.SelectionBox.Length * entity.SelectionBox.Height * (eagent != null && eagent.Controls.Sneak ? 2 : 1);
+             dimension = entity.Pos.Dimension;
+ 
+-            if (cworld != null && entity != cworld.Player.Entity)
++            Entity clientPlayer = cworld?.Player?.Entity;
++            if (cworld != null && entity != clientPlayer)
+             {
+-                WalkEntity(cworld.Player.Entity);
++                if (clientPlayer != null) WalkEntity(clientPlayer);
+             }
+             else
+             {
+                 partitionUtil.WalkEntities(ownPosRepulseX, ownPosRepulseY, ownPosRepulseZ, touchdist + partitionUtil.LargestTouchDistance + 0.1, WalkEntity, IsInRangePartition, EnumEntitySearchType.Creatures);
+             }

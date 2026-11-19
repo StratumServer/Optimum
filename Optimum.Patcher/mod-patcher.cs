@@ -136,7 +136,8 @@ public static class ModPatcher
                 ],
                 ["Vintagestory.GameContent.EntityBehaviorRepulseAgents"] =
                 [
-                    "isWithinRepulseRange",
+                    "maxRepulseDistSq",
+                    "UpdateMaxRepulseDistSq",
                 ],
                 ["Vintagestory.GameContent.ChunkMapLayer"] =
                 [
@@ -228,6 +229,7 @@ public static class ModPatcher
                 new("Vintagestory.Essentials.PathNodeSet", "GetEnumerator", 0),
                 new("Vintagestory.GameContent.BlockEntityParticleEmitter", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorCollectEntities", "OnGameTick", 1),
+                new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "AfterInitialized", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "OnGameTick", 1),
                 new("Vintagestory.GameContent.EntityBehaviorRepulseAgents", "UpdateColSelBoxes", 0),
                 new("Vintagestory.Essentials.AStar", "FindPathOrEscapePath", 9),
