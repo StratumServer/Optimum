@@ -1,9 +1,8 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
+index 5c25891..7b39737 100644
 --- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs
-@@ -1,10 +1,11 @@
- using System;
- using Vintagestory.API;
+@@ -3,6 +3,7 @@ using Vintagestory.API;
  using Vintagestory.API.Client;
  using Vintagestory.API.Common;
  using Vintagestory.API.Common.Entities;
@@ -11,69 +10,86 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.c
  using Vintagestory.API.Datastructures;
  using Vintagestory.API.MathTools;
  
- namespace Vintagestory.GameContent;
- 
-@@ -22,10 +23,12 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
- 
- 	protected double touchdist;
+@@ -24,6 +25,8 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
  
  	private IClientWorldAccessor cworld;
  
-+	private bool isWithinRepulseRange;
++	private double maxRepulseDistSq;
 +
  	public double ownPosRepulseX;
  
  	public double ownPosRepulseY;
- 
- 	public double ownPosRepulseZ;
-@@ -59,10 +62,30 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+@@ -56,11 +59,25 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+ 		touchdist = entity.touchDistance;
+ 		entity.BHRepulseAgents = this;
+ 		entity.AfterPhysicsTick = AfterPhysicsTick;
++		UpdateMaxRepulseDistSq();
++	}
++
++	private void UpdateMaxRepulseDistSq()
++	{
++		Cuboidf collisionBox = entity?.CollisionBox;
++		double num = ((collisionBox != null) ? Math.Max(0.0, (double)(collisionBox.X2 - collisionBox.X1) * 0.5) : 0.0);
++		if (touchdist > num)
++		{
++			num = touchdist;
++		}
++		double num2 = num + 4.0;
++		maxRepulseDistSq = num2 * num2;
  	}
  
  	public override void UpdateColSelBoxes()
  	{
  		touchdist = entity.touchDistance;
-+		if (entity.World?.Side == EnumAppSide.Client && cworld != null)
-+		{
-+			Entity plr = cworld.Player?.Entity;
-+			if (plr != null && entity != plr)
-+			{
-+				double dx = entity.Pos.X - plr.Pos.X;
-+				double dz = entity.Pos.Z - plr.Pos.Z;
-+				double maxRepulseDist = (entity.CollisionBox.X2 - entity.CollisionBox.X1) * 0.5 + 4.0;
-+				double maxRepulseDistSq = maxRepulseDist * maxRepulseDist;
-+				isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);
-+			}
-+			else
-+			{
-+				isWithinRepulseRange = true;
-+			}
-+		}
-+		else
-+		{
-+			isWithinRepulseRange = true;
-+		}
++		UpdateMaxRepulseDistSq();
  	}
  
  	public void AfterPhysicsTick()
- 	{
- 		Entity obj = entity;
-@@ -79,10 +102,19 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
- 		Entity entity = base.entity;
- 		if (entity.State == EnumEntityState.Inactive || !entity.IsInteractable || !movable)
- 		{
+@@ -82,7 +99,30 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
  			return;
  		}
-+		if (OptimumConfig.RepulsionGateEnabled && entity.World?.Side == EnumAppSide.Client && cworld != null && entity != cworld.Player?.Entity)
+ 		EntityAgent entityAgent = entity as EntityAgent;
+-		if (entityAgent?.MountedOn != null || entity.World.ElapsedMilliseconds < 2000)
++		if (entityAgent?.MountedOn != null)
 +		{
-+			if (!isWithinRepulseRange)
++			return;
++		}
++		if (OptimumConfig.RepulsionGateEnabled && entity.World?.Side == EnumAppSide.Client && cworld != null)
++		{
++			Entity entity2 = cworld.Player?.Entity;
++			if (entity2 != null && entity != entity2)
 +			{
-+				OptimumDiagnostics.RepulseAgents.Skip();
-+				return;
++				if (maxRepulseDistSq <= 0.0)
++				{
++					UpdateMaxRepulseDistSq();
++				}
++				double num = entity.Pos.X - entity2.Pos.X;
++				double num2 = entity.Pos.Z - entity2.Pos.Z;
++				if (entity.Pos.Dimension != entity2.Pos.Dimension || num * num + num2 * num2 > maxRepulseDistSq)
++				{
++					OptimumDiagnostics.RepulseAgents.Skip();
++					return;
++				}
 +			}
 +		}
 +		OptimumDiagnostics.RepulseAgents.Hit();
- 		EntityAgent entityAgent = entity as EntityAgent;
- 		if (entityAgent?.MountedOn != null || entity.World.ElapsedMilliseconds < 2000)
++		if (entity.World.ElapsedMilliseconds < 2000)
  		{
  			return;
  		}
+@@ -90,9 +130,13 @@ public class EntityBehaviorRepulseAgents : EntityBehavior
+ 		vec3d.Set(0.0, 0.0, 0.0);
+ 		mySize = entity.SelectionBox.Length * entity.SelectionBox.Height * (float)((entityAgent == null || !entityAgent.Controls.Sneak) ? 1 : 2);
+ 		dimension = entity.Pos.Dimension;
+-		if (cworld != null && entity != cworld.Player.Entity)
++		Entity entity3 = cworld?.Player?.Entity;
++		if (cworld != null && entity != entity3)
+ 		{
+-			WalkEntity(cworld.Player.Entity);
++			if (entity3 != null)
++			{
++				WalkEntity(entity3);
++			}
+ 		}
+ 		else
+ 		{

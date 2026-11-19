@@ -355,23 +355,28 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-    public void EntityBehaviorRepulseAgents_PrecalculatesRepulsionRangeInUpdateColSelBoxes()
+    public void EntityBehaviorRepulseAgents_RefreshesDistanceGateInOnGameTick()
     {
         string modPatcher = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/mod-patcher.cs"));
-        Assert.Contains("\"isWithinRepulseRange\"", modPatcher);
+        Assert.Contains("\"maxRepulseDistSq\"", modPatcher);
+        Assert.Contains("\"UpdateMaxRepulseDistSq\"", modPatcher);
+        Assert.Contains("new(\"Vintagestory.GameContent.EntityBehaviorRepulseAgents\", \"AfterInitialized\", 1)", modPatcher);
+        Assert.Contains("new(\"Vintagestory.GameContent.EntityBehaviorRepulseAgents\", \"OnGameTick\", 1)", modPatcher);
         Assert.Contains("new(\"Vintagestory.GameContent.EntityBehaviorRepulseAgents\", \"UpdateColSelBoxes\", 0)", modPatcher);
 
         string sourcePatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VSEssentials/Entity/Behavior/BehaviorRepulseAgents.cs.patch"));
-        Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", sourcePatch);
-        Assert.Contains("if (!isWithinRepulseRange && entity != cworld.Player?.Entity)", sourcePatch);
+        Assert.Contains("UpdateMaxRepulseDistSq();", sourcePatch);
+        Assert.Contains("dx * dx + dz * dz > maxRepulseDistSq", sourcePatch);
+        Assert.Contains("entity.Pos.Dimension != plr.Pos.Dimension", sourcePatch);
         Assert.Contains("entity.World?.Side == EnumAppSide.Client", sourcePatch);
 
         string runtimePatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/runtime/VSEssentials/Vintagestory/GameContent/EntityBehaviorRepulseAgents.cs.patch"));
-        Assert.Contains("private bool isWithinRepulseRange;", runtimePatch);
-        Assert.Contains("isWithinRepulseRange = (dx * dx + dz * dz <= maxRepulseDistSq);", runtimePatch);
-        Assert.Contains("if (!isWithinRepulseRange)", runtimePatch);
+        Assert.Contains("private double maxRepulseDistSq;", runtimePatch);
+        Assert.Contains("UpdateMaxRepulseDistSq();", runtimePatch);
+        Assert.Contains("num * num + num2 * num2 > maxRepulseDistSq", runtimePatch);
+        Assert.Contains("entity.Pos.Dimension != entity2.Pos.Dimension", runtimePatch);
         Assert.Contains("entity.World?.Side == EnumAppSide.Client", runtimePatch);
     }
 
