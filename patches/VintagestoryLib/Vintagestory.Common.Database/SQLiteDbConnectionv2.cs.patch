@@ -1,0 +1,73 @@
+diff --git a/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs b/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs
+index 0c59a67..a4e235e 100644
+--- a/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs
++++ b/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs
+@@ -385,14 +385,27 @@ public class SQLiteDbConnectionv2 : SQLiteDBConnection, IGameDbConnection, IDisp
+ 			try
+ 			{
+ 				using DbCommand dbCommand = sqliteConn.CreateCommand();
+ 				dbCommand.Transaction = (DbTransaction?)(object)val;
+ 				dbCommand.CommandText = "DELETE FROM " + tablename + " WHERE position=@position";
+-				dbCommand.Parameters.Add(CreateParameter("position", DbType.UInt64, 0, dbCommand));
+-				foreach (ChunkPos chunkposition in chunkpositions)
++				DbParameter posParam = CreateParameter("position", DbType.UInt64, 0, dbCommand);
++				dbCommand.Parameters.Add(posParam);
++				if (OptimumConfig.BatchedDbMaintenanceEnabled)
+ 				{
+-					DeleteChunk(chunkposition.ToChunkIndex(), dbCommand);
++					dbCommand.Prepare();
++					foreach (ChunkPos chunkposition in chunkpositions)
++					{
++						posParam.Value = chunkposition.ToChunkIndex();
++						dbCommand.ExecuteNonQuery();
++					}
++				}
++				else
++				{
++					foreach (ChunkPos chunkposition2 in chunkpositions)
++					{
++						DeleteChunk(chunkposition2.ToChunkIndex(), dbCommand);
++					}
+ 				}
+ 				((DbTransaction)(object)val).Commit();
+ 			}
+ 			finally
+ 			{
+@@ -429,10 +442,14 @@ public class SQLiteDbConnectionv2 : SQLiteDBConnection, IGameDbConnection, IDisp
+ 	{
+ 		using DbCommand dbCommand = sqliteConn.CreateCommand();
+ 		dbCommand.CommandText = "INSERT OR REPLACE INTO mapregion (position, data) VALUES (@position,@data)";
+ 		dbCommand.Parameters.Add(CreateParameter("position", DbType.UInt64, 0, dbCommand));
+ 		dbCommand.Parameters.Add(CreateParameter("data", DbType.Object, null, dbCommand));
++		if (OptimumConfig.BatchedDbMaintenanceEnabled)
++		{
++			dbCommand.Prepare();
++		}
+ 		SetMulti(mapregions, dbCommand, doZeroY: true);
+ 	}
+ 
+ 	private void SetMulti(IEnumerable<DbChunk> chunks, DbCommand cmd, bool doZeroY)
+ 	{
+@@ -653,10 +670,22 @@ public class SQLiteDbConnectionv2 : SQLiteDBConnection, IGameDbConnection, IDisp
+ 			string errorMessage = null;
+ 			if (!sQLiteDbConnectionv.OpenOrCreate(text, ref errorMessage, requireWriteAccess: true, corruptionProtection: false, doIntegrityCheck: false))
+ 			{
+ 				return;
+ 			}
++			if (OptimumConfig.BatchedDbMaintenanceEnabled && OptimumDbMaintenance.CanUseBatchedBackupPartial(start, end, mapSizeYinChunks))
++			{
++				try
++				{
++					OptimumDbMaintenance.ExecuteBatchedBackupPartial(sQLiteDbConnectionv.sqliteConn, databaseFileName, transactionLock, start, end, mapSizeYinChunks);
++				}
++				finally
++				{
++					sQLiteDbConnectionv.Close();
++				}
++				return;
++			}
+ 			SqliteCommand val = sQLiteDbConnectionv.sqliteConn.CreateCommand();
+ 			try
+ 			{
+ 				((DbCommand)(object)val).CommandText = "    ATTACH DATABASE $source AS src;\r\n\r\n    INSERT INTO main.gamedata\r\n    SELECT * FROM src.gamedata;\r\n\r\n    INSERT INTO main.playerdata\r\n    SELECT * FROM src.playerdata;\r\n\r\n    DETACH DATABASE src;";
+ 				val.Parameters.AddWithValue("$source", (object)databaseFileName);

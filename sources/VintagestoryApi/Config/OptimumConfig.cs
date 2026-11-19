@@ -799,6 +799,10 @@ public static class OptimumConfig
     // and TreeAttribute allocations via span codecs and pooled serialization slabs.
     public static bool SpanBlockEntitySerializationEnabled = true;
 
+    // Issue #648: Optimize /db prune and /db backuppartial SQLite queries, region
+    // updates, and chunk header scanning without full protobuf deserialization.
+    public static bool BatchedDbMaintenanceEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)

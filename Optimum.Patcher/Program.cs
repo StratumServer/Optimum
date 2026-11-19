@@ -102,6 +102,8 @@ var typesToInject = new List<string>
     "Vintagestory.Server.OptimumChunkReadPool",
     // Issue #646: secondary hash index for O(1) ban and whitelist lookups in PlayerDataManager.
     "Vintagestory.Server.OptimumPlayerEntryIndex",
+    // Issue #648: batched SQLite maintenance queries and protobuf chunk header scanner for /db prune and /db backuppartial.
+    "Vintagestory.Server.OptimumDbMaintenance",
 };
 
 // --- Phase 2b: Members to inject into existing types ---
@@ -1458,6 +1460,11 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientChunk", "AddOrUpdateBlockEntityFromPacket", 2),
     new("Vintagestory.Client.NoObf.ClientSystemEntities", "createBlockEntityFromPacket", 2),
     new("Vintagestory.Client.NoObf.ClientSystemEntities", "UpdateBlockEntityData", 4),
+    // Issue #648: optimize /db prune and /db backuppartial SQLite queries and chunk header scanning
+    new("Vintagestory.Server.ServerSystemSupplyChunkCommands", "prune", 5),
+    new("Vintagestory.Common.Database.SQLiteDbConnectionv2", "BackupPartial", 4),
+    new("Vintagestory.Common.Database.SQLiteDbConnectionv2", "DeleteChunks", 2),
+    new("Vintagestory.Common.Database.SQLiteDbConnectionv2", "SetMapRegions", 1),
     new("Vintagestory.Server.ServerMapChunk", "ToBytes", 0),
     new("Vintagestory.Server.ServerMapRegion", "ToBytes", 0),
 };

@@ -1,0 +1,155 @@
+diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs
+index e84b49c..ff566b2 100644
+--- a/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs
++++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs
+@@ -94,149 +94,11 @@ internal class ServerSystemSupplyChunkCommands : ServerSystem
+ 		return prune(logToPlayer, threshold, dryRun, keepClaims, aboveVersion);
+ 	}
+ 
+ 	private TextCommandResult prune(IServerPlayer logToPlayer, int threshold, bool dryRun, bool keepClaims, string aboveVersion)
+ 	{
+-		int qBelowThreshold = 0;
+-		HashSet<FastVec2i> toDelete = new HashSet<FastVec2i>();
+-		HashSet<FastVec2i> toKeep = new HashSet<FastVec2i>();
+-		List<LandClaim> claims = server.WorldMap.All;
+-		HorRectanglei rect = new HorRectanglei();
+-		int chunksize = server.api.worldapi.ChunkSize;
+-		processInBackground(delegate
+-		{
+-			chunkthread.gameDatabase.ForAllChunks(delegate(DbChunk schunk)
+-			{
+-				try
+-				{
+-					if (keepClaims)
+-					{
+-						bool flag = false;
+-						rect.X1 = schunk.Position.X * chunksize;
+-						rect.Z1 = schunk.Position.Z * chunksize;
+-						rect.X2 = schunk.Position.X * chunksize + chunksize;
+-						rect.Z2 = schunk.Position.Z * chunksize + chunksize;
+-						foreach (LandClaim item2 in claims)
+-						{
+-							if (item2 != null && item2.Intersects2d(rect))
+-							{
+-								flag = true;
+-								break;
+-							}
+-						}
+-						if (flag)
+-						{
+-							toKeep.Add(new FastVec2i(schunk.Position.X, schunk.Position.Z));
+-							return;
+-						}
+-					}
+-					bool flag2 = false;
+-					if (threshold > 0 || aboveVersion != null)
+-					{
+-						ServerChunk serverChunk;
+-						using (MemoryStream memoryStream = new MemoryStream(schunk.Data))
+-						{
+-							serverChunk = Serializer.Deserialize<ServerChunk>((Stream)memoryStream);
+-						}
+-						flag2 = serverChunk.BlocksRemoved + serverChunk.BlocksPlaced >= threshold && threshold > 0;
+-						if (aboveVersion != null && GameVersion.IsLowerVersionThan(serverChunk.GameVersionCreated, aboveVersion))
+-						{
+-							flag2 = true;
+-						}
+-					}
+-					if (flag2)
+-					{
+-						toKeep.Add(new FastVec2i(schunk.Position.X, schunk.Position.Z));
+-					}
+-					else
+-					{
+-						qBelowThreshold++;
+-						toDelete.Add(new FastVec2i(schunk.Position.X, schunk.Position.Z));
+-					}
+-				}
+-				catch (Exception)
+-				{
+-					throw;
+-				}
+-			});
+-			foreach (FastVec2i item3 in toKeep)
+-			{
+-				toDelete.Remove(item3);
+-			}
+-			server.EnqueueMainThreadTask(delegate
+-			{
+-				if (dryRun)
+-				{
+-					notifyIndirect(logToPlayer, Lang.Get("Dry run prune complete. With a {0} block edits threshold, {1} chunk columns can be removed, {2} chunk columns would be kept.", threshold, toDelete.Count, toKeep.Count));
+-				}
+-				else
+-				{
+-					server.api.Server.PauseThread("chunkdbthread");
+-					int num = server.api.worldapi.RegionSize / chunksize;
+-					Cuboidi cuboidi = new Cuboidi();
+-					Dictionary<long, ServerMapRegion> dictionary = new Dictionary<long, ServerMapRegion>(10);
+-					Queue<long> queue = new Queue<long>(10);
+-					FastMemoryStream ms = new FastMemoryStream();
+-					foreach (FastVec2i item4 in toDelete)
+-					{
+-						int num2 = item4.X / num;
+-						int num3 = item4.Y / num;
+-						ServerMapRegion value = server.WorldMap.GetMapRegion(num2, num3) as ServerMapRegion;
+-						long num4 = server.WorldMap.MapRegionIndex2D(num2, num3);
+-						if (value == null && !dictionary.TryGetValue(num4, out value))
+-						{
+-							byte[] mapRegion = chunkthread.gameDatabase.GetMapRegion(num2, num3);
+-							if (mapRegion != null)
+-							{
+-								if (queue.Count >= 9)
+-								{
+-									long num5 = queue.Dequeue();
+-									ServerMapRegion serverMapRegion = dictionary[num5];
+-									DbChunk item = new DbChunk
+-									{
+-										Position = server.WorldMap.MapRegionPosFromIndex2D(num5),
+-										Data = serverMapRegion.ToBytes(ms)
+-									};
+-									chunkthread.gameDatabase.SetMapRegions(new List<DbChunk> { item });
+-									dictionary.Remove(num5);
+-								}
+-								value = (dictionary[num4] = ServerMapRegion.FromBytes(mapRegion));
+-								queue.Enqueue(num4);
+-							}
+-						}
+-						List<GeneratedStructure> list = new List<GeneratedStructure>();
+-						cuboidi.X1 = item4.X * chunksize;
+-						cuboidi.Z1 = item4.Y * chunksize;
+-						cuboidi.X2 = item4.X * chunksize + chunksize;
+-						cuboidi.Z2 = item4.Y * chunksize + chunksize;
+-						if (value?.GeneratedStructures != null)
+-						{
+-							foreach (GeneratedStructure generatedStructure in value.GeneratedStructures)
+-							{
+-								if (cuboidi.Contains(generatedStructure.Location.Start.X, generatedStructure.Location.Start.Z))
+-								{
+-									list.Add(generatedStructure);
+-								}
+-							}
+-							foreach (GeneratedStructure item5 in list)
+-							{
+-								value.GeneratedStructures.Remove(item5);
+-							}
+-						}
+-						server.api.WorldManager.DeleteChunkColumn(item4.X, item4.Y);
+-					}
+-					chunkthread.gameDatabase.SetMapRegions(dictionary.Select((KeyValuePair<long, ServerMapRegion> r) => new DbChunk
+-					{
+-						Position = server.WorldMap.MapRegionPosFromIndex2D(r.Key),
+-						Data = r.Value.ToBytes(ms)
+-					}));
+-					server.api.Server.ResumeThread("chunkdbthread");
+-					notifyIndirect(logToPlayer, Lang.Get("Prune complete, {1} chunk columns were removed, {2} chunk columns were kept.", threshold, toDelete.Count, toKeep.Count));
+-				}
+-			});
+-		}, null);
+-		return TextCommandResult.Success(dryRun ? Lang.Get("Dry run prune started, this may take some time.") : Lang.Get("Prune started, this may take some time."));
++		return OptimumDbMaintenance.StartPrune(server, chunkthread, logToPlayer, threshold, dryRun, keepClaims, aboveVersion);
+ 	}
+ 
+ 	private TextCommandResult onCmdGenBackup(TextCommandCallingArgs args)
+ 	{
+ 		if (server.Config.HostedMode)
