@@ -1,0 +1,280 @@
+diff --git a/VintagestoryLib/Vintagestory.Common/TCPNetworkConnection.cs b/VintagestoryLib/Vintagestory.Common/TCPNetworkConnection.cs
+index 9f40fc1..33f7043 100644
+--- a/VintagestoryLib/Vintagestory.Common/TCPNetworkConnection.cs
++++ b/VintagestoryLib/Vintagestory.Common/TCPNetworkConnection.cs
+@@ -3,10 +3,11 @@ using System.Collections.Generic;
+ using System.Net;
+ using System.Net.Sockets;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.Client.NoObf;
+ 
+ namespace Vintagestory.Common;
+ 
+ public class TCPNetworkConnection : INetworkConnection
+@@ -27,10 +28,20 @@ public class TCPNetworkConnection : INetworkConnection
+ 
+ 	private Queue<byte> tosendBeforeConnected = new Queue<byte>();
+ 
+ 	private CancellationTokenSource cts = new CancellationTokenSource();
+ 
++	private byte[] receivedBuffer;
++
++	private int receivedHead;
++
++	private int receivedTail;
++
++	private int receivedCount;
++
++	private Action<Task<int>> onReceiveCompletedCallback;
++
+ 	public bool Connected => connected;
+ 
+ 	public bool Disconnected => disconnected;
+ 
+ 	public TCPNetworkConnection(string ip, int port, Action<ConnectionResult> onConnectResult, Action<Exception> onDisconnected)
+@@ -124,73 +135,200 @@ public class TCPNetworkConnection : INetworkConnection
+ 		onDisconnected = null;
+ 		disconnected = true;
+ 		connected = false;
+ 	}
+ 
+-	protected async void OnBytesReceived(object state)
++	protected void OnBytesReceived(object state)
++	{
++		onReceiveCompletedCallback ??= OnReceiveTaskCompleted;
++		BeginNextReceive();
++	}
++
++	private void BeginNextReceive()
+ 	{
+ 		try
+ 		{
+-			while (tcpSocket.Connected && !cts.Token.IsCancellationRequested)
++			while (tcpSocket != null && tcpSocket.Connected && !cts.Token.IsCancellationRequested)
+ 			{
+-				int num = await tcpSocket.ReceiveAsync(dataRcvBuf, cts.Token);
+-				if (num <= 0)
++				ValueTask<int> receiveTask = tcpSocket.ReceiveAsync(dataRcvBuf, cts.Token);
++				if (!receiveTask.IsCompleted)
+ 				{
+-					disconnected = true;
+-					if (onDisconnected == null)
+-					{
+-						try
+-						{
+-							tcpSocket.Close();
+-							cts.Cancel();
+-							break;
+-						}
+-						catch
+-						{
+-							break;
+-						}
+-					}
+-					onDisconnected(new Exception("The server closed down the socket without response. The server may be password protected or whitelisted"));
+-					break;
++					receiveTask.AsTask().ContinueWith(onReceiveCompletedCallback, TaskScheduler.Default);
++					return;
+ 				}
+-				lock (received)
++				int num = receiveTask.GetAwaiter().GetResult();
++				if (!ProcessReceivedChunk(num))
+ 				{
+-					for (int i = 0; i < num; i++)
+-					{
+-						received.Enqueue(dataRcvBuf.Span[i]);
+-					}
++					return;
+ 				}
+ 			}
+ 		}
+ 		catch (Exception obj2)
+ 		{
+-			try
+-			{
+-				tcpSocket?.Close();
+-				cts.Cancel();
+-			}
+-			catch
+-			{
+-			}
+-			disconnected = true;
+-			onDisconnected?.Invoke(obj2);
++			HandleReceiveException(obj2);
+ 		}
+ 	}
+ 
++	private void OnReceiveTaskCompleted(Task<int> completedTask)
++	{
++		try
++		{
++			int num = completedTask.GetAwaiter().GetResult();
++			if (ProcessReceivedChunk(num))
++			{
++				BeginNextReceive();
++			}
++		}
++		catch (Exception obj2)
++		{
++			HandleReceiveException(obj2);
++		}
++	}
++
++	private void HandleReceiveException(Exception obj2)
++	{
++		try
++		{
++			tcpSocket?.Close();
++			cts.Cancel();
++		}
++		catch
++		{
++		}
++		disconnected = true;
++		onDisconnected?.Invoke(obj2);
++	}
++
++	private bool ProcessReceivedChunk(int num)
++	{
++		if (num <= 0)
++		{
++			disconnected = true;
++			if (onDisconnected == null)
++			{
++				try
++				{
++					tcpSocket.Close();
++					cts.Cancel();
++				}
++				catch
++				{
++				}
++				return false;
++			}
++			onDisconnected(new Exception("The server closed down the socket without response. The server may be password protected or whitelisted"));
++			return false;
++		}
++		lock (received)
++		{
++			if ((OptimumConfig.NetworkAndAudioBufferReuseEnabled && received.Count == 0) || receivedCount > 0)
++			{
++				EnqueueReceivedBytes(dataRcvBuf.Span.Slice(0, num));
++			}
++			else
++			{
++				Span<byte> span = dataRcvBuf.Span;
++				for (int i = 0; i < num; i++)
++				{
++					received.Enqueue(span[i]);
++				}
++			}
++		}
++		return true;
++	}
++
++	private void EnqueueReceivedBytes(ReadOnlySpan<byte> src)
++	{
++		int length = src.Length;
++		if (length <= 0)
++		{
++			return;
++		}
++		if (receivedBuffer == null)
++		{
++			int initialCapacity = 16384;
++			while (initialCapacity < length)
++			{
++				initialCapacity <<= 1;
++			}
++			receivedBuffer = new byte[initialCapacity];
++			receivedHead = 0;
++			receivedTail = 0;
++			receivedCount = 0;
++		}
++		else if (receivedCount + length > receivedBuffer.Length)
++		{
++			int newCapacity = receivedBuffer.Length << 1;
++			while (newCapacity < receivedCount + length)
++			{
++				newCapacity <<= 1;
++			}
++			byte[] newBuf = new byte[newCapacity];
++			if (receivedCount > 0)
++			{
++				int firstPart = Math.Min(receivedCount, receivedBuffer.Length - receivedHead);
++				Buffer.BlockCopy(receivedBuffer, receivedHead, newBuf, 0, firstPart);
++				int secondPart = receivedCount - firstPart;
++				if (secondPart > 0)
++				{
++					Buffer.BlockCopy(receivedBuffer, 0, newBuf, firstPart, secondPart);
++				}
++			}
++			receivedBuffer = newBuf;
++			receivedHead = 0;
++			receivedTail = receivedCount;
++		}
++		int firstWrite = Math.Min(length, receivedBuffer.Length - receivedTail);
++		src.Slice(0, firstWrite).CopyTo(receivedBuffer.AsSpan(receivedTail, firstWrite));
++		int secondWrite = length - firstWrite;
++		if (secondWrite > 0)
++		{
++			src.Slice(firstWrite, secondWrite).CopyTo(receivedBuffer.AsSpan(0, secondWrite));
++		}
++		receivedTail = (receivedTail + length) & (receivedBuffer.Length - 1);
++		receivedCount += length;
++	}
++
++	private int DequeueReceivedBytes(byte[] dest, int destOffset, int maxLength)
++	{
++		if (receivedCount <= 0 || maxLength <= 0)
++		{
++			return 0;
++		}
++		int toRead = Math.Min(receivedCount, maxLength);
++		int firstRead = Math.Min(toRead, receivedBuffer.Length - receivedHead);
++		Buffer.BlockCopy(receivedBuffer, receivedHead, dest, destOffset, firstRead);
++		int secondRead = toRead - firstRead;
++		if (secondRead > 0)
++		{
++			Buffer.BlockCopy(receivedBuffer, 0, dest, destOffset + firstRead, secondRead);
++		}
++		receivedCount -= toRead;
++		if (receivedCount == 0)
++		{
++			receivedHead = 0;
++			receivedTail = 0;
++		}
++		else
++		{
++			receivedHead = (receivedHead + toRead) & (receivedBuffer.Length - 1);
++		}
++		return toRead;
++	}
++
+ 	public void Receive(byte[] data, int dataLength, out int total)
+ 	{
+ 		total = 0;
+ 		lock (received)
+ 		{
+-			for (int i = 0; i < dataLength; i++)
++			while (received.Count > 0 && total < dataLength)
+ 			{
+-				if (received.Count == 0)
+-				{
+-					break;
+-				}
+-				data[i] = received.Dequeue();
+-				total++;
++				data[total++] = received.Dequeue();
++			}
++			if (receivedCount > 0 && total < dataLength)
++			{
++				total += DequeueReceivedBytes(data, total, dataLength - total);
+ 			}
+ 		}
+ 	}
+ 
+ 	public void Send(byte[] data, int length)

@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
-index b5000e7..a7d088d 100644
+index b5000e7..8b3a35b 100644
 --- a/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client/ScreenManager.cs
 @@ -38,10 +38,12 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
@@ -31,7 +31,39 @@ index b5000e7..a7d088d 100644
  
  	public static void LoadSoundsSlow_Async(ClientMain game)
  	{
-@@ -435,19 +440,38 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -417,17 +422,27 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+ 		List<IAsset> many = Platform.AssetManager.GetMany(AssetCategory.sounds, loadAsset: false);
+ 		Platform.Logger.VerboseDebug("Loadsounds, found " + many.Count + " sounds");
+ 		List<AudioData> list = new List<AudioData>();
+ 		foreach (IAsset item in many)
+ 		{
+-			LoadSound(item);
++			AudioData audioData = LoadSound(item);
+ 			if (item.Location.PathStartsWith("sounds/menubutton"))
+ 			{
+-				list.Add(new AudioMetaData(item)
++				if (Vintagestory.API.Config.OptimumConfig.NetworkAndAudioBufferReuseEnabled)
+ 				{
+-					Loaded = 0
+-				});
++					if (audioData != null)
++					{
++						list.Add(audioData);
++					}
++				}
++				else
++				{
++					list.Add(new AudioMetaData(item)
++					{
++						Loaded = 0
++					});
++				}
+ 			}
+ 		}
+ 		foreach (AudioData item2 in list)
+ 		{
+ 			item2.Load();
+@@ -435,19 +450,38 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  		}
  	}
  
@@ -70,7 +102,7 @@ index b5000e7..a7d088d 100644
  					Platform.Logger.VerboseDebug("Load sound asset " + item.Key.ToShortString());
  				}
  				item.Value.Load();
-@@ -466,10 +490,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -466,10 +500,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  			{
  				return;
  			}
@@ -85,34 +117,45 @@ index b5000e7..a7d088d 100644
  					Platform.Logger.VerboseDebug("Load sound asset " + item2.Key);
  				}
  				item2.Value.Load();
-@@ -481,42 +509,127 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -481,42 +519,127 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  			}
  		}
  		soundAudioDataAsyncLoadTemp.Clear();
  	}
  
+-	public static AudioData LoadMusicTrack(IAsset asset)
 +	internal static object GetSoundAudioDataLock()
-+	{
+ 	{
+-		if (asset != null && !asset.IsLoaded())
+-		{
+-			asset.Origin.LoadAsset(asset);
+-		}
+-		if (asset == null || asset.Data == null)
 +		return LazyInitializer.EnsureInitialized(ref soundAudioDataLock);
 +	}
 +
 +	internal static AudioData TryGetAudioData(AssetLocation location)
 +	{
 +		if (location == null)
-+		{
-+			return null;
-+		}
+ 		{
+ 			return null;
+ 		}
+-		if (!soundAudioData.TryGetValue(asset.Location, out var value))
 +		lock (GetSoundAudioDataLock())
-+		{
+ 		{
+-			soundAudioData[asset.Location] = Platform.CreateAudioData(asset);
+-			asset.Data = null;
 +			soundAudioData.TryGetValue(location, out var value);
 +			return value;
-+		}
+ 		}
+-		else
 +	}
 +
 +	internal static AudioData GetOrAddAudioData(AssetLocation location, AudioData created)
 +	{
 +		lock (GetSoundAudioDataLock())
-+		{
+ 		{
+-			value.Load();
 +			if (!soundAudioData.TryGetValue(location, out var value))
 +			{
 +				soundAudioData[location] = created;
@@ -123,7 +166,8 @@ index b5000e7..a7d088d 100644
 +				audioMetaData2.AutoUnload |= audioMetaData.AutoUnload;
 +			}
 +			return value;
-+		}
+ 		}
+-		return soundAudioData[asset.Location];
 +	}
 +
 +	internal static void CopySoundAudioDataToAsyncTemp()
@@ -152,9 +196,8 @@ index b5000e7..a7d088d 100644
 +		}
 +	}
 +
- 	public static AudioData LoadMusicTrack(IAsset asset)
- 	{
--		if (asset != null && !asset.IsLoaded())
++	public static AudioData LoadMusicTrack(IAsset asset)
++	{
 +		if (asset == null)
 +		{
 +			return null;
@@ -173,32 +216,25 @@ index b5000e7..a7d088d 100644
 +			return audioMetaData;
 +		}
 +		if (!asset.IsLoaded() && asset.Origin != null)
- 		{
- 			asset.Origin.LoadAsset(asset);
- 		}
--		if (asset == null || asset.Data == null)
++		{
++			asset.Origin.LoadAsset(asset);
++		}
 +		if (asset.Data == null)
- 		{
- 			return null;
- 		}
--		if (!soundAudioData.TryGetValue(asset.Location, out var value))
++		{
++			return null;
++		}
 +		AudioData audioData = Platform.CreateAudioData(asset);
 +		asset.Data = null;
 +		if (audioData is AudioMetaData audioMetaData2)
- 		{
--			soundAudioData[asset.Location] = Platform.CreateAudioData(asset);
--			asset.Data = null;
++		{
 +			audioMetaData2.AutoUnload = true;
- 		}
--		else
++		}
 +		AudioData orAddAudioData = GetOrAddAudioData(asset.Location, audioData);
 +		if (orAddAudioData != audioData && orAddAudioData is AudioMetaData audioMetaData3)
- 		{
--			value.Load();
++		{
 +			audioMetaData3.AutoUnload = true;
 +			audioMetaData3.EnsurePcmLoaded();
- 		}
--		return soundAudioData[asset.Location];
++		}
 +		return orAddAudioData;
  	}
  
@@ -222,7 +258,7 @@ index b5000e7..a7d088d 100644
  	public void loadMods()
  	{
  		List<string> list = new List<string>(ClientSettings.ModPaths);
-@@ -704,10 +817,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -704,10 +827,14 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  		}, code);
  	}
  
@@ -237,7 +273,7 @@ index b5000e7..a7d088d 100644
  		Platform.GlViewport(0, 0, width, height);
  		Platform.ClearFrameBuffer(EnumFrameBuffer.Default);
  		Platform.ClearFrameBuffer(EnumFrameBuffer.Primary);
-@@ -1051,30 +1168,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
+@@ -1051,30 +1178,98 @@ public class ScreenManager : KeyEventHandler, MouseEventHandler, NewFrameHandler
  	public static void PlaySound(string name)
  	{
  		PlaySound(new AssetLocation("sounds/" + name).WithPathAppendixOnce(".ogg"));
