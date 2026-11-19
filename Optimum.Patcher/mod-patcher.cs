@@ -420,6 +420,15 @@ public static class ModPatcher
                     "ExecuteOptimumFallbackRestore",
                     "BuildOptimumOpenedMesh",
                 ],
+                ["Vintagestory.GameContent.BlockEntityOven"] =
+                [
+                    "optimumHasVisualState",
+                    "optimumLastContentMode",
+                    "optimumLastRotationDeg",
+                    "optimumLastSlotMeshKeys",
+                    "optimumLastSlotHeightMuls",
+                    "UpdateOptimumVisualState",
+                ],
             },
             Interfaces: new()
             {
@@ -526,6 +535,8 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "OnBlockInteractStart", 4),
                 new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "OnTesselation", 2),
                 new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "ensureMeshExists", 1),
+                new("Vintagestory.GameContent.BlockEntityOven", "Initialize", 1),
+                new("Vintagestory.GameContent.BlockEntityOven", "FromTreeAttributes", 2),
             ]);
     }
 

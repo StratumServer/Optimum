@@ -1,0 +1,106 @@
+diff --git a/VSSurvivalMod/Systems/Cooking/Clayoven/BEClayOven.cs b/VSSurvivalMod/Systems/Cooking/Clayoven/BEClayOven.cs
+--- a/VSSurvivalMod/Systems/Cooking/Clayoven/BEClayOven.cs
++++ b/VSSurvivalMod/Systems/Cooking/Clayoven/BEClayOven.cs
+@@ -85,6 +85,12 @@
+         /// </summary>
+         internal InventoryOven ovenInv;
+ 
++        private bool optimumHasVisualState;
++        private int optimumLastContentMode;
++        private int optimumLastRotationDeg;
++        private string[] optimumLastSlotMeshKeys;
++        private float[] optimumLastSlotHeightMuls;
++
+         EnumOvenContentMode OvenContentMode
+         {
+             get
+@@ -140,6 +146,10 @@
+             RegisterGameTickListener(OnBurnTick, 100);
+             this.prng = new Random((int)(this.Pos.GetHashCode()));
+             this.SetRotation();
++            if (api.Side == EnumAppSide.Client)
++            {
++                UpdateOptimumVisualState();
++            }
+         }
+ 
+         private void SetRotation()
+@@ -649,18 +659,72 @@
+ 
+             if (Api?.Side == EnumAppSide.Client)
+             {
+-                MarkMeshesDirty();
++                bool visualChanged = UpdateOptimumVisualState();
+                 if (clientSidePrevBurning != IsBurning)
+                 {
++                    MarkMeshesDirty();
+                     ToggleAmbientSounds(IsBurning);
+                     clientSidePrevBurning = IsBurning;
+                     MarkDirty(true);
+                 }
+-                else
+-                {
+-                    Api.World.BlockAccessor.MarkBlockDirty(Pos);   // always redraw on client after updating meshes
+-                }
+-            }
++                else if (visualChanged)
++                {
++                    MarkMeshesDirty();
++                    Api.World.BlockAccessor.MarkBlockDirty(Pos);
++                }
++            }
++        }
++
++        private bool UpdateOptimumVisualState()
++        {
++            int contentMode = (int)OvenContentMode;
++            int displayedItems = DisplayedItems;
++            int currentRotation = rotationDeg;
++            bool changed = !optimumHasVisualState
++                || optimumLastContentMode != contentMode
++                || optimumLastRotationDeg != currentRotation
++                || optimumLastSlotMeshKeys == null
++                || optimumLastSlotMeshKeys.Length != displayedItems
++                || optimumLastSlotHeightMuls == null
++                || optimumLastSlotHeightMuls.Length != displayedItems;
++
++            if (optimumLastSlotMeshKeys == null || optimumLastSlotMeshKeys.Length != displayedItems)
++            {
++                optimumLastSlotMeshKeys = new string[displayedItems];
++            }
++
++            if (optimumLastSlotHeightMuls == null || optimumLastSlotHeightMuls.Length != displayedItems)
++            {
++                optimumLastSlotHeightMuls = new float[displayedItems];
++            }
++
++            for (int i = 0; i < displayedItems; i++)
++            {
++                ItemSlot slot = i < Inventory.Count ? Inventory[i] : null;
++                string meshKey = (slot != null && !slot.Empty && slot.Itemstack?.Collectible?.Code != null)
++                    ? getMeshCacheKey(slot)
++                    : null;
++                float heightMul = (contentMode == (int)EnumOvenContentMode.Firewood)
++                    ? 0.9f
++                    : (i < bakingData.Length && bakingData[i] != null ? bakingData[i].CurHeightMul : 1f);
++
++                if (!string.Equals(optimumLastSlotMeshKeys[i], meshKey, StringComparison.Ordinal))
++                {
++                    optimumLastSlotMeshKeys[i] = meshKey;
++                    changed = true;
++                }
++
++                if (BitConverter.SingleToInt32Bits(optimumLastSlotHeightMuls[i]) != BitConverter.SingleToInt32Bits(heightMul))
++                {
++                    optimumLastSlotHeightMuls[i] = heightMul;
++                    changed = true;
++                }
++            }
++
++            optimumLastContentMode = contentMode;
++            optimumLastRotationDeg = currentRotation;
++            optimumHasVisualState = true;
++            return changed;
+         }
+ 
+         public override void ToTreeAttributes(ITreeAttribute tree)
