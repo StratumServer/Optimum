@@ -807,6 +807,10 @@ public static class OptimumConfig
     // updates, and chunk header scanning without full protobuf deserialization.
     public static bool BatchedDbMaintenanceEnabled = true;
 
+    // Issue #649: Reduce per-packet buffer churn in TCP/UDP networking and per-file
+    // decoder state allocations in OggDecoder/LoadSoundsInitial.
+    public static bool NetworkAndAudioBufferReuseEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)

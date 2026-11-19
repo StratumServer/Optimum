@@ -886,6 +886,50 @@ var membersToInject = new Dictionary<string, List<string>>
         "AcquirePin",
         "ReleasePin",
     },
+    // Issue #649: TCP/UDP buffer reuse and [ThreadStatic] OggDecoder state reuse
+    ["Vintagestory.Common.TCPNetworkConnection"] = new()
+    {
+        "receivedBuffer",
+        "receivedHead",
+        "receivedTail",
+        "receivedCount",
+        "onReceiveCompletedCallback",
+        "BeginNextReceive",
+        "OnReceiveTaskCompleted",
+        "HandleReceiveException",
+        "ProcessReceivedChunk",
+        "EnqueueReceivedBytes",
+        "DequeueReceivedBytes",
+    },
+    ["Vintagestory.Server.Network.TcpNetConnection"] = new()
+    {
+        "receivedBytes",
+        "onReceiveCompletedCallback",
+        "receiveLoopTcs",
+        "BeginNextReceive",
+        "OnReceiveTaskCompleted",
+        "ProcessReceivedChunk",
+        "SendPooledPayload",
+    },
+    ["Vintagestory.Server.Network.UdpNetServer"] = new()
+    {
+        "readDrainList",
+        "readBatchCache",
+        "lastReturnedBatch",
+        "udpSendBuffer",
+        "udpSendStream",
+    },
+    ["Vintagestory.Client.NoObf.OggDecoder"] = new()
+    {
+        "threadSyncState",
+        "threadStreamState",
+        "threadOggPage",
+        "threadPacket",
+        "threadComment",
+        "threadBlock",
+        "threadPcmOut",
+        "threadPcmIndex",
+    },
 };
 
 // --- Phase 2c: existing vanilla fields to retype in place (object -> Lock) ---
@@ -1467,6 +1511,15 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Common.Database.SQLiteDbConnectionv2", "SetMapRegions", 1),
     new("Vintagestory.Server.ServerMapChunk", "ToBytes", 0),
     new("Vintagestory.Server.ServerMapRegion", "ToBytes", 0),
+    // Issue #649: reduce per-packet buffer churn in TCP/UDP networking and per-file allocations in OggDecoder/LoadSoundsInitial
+    new("Vintagestory.Common.TCPNetworkConnection", "OnBytesReceived", 1),
+    new("Vintagestory.Common.TCPNetworkConnection", "Receive", 3),
+    new("Vintagestory.Server.Network.TcpNetConnection", "ReceiveData", 0),
+    new("Vintagestory.Server.Network.TcpNetConnection", "Send", 2),
+    new("Vintagestory.Server.Network.TcpNetConnection", "HiPerformanceSend", 3),
+    new("Vintagestory.Server.Network.UdpNetServer", "ReadMessage", 0),
+    new("Vintagestory.Server.Network.UdpNetServer", "SendToClient", 2),
+    new("Vintagestory.Client.ScreenManager", "LoadSoundsInitial", 0),
 };
 
 int total = ILPatcher.PatchWithInjection(

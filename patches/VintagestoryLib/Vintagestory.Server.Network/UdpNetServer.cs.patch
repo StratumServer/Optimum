@@ -1,0 +1,146 @@
+diff --git a/VintagestoryLib/Vintagestory.Server.Network/UdpNetServer.cs b/VintagestoryLib/Vintagestory.Server.Network/UdpNetServer.cs
+index e475daf..fa5b511 100644
+--- a/VintagestoryLib/Vintagestory.Server.Network/UdpNetServer.cs
++++ b/VintagestoryLib/Vintagestory.Server.Network/UdpNetServer.cs
+@@ -1,11 +1,13 @@
++using System;
+ using System.Collections.Concurrent;
+ using System.Collections.Generic;
+ using System.Net;
+ using System.Net.Sockets;
+ using System.Threading;
+ using System.Threading.Tasks;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.Server;
+ using Vintagestory.API.Util;
+ using Vintagestory.Common;
+ using Vintagestory.Common.Network.Packets;
+@@ -26,10 +28,22 @@ public class UdpNetServer : UNetServer
+ 
+ 	private readonly ConcurrentQueue<UdpPacket> serverPacketQueue = new ConcurrentQueue<UdpPacket>();
+ 
+ 	private Task udpListenTask;
+ 
++	private List<UdpPacket> readDrainList;
++
++	private UdpPacket[][] readBatchCache;
++
++	private UdpPacket[] lastReturnedBatch;
++
++	[ThreadStatic]
++	private static BoxedArray udpSendBuffer;
++
++	[ThreadStatic]
++	private static CitoMemoryStream udpSendStream;
++
+ 	private int port { get; set; }
+ 
+ 	private string ip { get; set; }
+ 
+ 	public override Dictionary<IPEndPoint, int> EndPoints { get; } = new Dictionary<IPEndPoint, int>();
+@@ -106,17 +120,57 @@ public class UdpNetServer : UNetServer
+ 		}
+ 	}
+ 
+ 	public override UdpPacket[] ReadMessage()
+ 	{
+-		UdpPacket[] result = null;
+-		if (!serverPacketQueue.IsEmpty)
++		if (lastReturnedBatch != null)
+ 		{
+-			result = serverPacketQueue.ToArray();
+-			serverPacketQueue.Clear();
++			Array.Clear(lastReturnedBatch, 0, lastReturnedBatch.Length);
++			lastReturnedBatch = null;
+ 		}
+-		return result;
++		if (!OptimumConfig.NetworkAndAudioBufferReuseEnabled)
++		{
++			UdpPacket[] result = null;
++			if (!serverPacketQueue.IsEmpty)
++			{
++				result = serverPacketQueue.ToArray();
++				serverPacketQueue.Clear();
++			}
++			return result;
++		}
++		if (serverPacketQueue.IsEmpty)
++		{
++			return null;
++		}
++		List<UdpPacket> drainList = (readDrainList ??= new List<UdpPacket>(16));
++		drainList.Clear();
++		UdpPacket item;
++		while (serverPacketQueue.TryDequeue(out item))
++		{
++			drainList.Add(item);
++		}
++		int count = drainList.Count;
++		if (count == 0)
++		{
++			return null;
++		}
++		if (count <= 64)
++		{
++			UdpPacket[][] cache = (readBatchCache ??= new UdpPacket[65][]);
++			UdpPacket[] batch = cache[count];
++			if (batch == null)
++			{
++				batch = (cache[count] = new UdpPacket[count]);
++			}
++			drainList.CopyTo(batch, 0);
++			drainList.Clear();
++			lastReturnedBatch = batch;
++			return batch;
++		}
++		UdpPacket[] largeBatch = drainList.ToArray();
++		drainList.Clear();
++		return largeBatch;
+ 	}
+ 
+ 	public override void Dispose()
+ 	{
+ 		cts.Cancel();
+@@ -129,13 +183,38 @@ public class UdpNetServer : UNetServer
+ 	{
+ 		try
+ 		{
+ 			if (endPointsReverse.TryGetValue(clientId, out var value))
+ 			{
+-				byte[] array = Packet_UdpPacketSerializer.SerializeToBytes(packet);
+-				udpServer.Send(array, value);
+-				return array.Length;
++				if (!OptimumConfig.NetworkAndAudioBufferReuseEnabled)
++				{
++					byte[] array = Packet_UdpPacketSerializer.SerializeToBytes(packet);
++					udpServer.Send(array, value);
++					return array.Length;
++				}
++				BoxedArray sendBox = udpSendBuffer;
++				CitoMemoryStream stream = udpSendStream;
++				if (sendBox == null || stream == null || sendBox.buffer == null)
++				{
++					sendBox = (udpSendBuffer = new BoxedArray
++					{
++						buffer = new byte[512]
++					});
++					stream = (udpSendStream = new CitoMemoryStream(sendBox));
++				}
++				else
++				{
++					int prevPos = stream.Position();
++					if (prevPos != 0)
++					{
++						stream.Seek(-prevPos, CitoSeekOrigin.Current);
++					}
++				}
++				Packet_UdpPacketSerializer.Serialize(stream, packet);
++				int length = stream.Position();
++				udpServer.Send(sendBox.buffer, length, value);
++				return length;
+ 			}
+ 		}
+ 		catch
+ 		{
+ 		}

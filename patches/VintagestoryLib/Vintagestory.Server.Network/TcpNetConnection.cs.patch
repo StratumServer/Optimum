@@ -1,8 +1,347 @@
 diff --git a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
-index 1a155af..93fcd74 100644
+index 1a155af..716532d 100644
 --- a/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
 +++ b/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs
-@@ -227,10 +227,52 @@ public class TcpNetConnection : NetConnection
+@@ -1,13 +1,15 @@
+ using System;
++using System.Buffers;
+ using System.Collections.Generic;
+ using System.Net;
+ using System.Net.Sockets;
+ using System.Reflection;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.Common;
+ 
+ namespace Vintagestory.Server.Network;
+ 
+@@ -37,10 +39,16 @@ public class TcpNetConnection : NetConnection
+ 
+ 	private Memory<byte> dataRcvBuf = new byte[4096];
+ 
+ 	private CancellationTokenSource cts;
+ 
++	private FastMemoryStream receivedBytes;
++
++	private Action<Task<int>> onReceiveCompletedCallback;
++
++	private TaskCompletionSource<bool> receiveLoopTcs;
++
+ 	public int MaxPacketSize = 5000;
+ 
+ 	public event OnReceivedMessageDelegate ReceivedMessage;
+ 
+ 	public event TcpConnectionDelegate Disconnected;
+@@ -54,108 +62,228 @@ public class TcpNetConnection : NetConnection
+ 	{
+ 		cts = new CancellationTokenSource();
+ 		TyronThreadPool.QueueTask((System.Func<Task>)ReceiveData, "TcpNetConReceiveData");
+ 	}
+ 
+-	private async Task ReceiveData()
++	private Task ReceiveData()
++	{
++		receiveLoopTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
++		onReceiveCompletedCallback ??= OnReceiveTaskCompleted;
++		BeginNextReceive();
++		return receiveLoopTcs.Task;
++	}
++
++	private void BeginNextReceive()
+ 	{
+ 		try
+ 		{
+-			FastMemoryStream receivedBytes = null;
+-			while (TcpSocket.Connected && !cts.Token.IsCancellationRequested)
++			while (TcpSocket != null && TcpSocket.Connected && !cts.Token.IsCancellationRequested)
+ 			{
+-				int num;
++				ValueTask<int> receiveTask;
+ 				try
+ 				{
+-					num = await TcpSocket.ReceiveAsync(dataRcvBuf, cts.Token);
++					receiveTask = TcpSocket.ReceiveAsync(dataRcvBuf, cts.Token);
+ 				}
+ 				catch
+ 				{
+ 					InvokeDisconnected();
+-					break;
++					receiveLoopTcs?.TrySetResult(true);
++					return;
+ 				}
+-				if (num <= 0)
++				if (!receiveTask.IsCompleted)
++				{
++					receiveTask.AsTask().ContinueWith(onReceiveCompletedCallback, TaskScheduler.Default);
++					return;
++				}
++				int num;
++				try
++				{
++					num = receiveTask.GetAwaiter().GetResult();
++				}
++				catch
+ 				{
+ 					InvokeDisconnected();
+-					break;
++					receiveLoopTcs?.TrySetResult(true);
++					return;
+ 				}
+-				if ((base.client == null || base.client.IsNewClient) && num > 4 && (receivedBytes == null || receivedBytes.Position == 0L))
++				if (!ProcessReceivedChunk(num))
+ 				{
+-					int num2 = dataRcvBuf.Span[4];
+-					if (num2 != 8 && num2 != 18)
+-					{
+-						DisconnectForBadPacket("Client " + Address + " disconnected, invalid packet received");
+-						break;
+-					}
+-				}
+-				if (receivedBytes == null)
+-				{
+-					receivedBytes = new FastMemoryStream(512);
+-				}
+-				receivedBytes.Write(dataRcvBuf.Span.Slice(0, num));
+-				while (receivedBytes.Position >= 4)
+-				{
+-					byte[] buffer = receivedBytes.GetBuffer();
+-					int num3 = NetIncomingMessage.ReadInt(buffer);
+-					bool flag = num3 < 0;
+-					num3 &= 0x7FFFFFFF;
+-					if (num3 > MaxPacketSize)
+-					{
+-						DisconnectForBadPacket($"Client {Address} disconnected, too large packet of {num3} bytes received");
+-						return;
+-					}
+-					if (num3 == 0)
+-					{
+-						receivedBytes.RemoveFromStart(4);
+-						continue;
+-					}
+-					if (receivedBytes.Position < 4 + num3)
+-					{
+-						break;
+-					}
+-					byte[] array;
+-					if (flag)
+-					{
+-						array = Compression.Decompress(buffer, 4, num3);
+-					}
+-					else
+-					{
+-						array = new byte[num3];
+-						for (int i = 0; i < num3; i++)
+-						{
+-							array[i] = buffer[4 + i];
+-						}
+-					}
+-					receivedBytes.RemoveFromStart(4 + num3);
+-					int num4 = ProtocolParser.PeekPacketId(array);
+-					if (num4 <= 0 || num4 >= (MaxPacketClientId + 1) * 8)
+-					{
+-						DisconnectForBadPacket("Client " + Address + " disconnected, send packet with invalid client packet id: " + num4);
+-						return;
+-					}
+-					ReceivedMessage(array, this);
++					receiveLoopTcs?.TrySetResult(true);
++					return;
+ 				}
+ 			}
++			receiveLoopTcs?.TrySetResult(true);
+ 		}
+ 		catch
+ 		{
+ 			InvokeDisconnected();
++			receiveLoopTcs?.TrySetResult(true);
+ 		}
+ 	}
+ 
++	private void OnReceiveTaskCompleted(Task<int> completedTask)
++	{
++		try
++		{
++			int num;
++			try
++			{
++				num = completedTask.GetAwaiter().GetResult();
++			}
++			catch
++			{
++				InvokeDisconnected();
++				receiveLoopTcs?.TrySetResult(true);
++				return;
++			}
++			if (!ProcessReceivedChunk(num))
++			{
++				receiveLoopTcs?.TrySetResult(true);
++				return;
++			}
++			BeginNextReceive();
++		}
++		catch
++		{
++			InvokeDisconnected();
++			receiveLoopTcs?.TrySetResult(true);
++		}
++	}
++
++	private bool ProcessReceivedChunk(int num)
++	{
++		if (num <= 0)
++		{
++			InvokeDisconnected();
++			return false;
++		}
++		if ((base.client == null || base.client.IsNewClient) && num > 4 && (receivedBytes == null || receivedBytes.Position == 0L))
++		{
++			int num2 = dataRcvBuf.Span[4];
++			if (num2 != 8 && num2 != 18)
++			{
++				DisconnectForBadPacket("Client " + Address + " disconnected, invalid packet received");
++				return false;
++			}
++		}
++		if (receivedBytes == null)
++		{
++			receivedBytes = new FastMemoryStream(512);
++		}
++		receivedBytes.Write(dataRcvBuf.Span.Slice(0, num));
++		while (receivedBytes.Position >= 4)
++		{
++			byte[] buffer = receivedBytes.GetBuffer();
++			int num3 = NetIncomingMessage.ReadInt(buffer);
++			bool flag = num3 < 0;
++			num3 &= 0x7FFFFFFF;
++			if (num3 > MaxPacketSize)
++			{
++				DisconnectForBadPacket($"Client {Address} disconnected, too large packet of {num3} bytes received");
++				return false;
++			}
++			if (num3 == 0)
++			{
++				receivedBytes.RemoveFromStart(4);
++				continue;
++			}
++			if (receivedBytes.Position < 4 + num3)
++			{
++				break;
++			}
++			byte[] array;
++			if (flag)
++			{
++				array = Compression.Decompress(buffer, 4, num3);
++			}
++			else if (OptimumConfig.NetworkAndAudioBufferReuseEnabled)
++			{
++				array = GC.AllocateUninitializedArray<byte>(num3);
++				Buffer.BlockCopy(buffer, 4, array, 0, num3);
++			}
++			else
++			{
++				array = new byte[num3];
++				for (int i = 0; i < num3; i++)
++				{
++					array[i] = buffer[4 + i];
++				}
++			}
++			receivedBytes.RemoveFromStart(4 + num3);
++			int num4 = ProtocolParser.PeekPacketId(array);
++			if (num4 <= 0 || num4 >= (MaxPacketClientId + 1) * 8)
++			{
++				DisconnectForBadPacket("Client " + Address + " disconnected, send packet with invalid client packet id: " + num4);
++				return false;
++			}
++			ReceivedMessage(array, this);
++		}
++		return true;
++	}
++
+ 	private void DisconnectForBadPacket(string msg)
+ 	{
+ 		if (TemporaryIpBlockList)
+ 		{
+ 			blockedIps.Add(((IPEndPoint)TcpSocket.RemoteEndPoint).Address.ToString());
+ 		}
+ 		InvokeDisconnected();
+ 		ServerMain.Logger.Notification(msg);
+ 	}
+ 
++	private EnumSendResult SendPooledPayload(byte[] payload, int payloadLength, bool compressedFlag)
++	{
++		if (cts == null)
++		{
++			return EnumSendResult.Disconnected;
++		}
++		int totalLength = payloadLength + 4;
++		byte[] rented = ArrayPool<byte>.Shared.Rent(totalLength);
++		bool returnToPool = true;
++		try
++		{
++			NetIncomingMessage.WriteInt(rented, payloadLength | (int)((compressedFlag ? 1u : 0u) << 31));
++			if (payloadLength > 0)
++			{
++				Buffer.BlockCopy(payload, 0, rented, 4, payloadLength);
++			}
++			ValueTask<int> sendTask = TcpSocket.SendAsync(new ReadOnlyMemory<byte>(rented, 0, totalLength), SocketFlags.None, cts.Token);
++			if (sendTask.IsCompleted)
++			{
++				sendTask.GetAwaiter().GetResult();
++			}
++			else
++			{
++				returnToPool = false;
++			}
++			return EnumSendResult.Ok;
++		}
++		catch
++		{
++			InvokeDisconnected();
++			return EnumSendResult.Disconnected;
++		}
++		finally
++		{
++			if (returnToPool)
++			{
++				ArrayPool<byte>.Shared.Return(rented);
++			}
++		}
++	}
++
+ 	public override EnumSendResult Send(byte[] data, bool compressedFlag)
+ 	{
++		if (OptimumConfig.NetworkAndAudioBufferReuseEnabled)
++		{
++			if (data == null)
++			{
++				InvokeDisconnected();
++				return EnumSendResult.Disconnected;
++			}
++			return SendPooledPayload(data, data.Length, compressedFlag);
++		}
+ 		try
+ 		{
+ 			int num = data.Length;
+ 			byte[] array = new byte[num + 4];
+ 			NetIncomingMessage.WriteInt(array, num | (int)((compressedFlag ? 1u : 0u) << 31));
+@@ -221,25 +349,88 @@ public class TcpNetConnection : NetConnection
+ 		return IpEndpoint;
+ 	}
+ 
+ 	public override EnumSendResult HiPerformanceSend(BoxedPacket box, ILogger Logger, bool compressionAllowed)
+ 	{
++		if (OptimumConfig.NetworkAndAudioBufferReuseEnabled && !(box is BoxedPacket_ServerAssets))
++		{
++			int len = box.Length;
++			if (len <= 1460 || !compressionAllowed)
++			{
++				box.LengthSent = len;
++				return SendPooledPayload(box.buffer, len, compressedFlag: false);
++			}
++		}
+ 		byte[] packet = PreparePacketForSending(box, compressionAllowed, out var compressed);
  		return SendPreparedPacket(packet, compressed, Logger);
  	}
  
@@ -55,3 +394,24 @@ index 1a155af..93fcd74 100644
  		byte[] array;
  		if ((num > 1460) & compressionAllowed)
  		{
+ 			array = Compression.CompressOffset4(box.buffer, num);
+ 			num = array.Length - 4;
+ 			compressed = true;
+ 		}
++		else if (OptimumConfig.NetworkAndAudioBufferReuseEnabled)
++		{
++			if (num == 0)
++			{
++				array = new byte[4];
++			}
++			else
++			{
++				array = GC.AllocateUninitializedArray<byte>(num + 4);
++				Buffer.BlockCopy(box.buffer, 0, array, 4, num);
++			}
++		}
+ 		else
+ 		{
+ 			array = box.Clone(4);
+ 		}
+ 		box.LengthSent = num;
