@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index d3edef9..9143cc0 100644
+index d3edef9..f4085a8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -186,7 +186,7 @@ index d3edef9..9143cc0 100644
 +			if (frameBuffers != null && frameBuffers.Count > 0 && frameBuffers[0]?.ColorTextureIds != null)
 +			{
 +				int expectedColorCount = OptimumConfig.EffectiveSsaoDepthPosition ? 3 : 4;
-+				if (frameBuffers[0].ColorTextureIds.Length != expectedColorCount)
++				if (frameBuffers[0].Disposed || frameBuffers[0].ColorTextureIds.Length != expectedColorCount)
 +				{
 +					ScreenManager.Platform.RebuildFrameBuffers();
 +				}
