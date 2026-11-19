@@ -111,3 +111,8 @@ patches/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs.patch
 # Packet_BlockEntitySerializer emits/reads identical field 5 wire bytes without extra per-BE byte[].
 patches/VintagestoryLib/Packet_BlockEntity.cs.patch
 patches/VintagestoryLib/Packet_BlockEntitySerializer.cs.patch
+
+# Issue #648: server-local SQLite maintenance batching and span chunk header scanning for /db prune
+# and /db backuppartial. Identical database schema, row output, and multiplayer wire behavior.
+patches/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs.patch

@@ -77,6 +77,7 @@ patches/VintagestoryLib/Vintagestory.Client/GuiScreenRunningGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/RenderAPIBase.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/AssemblyResolver.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/Asset.cs.patch
+patches/VintagestoryLib/Vintagestory.Common.Database/SQLiteDbConnectionv2.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/BlockChunkDataLayer.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/ChatCommandImpl.cs.patch
 patches/VintagestoryLib/Vintagestory.Common/CollectibleNet.cs.patch
@@ -112,6 +113,7 @@ patches/VintagestoryLib/Vintagestory.Server/ServerSystemLoadAndSaveGame.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemNotifyPing.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemRelight.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs.patch
+patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunkCommands.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemSupplyChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerSystemUnloadChunks.cs.patch
 patches/VintagestoryLib/Vintagestory.Server.Network/TcpNetConnection.cs.patch
