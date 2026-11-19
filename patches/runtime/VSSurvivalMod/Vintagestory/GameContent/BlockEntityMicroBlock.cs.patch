@@ -1,7 +1,7 @@
 diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
 --- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
 +++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs
-@@ -2351,18 +2351,53 @@ public class BlockEntityMicroBlock : BlockEntity, IRotatable, IAcceptsDecor, IMa
+@@ -2351,18 +2351,57 @@ public class BlockEntityMicroBlock : BlockEntity, IRotatable, IAcceptsDecor, IMa
  		if (Mesh == null)
  		{
  			Mesh = GenMesh();
@@ -17,9 +17,13 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs b/V
 +		{
 +			long startTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 +			int primaryBlockId = (BlockIds.Length == 1) ? BlockIds[0] : GetMajorityMaterialId();
-+			Block primaryBlock = Api.World.GetBlock(primaryBlockId);
-+			bool canUseDefaultMesh = VolumeRel >= 0.35f && primaryBlock != null && primaryBlock.RenderPass == EnumChunkRenderPass.Opaque && primaryBlock.VertexFlags.GlowLevel == 0;
++			Block primaryBlock = (primaryBlockId > 0 && primaryBlockId < Api.World.Blocks.Count) ? Api.World.GetBlock(primaryBlockId) : null;
++			bool canUseDefaultMesh = VolumeRel >= 0.35f && OptimumApiBridge.IsEligibleChiselLodBlock(primaryBlock) && primaryBlock.RenderPass == EnumChunkRenderPass.Opaque && (primaryBlock.VertexFlags == null || primaryBlock.VertexFlags.GlowLevel == 0);
 +			MeshData lodMesh = canUseDefaultMesh ? capi.TesselatorManager.GetDefaultBlockMesh(primaryBlock) : null;
++			if (OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, lodMesh))
++			{
++				lodMesh = null;
++			}
 +			bool fallback = lodMesh == null;
 +			lodMesh ??= Mesh;
 +			try

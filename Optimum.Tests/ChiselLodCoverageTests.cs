@@ -1,5 +1,10 @@
 using System;
 using System.IO;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using Vintagestory.API.Client;
+using Vintagestory.API.Common;
+using Vintagestory.API.Config;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -280,6 +285,326 @@ public class ChiselLodCoverageTests
         Vintagestory.API.Config.OptimumConfig.SetChiselLodDistance(64);
         Assert.Equal(64, Vintagestory.API.Config.OptimumConfig.ChiselLodDistance);
         Assert.Equal(64.0 * 64.0, Vintagestory.API.Config.OptimumConfig.ChiselLodDistanceSq);
+    }
+
+    [Fact]
+    public void ChiselLod_GuardsPlaceholderAndMissingProxiesInPatches()
+    {
+        string microblockPatch = PatchReader.ReadPatch("patches/runtime/VSSurvivalMod/Vintagestory/GameContent/BlockEntityMicroBlock.cs.patch");
+        string stmPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs.patch");
+
+        Assert.Contains("primaryBlockId > 0", microblockPatch);
+        Assert.Contains("OptimumApiBridge.IsEligibleChiselLodBlock(primaryBlock)", microblockPatch);
+        Assert.Contains("OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, lodMesh)", microblockPatch);
+        Assert.Contains("OptimumApiBridge.RegisterUnknownBlockModelData(this, unknownBlockModelData)", stmPatch);
+        Assert.Contains("OptimumApiBridge.UnregisterUnknownBlockModelData(this)", stmPatch);
+    }
+
+    [Fact]
+    public void ChiselLodIsEligibleBlock_RejectsInvalidAndNonOpaqueMaterials()
+    {
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(null));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "rock-granite"),
+            IsMissing = true,
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+            VertexFlags = new VertexFlags(0),
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 0,
+            Code = new AssetLocation("game", "air"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = -1,
+            Code = new AssetLocation("game", "rock-granite"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = null,
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "unknown"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("somemod", "UNKNOWN"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "emptything"),
+            DrawType = EnumDrawType.Empty,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "airlike"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Air,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "meta-collider"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Meta,
+            RenderPass = EnumChunkRenderPass.Opaque,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "glass-plain"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Glass,
+            RenderPass = EnumChunkRenderPass.Transparent,
+        }));
+
+        Assert.False(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "ember"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+            VertexFlags = new VertexFlags(12),
+        }));
+
+        Assert.True(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "rock-granite"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+            VertexFlags = new VertexFlags(0),
+        }));
+
+        Assert.True(OptimumApiBridge.IsEligibleChiselLodBlock(new Block
+        {
+            BlockId = 10,
+            Code = new AssetLocation("game", "rock-granite"),
+            DrawType = EnumDrawType.Cube,
+            BlockMaterial = EnumBlockMaterial.Stone,
+            RenderPass = EnumChunkRenderPass.Opaque,
+            VertexFlags = null,
+        }));
+    }
+
+    [Fact]
+    public void ChiselLodIsPlaceholderMesh_RejectsStructuralUnknownRefAndUnknownTexture()
+    {
+        var unknownTex = new TextureAtlasPosition
+        {
+            atlasTextureId = 255,
+            x1 = 0.05f,
+            y1 = 0.25f,
+            x2 = 0.06f,
+            y2 = 0.27f,
+        };
+        var tessMgr = StubProxy.Create<ITesselatorManager>(_ => null);
+        var atlas = StubProxy.Create<IBlockTextureAtlasAPI>(name => name == "get_UnknownTexturePosition" ? unknownTex : null);
+        var capi = StubProxy.Create<ICoreClientAPI>(name => name switch
+        {
+            "get_TesselatorManager" => tessMgr,
+            "get_BlockTextureAtlas" => atlas,
+            _ => null,
+        });
+
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, null));
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(null, CreateValidQuadMesh(verticesCount: 0, indicesCount: 36, faces: 6, atlasId: 255, u0: 0.5f, v0: 0.5f)));
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(null, CreateValidQuadMesh(verticesCount: 24, indicesCount: 0, faces: 6, atlasId: 255, u0: 0.5f, v0: 0.5f)));
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(null, CreateValidQuadMesh(verticesCount: 24, indicesCount: 36, faces: 0, atlasId: 255, u0: 0.5f, v0: 0.5f)));
+
+        var noXyzFacesArray = CreateValidQuadMesh(24, 36, 6, 255, 0.5f, 0.5f);
+        noXyzFacesArray.XyzFaces = null;
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, noXyzFacesArray));
+
+        var noTextureIds = CreateValidQuadMesh(24, 36, 6, 255, 0.5f, 0.5f);
+        noTextureIds.TextureIds = Array.Empty<int>();
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, noTextureIds));
+
+        var validGraniteMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 255, u0: 0.5f, v0: 0.5f);
+        Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, validGraniteMesh));
+
+        // Registered unknownBlockModelData reference must be rejected even if structurally populated
+        var registeredUnknownMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 255, u0: 0.5f, v0: 0.5f);
+        OptimumApiBridge.RegisterUnknownBlockModelData(tessMgr, registeredUnknownMesh);
+        try
+        {
+            Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, registeredUnknownMesh));
+            Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, validGraniteMesh));
+        }
+        finally
+        {
+            OptimumApiBridge.UnregisterUnknownBlockModelData(tessMgr);
+        }
+        Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, registeredUnknownMesh));
+
+        // Face using UnknownTexturePosition without TextureIndices (defaults to slot 0) must be rejected
+        var unknownTexMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 255, u0: 0.055f, v0: 0.26f);
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, unknownTexMesh));
+
+        // Multi-atlas mesh where only face 1 points at UnknownTexturePosition must be rejected
+        var multiAtlasUnknown = CreateValidQuadMesh(8, 12, 2, atlasId: 100, u0: 0.5f, v0: 0.5f);
+        multiAtlasUnknown.TextureIds = new[] { 100, 255 };
+        multiAtlasUnknown.TextureIndices = new byte[] { 0, 1 };
+        multiAtlasUnknown.TextureIndicesCount = 2;
+        multiAtlasUnknown.Uv = new[]
+        {
+            0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f, 0.5f,
+            0.052f, 0.252f, 0.058f, 0.252f, 0.058f, 0.268f, 0.052f, 0.268f,
+        };
+        Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, multiAtlasUnknown));
+
+        // Same UVs on a DIFFERENT atlas ID must NOT trigger false positive
+        var differentAtlasMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 100, u0: 0.055f, v0: 0.26f);
+        Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, differentAtlasMesh));
+
+        // Zero-area UnknownTexturePosition must NOT trigger false positive at UV origin
+        var zeroAtlasPos = new TextureAtlasPosition { atlasTextureId = 255 };
+        var zeroAtlas = StubProxy.Create<IBlockTextureAtlasAPI>(name => name == "get_UnknownTexturePosition" ? zeroAtlasPos : null);
+        var zeroCapi = StubProxy.Create<ICoreClientAPI>(name => name switch
+        {
+            "get_TesselatorManager" => tessMgr,
+            "get_BlockTextureAtlas" => zeroAtlas,
+            _ => null,
+        });
+        var originUvMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 255, u0: 0f, v0: 0f);
+        Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(zeroCapi, originUvMesh));
+    }
+
+    [Fact]
+    public void ChiselLodShapeTesselatorManager_TracksAndUnregistersUnknownMeshWhenDonorBuilt()
+    {
+        string donorPath = FindOptionalRepositoryFile("build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (donorPath == null)
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type stmType = donorAsm.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager", throwOnError: true)!;
+        object stm = RuntimeHelpers.GetUninitializedObject(stmType);
+
+        // Give unknownMesh valid-looking structural fields so only ReferenceEquals registration proves tracking
+        MeshData unknownMesh = CreateValidQuadMesh(24, 36, 6, atlasId: 255, u0: 0.5f, v0: 0.5f);
+        stmType.GetField("unknownBlockModelData", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(stm, unknownMesh);
+        stmType.GetField("blockModelDatas", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(stm, new MeshData[16]);
+
+        MethodInfo tesselateBlock = stmType.GetMethod("TesselateBlock", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!;
+        MethodInfo disposeMethod = stmType.GetMethod("Dispose", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!;
+
+        var missingBlock = new Block
+        {
+            BlockId = 5,
+            Code = new AssetLocation("missingmod", "carved-oak"),
+            IsMissing = true,
+        };
+
+        var capi = StubProxy.Create<ICoreClientAPI>(name => name == "get_TesselatorManager" ? stm : null);
+        tesselateBlock.Invoke(stm, new object?[] { missingBlock, false });
+        try
+        {
+            Assert.True(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, unknownMesh));
+        }
+        finally
+        {
+            disposeMethod.Invoke(stm, Array.Empty<object?>());
+        }
+
+        Assert.False(OptimumApiBridge.IsPlaceholderChiselLodMesh(capi, unknownMesh));
+    }
+
+    private static MeshData CreateValidQuadMesh(int verticesCount, int indicesCount, int faces, int atlasId, float u0, float v0)
+    {
+        int allocVertices = Math.Max(verticesCount, Math.Max(faces * 4, 4));
+        float[] uv = new float[allocVertices * 2];
+        for (int i = 0; i < uv.Length; i += 2)
+        {
+            uv[i] = u0;
+            uv[i + 1] = v0;
+        }
+
+        return new MeshData
+        {
+            VerticesCount = verticesCount,
+            IndicesCount = indicesCount,
+            XyzFaces = faces > 0 ? new byte[faces] : Array.Empty<byte>(),
+            XyzFacesCount = faces,
+            VerticesPerFace = 4,
+            TextureIds = new[] { atlasId },
+            Uv = uv,
+        };
+    }
+
+    private static string? FindOptionalRepositoryFile(string relativePath)
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory != null)
+        {
+            string candidate = Path.Combine(directory.FullName, relativePath);
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+            directory = directory.Parent;
+        }
+        return null;
+    }
+
+    public class StubProxy : DispatchProxy
+    {
+        private System.Func<string, object?> resolver = _ => null;
+
+        public static T Create<T>(System.Func<string, object?> resolver) where T : class
+        {
+            object proxy = Create<T, StubProxy>();
+            ((StubProxy)proxy).resolver = resolver;
+            return (T)proxy;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            return targetMethod != null ? resolver(targetMethod.Name) : null;
+        }
     }
 
     private static string FindRepositoryFile(string relativePath)
