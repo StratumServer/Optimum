@@ -766,6 +766,20 @@ var membersToInject = new Dictionary<string, List<string>>
         "ClearAttributesCache",
         "ParseAttributes",
     },
+    // Issue #671: defer crafting grid recipe searches during a single client mouse-move dispatch
+    ["Vintagestory.Common.InventoryCraftingGrid"] = new()
+    {
+        "t_mouseMoveBatchDepth",
+        "t_pendingGrid",
+        "t_pendingOverflow",
+        "BeginMouseMoveBatch",
+        "EndMouseMoveBatch",
+        "FlushAllPendingRecipeSearches",
+        "ScheduleOrFindMatchingRecipe",
+        "EnqueuePendingRecipeSearch",
+        "FlushPendingRecipeSearch",
+        "ClearPendingRecipeSearch",
+    },
     // ServerPackets.cs.patch: 14th file of cecil-owned.list's server section,
     // discovered during the wiring plan's triage but not audited there. Verified
     // separately: zero <>c references in either target method (the class-level
@@ -1012,8 +1026,19 @@ var targets = new List<MethodTarget>
             "Vintagestory.API.MathTools.BlockFilter",
             "Vintagestory.API.MathTools.EntityFilter",
         }),
-    // Issue #275: O(1) candidate deduplication in crafting recipe resolution
+    // Issue #275 & #671: O(1) candidate deduplication and mouse-move drag recipe search batching
+    new("Vintagestory.Common.InventoryCraftingGrid", "BeginMouseMoveBatch", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "EndMouseMoveBatch", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "FlushAllPendingRecipeSearches", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "ScheduleOrFindMatchingRecipe", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "EnqueuePendingRecipeSearch", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "FlushPendingRecipeSearch", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "ClearPendingRecipeSearch", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "ActivateSlot", 3),
+    new("Vintagestory.Common.InventoryCraftingGrid", "OnItemSlotModified", 1),
+    new("Vintagestory.Common.InventoryCraftingGrid", "TryMoveItemStack", 4),
     new("Vintagestory.Common.InventoryCraftingGrid", "FindMatchingRecipe", 0),
+    new("Vintagestory.Common.InventoryCraftingGrid", "ConsumeIngredients", 1),
     // ClientMain: single-pass OpenedGuis scan instead of two LINQ calls (vanilla fields only)
     new("Vintagestory.Client.NoObf.ClientMain", "UpdateFreeMouse", 0),
     // ClientSystemStartup: atlas pipeline per-stage timing instrumentation.
