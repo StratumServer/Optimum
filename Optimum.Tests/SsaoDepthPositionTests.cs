@@ -3,6 +3,9 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Text.RegularExpressions;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -11,6 +14,8 @@ using OpenTK.Mathematics;
 using OpenTK.Windowing.Common;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
+using Vintagestory.API.Client;
+using Vintagestory.API.Common;
 using Vintagestory.API.Config;
 using Xunit;
 
@@ -693,6 +698,253 @@ void main() {
             arr[i * 3 + 2] = v.Z;
         }
         return arr;
+    }
+
+    [Fact]
+    public void RebuildAndDisposeFrameBuffers_PreserveNewlyRebuiltActiveTierAndGuardDoubleDelete()
+    {
+        string platformPatch = PatchReader.ReadPatchedContent(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch"));
+        Assert.Contains("optimumTierCache.DrainAll(optimumDrainScratch);", platformPatch, StringComparison.Ordinal);
+        Assert.Contains("if (IsShuttingDown || ReferenceEquals(buffers, frameBuffers))", platformPatch, StringComparison.Ordinal);
+        Assert.Contains("if (fb != null && !fb.Disposed)", platformPatch, StringComparison.Ordinal);
+        Assert.Contains("targetBuffers[0].ColorTextureIds.Length == expectedPrimaryColors", platformPatch, StringComparison.Ordinal);
+
+        string shaderRegistryPatch = PatchReader.ReadPatchedContent(
+            PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs.patch"));
+        Assert.Contains("frameBuffers[0].Disposed || frameBuffers[0].ColorTextureIds.Length != expectedColorCount", shaderRegistryPatch, StringComparison.Ordinal);
+
+        string? tempPatchedPath = null;
+        string patchedLibPath = ResolveOrBuildPatchedVintagestoryLibPath(out tempPatchedPath);
+        try
+        {
+            using var asm = AssemblyDefinition.ReadAssembly(patchedLibPath);
+            var platform = asm.MainModule.GetType("Vintagestory.Client.NoObf.ClientPlatformWindows")!;
+            var rebuildMethod = platform.Methods.Single(m => m.Name == "RebuildFrameBuffers" && m.Parameters.Count == 0);
+            var disposeMethod = platform.Methods.Single(m => m.Name == "DisposeFrameBuffers" && m.Parameters.Count == 1);
+            var activateTierMethod = platform.Methods.Single(m => m.Name == "OptimumActivateScaleTier" && m.Parameters.Count == 3);
+
+            AssertCallsMember(rebuildMethod, "OptimumDisposeFallbackTiersBeforeRebuild");
+            AssertCallsMember(rebuildMethod, "DrainAll");
+            AssertCallsMember(rebuildMethod, "SetupDefaultFrameBuffers");
+            AssertCallsMember(rebuildMethod, "DisposeFrameBuffers");
+
+            AssertCallsMember(disposeMethod, "get_IsShuttingDown");
+            AssertCallsMember(disposeMethod, "OptimumDisposeFallbackTiersBeforeRebuild");
+            AssertCallsMember(activateTierMethod, "get_EffectiveSsaoDepthPosition");
+        }
+        finally
+        {
+            if (tempPatchedPath != null && File.Exists(tempPatchedPath))
+            {
+                try { File.Delete(tempPatchedPath); } catch { }
+            }
+        }
+    }
+
+    [GlContextFact]
+    public void RealGlContext_RebuildFrameBuffers_AfterSsaoFallbackAndResize_KeepsLiveFbosAliveForExternalPasses()
+    {
+        bool origSsaoDepth = OptimumConfig.SsaoDepthPositionEnabled;
+        bool origDynamicScale = OptimumConfig.DynamicRenderScaleEnabled;
+        float origRenderScale = OptimumConfig.RenderScale;
+        string? tempPatchedPath = null;
+        AssemblyLoadContext? alc = null;
+
+        try
+        {
+            OptimumConfig.ResetShaderCompatibilityForTests();
+            OptimumConfig.SsaoDepthPositionEnabled = true;
+            OptimumConfig.DynamicRenderScaleEnabled = false;
+            OptimumConfig.RenderScale = 1.0f;
+
+            string patchedLibPath = ResolveOrBuildPatchedVintagestoryLibPath(out tempPatchedPath);
+            string libDir = Path.GetDirectoryName(patchedLibPath)!;
+            string repoRoot = Path.GetDirectoryName(PatchReader.FindRepositoryFile("VintageStory.slnx"))!;
+            string vanillaLibDir = Path.Combine(repoRoot, ".vanilla", "win-x64", "vintagestory", "Lib");
+            string binDir = Path.Combine(repoRoot, "bin", "Release", "net10.0");
+
+            alc = new AssemblyLoadContext($"SsaoFboRebuildTest-{Guid.NewGuid():N}", isCollectible: true);
+            alc.Resolving += (ctx, name) =>
+            {
+                if (string.Equals(name.Name, "VintagestoryAPI", StringComparison.OrdinalIgnoreCase))
+                    return typeof(FrameBufferRef).Assembly;
+                if (string.Equals(name.Name, "Optimum.Api.Contracts", StringComparison.OrdinalIgnoreCase))
+                    return typeof(OptimumConfig).Assembly;
+                if (name.Name != null && name.Name.StartsWith("OpenTK", StringComparison.OrdinalIgnoreCase))
+                {
+                    var loaded = AssemblyLoadContext.Default.Assemblies.FirstOrDefault(a =>
+                        string.Equals(a.GetName().Name, name.Name, StringComparison.OrdinalIgnoreCase));
+                    if (loaded != null) return loaded;
+                }
+                foreach (string dir in new[] { libDir, binDir, vanillaLibDir, AppContext.BaseDirectory })
+                {
+                    string candidate = Path.Combine(dir, name.Name + ".dll");
+                    if (File.Exists(candidate)) return ctx.LoadFromAssemblyPath(candidate);
+                }
+                return null;
+            };
+
+            Assembly libAsm = alc.LoadFromAssemblyPath(patchedLibPath);
+            Type platformType = libAsm.GetType("Vintagestory.Client.NoObf.ClientPlatformWindows", throwOnError: true)!;
+            Type gameWindowType = libAsm.GetType("Vintagestory.Client.NoObf.GameWindowNative", throwOnError: true)!;
+            Type clientSettingsType = libAsm.GetType("Vintagestory.Client.NoObf.ClientSettings", throwOnError: true)!;
+
+            // Configure ClientSettings: SSAO High (2), SSAA 1.0, Shadows 1.
+            clientSettingsType.GetProperty("SSAOQuality", BindingFlags.Public | BindingFlags.Static)!.SetValue(null, 2);
+            clientSettingsType.GetProperty("SSAA", BindingFlags.Public | BindingFlags.Static)!.SetValue(null, 1.0f);
+            clientSettingsType.GetProperty("ShadowMapQuality", BindingFlags.Public | BindingFlags.Static)!.SetValue(null, 1);
+
+            GLFWProvider.CheckForMainThread = false;
+            var gws = GameWindowSettings.Default;
+            var nws = new NativeWindowSettings
+            {
+                StartVisible = false,
+                APIVersion = new Version(4, 3),
+                Profile = ContextProfile.Core,
+                Flags = ContextFlags.ForwardCompatible,
+                ClientSize = new Vector2i(320, 180),
+            };
+            using var window = (NativeWindow)Activator.CreateInstance(gameWindowType, new object[] { gws, nws })!;
+            window.MakeCurrent();
+            while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+
+            object platform = RuntimeHelpers.GetUninitializedObject(platformType);
+            platformType.GetField("window", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, window);
+            object nullLogger = Activator.CreateInstance(libAsm.GetType("Vintagestory.Common.NullLogger", throwOnError: true)!)!;
+            platformType.GetField("logger", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, nullLogger);
+            platformType.GetField("OffscreenBuffer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, true);
+            platformType.GetField("SetupSSAO", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, true);
+            platformType.GetField("ssaoKernel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, new float[192]);
+            platformType.GetField("sampleCount", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!.SetValue(platform, 1);
+
+            FieldInfo frameBuffersField = platformType.GetField("frameBuffers", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+            FieldInfo tierCacheField = platformType.GetField("optimumTierCache", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            FieldInfo screenQuadField = platformType.GetField("screenQuad", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            MethodInfo setupMethod = platformType.GetMethod("SetupDefaultFrameBuffers", BindingFlags.Instance | BindingFlags.Public)!;
+            MethodInfo rebuildMethod = platformType.GetMethod("RebuildFrameBuffers", BindingFlags.Instance | BindingFlags.Public)!;
+            MethodInfo disposeMethod = platformType.GetMethod("DisposeFrameBuffers", BindingFlags.Instance | BindingFlags.Public)!;
+
+            // Step 1: Initial startup with compatible shaders (SSAO depth reconstruction active -> 3 Primary color attachments).
+            var initialBuffers = (List<FrameBufferRef>)setupMethod.Invoke(platform, null)!;
+            frameBuffersField.SetValue(platform, initialBuffers);
+            var initialQuad = (MeshRef)screenQuadField.GetValue(platform)!;
+            Assert.NotNull(initialQuad);
+            Assert.False(initialQuad.Disposed);
+            Assert.Equal(3, initialBuffers[0].ColorTextureIds.Length);
+            Assert.False(initialBuffers[0].Disposed);
+            Assert.False(initialBuffers[1].Disposed);
+            Assert.True(OptimumDiagnostics.SsaoDepthPositionDropped);
+
+            // Step 2: Shader override triggers SSAO depth-position fallback -> RebuildFrameBuffers() at same resolution.
+            OptimumConfig.SetSsaoDepthPositionRuntimeCompatible(false);
+            rebuildMethod.Invoke(platform, null);
+
+            var fallbackBuffers = (List<FrameBufferRef>)frameBuffersField.GetValue(platform)!;
+            Assert.NotSame(initialBuffers, fallbackBuffers);
+            Assert.True(initialBuffers[0].Disposed, "Old Primary FBO must be disposed.");
+            Assert.True(initialBuffers[1].Disposed, "Old Transparent FBO must be disposed.");
+            Assert.Same(initialQuad, screenQuadField.GetValue(platform));
+            Assert.False(initialQuad.Disposed, "Fullscreen screenQuad must stay alive across RebuildFrameBuffers for external renderers.");
+
+            // Core #675 regression assertion: new Primary and Transparent FBOs must stay ALIVE with 4 color attachments.
+            Assert.False(fallbackBuffers[0].Disposed, "Rebuilt Primary FBO was prematurely disposed.");
+            Assert.False(fallbackBuffers[1].Disposed, "Rebuilt Transparent FBO was prematurely disposed.");
+            Assert.Equal(4, fallbackBuffers[0].ColorTextureIds.Length);
+            Assert.False(OptimumDiagnostics.SsaoDepthPositionDropped);
+            Assert.True(GL.IsFramebuffer(fallbackBuffers[0].FboId));
+            Assert.True(GL.IsTexture(fallbackBuffers[0].DepthTextureId));
+            Assert.True(GL.IsTexture(fallbackBuffers[0].ColorTextureIds[2]));
+            Assert.True(GL.IsTexture(fallbackBuffers[0].ColorTextureIds[3]));
+            AssertExternalDeferredGBufferComplete(fallbackBuffers[0]);
+
+            // Step 3: Simulate resize + return (e.g. fullscreen toggle) and verify rebuilt FBOs remain alive and cache has 1 entry.
+            window.ClientSize = new Vector2i(400, 240);
+            rebuildMethod.Invoke(platform, null);
+            var resizedBuffers = (List<FrameBufferRef>)frameBuffersField.GetValue(platform)!;
+            Assert.True(fallbackBuffers[0].Disposed);
+            Assert.False(resizedBuffers[0].Disposed);
+            Assert.False(resizedBuffers[1].Disposed);
+            Assert.Equal(4, resizedBuffers[0].ColorTextureIds.Length);
+            AssertExternalDeferredGBufferComplete(resizedBuffers[0]);
+
+            var cache = (OptimumTierCache<List<FrameBufferRef>>)tierCacheField.GetValue(platform)!;
+            Assert.Equal(1, cache.Count);
+
+            // Step 4: Restore compatible shaders (e.g. mod removed / reload) -> depth reconstruction re-engages cleanly.
+            OptimumConfig.ResetShaderCompatibilityAfterReload();
+            rebuildMethod.Invoke(platform, null);
+            var compatBuffers = (List<FrameBufferRef>)frameBuffersField.GetValue(platform)!;
+            Assert.True(resizedBuffers[0].Disposed);
+            Assert.False(compatBuffers[0].Disposed);
+            Assert.False(compatBuffers[1].Disposed);
+            Assert.Equal(3, compatBuffers[0].ColorTextureIds.Length);
+            Assert.True(OptimumDiagnostics.SsaoDepthPositionDropped);
+            Assert.True(GL.IsFramebuffer(compatBuffers[0].FboId));
+            Assert.True(GL.IsTexture(compatBuffers[0].ColorTextureIds[2]));
+
+            // Clean teardown.
+            platformType.BaseType!.GetProperty("IsShuttingDown", BindingFlags.Instance | BindingFlags.Public)!.SetValue(platform, true);
+            disposeMethod.Invoke(platform, new object[] { compatBuffers });
+            Assert.True(compatBuffers[0].Disposed);
+            Assert.True(initialQuad.Disposed, "Fullscreen screenQuad must be disposed on shutdown.");
+            Assert.Equal(0, cache.Count);
+        }
+        finally
+        {
+            OptimumConfig.ResetShaderCompatibilityForTests();
+            OptimumConfig.SsaoDepthPositionEnabled = origSsaoDepth;
+            OptimumConfig.DynamicRenderScaleEnabled = origDynamicScale;
+            OptimumConfig.RenderScale = origRenderScale;
+            OptimumDiagnostics.ResetAllCounters();
+            alc?.Unload();
+            if (tempPatchedPath != null && File.Exists(tempPatchedPath))
+            {
+                try { File.Delete(tempPatchedPath); } catch { }
+            }
+        }
+    }
+
+    private static void AssertExternalDeferredGBufferComplete(FrameBufferRef primary)
+    {
+        while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+        int fbo = GL.GenFramebuffer();
+        int c0 = GL.GenTexture();
+        int c1 = GL.GenTexture();
+        int c3 = GL.GenTexture();
+        try
+        {
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, fbo);
+
+            void AttachColor(int tex, FramebufferAttachment att, PixelInternalFormat fmt)
+            {
+                GL.BindTexture(TextureTarget.Texture2D, tex);
+                GL.TexImage2D(TextureTarget.Texture2D, 0, fmt, primary.Width, primary.Height, 0, PixelFormat.Rgba, PixelType.Float, IntPtr.Zero);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+                GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+                GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, att, TextureTarget.Texture2D, tex, 0);
+            }
+
+            AttachColor(c0, FramebufferAttachment.ColorAttachment0, PixelInternalFormat.Rgba8);
+            AttachColor(c1, FramebufferAttachment.ColorAttachment1, PixelInternalFormat.Rgba16f);
+            AttachColor(c3, FramebufferAttachment.ColorAttachment3, PixelInternalFormat.Rgba16f);
+            // Alias Primary's live gNormal (ColorTextureIds[2]) and DepthTextureId just like external deferred passes.
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.ColorAttachment2, TextureTarget.Texture2D, primary.ColorTextureIds[2], 0);
+            GL.FramebufferTexture2D(FramebufferTarget.Framebuffer, FramebufferAttachment.DepthAttachment, TextureTarget.Texture2D, primary.DepthTextureId, 0);
+
+            FramebufferErrorCode status = GL.CheckFramebufferStatus(FramebufferTarget.Framebuffer);
+            Assert.Equal(FramebufferErrorCode.FramebufferComplete, status);
+            Assert.Equal(OpenTK.Graphics.OpenGL.ErrorCode.NoError, GL.GetError());
+        }
+        finally
+        {
+            GL.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            GL.BindTexture(TextureTarget.Texture2D, 0);
+            GL.DeleteFramebuffer(fbo);
+            GL.DeleteTexture(c0);
+            GL.DeleteTexture(c1);
+            GL.DeleteTexture(c3);
+        }
     }
 
     private static string ResolveOrBuildPatchedVintagestoryLibPath(out string? tempPatchedPath)
