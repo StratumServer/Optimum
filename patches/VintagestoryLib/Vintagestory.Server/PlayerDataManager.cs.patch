@@ -1,8 +1,23 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs b/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
-index 0e34935..0d01229 100644
+index 0e34935..5d22d60 100644
 --- a/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
 +++ b/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs
-@@ -76,17 +76,18 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -31,10 +31,14 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 
+ 	public bool bannedListDirty;
+ 
+ 	public bool whiteListDirty;
+ 
++	private OptimumPlayerEntryIndex optimumBanIndex;
++
++	private OptimumPlayerEntryIndex optimumWhitelistIndex;
++
+ 	Dictionary<int, PlayerGroup> IGroupManager.PlayerGroupsById => PlayerGroupsById;
+ 
+ 	Dictionary<string, IServerPlayerData> IPlayerDataManager.PlayerDataByUid
+ 	{
+ 		get
+@@ -76,17 +80,18 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
  	}
  
  	private void OnCheckRequireSave(float dt)
@@ -22,7 +37,7 @@ index 0e34935..0d01229 100644
  				playerDataDirty = false;
  			}
  			catch (Exception ex)
-@@ -98,11 +99,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -98,11 +103,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
  		{
  			try
  			{
@@ -35,7 +50,7 @@ index 0e34935..0d01229 100644
  				playerGroupsDirty = false;
  			}
  			catch (Exception ex2)
-@@ -114,11 +115,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -114,11 +119,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
  		{
  			try
  			{
@@ -48,7 +63,7 @@ index 0e34935..0d01229 100644
  				bannedListDirty = false;
  			}
  			catch (Exception ex3)
-@@ -132,11 +133,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -132,11 +137,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
  		}
  		try
  		{
@@ -61,7 +76,7 @@ index 0e34935..0d01229 100644
  			whiteListDirty = false;
  		}
  		catch (Exception ex4)
-@@ -187,13 +188,14 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -187,13 +192,14 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
  		}
  		foreach (PlayerGroup item2 in list2)
  		{
@@ -77,8 +92,154 @@ index 0e34935..0d01229 100644
  			}
  			else
  			{
-@@ -431,11 +433,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+@@ -202,10 +208,12 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		}
+ 		foreach (PlayerEntry item4 in list4)
+ 		{
+ 			WhitelistedPlayers.Add(item4);
+ 		}
++		GetIndexForList(BannedPlayers).Rebuild(BannedPlayers);
++		GetIndexForList(WhitelistedPlayers).Rebuild(WhitelistedPlayers);
+ 	}
+ 
+ 	public PlayerGroup PlayerGroupForPrivateMessage(ConnectedClient sender, ConnectedClient receiver)
  	{
+ 		string text = GameMath.Md5Hash(sender.ServerData.PlayerUID + "-" + receiver.ServerData.PlayerUID);
+@@ -329,18 +337,20 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	internal void BanPlayer(string playername, string playeruid, string byPlayerName, string reason = "", DateTime? untildate = null)
+ 	{
+ 		PlayerEntry playerBan = GetPlayerBan(playername, playeruid);
+ 		if (playerBan == null)
+ 		{
+-			BannedPlayers.Add(new PlayerEntry
++			PlayerEntry entry = new PlayerEntry
+ 			{
+ 				PlayerName = playername,
+ 				IssuedByPlayerName = byPlayerName,
+ 				PlayerUID = playeruid,
+ 				Reason = reason,
+ 				UntilDate = untildate
+-			});
++			};
++			BannedPlayers.Add(entry);
++			GetIndexForList(BannedPlayers).NotifyAdded(BannedPlayers, entry);
+ 			ServerMain.Logger.Audit("{0} was banned by {1} until {2}. Reason: {3}", playername, byPlayerName, untildate, reason);
+ 		}
+ 		else
+ 		{
+ 			playerBan.Reason = reason;
+@@ -354,10 +364,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	{
+ 		PlayerEntry playerBan = GetPlayerBan(playername, playeruid);
+ 		if (playerBan != null)
+ 		{
+ 			BannedPlayers.Remove(playerBan);
++			GetIndexForList(BannedPlayers).NotifyRemoved(BannedPlayers, playerBan);
+ 			bannedListDirty = true;
+ 			ServerMain.Logger.Audit("{0} was unbanned by {1}.", playername, issuingPlayerName);
+ 			return true;
+ 		}
+ 		return false;
+@@ -367,10 +378,11 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	{
+ 		PlayerEntry playerWhitelist = GetPlayerWhitelist(playername, playeruid);
+ 		if (playerWhitelist != null)
+ 		{
+ 			WhitelistedPlayers.Remove(playerWhitelist);
++			GetIndexForList(WhitelistedPlayers).NotifyRemoved(WhitelistedPlayers, playerWhitelist);
+ 			whiteListDirty = true;
+ 			return true;
+ 		}
+ 		return false;
+ 	}
+@@ -378,18 +390,20 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 	public void WhitelistPlayer(string playername, string playeruid, string byPlayername, string reason = "", DateTime? untildate = null)
+ 	{
+ 		PlayerEntry playerWhitelist = GetPlayerWhitelist(playername, playeruid);
+ 		if (playerWhitelist == null)
+ 		{
+-			WhitelistedPlayers.Add(new PlayerEntry
++			PlayerEntry entry = new PlayerEntry
+ 			{
+ 				PlayerName = playername,
+ 				IssuedByPlayerName = byPlayername,
+ 				Reason = reason,
+ 				UntilDate = untildate,
+ 				PlayerUID = playeruid
+-			});
++			};
++			WhitelistedPlayers.Add(entry);
++			GetIndexForList(WhitelistedPlayers).NotifyAdded(WhitelistedPlayers, entry);
+ 		}
+ 		else
+ 		{
+ 			playerWhitelist.Reason = reason;
+ 			playerWhitelist.UntilDate = untildate;
+@@ -397,45 +411,64 @@ public class PlayerDataManager : IPermissionManager, IGroupManager, IPlayerDataM
+ 		whiteListDirty = true;
+ 	}
+ 
+ 	public PlayerEntry GetPlayerBan(string playername, string playeruid)
+ 	{
+-		PlayerEntry playerEntry = GetPlayerEntry(BannedPlayers, playeruid, playername);
++		return GetModerationEntry(BannedPlayers, playername, playeruid, ref bannedListDirty);
++	}
++
++	public PlayerEntry GetPlayerWhitelist(string playername, string playeruid)
++	{
++		return GetModerationEntry(WhitelistedPlayers, playername, playeruid, ref whiteListDirty);
++	}
++
++	private PlayerEntry GetModerationEntry(List<PlayerEntry> list, string playername, string playeruid, ref bool dirtyFlag)
++	{
++		PlayerEntry playerEntry = GetPlayerEntry(list, playeruid, playername);
+ 		if (playerEntry == null)
+ 		{
+ 			return null;
+ 		}
+ 		if (playeruid != null && playeruid != playerEntry.PlayerUID)
+ 		{
++			string previousUid = playerEntry.PlayerUID;
+ 			playerEntry.PlayerUID = playeruid;
+-			bannedListDirty = true;
++			dirtyFlag = true;
++			GetIndexForList(list)?.NotifyUidUpdated(list, playerEntry, previousUid);
+ 		}
+ 		return playerEntry;
+ 	}
+ 
+-	public PlayerEntry GetPlayerWhitelist(string playername, string playeruid)
++	private OptimumPlayerEntryIndex GetIndexForList(List<PlayerEntry> list)
+ 	{
+-		PlayerEntry playerEntry = GetPlayerEntry(WhitelistedPlayers, playeruid, playername);
+-		if (playerEntry == null)
++		if (object.ReferenceEquals(list, BannedPlayers))
+ 		{
+-			return null;
++			return optimumBanIndex ??= new OptimumPlayerEntryIndex();
+ 		}
+-		if (playeruid != null && playeruid != playerEntry.PlayerUID)
++		if (object.ReferenceEquals(list, WhitelistedPlayers))
+ 		{
+-			playerEntry.PlayerUID = playeruid;
+-			whiteListDirty = true;
++			return optimumWhitelistIndex ??= new OptimumPlayerEntryIndex();
+ 		}
+-		return playerEntry;
++		return null;
+ 	}
+ 
+ 	private PlayerEntry GetPlayerEntry(List<PlayerEntry> list, string playeruid, string playername)
+ 	{
++		if (list == null)
++		{
++			return null;
++		}
++		OptimumPlayerEntryIndex index = GetIndexForList(list);
++		if (index != null)
++		{
++			return index.FindEntry(list, playeruid, playername);
++		}
  		foreach (PlayerEntry item in list)
  		{
  			if (item.PlayerUID == null || playeruid == null)
