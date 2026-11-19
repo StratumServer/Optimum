@@ -25,6 +25,9 @@ public sealed class GitInstaller : IGitAcquisition
     private const string ReleasePageUrl = "https://github.com/git-for-windows/git/releases/latest";
     private const string GitForWindowsUrl = "https://git-scm.com/install/windows";
     private static readonly TimeSpan VerifyTimeout = TimeSpan.FromSeconds(10);
+    private static readonly Regex ReleaseTagPattern = new(
+        "^v(?<base>[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z]+)*)(?:\\.windows\\.(?<win>[0-9]+))?$",
+        RegexOptions.CultureInvariant);
     private static readonly Regex ReleaseDigestRow = new(
         """<tr>\s*<td>(?<name>MinGit-[^<]+\.zip)</td>\s*<td>(?<digest>[0-9a-fA-F]{64})</td>\s*</tr>""",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase | RegexOptions.Singleline);
@@ -102,9 +105,8 @@ public sealed class GitInstaller : IGitAcquisition
     {
         observer.Phase(ProgressPhase.Decompile, 1, "fetching official portable Git release details");
         GitRelease release = await GetReleaseAsync(observer, cancellationToken);
-        string tag = release.Tag;
-        if (!Regex.IsMatch(tag, "^v[0-9]+\\.[0-9]+\\.[0-9]+\\.windows\\.[0-9]+$", RegexOptions.CultureInvariant))
-            throw new InvalidDataException("the Git for Windows release tag has an unexpected format");
+        (string baseVersion, string windowsSuffix) = ParseReleaseTag(
+            release.Tag, "the Git for Windows release tag has an unexpected format");
 
         string[] architectureVariants = _probe.Arch switch
         {
@@ -114,16 +116,16 @@ public sealed class GitInstaller : IGitAcquisition
             _ => throw new InvalidDataException($"unsupported Windows architecture: {_probe.Arch}"),
         };
 
-        string version = tag[1..].Replace(".windows.", ".", StringComparison.Ordinal);
         List<string> failures = [];
         foreach (string variant in architectureVariants)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            string assetName = $"MinGit-{version}-{variant}.zip";
-            if (!release.Assets.TryGetValue(assetName, out PortableAsset? asset))
+            if (!TryResolveAsset(release, baseVersion, windowsSuffix, variant,
+                    out string assetName, out PortableAsset? asset))
             {
-                failures.Add($"{assetName} is not published with a SHA-256 digest");
-                observer.Log(LogLevel.Warn, $"Portable Git variant {assetName} is unavailable or has no SHA-256 digest; trying the next variant.");
+                string expectedName = PreferredAssetName(baseVersion, windowsSuffix, variant);
+                failures.Add($"{expectedName} is not published with a SHA-256 digest");
+                observer.Log(LogLevel.Warn, $"Portable Git variant {expectedName} is unavailable or has no SHA-256 digest; trying the next variant.");
                 continue;
             }
 
@@ -261,9 +263,8 @@ public sealed class GitInstaller : IGitAcquisition
             throw new InvalidDataException("the official Git for Windows release page redirected to an unexpected URL");
         }
 
-        string tag = Uri.UnescapeDataString(finalUri.AbsolutePath[tagPathPrefix.Length..]);
-        if (!Regex.IsMatch(tag, "^v[0-9]+\\.[0-9]+\\.[0-9]+\\.windows\\.[0-9]+$", RegexOptions.CultureInvariant))
-            throw new InvalidDataException("the official release page has an unexpected Git for Windows tag");
+        string tag = Uri.UnescapeDataString(finalUri.AbsolutePath.TrimEnd('/')[tagPathPrefix.Length..]);
+        ParseReleaseTag(tag, "the official release page has an unexpected Git for Windows tag");
 
         string html = await response.Content.ReadAsStringAsync(cancellationToken);
         var assets = new Dictionary<string, PortableAsset>(StringComparer.Ordinal);
@@ -338,6 +339,101 @@ public sealed class GitInstaller : IGitAcquisition
         string? directory = Path.GetDirectoryName(gitExecutable);
         if (!string.IsNullOrWhiteSpace(directory))
             _prependProcessPath(directory);
+    }
+
+    private static (string BaseVersion, string WindowsSuffix) ParseReleaseTag(string tag, string errorMessage)
+    {
+        Match match = ReleaseTagPattern.Match(tag);
+        if (!match.Success)
+            throw new InvalidDataException(errorMessage);
+        return (match.Groups["base"].Value, match.Groups["win"].Value);
+    }
+
+    /// <summary>
+    /// Git for Windows omits the trailing revision on <c>.windows.1</c> asset names
+    /// while including it on <c>.windows.2</c> and later. Check the expected name
+    /// first, then the alternate form for the same tag base version and variant.
+    /// </summary>
+    private static bool TryResolveAsset(
+        GitRelease release,
+        string baseVersion,
+        string windowsSuffix,
+        string variant,
+        out string assetName,
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out PortableAsset? asset)
+    {
+        string baseAssetName = $"MinGit-{baseVersion}-{variant}.zip";
+        string? suffixedAssetName = string.IsNullOrEmpty(windowsSuffix)
+            ? null
+            : $"MinGit-{baseVersion}.{windowsSuffix}-{variant}.zip";
+
+        string primaryName = PreferredAssetName(baseVersion, windowsSuffix, variant);
+        if (release.Assets.TryGetValue(primaryName, out asset))
+        {
+            assetName = primaryName;
+            return true;
+        }
+
+        string? secondaryName = windowsSuffix == "1" ? suffixedAssetName
+            : !string.IsNullOrEmpty(windowsSuffix) ? baseAssetName
+            : null;
+        if (secondaryName is not null && release.Assets.TryGetValue(secondaryName, out asset))
+        {
+            assetName = secondaryName;
+            return true;
+        }
+
+        string? matchedName = null;
+        foreach (string candidateName in release.Assets.Keys)
+        {
+            if (IsVariantAssetMatch(candidateName, baseVersion, variant)
+                && (matchedName is null || StringComparer.Ordinal.Compare(candidateName, matchedName) < 0))
+            {
+                matchedName = candidateName;
+            }
+        }
+
+        if (matchedName is not null && release.Assets.TryGetValue(matchedName, out asset))
+        {
+            assetName = matchedName;
+            return true;
+        }
+
+        assetName = primaryName;
+        asset = null;
+        return false;
+    }
+
+    private static string PreferredAssetName(string baseVersion, string windowsSuffix, string variant) =>
+        string.IsNullOrEmpty(windowsSuffix) || windowsSuffix == "1"
+            ? $"MinGit-{baseVersion}-{variant}.zip"
+            : $"MinGit-{baseVersion}.{windowsSuffix}-{variant}.zip";
+
+    private static bool IsVariantAssetMatch(string candidateName, string baseVersion, string variant)
+    {
+        string prefix = $"MinGit-{baseVersion}";
+        string suffix = $"-{variant}.zip";
+        if (candidateName.Length < prefix.Length + suffix.Length
+            || !candidateName.StartsWith(prefix, StringComparison.Ordinal)
+            || !candidateName.EndsWith(suffix, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        ReadOnlySpan<char> middle = candidateName.AsSpan(
+            prefix.Length,
+            candidateName.Length - prefix.Length - suffix.Length);
+        return middle.IsEmpty || (middle.Length >= 2 && middle[0] == '.' && AllAsciiDigits(middle[1..]));
+    }
+
+    private static bool AllAsciiDigits(ReadOnlySpan<char> chars)
+    {
+        foreach (char ch in chars)
+        {
+            if (!char.IsAsciiDigit(ch))
+                return false;
+        }
+        return true;
     }
 
     private static string RequiredString(JsonElement parent, string name) =>
