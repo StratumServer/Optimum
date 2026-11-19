@@ -39,16 +39,22 @@ try {
     if ($merged.runtimeOptions.configProperties.keep -ne $true) {
         throw 'The launcher runtimeconfig properties were not preserved.'
     }
-    if ($merged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.DATAs' -ne 1) {
-        throw 'The launcher runtimeconfig Server/Concurrent/DATAs GC properties were not configured.'
+    if ($merged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $merged.runtimeOptions.configProperties.'System.GC.DynamicAdaptationMode' -ne 1) {
+        throw 'The launcher runtimeconfig Server/Concurrent/DynamicAdaptationMode GC properties were not configured.'
+    }
+    if ($merged.runtimeOptions.configProperties.PSObject.Properties['System.GC.DATAs'] -ne $null) {
+        throw 'The unused System.GC.DATAs property must not be present in the launcher runtimeconfig.'
     }
     if ($merged.runtimeOptions.configProperties.'System.Runtime.TieredPGO' -ne $true) {
         throw 'The launcher runtimeconfig TieredPGO property was not configured.'
     }
 
     $vanillaMerged = Get-Content -Raw -LiteralPath $vanillaPath | ConvertFrom-Json
-    if ($vanillaMerged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.DATAs' -ne 1) {
-        throw 'The vanilla runtimeconfig Server/Concurrent/DATAs GC properties were not configured.'
+    if ($vanillaMerged.runtimeOptions.configProperties.'System.GC.Server' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.Concurrent' -ne $true -or $vanillaMerged.runtimeOptions.configProperties.'System.GC.DynamicAdaptationMode' -ne 1) {
+        throw 'The vanilla runtimeconfig Server/Concurrent/DynamicAdaptationMode GC properties were not configured.'
+    }
+    if ($vanillaMerged.runtimeOptions.configProperties.PSObject.Properties['System.GC.DATAs'] -ne $null) {
+        throw 'The unused System.GC.DATAs property must not be present in the vanilla runtimeconfig.'
     }
 
     $before = Get-Content -Raw -LiteralPath $launcherPath

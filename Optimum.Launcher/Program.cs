@@ -1012,8 +1012,10 @@ public static class Program
 
     /// <summary>
     /// Calibrates DATAS and GC memory limits based on available physical RAM or user memory profile.
-    /// On machines with 8 GB RAM or less (or with --optimum-memory-profile=aggressive), DATAS is disabled
-    /// and HighMemoryPercent is bounded to prevent swap thrashing and over-allocation.
+    /// Keeps DATAS enabled (System.GC.DynamicAdaptationMode=1) so Server GC adapts heap count to the
+    /// live working set, removes the legacy unused System.GC.DATAs key if present, and on machines with
+    /// 8 GB RAM or less (or with --optimum-memory-profile=aggressive) bounds HighMemoryPercent to 75
+    /// to trigger reclamation earlier and avoid swap thrashing.
     /// </summary>
     public static void CalibrateRuntimeConfigForMemory(string gameDir, string[]? args = null)
     {
@@ -1069,18 +1071,19 @@ public static class Program
                     modified = true;
                 }
 
+                if (cfg.ContainsKey("System.GC.DATAs"))
+                {
+                    cfg.Remove("System.GC.DATAs");
+                    modified = true;
+                }
+                if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 1)
+                {
+                    cfg["System.GC.DynamicAdaptationMode"] = 1;
+                    modified = true;
+                }
+
                 if (isLowMemory)
                 {
-                    if (cfg.ContainsKey("System.GC.DATAs"))
-                    {
-                        cfg.Remove("System.GC.DATAs");
-                        modified = true;
-                    }
-                    if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 0)
-                    {
-                        cfg["System.GC.DynamicAdaptationMode"] = 0;
-                        modified = true;
-                    }
                     if (!cfg.ContainsKey("System.GC.HighMemoryPercent") || cfg["System.GC.HighMemoryPercent"]?.GetValue<int>() != 75)
                     {
                         cfg["System.GC.HighMemoryPercent"] = 75;
@@ -1089,19 +1092,9 @@ public static class Program
                 }
                 else
                 {
-                    if (cfg.ContainsKey("System.GC.DynamicAdaptationMode"))
-                    {
-                        cfg.Remove("System.GC.DynamicAdaptationMode");
-                        modified = true;
-                    }
                     if (cfg.ContainsKey("System.GC.HighMemoryPercent"))
                     {
                         cfg.Remove("System.GC.HighMemoryPercent");
-                        modified = true;
-                    }
-                    if (!cfg.ContainsKey("System.GC.DATAs") || cfg["System.GC.DATAs"]?.GetValue<int>() != 1)
-                    {
-                        cfg["System.GC.DATAs"] = 1;
                         modified = true;
                     }
                 }
@@ -1109,7 +1102,7 @@ public static class Program
                 if (modified)
                 {
                     File.WriteAllText(cfgPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
-                    Logger.Log($"[Optimum] Calibrated GC configuration in {Path.GetFileName(cfgPath)} for {(isLowMemory ? "low-RAM (DynamicAdaptationMode=0, HighMemoryPercent=75)" : "standard (DATAs=1)")}.");
+                    Logger.Log($"[Optimum] Calibrated GC configuration in {Path.GetFileName(cfgPath)} for {(isLowMemory ? "low-RAM (DynamicAdaptationMode=1, HighMemoryPercent=75)" : "standard (DynamicAdaptationMode=1)")}.");
                 }
             }
         }

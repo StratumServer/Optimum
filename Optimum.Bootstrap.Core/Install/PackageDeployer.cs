@@ -596,14 +596,15 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                     modified = true;
                 }
 
+                if (cfg.ContainsKey("System.GC.DATAs")) { cfg.Remove("System.GC.DATAs"); modified = true; }
+                if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 1)
+                {
+                    cfg["System.GC.DynamicAdaptationMode"] = 1;
+                    modified = true;
+                }
+
                 if (isLowMemory)
                 {
-                    if (cfg.ContainsKey("System.GC.DATAs")) { cfg.Remove("System.GC.DATAs"); modified = true; }
-                    if (!cfg.ContainsKey("System.GC.DynamicAdaptationMode") || cfg["System.GC.DynamicAdaptationMode"]?.GetValue<int>() != 0)
-                    {
-                        cfg["System.GC.DynamicAdaptationMode"] = 0;
-                        modified = true;
-                    }
                     if (!cfg.ContainsKey("System.GC.HighMemoryPercent") || cfg["System.GC.HighMemoryPercent"]?.GetValue<int>() != 75)
                     {
                         cfg["System.GC.HighMemoryPercent"] = 75;
@@ -612,13 +613,7 @@ public sealed class PackageDeployer(ISystemProbe probe) : IPackageInstaller
                 }
                 else
                 {
-                    if (cfg.ContainsKey("System.GC.DynamicAdaptationMode")) { cfg.Remove("System.GC.DynamicAdaptationMode"); modified = true; }
                     if (cfg.ContainsKey("System.GC.HighMemoryPercent")) { cfg.Remove("System.GC.HighMemoryPercent"); modified = true; }
-                    if (!cfg.ContainsKey("System.GC.DATAs") || cfg["System.GC.DATAs"]?.GetValue<int>() != 1)
-                    {
-                        cfg["System.GC.DATAs"] = 1;
-                        modified = true;
-                    }
                 }
 
                 if (modified)
