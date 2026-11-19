@@ -431,6 +431,12 @@ public static class ModPatcher
                     "optimumLastSlotHeightMuls",
                     "UpdateOptimumVisualState",
                 ],
+                ["Vintagestory.GameContent.BlockEntityFruitPress"] =
+                [
+                    "optimumCachedBucketStack",
+                    "optimumCachedBucketContentSize",
+                    "optimumCachedBucketMeshKey",
+                ],
             },
             Interfaces: new()
             {
@@ -540,6 +546,8 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockEntityOven", "Initialize", 1),
                 new("Vintagestory.GameContent.BlockEntityOven", "FromTreeAttributes", 2),
                 new("Vintagestory.GameContent.BlockEntityRiftWard", "FromTreeAttributes", 2),
+                new("Vintagestory.GameContent.BlockEntityFruitPress", "onTick100msServer", 1),
+                new("Vintagestory.GameContent.BlockEntityFruitPress", "genBucketMesh", 0),
             ]);
     }
 

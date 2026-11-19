@@ -1,0 +1,78 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFruitPress.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFruitPress.cs
+index 03a2ed5..9aee479 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFruitPress.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityFruitPress.cs
+@@ -35,6 +35,12 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 
+ 	private MeshData bucketMeshTmp;
+ 
++	private ItemStack optimumCachedBucketStack;
++
++	private int optimumCachedBucketContentSize;
++
++	private string optimumCachedBucketMeshKey;
++
+ 	private FruitpressContentsRenderer renderer;
+ 
+ 	private AnimationMetaData compressAnimMeta = new AnimationMetaData
+@@ -282,6 +288,7 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 			ItemStack resolvedItemstack = juiceableProps.LiquidStack.ResolvedItemstack;
+ 			resolvedItemstack.StackSize = 999999;
+ 			float num3;
++			bool redrawOnClient = false;
+ 			if (blockLiquidContainerBase != null && !blockLiquidContainerBase.IsFull(BucketSlot.Itemstack))
+ 			{
+ 				float currentLitres = blockLiquidContainerBase.GetCurrentLitres(BucketSlot.Itemstack);
+@@ -290,6 +297,7 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 					blockLiquidContainerBase.TryPutLiquid(BucketSlot.Itemstack, resolvedItemstack, (float)num2);
+ 				}
+ 				num3 = blockLiquidContainerBase.GetCurrentLitres(BucketSlot.Itemstack) - currentLitres;
++				redrawOnClient = num3 > 0f;
+ 			}
+ 			else
+ 			{
+@@ -299,7 +307,7 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 			squeezedLitresLeft -= ((pressSqueezeRel <= num) ? num3 : (num3 * 100f));
+ 			juiceableLitresTransfered += num3;
+ 			lastLiquidTransferTotalHours = totalHours;
+-			MarkDirty(redrawOnClient: true);
++			MarkDirty(redrawOnClient);
+ 		}
+ 		else if (Api.Side == EnumAppSide.Server && (!CompressAnimActive || juiceableLitresLeft <= 0.0))
+ 		{
+@@ -838,11 +846,24 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 		if (BucketSlot.Empty || capi == null)
+ 		{
+ 			bucketMesh?.Clear();
++			optimumCachedBucketStack = null;
++			optimumCachedBucketContentSize = -1;
++			optimumCachedBucketMeshKey = null;
+ 			return;
+ 		}
+-		IContainedMeshSource containedMeshSource = BucketSlot.Itemstack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
++		ItemStack itemstack = BucketSlot.Itemstack;
++		IContainedMeshSource containedMeshSource = itemstack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
+ 		if (containedMeshSource != null)
+ 		{
++			BlockLiquidContainerBase blockLiquidContainerBase = itemstack.Collectible as BlockLiquidContainerBase;
++			ItemStack itemStack = blockLiquidContainerBase?.GetContent(itemstack);
++			int num = ((itemStack != null) ? itemStack.StackSize : (-1));
++			bool flag = blockLiquidContainerBase == null || (containedMeshSource.GetType() != typeof(BlockBucket) && containedMeshSource.GetType() != typeof(BlockLiquidContainerTopOpened));
++			string text = (flag ? containedMeshSource.GetMeshCacheKey(BucketSlot) : null);
++			if (bucketMesh != null && bucketMesh.VerticesCount > 0 && optimumCachedBucketStack != null && optimumCachedBucketContentSize == num && itemstack.StackSize == optimumCachedBucketStack.StackSize && itemstack.Equals(capi.World, optimumCachedBucketStack, GlobalConstants.IgnoredStackAttributes) && (!flag || string.Equals(optimumCachedBucketMeshKey, text, StringComparison.Ordinal)))
++			{
++				return;
++			}
+ 			bucketMeshTmp = containedMeshSource.GenMesh(BucketSlot, capi.BlockTextureAtlas, Pos);
+ 			bucketMeshTmp.CustomInts = new CustomMeshDataPartInt(bucketMeshTmp.FlagsCount);
+ 			bucketMeshTmp.CustomInts.Count = bucketMeshTmp.FlagsCount;
+@@ -850,6 +871,9 @@ public class BlockEntityFruitPress : BlockEntityContainer
+ 			bucketMeshTmp.CustomFloats = new CustomMeshDataPartFloat(bucketMeshTmp.FlagsCount * 2);
+ 			bucketMeshTmp.CustomFloats.Count = bucketMeshTmp.FlagsCount * 2;
+ 			bucketMesh = bucketMeshTmp.Clone();
++			optimumCachedBucketStack = itemstack.Clone();
++			optimumCachedBucketContentSize = num;
++			optimumCachedBucketMeshKey = text;
+ 		}
+ 	}
+ }

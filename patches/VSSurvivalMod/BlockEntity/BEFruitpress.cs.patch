@@ -1,0 +1,105 @@
+diff --git a/VSSurvivalMod/BlockEntity/BEFruitpress.cs b/VSSurvivalMod/BlockEntity/BEFruitpress.cs
+index d216dd7..88601a6 100644
+--- a/VSSurvivalMod/BlockEntity/BEFruitpress.cs
++++ b/VSSurvivalMod/BlockEntity/BEFruitpress.cs
+@@ -88,10 +88,14 @@ namespace Vintagestory.GameContent
+ 
+         MeshData meshMovable;
+         MeshData bucketMesh;
+         MeshData bucketMeshTmp;
+ 
++        private ItemStack optimumCachedBucketStack;
++        private int optimumCachedBucketContentSize;
++        private string optimumCachedBucketMeshKey;
++
+         FruitpressContentsRenderer renderer;
+ 
+ 
+         AnimationMetaData compressAnimMeta = new AnimationMetaData()
+         {
+@@ -285,10 +289,11 @@ namespace Vintagestory.GameContent
+             if (Api.Side == EnumAppSide.Server && juiceProps != null && squeezedLitresLeft > 0)
+             {
+                 ItemStack liquidStack = juiceProps.LiquidStack.ResolvedItemstack;
+                 liquidStack.StackSize = 999999;
+                 float actuallyTransfered;
++                bool bucketChanged = false;
+ 
+                 if (cntBlock != null && !cntBlock.IsFull(BucketSlot.Itemstack))
+                 {
+                     float beforelitres = cntBlock.GetCurrentLitres(BucketSlot.Itemstack);
+ 
+@@ -297,20 +302,21 @@ namespace Vintagestory.GameContent
+                         cntBlock.TryPutLiquid(BucketSlot.Itemstack, liquidStack, (float)litresToTransfer);
+                     }
+ 
+                     float litres = cntBlock.GetCurrentLitres(BucketSlot.Itemstack);
+                     actuallyTransfered = litres - beforelitres;
++                    bucketChanged = actuallyTransfered > 0f;
+                 } else
+                 {
+                     actuallyTransfered = (float)litresToTransfer;
+                 }
+ 
+                 juiceableLitresLeft -= actuallyTransfered;
+                 squeezedLitresLeft -= pressSqueezeRel <= squeezeRel ? actuallyTransfered : (actuallyTransfered * 100); // Let the mash drain less if screw is released.
+                 juiceableLitresTransfered += actuallyTransfered;
+                 lastLiquidTransferTotalHours = totalHours;
+-                MarkDirty(true);
++                MarkDirty(bucketChanged);
+             }
+             else if (Api.Side == EnumAppSide.Server && (!CompressAnimActive || juiceableLitresLeft <= 0))
+             {
+                 UnregisterGameTickListener(listenerId);
+                 listenerId = 0;
+@@ -923,25 +929,49 @@ namespace Vintagestory.GameContent
+         private void genBucketMesh()
+         {
+             if (BucketSlot.Empty || capi == null)
+             {
+                 bucketMesh?.Clear();
++                optimumCachedBucketStack = null;
++                optimumCachedBucketContentSize = -1;
++                optimumCachedBucketMeshKey = null;
+                 return;
+             }
+ 
+-            IContainedMeshSource meshSource = BucketSlot.Itemstack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
++            ItemStack bucketStack = BucketSlot.Itemstack;
++            IContainedMeshSource meshSource = bucketStack.Collectible?.GetCollectibleInterface<IContainedMeshSource>();
+             if (meshSource != null)
+             {
++                BlockLiquidContainerBase cntBlock = bucketStack.Collectible as BlockLiquidContainerBase;
++                ItemStack contentStack = cntBlock?.GetContent(bucketStack);
++                int contentStackSize = contentStack != null ? contentStack.StackSize : -1;
++                bool useMeshKey = cntBlock == null || (meshSource.GetType() != typeof(BlockBucket) && meshSource.GetType() != typeof(BlockLiquidContainerTopOpened));
++                string meshKey = useMeshKey ? meshSource.GetMeshCacheKey(BucketSlot) : null;
++
++                if (bucketMesh != null
++                    && bucketMesh.VerticesCount > 0
++                    && optimumCachedBucketStack != null
++                    && optimumCachedBucketContentSize == contentStackSize
++                    && bucketStack.StackSize == optimumCachedBucketStack.StackSize
++                    && bucketStack.Equals(capi.World, optimumCachedBucketStack, GlobalConstants.IgnoredStackAttributes)
++                    && (!useMeshKey || string.Equals(optimumCachedBucketMeshKey, meshKey, StringComparison.Ordinal)))
++                {
++                    return;
++                }
++
+                 bucketMeshTmp = meshSource.GenMesh(BucketSlot, capi.BlockTextureAtlas, Pos);
+                 // Liquid mesh part
+                 bucketMeshTmp.CustomInts = new CustomMeshDataPartInt(bucketMeshTmp.FlagsCount);
+                 bucketMeshTmp.CustomInts.Count = bucketMeshTmp.FlagsCount;
+                 bucketMeshTmp.CustomInts.Values.Fill(VertexFlags.LiquidWeakFoamBitMask); // light foam only
+ 
+                 bucketMeshTmp.CustomFloats = new CustomMeshDataPartFloat(bucketMeshTmp.FlagsCount * 2);
+                 bucketMeshTmp.CustomFloats.Count = bucketMeshTmp.FlagsCount * 2;
+ 
+                 bucketMesh = bucketMeshTmp.Clone();
++                optimumCachedBucketStack = bucketStack.Clone();
++                optimumCachedBucketContentSize = contentStackSize;
++                optimumCachedBucketMeshKey = meshKey;
+             }
+         }
+     }
+ }
