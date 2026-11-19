@@ -1164,6 +1164,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ClientMain", "DestroyGameSession", 2),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleWorldMetaData", 1),
     // Issue #482: pass SelectiveElements and QuantityElements in CreateMesh
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "PrepareToLoadShapes", 0),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "CreateMesh", 4),
     // Issue #467: restore multi-threaded TargetSet partitioning in LoadBlockShapes
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "LoadBlockShapes", 1),
