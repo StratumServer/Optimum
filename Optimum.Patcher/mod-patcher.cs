@@ -379,6 +379,42 @@ public static class ModPatcher
                     "optimumTmpPos",
                     "GetWindLock",
                 ],
+                ["Vintagestory.GameContent.BlockBehaviorDoor"] =
+                [
+                    "animatableOpenedOrigMesh",
+                ],
+                ["Vintagestory.GameContent.BlockBehaviorTrapDoor"] =
+                [
+                    "animatableOpenedOrigMesh",
+                ],
+                ["Vintagestory.GameContent.BEBehaviorDoor"] =
+                [
+                    "optimumBakeState",
+                    "GetOrCreateOptimumBakeState",
+                    "CreateOptimumOpenedMeta",
+                    "IsOptimumDoorOpened",
+                    "ExecuteOptimumFallbackRestore",
+                    "BuildOptimumOpenedMesh",
+                ],
+                ["Vintagestory.GameContent.BEBehaviorTrapDoor"] =
+                [
+                    "optimumBakeState",
+                    "GetOrCreateOptimumBakeState",
+                    "CreateOptimumOpenedMeta",
+                    "IsOptimumDoorOpened",
+                    "ExecuteOptimumFallbackRestore",
+                    "BuildOptimumOpenedMesh",
+                ],
+                ["Vintagestory.GameContent.BEBehaviorCabinetDoors"] =
+                [
+                    "optimumBakeState",
+                    "optimumSkipEnsureAnimUpdate",
+                    "GetOrCreateOptimumBakeState",
+                    "CreateOptimumOpenedMeta",
+                    "IsOptimumDoorOpened",
+                    "ExecuteOptimumFallbackRestore",
+                    "BuildOptimumOpenedMesh",
+                ],
             },
             Interfaces: new()
             {
@@ -464,6 +500,21 @@ public static class ModPatcher
                 new("Vintagestory.GameContent.BlockMaterialFromAttributes", "GetOrCreateMesh", 2),
                 new("Vintagestory.GameContent.BlockShapeMaterialFromAttributes", "GetOrCreateMesh", 4),
                 new("Vintagestory.GameContent.BlockShapeMaterialFromAttributes", "OnBeforeRender", 4),
+                new("Vintagestory.GameContent.BEBehaviorDoor", "Initialize", 2),
+                new("Vintagestory.GameContent.BEBehaviorDoor", "UpdateMeshAndAnimations", 0),
+                new("Vintagestory.GameContent.BEBehaviorDoor", "ToggleDoorWing", 1),
+                new("Vintagestory.GameContent.BEBehaviorDoor", "OnTesselation", 2),
+                new("Vintagestory.GameContent.BEBehaviorDoor", "FromTreeAttributes", 2),
+                new("Vintagestory.GameContent.BEBehaviorTrapDoor", "Initialize", 2),
+                new("Vintagestory.GameContent.BEBehaviorTrapDoor", "UpdateMeshAndAnimations", 0),
+                new("Vintagestory.GameContent.BEBehaviorTrapDoor", "ToggleDoorWing", 1),
+                new("Vintagestory.GameContent.BEBehaviorTrapDoor", "OnTesselation", 2),
+                new("Vintagestory.GameContent.BEBehaviorTrapDoor", "FromTreeAttributes", 2),
+                new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "Initialize", 2),
+                new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "updateAnimationState", 0),
+                new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "OnBlockInteractStart", 4),
+                new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "OnTesselation", 2),
+                new("Vintagestory.GameContent.BEBehaviorCabinetDoors", "ensureMeshExists", 1),
             ]);
     }
 

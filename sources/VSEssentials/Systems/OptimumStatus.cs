@@ -468,6 +468,7 @@ public class OptimumStatusModSystem : ModSystem
         sb.AppendLine(OptimumDiagnostics.GetShadowFarReuseSummary());
         sb.AppendLine(OptimumDiagnostics.GetDynamicRenderScaleSummary());
         sb.AppendLine(OptimumDiagnostics.GetCommonNatFloatSummary());
+        sb.AppendLine(OptimumDiagnostics.GetOpenDoorBakeSummary());
         sb.Append(OptimumDiagnostics.GetGreedyMeshSummary());
         return sb.ToString();
     }
@@ -543,6 +544,8 @@ public class OptimumStatusModSystem : ModSystem
                 OptimumConfig.DynamicRenderScaleUpscaler);
         if (OptimumConfig.ReuseCommonNatFloatEnabled)
             api.Logger.Debug("[Optimum] Common NatFloat reuse: ON");
+        if (OptimumConfig.BakeOpenDoorsEnabled)
+            api.Logger.Debug("[Optimum] Open door static mesh bake: ON");
 
         if (OptimumConfig.OptiTimeDetected)
             api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);
