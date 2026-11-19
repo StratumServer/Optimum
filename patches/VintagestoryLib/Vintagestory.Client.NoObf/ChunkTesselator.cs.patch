@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 42fad1f..52090a4 100644
+index 42fad1f..a93104f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -294,7 +294,7 @@ index 42fad1f..52090a4 100644
  			{
  				throw;
  			}
-@@ -426,21 +517,68 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -426,19 +517,101 @@ public class ChunkTesselator : IMeshPoolSupplier
  			if (dictionary != null)
  			{
  				BuildDecorPolygons(chunkX, chunkY, chunkZ, dictionary, skipChunkCenter);
@@ -305,11 +305,11 @@ index 42fad1f..52090a4 100644
  			if (!skipChunkCenter)
  			{
  				num += populateTesselatedChunkPart(centerModeldataByRenderPassByLodLevel, out tessChunk.centerParts);
-+				num += populateTesselatedChunkPart(centerOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] centerOptimumChiselParts, true);
++				num += populateOptimumChiselTesselatedChunkPart(centerOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] centerOptimumChiselParts);
 +				tessChunk.centerParts = MergeTesselatedChunkParts(tessChunk.centerParts, centerOptimumChiselParts);
  			}
  			num += populateTesselatedChunkPart(edgeModeldataByRenderPassByLodLevel, out tessChunk.edgeParts);
-+			num += populateTesselatedChunkPart(edgeOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] edgeOptimumChiselParts, true);
++			num += populateOptimumChiselTesselatedChunkPart(edgeOptimumChiselModeldataByRenderPassByLodLevel, out TesselatedChunkPart[] edgeOptimumChiselParts);
 +			tessChunk.edgeParts = MergeTesselatedChunkParts(tessChunk.edgeParts, edgeOptimumChiselParts);
  			tessChunk.SetBounds(vars.xMin, vars.xMax, vars.yMin, vars.yMax, vars.zMin, vars.zMax);
 +			if (OptimumDiagnostics.MeshProfileEnabled)
@@ -356,15 +356,47 @@ index 42fad1f..52090a4 100644
 +		Array.Copy(second, 0, merged, first.Length, second.Length);
 +		return merged;
 +	}
++
++	private int populateOptimumChiselTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
++	{
++		bool hasVertices = false;
++		EnumChunkRenderPass[] array = passes;
++		for (int i = 0; i < array.Length && !hasVertices; i++)
++		{
++			int passIndex = (int)array[i];
++			for (int j = 0; j < quantityAtlasses; j++)
++			{
++				if (modeldataByRenderPassByLodLevel[0][passIndex][j].VerticesCount
++					+ modeldataByRenderPassByLodLevel[1][passIndex][j].VerticesCount
++					+ modeldataByRenderPassByLodLevel[2][passIndex][j].VerticesCount
++					+ modeldataByRenderPassByLodLevel[3][passIndex][j].VerticesCount > 0)
++				{
++					hasVertices = true;
++					break;
++				}
++			}
++		}
++		if (!hasVertices)
++		{
++			tessChunkParts = emptyParts;
++			return 0;
++		}
++		int verticesCount = populateTesselatedChunkPart(modeldataByRenderPassByLodLevel, out tessChunkParts);
++		if (tessChunkParts != null)
++		{
++			for (int i = 0; i < tessChunkParts.Length; i++)
++			{
++				tessChunkParts[i].optimumUseChiselLodDistance = true;
++			}
++		}
++		return verticesCount;
++	}
  
--	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
-+	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts, bool optimumUseChiselLodDistance = false)
+ 	private int populateTesselatedChunkPart(MeshData[][][] modeldataByRenderPassByLodLevel, out TesselatedChunkPart[] tessChunkParts)
  	{
  		int num = 0;
  		int num2 = 0;
- 		MeshData.Recycler.DoRecycling();
- 		EnumChunkRenderPass[] array = passes;
-@@ -456,18 +594,34 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -456,17 +629,32 @@ public class ChunkTesselator : IMeshPoolSupplier
  				int verticesCount2 = meshData2.VerticesCount;
  				int verticesCount3 = meshData3.VerticesCount;
  				int verticesCount4 = meshData4.VerticesCount;
@@ -392,19 +424,16 @@ index 42fad1f..52090a4 100644
 -						modelDataLod1 = ((verticesCount2 == 0) ? null : meshData2.CloneUsingRecycler()),
 -						modelDataNotLod2Far = ((verticesCount3 == 0) ? null : meshData3.CloneUsingRecycler()),
 -						modelDataLod2Far = ((verticesCount4 == 0) ? null : meshData4.CloneUsingRecycler()),
--						pass = enumChunkRenderPass
 +						modelDataLod0 = __cl0,
 +						modelDataLod1 = __cl1,
 +						modelDataNotLod2Far = __cl2,
 +						modelDataLod2Far = __cl3,
-+						pass = enumChunkRenderPass,
-+						optimumUseChiselLodDistance = optimumUseChiselLodDistance
+ 						pass = enumChunkRenderPass
  					};
  					num2 += verticesCount + verticesCount2;
  				}
  			}
- 		}
-@@ -489,20 +643,26 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -489,20 +677,26 @@ public class ChunkTesselator : IMeshPoolSupplier
  	public bool CalculateVisibleFaces(bool skipChunkCenter, int baseX, int baseY, int baseZ)
  	{
  		byte[] array = currentChunkDraw32;
@@ -432,7 +461,7 @@ index 42fad1f..52090a4 100644
  						array[num2 + k] = 0;
  					}
  					else
-@@ -715,12 +875,22 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -715,12 +909,22 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				currentChunkDraw32[i] &= 223;
  				currentChunkDrawFluids[i] &= 223;
@@ -455,7 +484,7 @@ index 42fad1f..52090a4 100644
  		{
  			int num5 = (j + 1) * 34 + 1;
  			tCTCache.posY = num + j;
-@@ -731,20 +901,23 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -731,20 +935,23 @@ public class ChunkTesselator : IMeshPoolSupplier
  			do
  			{
  				tCTCache.lz = num7;
@@ -479,7 +508,7 @@ index 42fad1f..52090a4 100644
  			while (++num7 < 32);
  		}
  	}
-@@ -761,10 +934,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -761,10 +968,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				currentChunkDraw32[i] &= 223;
  			}
@@ -491,7 +520,7 @@ index 42fad1f..52090a4 100644
  		for (int j = 0; j < 32; j++)
  		{
  			int num5 = (j + 1) * 34 + 1;
-@@ -838,18 +1012,20 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -838,18 +1046,20 @@ public class ChunkTesselator : IMeshPoolSupplier
  			int num7 = num5 / 32 / 32;
  			int num8 = num5 / 32 % 32;
  			if (num6 * (num6 ^ num) * num7 * (num7 ^ num) * num8 * (num8 ^ num) == 0)
@@ -512,7 +541,7 @@ index 42fad1f..52090a4 100644
  			tCTCache.index3d = num5;
  			Vec3i normali = blockFacing.Normali;
  			num7 += normali.Y;
-@@ -859,11 +1035,11 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -859,11 +1069,11 @@ public class ChunkTesselator : IMeshPoolSupplier
  			tCTCache.posY = num3 + num7;
  			tCTCache.posZ = num4 + num8;
  			tCTCache.finalY = num7;
@@ -525,7 +554,7 @@ index 42fad1f..52090a4 100644
  			tCTCache.lz = num8;
  			int faceflags = 63 - blockFacing.Opposite.Flag;
  			tCTCache.decorSubPosition = DecorBits.SubpositionFromIndex(key);
-@@ -927,20 +1103,31 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -927,20 +1137,31 @@ public class ChunkTesselator : IMeshPoolSupplier
  			{
  				tCTCache.preRotationMatrix = null;
  			}
@@ -563,7 +592,7 @@ index 42fad1f..52090a4 100644
  			tCTCache.decorRotationData = 0;
  			tCTCache.preRotationMatrix = null;
  		}
-@@ -1013,16 +1200,21 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -1013,16 +1234,21 @@ public class ChunkTesselator : IMeshPoolSupplier
  		vars.lx = lX;
  		vars.finalX = lX;
  		vars.finalY = vars.ly;
@@ -587,7 +616,7 @@ index 42fad1f..52090a4 100644
  		if (block.RandomDrawOffset != 0)
  		{
  			vars.finalX += (float)(GameMath.oaatHash(posX, 0, posZ) % 12) / (24f + 12f * (float)block.RandomDrawOffset);
-@@ -1097,93 +1289,169 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -1097,93 +1323,169 @@ public class ChunkTesselator : IMeshPoolSupplier
  		}
  	}
  
@@ -645,14 +674,14 @@ index 42fad1f..52090a4 100644
 +			curChunk.MarkFresh();
 +			ClientChunkData clientChunkData = (ClientChunkData)curChunk.Data;
 +			if (clientChunkData == null)
-+			{
+ 			{
+-				for (int j = 0; j < 32; j++)
 +				throw new RetryTesselationException("Center chunk data null during tessellation");
 +			}
 +			clientChunkData.BuildFastBlockAccessArray(blocksFast);
 +			chunkdatasNearby[13] = clientChunkData;
 +			if (skipChunkCenter)
- 			{
--				for (int j = 0; j < 32; j++)
++			{
 +				for (int i = 0; i < 32; i++)
  				{
 -					num6 = (i * 34 + j) * 34 + num5;
@@ -738,15 +767,15 @@ index 42fad1f..52090a4 100644
 -				num12 += 9;
 -				if (num12 == 13)
 +				if (nbChunk.Disposed)
-+				{
+ 				{
+-					num6 += 32;
 +					throw new RetryTesselationException("Neighbor chunk disposed during border copy");
 +				}
 +				nbChunk.Unpack();
 +				nbChunk.MarkFresh();
 +				ClientChunkData nbData = (ClientChunkData)nbChunk.Data;
 +				if (nbData == null)
- 				{
--					num6 += 32;
++				{
 +					throw new RetryTesselationException("Neighbor chunk data null during border copy");
 +				}
 +				if (xBand == 0)
@@ -811,7 +840,7 @@ index 42fad1f..52090a4 100644
  		for (int num13 = 0; num13 < currentChunkBlocksExt.Length; num13++)
  		{
  			if (currentChunkBlocksExt[num13] == null)
-@@ -1194,16 +1462,17 @@ public class ChunkTesselator : IMeshPoolSupplier
+@@ -1194,16 +1496,17 @@ public class ChunkTesselator : IMeshPoolSupplier
  	}
  
  	[MethodImpl(MethodImplOptions.AggressiveInlining)]

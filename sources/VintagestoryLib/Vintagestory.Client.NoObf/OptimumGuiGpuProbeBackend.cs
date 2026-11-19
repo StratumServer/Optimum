@@ -292,6 +292,14 @@ namespace Vintagestory.Client.NoObf
 						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
 							"empty-surface", out candidateTexture, out failureReason);
 					}
+					// A managed recording surface that a worker thread already rasterized and
+					// flushed (such as a mod's background HUD canvas) has its pixels ready in memory
+					// for direct CPU texture upload without touching Ganesh or downgrading GPU GUI.
+					if (surface.IsFlushedCrossThreadSurface)
+					{
+						failureReason = "flushed-cross-thread-surface";
+						return false;
+					}
 					if (ForceSkiaCpuPreflightFallbackForTest)
 					{
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();

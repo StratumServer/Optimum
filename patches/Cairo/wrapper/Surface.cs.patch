@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..e8e11c9 100644
+index 6f7730e..70e6a44 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,660 @@
+@@ -32,37 +32,692 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -28,6 +28,7 @@ index 6f7730e..e8e11c9 100644
 +		Surface aliasOwner;
 +		readonly object recordingSync = new object ();
 +		Thread recordingOwnerThread;
++		bool recordingFlushedForHandoff;
 +		Context nativeRecordingContext;
 +        WeakReference<Context> managedRecordingContext;
 +        Context recordingContext {
@@ -63,12 +64,12 @@ index 6f7730e..e8e11c9 100644
 +
 +		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly)
 +			: this (handle, owner, recordingCandidate, managedOnly, Status.Success)
- 		{
--			if (handle == IntPtr.Zero)
++		{
 +		}
 +
 +		protected Surface (IntPtr handle, bool owner, bool recordingCandidate, bool managedOnly, Status managedStatus = Status.Success)
-+		{
+ 		{
+-			if (handle == IntPtr.Zero)
 +			if (handle == IntPtr.Zero && !managedOnly)
  				throw new ArgumentException ("handle should not be NULL", "handle");
 +			if (handle != IntPtr.Zero)
@@ -211,6 +212,7 @@ index 6f7730e..e8e11c9 100644
 +            retained.recorder = recorder;
 +            retained.recorder.MoveSurfaceOwner (retained);
 +            retained.recordingOwnerThread = recordingOwnerThread;
++            retained.recordingFlushedForHandoff = recordingFlushedForHandoff;
 +            retained.recordingContext = recordingContext;
 +            retained.finished = finished;
 +            retained.managedDeviceOffset = managedDeviceOffset;
@@ -250,6 +252,22 @@ index 6f7730e..e8e11c9 100644
 +		internal bool ManagedFinished => aliasOwner != null && managedOnly ? aliasOwner.ManagedFinished : finished;
 +		internal bool HasPendingRecordedCommands => aliasOwner != null && managedOnly
 +			? aliasOwner.HasPendingRecordedCommands : recorder?.HasPendingCommands ?? false;
++		internal bool IsFlushedCrossThreadSurface {
++			get {
++				if (aliasOwner != null && managedOnly) return aliasOwner.IsFlushedCrossThreadSurface;
++				lock (recordingSync) {
++					return managedOnly && recordingFlushedForHandoff && (recorder == null || !recorder.HasPendingCommands)
++						&& !ReferenceEquals (recordingOwnerThread, Thread.CurrentThread);
++				}
++			}
++		}
++		internal bool IsFlushedWithNoPendingCommands ()
++		{
++			if (aliasOwner != null && managedOnly) return aliasOwner.IsFlushedWithNoPendingCommands ();
++			lock (recordingSync) {
++				return managedOnly && recordingFlushedForHandoff && (recorder == null || !recorder.HasPendingCommands);
++			}
++		}
 +		internal void CheckpointRecordedCommandsForPixelAccess ()
 +		{
 +			if (aliasOwner != null && managedOnly) { aliasOwner.CheckpointRecordedCommandsForPixelAccess (); return; }
@@ -518,7 +536,14 @@ index 6f7730e..e8e11c9 100644
 +					NativeMethods.cairo_image_surface_get_format(handle) == Format.Argb32 && NativeMethods.cairo_surface_get_reference_count(handle) == 1) BeginRecording();
 +				if (recorder == null) return false;
 +				if (recorder.State == SurfaceRecordingState.GpuRendered || (managedOnly && recorder.State == SurfaceRecordingState.Sealed)) {
-+					if (!ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) throw new InvalidOperationException("A recording surface may only be modified from its recording thread.");
++					if (!ReferenceEquals(recordingOwnerThread, Thread.CurrentThread)) {
++						if (managedOnly && recordingFlushedForHandoff && !recorder.HasPendingCommands) {
++							recordingOwnerThread = Thread.CurrentThread;
++							recordingFlushedForHandoff = false;
++						} else {
++							throw new InvalidOperationException("A recording surface may only be modified from its recording thread.");
++						}
++					}
 +					recorder.ResumeRecording(permitSealed: managedOnly);
 +				}
 +				if (recorder.GraphicsState.Status != Status.Success) return true;
@@ -654,8 +679,15 @@ index 6f7730e..e8e11c9 100644
 +		{
 +			lock (recordingSync) {
 +				if (recorder != null && recorder.State == SurfaceRecordingState.Recording &&
-+				    !ReferenceEquals (recordingOwnerThread, Thread.CurrentThread))
++				    !ReferenceEquals (recordingOwnerThread, Thread.CurrentThread)) {
++					if (managedOnly && recordingFlushedForHandoff && !recorder.HasPendingCommands) {
++						recordingOwnerThread = Thread.CurrentThread;
++						recordingFlushedForHandoff = false;
++						return;
++					}
 +					throw new InvalidOperationException ("A recording surface may only be used from its recording thread.");
++				}
++				if (managedOnly && recordingFlushedForHandoff) recordingFlushedForHandoff = false;
 +			}
 +		}
 +
@@ -668,7 +700,7 @@ index 6f7730e..e8e11c9 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +710,299 @@ namespace Cairo
+@@ -87,141 +742,305 @@ namespace Cairo
  		}
  
  
@@ -857,7 +889,13 @@ index 6f7730e..e8e11c9 100644
 +            CheckDisposed ();
 +			if (aliasOwner != null && managedOnly) { aliasOwner.Flush (); return; }
  			CheckDisposed ();
-+			if (managedOnly) { if (this is ImageSurface image) image.CheckpointManagedPixels (); return; }
++			if (managedOnly) {
++				if (this is ImageSurface image) image.CheckpointManagedPixels ();
++				lock (recordingSync) {
++					if (!disposed && (recorder == null || !recorder.HasPendingCommands)) recordingFlushedForHandoff = true;
++				}
++				return;
++			}
 +			MaterializeRecorder ();
  			NativeMethods.cairo_surface_flush (handle);
  		}

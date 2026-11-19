@@ -488,6 +488,65 @@ public sealed class CairoSurfaceRecorderTests
 		Assert.Throws<ObjectDisposedException> (() => recorder.FillRectangle (0, 0, 1, 1, 0, 0, 0, 1));
 	}
 
+	[Fact]
+	public void FlushedManagedSurfaceAllowsCrossThreadUploadReuseAndDisposal()
+	{
+		bool previousAutomatic = Surface.AutomaticRecordingEnabled;
+		ImageSurface surface = null;
+		Context context = null;
+		try {
+			Surface.ConfigureAutomaticRecording (true);
+			// Worker A creates surface + persistent Context, paints frame 1 (red), and flushes.
+			Exception workerAFailure = RunOnSeparateThread (() => {
+				surface = new ImageSurface (Format.Argb32, 8, 8);
+				context = new Context (surface);
+				context.Operator = Operator.Source;
+				context.SetSourceRGBA (1, 0, 0, 1);
+				context.Paint ();
+				surface.Flush ();
+			});
+			Assert.Null (workerAFailure);
+			Assert.NotNull (surface);
+			Assert.NotNull (context);
+			Assert.True (surface.IsFlushedCrossThreadSurface);
+
+			// Main thread reads DataPtr (texture upload) without throwing and sees red pixels.
+			byte[] frame1 = new byte[surface.Stride * surface.Height];
+			Marshal.Copy (surface.DataPtr, frame1, 0, frame1.Length);
+			Assert.Equal (255, frame1[(4 * 8 + 4) * 4 + 2]); // R
+			Assert.Equal (0, frame1[(4 * 8 + 4) * 4 + 0]);   // B
+
+			// Worker B (different thread) reuses the same Context to paint frame 2 (blue) without flushing yet:
+			// mid-paint cross-thread access must still be rejected.
+			Exception workerBFailure = RunOnSeparateThread (() => {
+				context.Operator = Operator.Source;
+				context.SetSourceRGBA (0, 0, 1, 1);
+				context.Paint ();
+				Exception midPaintRead = RunOnSeparateThread (() => _ = surface.DataPtr);
+				Assert.IsType<InvalidOperationException> (midPaintRead);
+				surface.Flush ();
+			});
+			Assert.Null (workerBFailure);
+			Assert.True (surface.IsFlushedCrossThreadSurface);
+
+			// Main thread reads updated frame 2 pixels (blue) and disposes Context + Surface cleanly.
+			byte[] frame2 = new byte[surface.Stride * surface.Height];
+			Marshal.Copy (surface.DataPtr, frame2, 0, frame2.Length);
+			Assert.Equal (255, frame2[(4 * 8 + 4) * 4 + 0]); // B
+			Assert.Equal (0, frame2[(4 * 8 + 4) * 4 + 2]);   // R
+
+			context.Dispose ();
+			context = null;
+			surface.Dispose ();
+			Assert.Equal (SurfaceRecordingState.Disposed, surface.RecordingState);
+			surface = null;
+		} finally {
+			context?.Dispose ();
+			surface?.Dispose ();
+			Surface.ConfigureAutomaticRecording (previousAutomatic);
+		}
+	}
+
 	[NativeCairoFact]
 	public void FailedMaterializationIsStableAndDisposalClearsIt()
 	{
