@@ -275,6 +275,8 @@ public static class ApiPatcher
         if (soundAttributePatches != 3) throw new InvalidOperationException($"Expected 3 SoundAttributes patches, applied {soundAttributePatches}.");
         int shapeStringDedupPatches = PatchShapeStringDeduplication(vanilla.MainModule, contracts.MainModule);
         if (shapeStringDedupPatches != 5) throw new InvalidOperationException($"Expected 5 Shape string deduplication patches, applied {shapeStringDedupPatches}.");
+        int treeAttributePatches = PatchTreeAttributeSerialization(vanilla.MainModule, contracts.MainModule);
+        if (treeAttributePatches != 5) throw new InvalidOperationException($"Expected 5 TreeAttribute serialization patches, applied {treeAttributePatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -4724,6 +4726,161 @@ public static class ApiPatcher
         patched++;
 
         Console.WriteLine($"  API PATCHED: Shape / ShapeElement / AttachmentPoint string deduplication ({patched}/5)");
+        return patched;
+    }
+
+    internal static int PatchTreeAttributeSerialization(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string treeTypeName = "Vintagestory.API.Datastructures.TreeAttribute";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumApiBridge";
+
+        var bridgeType = contractsModule.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from contracts.");
+        var onRegisteredRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "OnTreeAttributeRegistered" && m.Parameters.Count == 2));
+        var createAttrRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "CreateTreeAttribute" && m.Parameters.Count == 1));
+        var createFromBytesRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "CreateTreeFromBytes" && m.Parameters.Count == 1));
+        var readFromBytesRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "ReadTreeFromBytes" && m.Parameters.Count == 2));
+        var treeToBytesRef = module.ImportReference(bridgeType.Methods.Single(m =>
+            m.IsStatic && m.Name == "TreeToBytes" && m.Parameters.Count == 1));
+
+        var treeType = module.GetType(treeTypeName)
+            ?? throw new InvalidOperationException($"{treeTypeName} is missing from the vanilla API.");
+
+        int patched = 0;
+
+        // 1. RegisterAttribute(int, Type): notify OptimumApiBridge when built-in attribute IDs are overridden.
+        var registerMethod = treeType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "RegisterAttribute" && m.Parameters.Count == 2 && m.HasBody)
+            ?? throw new InvalidOperationException($"{treeTypeName}.RegisterAttribute(int, Type) is missing.");
+        ClearDebugInformation(registerMethod);
+        if (registerMethod.Body.Instructions.Any(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == onRegisteredRef.FullName))
+        {
+            patched++;
+        }
+        else
+        {
+            var il = registerMethod.Body.GetILProcessor();
+            var first = registerMethod.Body.Instructions[0];
+            il.InsertBefore(first, il.Create(OpCodes.Ldarg_0));
+            il.InsertBefore(first, il.Create(OpCodes.Ldarg_1));
+            il.InsertBefore(first, il.Create(OpCodes.Call, onRegisteredRef));
+            patched++;
+        }
+
+        // 2. FromBytes(BinaryReader): replace AttributeIdMapping[attrId] + Activator.CreateInstance with fast switch bridge (#491).
+        var fromReaderMethod = treeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "FromBytes" && m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.FullName == "System.IO.BinaryReader" && m.HasBody)
+            ?? throw new InvalidOperationException($"{treeTypeName}.FromBytes(BinaryReader) is missing.");
+        ClearDebugInformation(fromReaderMethod);
+        if (fromReaderMethod.Body.Instructions.Any(i =>
+            i.OpCode == OpCodes.Call && i.Operand is MethodReference mr && mr.FullName == createAttrRef.FullName))
+        {
+            patched++;
+        }
+        else
+        {
+            var insns = fromReaderMethod.Body.Instructions;
+            int mappingIdx = -1;
+            int castIdx = -1;
+            for (int i = 0; i < insns.Count; i++)
+            {
+                if (insns[i].OpCode == OpCodes.Ldsfld && insns[i].Operand is FieldReference fr &&
+                    fr.Name == "AttributeIdMapping")
+                {
+                    mappingIdx = i;
+                }
+                else if (mappingIdx >= 0 && insns[i].OpCode == OpCodes.Castclass &&
+                    insns[i].Operand is TypeReference tr && tr.FullName == "Vintagestory.API.Datastructures.IAttribute")
+                {
+                    castIdx = i;
+                    break;
+                }
+            }
+
+            if (mappingIdx < 0 || castIdx <= mappingIdx + 2)
+            {
+                throw new InvalidOperationException(
+                    $"{fromReaderMethod.FullName}: expected AttributeIdMapping lookup + Castclass IAttribute pattern.");
+            }
+
+            var attrIdLoad = insns[mappingIdx + 1];
+            if (attrIdLoad.OpCode != OpCodes.Ldloc_0 && attrIdLoad.OpCode != OpCodes.Ldloc_1 &&
+                attrIdLoad.OpCode != OpCodes.Ldloc_2 && attrIdLoad.OpCode != OpCodes.Ldloc_3 &&
+                attrIdLoad.OpCode != OpCodes.Ldloc_S && attrIdLoad.OpCode != OpCodes.Ldloc)
+            {
+                throw new InvalidOperationException(
+                    $"{fromReaderMethod.FullName}: expected ldloc for attrId after AttributeIdMapping, found {attrIdLoad.OpCode}.");
+            }
+
+            var il = fromReaderMethod.Body.GetILProcessor();
+            insns[mappingIdx].OpCode = OpCodes.Nop;
+            insns[mappingIdx].Operand = null;
+            for (int i = castIdx; i >= mappingIdx + 2; i--)
+            {
+                il.Remove(insns[i]);
+            }
+            il.InsertAfter(attrIdLoad, il.Create(OpCodes.Call, createAttrRef));
+            patched++;
+        }
+
+        // 3. CreateFromBytes(byte[]): route through span decoder.
+        var createFromBytesMethod = treeType.Methods.SingleOrDefault(m =>
+            m.IsStatic && m.Name == "CreateFromBytes" && m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.FullName == "System.Byte[]" && m.HasBody)
+            ?? throw new InvalidOperationException($"{treeTypeName}.CreateFromBytes(byte[]) is missing.");
+        ClearDebugInformation(createFromBytesMethod);
+        {
+            createFromBytesMethod.Body.ExceptionHandlers.Clear();
+            createFromBytesMethod.Body.Variables.Clear();
+            createFromBytesMethod.Body.Instructions.Clear();
+            var il = createFromBytesMethod.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, createFromBytesRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        // 4. FromBytes(byte[]): route through span decoder.
+        var fromBytesMethod = treeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "FromBytes" && m.Parameters.Count == 1 &&
+            m.Parameters[0].ParameterType.FullName == "System.Byte[]" && m.HasBody)
+            ?? throw new InvalidOperationException($"{treeTypeName}.FromBytes(byte[]) is missing.");
+        ClearDebugInformation(fromBytesMethod);
+        {
+            fromBytesMethod.Body.ExceptionHandlers.Clear();
+            fromBytesMethod.Body.Variables.Clear();
+            fromBytesMethod.Body.Instructions.Clear();
+            var il = fromBytesMethod.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Call, readFromBytesRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        // 5. ToBytes(): route through pooled FastMemoryStream + OptimumReusableBinaryWriter.
+        var toBytesMethod = treeType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "ToBytes" && m.Parameters.Count == 0 && m.HasBody)
+            ?? throw new InvalidOperationException($"{treeTypeName}.ToBytes() is missing.");
+        ClearDebugInformation(toBytesMethod);
+        {
+            toBytesMethod.Body.ExceptionHandlers.Clear();
+            toBytesMethod.Body.Variables.Clear();
+            toBytesMethod.Body.Instructions.Clear();
+            var il = toBytesMethod.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Call, treeToBytesRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        Console.WriteLine($"  API PATCHED: {treeTypeName} span serialization ({patched}/5)");
         return patched;
     }
 

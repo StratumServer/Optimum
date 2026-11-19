@@ -1,0 +1,63 @@
+diff --git a/VintagestoryLib/Packet_BlockEntity.cs b/VintagestoryLib/Packet_BlockEntity.cs
+index 75a7ffa..d15c908 100644
+--- a/VintagestoryLib/Packet_BlockEntity.cs
++++ b/VintagestoryLib/Packet_BlockEntity.cs
+@@ -20,10 +20,58 @@ public class Packet_BlockEntity
+ 
+ 	public const int DataFieldID = 5;
+ 
+ 	public int size;
+ 
++	internal byte[] optimumSharedBuffer;
++
++	internal int optimumSharedOffset;
++
++	internal int optimumSharedLength;
++
++	internal Vintagestory.API.Config.OptimumPooledSlab optimumSlab;
++
++	internal bool HasOptimumData() => Data != null || optimumSharedBuffer != null;
++
++	internal void SetOptimumSlice(byte[] buffer, int offset, int length)
++	{
++		Data = null;
++		optimumSharedBuffer = buffer;
++		optimumSharedOffset = offset;
++		optimumSharedLength = length;
++	}
++
++	internal void ClearOptimumSlice()
++	{
++		optimumSharedBuffer = null;
++		optimumSharedOffset = 0;
++		optimumSharedLength = 0;
++		optimumSlab = null;
++	}
++
++	internal bool TryGetOptimumDataSpan(out byte[] buffer, out int offset, out int length)
++	{
++		if (Data != null)
++		{
++			buffer = Data;
++			offset = 0;
++			length = Data.Length;
++			return true;
++		}
++		if (optimumSharedBuffer != null)
++		{
++			buffer = optimumSharedBuffer;
++			offset = optimumSharedOffset;
++			length = optimumSharedLength;
++			return true;
++		}
++		buffer = null;
++		offset = 0;
++		length = 0;
++		return false;
++	}
++
+ 	public void SetClassname(string value)
+ 	{
+ 		Classname = value;
+ 	}
+ 

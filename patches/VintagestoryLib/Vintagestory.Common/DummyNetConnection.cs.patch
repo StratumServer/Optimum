@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs b/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
-index 691b55e..82dbe46 100644
+index 691b55e..102821a 100644
 --- a/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
 +++ b/VintagestoryLib/Vintagestory.Common/DummyNetConnection.cs
 @@ -28,10 +28,17 @@ public class DummyNetConnection : NetConnection
@@ -20,3 +20,38 @@ index 691b55e..82dbe46 100644
  		compressed = false;
  		return box.Clone(0);
  	}
+@@ -70,8 +77,34 @@ public class DummyNetConnection : NetConnection
+ 		return ClientSystemStartup.ReceiveAssetsPacketDirectly(packet);
+ 	}
+ 
+ 	internal static bool SendServerPacketDirectly(Packet_Server packet)
+ 	{
++		if (packet != null && packet.Id == 10 && packet.Chunks?.Chunks != null)
++		{
++			Packet_ServerChunk[] chunks = packet.Chunks.Chunks;
++			int count = packet.Chunks.ChunksCount;
++			for (int i = 0; i < count && i < chunks.Length; i++)
++			{
++				Packet_ServerChunk chunk = chunks[i];
++				if (chunk != null && chunk.BlockEntitiesCount > 0 && chunk.BlockEntities != null)
++				{
++					chunk.BlockEntities[0]?.optimumSlab?.Retain();
++				}
++			}
++			if (ClientSystemStartup.ReceiveServerPacketDirectly(packet))
++			{
++				return true;
++			}
++			for (int i = 0; i < count && i < chunks.Length; i++)
++			{
++				Packet_ServerChunk chunk = chunks[i];
++				if (chunk != null && chunk.BlockEntitiesCount > 0 && chunk.BlockEntities != null)
++				{
++					chunk.BlockEntities[0]?.optimumSlab?.Release();
++				}
++			}
++			return false;
++		}
+ 		return ClientSystemStartup.ReceiveServerPacketDirectly(packet);
+ 	}
+ }

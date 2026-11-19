@@ -7,6 +7,8 @@
 # improve lock contention and fix mod SVG icon loss. The patches ship in the
 # member-injection, and IL-hook type lists and fails loud on drift in either
 # (Optimum.Patcher/Program.cs), not via a recompiled VintagestoryLib.dll.
+patches/VintagestoryLib/Packet_BlockEntity.cs.patch
+patches/VintagestoryLib/Packet_BlockEntitySerializer.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/ClientProgram.cs.patch
 patches/VintagestoryLib/Vintagestory.Client/GuiCompositeMainMenuLeft.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.Gui/MainMenuAPI.cs.patch
@@ -26,6 +28,7 @@ patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientMain.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSettings.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs.patch
+patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientWorldMap.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/CrossTesselator.cs.patch
 patches/VintagestoryLib/Vintagestory.Client.NoObf/DrawWorldInteractionUtil.cs.patch

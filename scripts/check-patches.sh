@@ -144,6 +144,10 @@ patch_has_unavailable_target() {
 
 cecil_type_to_patch() {
   local type="$1" ns class
+  if [[ "$type" != *.* ]]; then
+    echo "patches/VintagestoryLib/$type.cs.patch"
+    return
+  fi
   class="${type##*.}"
   ns="${type%.*}"
   # The decompiled tree mirrors namespaces as directories, so the namespace
@@ -172,7 +176,7 @@ check_cecil_cross_reference() {
       echo "cecil-owned.list is missing a patch Program.cs targets: $rel" >&2
       mismatch=1
     fi
-  done < <(grep -oE '"Vintagestory\.(Client|Common|Server)(\.[A-Za-z0-9_]+)+"' "$patcher_program" | tr -d '"' | sort -u)
+  done < <(grep -oE '"(Vintagestory\.(Client|Common|Server)(\.[A-Za-z0-9_]+)+|Packet_[A-Za-z0-9_]+)"' "$patcher_program" | tr -d '"' | sort -u)
 
   while IFS= read -r owned; do
     [[ -z "$owned" ]] && continue

@@ -795,6 +795,10 @@ public static class OptimumConfig
     // static chunk meshes so idle open doors emit zero AnimatableRenderer draw calls.
     public static bool BakeOpenDoorsEnabled = true;
 
+    // Issue #642: Eliminate per-BlockEntity byte[], MemoryStream, BinaryReader/Writer,
+    // and TreeAttribute allocations via span codecs and pooled serialization slabs.
+    public static bool SpanBlockEntitySerializationEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)

@@ -1,0 +1,60 @@
+diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
+index 9ad9ecc..1797217 100644
+--- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
++++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
+@@ -370,19 +370,52 @@ public class ClientSystemEntities : ClientSystem
+ 	}
+ 
+ 	internal static BlockEntity createBlockEntityFromPacket(Packet_BlockEntity packet, ClientMain game)
+ 	{
+ 		BlockEntity blockEntity = ClientMain.ClassRegistry.CreateBlockEntity(packet.Classname);
+-		UpdateBlockEntityData(blockEntity, packet.Data, game, isNew: true);
++		UpdateBlockEntityFromPacket(blockEntity, packet, game, isNew: true);
+ 		return blockEntity;
+ 	}
+ 
++	internal static void UpdateBlockEntityFromPacket(BlockEntity entity, Packet_BlockEntity packet, ClientMain game, bool isNew)
++	{
++		TreeAttribute treeAttribute = new TreeAttribute();
++		if (packet.TryGetOptimumDataSpan(out byte[] dataBuf, out int dataOffset, out int dataLength))
++		{
++			if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled)
++			{
++				Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadTreeFromBytes(treeAttribute, dataBuf, dataOffset, dataLength);
++			}
++			else
++			{
++				using MemoryStream input = new MemoryStream(dataBuf, dataOffset, dataLength);
++				using BinaryReader stream = new BinaryReader(input);
++				treeAttribute.FromBytes(stream);
++			}
++		}
++		packet.ClearOptimumSlice();
++		if (isNew)
++		{
++			Block blockRaw = game.BlockAccessor.GetBlockRaw(treeAttribute.GetInt("posx"), treeAttribute.GetInt("posy"), treeAttribute.GetInt("posz"), 1);
++			entity.CreateBehaviors(blockRaw, game);
++		}
++		entity.FromTreeAttributes(treeAttribute, game);
++	}
++
+ 	internal static void UpdateBlockEntityData(BlockEntity entity, byte[] data, ClientMain game, bool isNew)
+ 	{
+-		BinaryReader stream = new BinaryReader(new MemoryStream(data));
+ 		TreeAttribute treeAttribute = new TreeAttribute();
+-		treeAttribute.FromBytes(stream);
++		if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled)
++		{
++			Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadTreeFromBytes(treeAttribute, data, 0, data.Length);
++		}
++		else
++		{
++			using MemoryStream input = new MemoryStream(data);
++			using BinaryReader stream = new BinaryReader(input);
++			treeAttribute.FromBytes(stream);
++		}
+ 		if (isNew)
+ 		{
+ 			Block blockRaw = game.BlockAccessor.GetBlockRaw(treeAttribute.GetInt("posx"), treeAttribute.GetInt("posy"), treeAttribute.GetInt("posz"), 1);
+ 			entity.CreateBehaviors(blockRaw, game);
+ 		}
