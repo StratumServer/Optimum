@@ -21,7 +21,7 @@ index 711b1bb..db1c067 100644
          float unconsumedDeltaTime;
  
          public EntityBehaviorCollectEntities(Entity entity) : base(entity)
-@@ -45,55 +50,54 @@ namespace Vintagestory.GameContent
+@@ -45,55 +50,102 @@ namespace Vintagestory.GameContent
              if (waitTicks-- > 0) return;
  
              if (player?.WorldData.CurrentGameMode == EnumGameMode.Spectator) return;
@@ -38,27 +38,41 @@ index 711b1bb..db1c067 100644
  
              deltaTime = System.Math.Min(1f, deltaTime + unconsumedDeltaTime);
  
-+            bool collectedAny = false;
++            int attemptsRemaining = -1;
              while ((deltaTime - 1/itemsPerSecond) > 0)
              {
++                Entity firstMatch = null;
                  Entity targetItem = null;
--                int targetIndex = 0;
+                 int targetIndex = 0;
 -
 -                for (; targetIndex < entities.Length; targetIndex++)
-+                if (partitionUtil != null)
++                int matchCount = 0;
++                int startIndex = lastCollectedEntityIndex;
++                if (startIndex < 0)
                  {
 -                    if (entities[targetIndex] == null) continue;
--
++                    startIndex = 0;
++                }
+ 
 -                    if (targetIndex >= lastCollectedEntityIndex)
++                if (partitionUtil != null)
++                {
 +                    partitionUtil.WalkEntities(tmp, 1.5, e =>
                      {
 -                        targetItem = entities[targetIndex];
 -                        break;
--                    }
 +                        if (entityMatcher(e))
 +                        {
-+                            targetItem = e;
-+                            return false;
++                            if (matchCount == 0)
++                            {
++                                firstMatch = e;
++                            }
++                            if (targetItem == null && matchCount >= startIndex)
++                            {
++                                targetItem = e;
++                                targetIndex = matchCount;
++                            }
++                            matchCount++;
 +                        }
 +                        return true;
 +                    }, EnumEntitySearchType.Inanimate);
@@ -66,17 +80,31 @@ index 711b1bb..db1c067 100644
 +                else
 +                {
 +                    Entity[] entities = entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
-+                    if (entities.Length > 0) targetItem = entities[0];
++                    matchCount = entities.Length;
++                    if (matchCount > 0)
++                    {
++                        firstMatch = entities[0];
++                        if (startIndex < matchCount)
++                        {
++                            targetItem = entities[startIndex];
++                            targetIndex = startIndex;
++                        }
+                     }
                  }
  
                  if (targetItem == null)
                  {
 -                    targetItem = entities[0];
--                    targetIndex = 0;
-+                    unconsumedDeltaTime = 0;
-+                    return;
++                    targetItem = firstMatch;
+                     targetIndex = 0;
                  }
 -                if (targetItem == null) return;
++
++                if (targetItem == null)
++                {
++                    unconsumedDeltaTime = 0;
++                    return;
++                }
  
                  if (!OnFoundCollectible(targetItem))
                  {
@@ -84,16 +112,31 @@ index 711b1bb..db1c067 100644
 -                } else
 -                {
 -                    entities[targetIndex] = null;
-+                    unconsumedDeltaTime = 0;
-+                    return;
++                    lastCollectedEntityIndex = (targetIndex + 1) % matchCount;
++                    if (attemptsRemaining < 0)
++                    {
++                        attemptsRemaining = matchCount - 1;
++                    }
++                    else
++                    {
++                        attemptsRemaining--;
++                    }
++
++                    if (attemptsRemaining > 0)
++                    {
++                        continue;
++                    }
++
++                    deltaTime -= 1 / itemsPerSecond;
++                    break;
                  }
  
-+                collectedAny = true;
++                attemptsRemaining = -1;
++                lastCollectedEntityIndex = targetItem.Alive ? (targetIndex + 1) % matchCount : targetIndex % matchCount;
                  deltaTime -= 1 / itemsPerSecond;
              }
  
--            unconsumedDeltaTime = deltaTime;
-+            unconsumedDeltaTime = collectedAny ? deltaTime : 0;
+             unconsumedDeltaTime = deltaTime;
          }
  
  

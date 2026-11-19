@@ -1,9 +1,7 @@
 diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 --- a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
 +++ b/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities.cs
-@@ -9,16 +9,22 @@ using Vintagestory.API.Server;
- namespace Vintagestory.GameContent;
- 
+@@ -11,11 +11,17 @@
  [DocumentAsJson]
  public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entity)
  {
@@ -16,17 +14,12 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
  	private int lastCollectedEntityIndex;
  
  	private Vec3d tmp = new Vec3d();
- 
-+	private EntityPartitioning partitionUtil;
 +
++	private EntityPartitioning partitionUtil;
+ 
  	private float itemsPerSecond = 23f;
  
- 	private float unconsumedDeltaTime;
- 
- 	public override void OnGameTick(float deltaTime)
-@@ -38,58 +44,57 @@ public class EntityBehaviorCollectEntities(Entity entity) : EntityBehavior(entit
- 			}
- 		}
+@@ -40,54 +46,94 @@
  		if (base.entity.IsActivityRunning("invulnerable"))
  		{
  			waitTicks = 3;
@@ -41,19 +34,38 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
 +		tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
 +		partitionUtil ??= base.entity.World?.Api?.ModLoader?.GetModSystem<EntityPartitioning>();
 +		deltaTime = Math.Min(1f, deltaTime + unconsumedDeltaTime);
-+		bool collectedAny = false;
++		int attemptsRemaining = -1;
 +		while (deltaTime - 1f / itemsPerSecond > 0f)
 +		{
++			Entity firstMatch = null;
 +			Entity targetItem = null;
-+			if (partitionUtil != null)
++			int targetIndex = 0;
++			int matchCount = 0;
++			int startIndex = lastCollectedEntityIndex;
++			if (startIndex < 0)
  			{
 -				return;
++				startIndex = 0;
+ 			}
+-			tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
+-			Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
+-			if (entitiesAround.Length == 0)
++			if (partitionUtil != null)
++			{
 +				partitionUtil.WalkEntities(tmp, 1.5, delegate(Entity e)
 +				{
 +					if (entityMatcher(e))
 +					{
-+						targetItem = e;
-+						return false;
++						if (matchCount == 0)
++						{
++							firstMatch = e;
++						}
++						if (targetItem == null && matchCount >= startIndex)
++						{
++							targetItem = e;
++							targetIndex = matchCount;
++						}
++						matchCount++;
 +					}
 +					return true;
 +				}, EnumEntitySearchType.Inanimate);
@@ -61,14 +73,22 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
 +			else
 +			{
 +				Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
-+				if (entitiesAround.Length != 0)
++				matchCount = entitiesAround.Length;
++				if (matchCount > 0)
 +				{
-+					targetItem = entitiesAround[0];
++					firstMatch = entitiesAround[0];
++					if (startIndex < matchCount)
++					{
++						targetItem = entitiesAround[startIndex];
++						targetIndex = startIndex;
++					}
 +				}
- 			}
--			tmp.Set(base.entity.Pos.X, base.entity.Pos.InternalY + (double)base.entity.SelectionBox.Y1 + (double)(base.entity.SelectionBox.Y2 / 2f), base.entity.Pos.Z);
--			Entity[] entitiesAround = base.entity.World.GetEntitiesAround(tmp, 1.5f, 1.5f, entityMatcher);
--			if (entitiesAround.Length == 0)
++			}
++			if (targetItem == null)
++			{
++				targetItem = firstMatch;
++				targetIndex = 0;
++			}
 +			if (targetItem == null)
  			{
  				unconsumedDeltaTime = 0f;
@@ -81,7 +101,9 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
 -				Entity entity = null;
 -				int i;
 -				for (i = 0; i < entitiesAround.Length; i++)
--				{
++				lastCollectedEntityIndex = (targetIndex + 1) % matchCount;
++				if (attemptsRemaining < 0)
+ 				{
 -					if (entitiesAround[i] != null && i >= lastCollectedEntityIndex)
 -					{
 -						entity = entitiesAround[i];
@@ -100,22 +122,26 @@ diff --git a/VSEssentials/Vintagestory/GameContent/EntityBehaviorCollectEntities
 -				if (!OnFoundCollectible(entity))
 -				{
 -					lastCollectedEntityIndex = (lastCollectedEntityIndex + 1) % entitiesAround.Length;
--				}
--				else
--				{
++					attemptsRemaining = matchCount - 1;
+ 				}
+ 				else
+ 				{
 -					entitiesAround[i] = null;
--				}
--				deltaTime -= 1f / itemsPerSecond;
-+				unconsumedDeltaTime = 0f;
-+				return;
++					attemptsRemaining--;
++				}
++				if (attemptsRemaining > 0)
++				{
++					continue;
+ 				}
+ 				deltaTime -= 1f / itemsPerSecond;
++				break;
  			}
 -			unconsumedDeltaTime = deltaTime;
-+			collectedAny = true;
++			attemptsRemaining = -1;
++			lastCollectedEntityIndex = (targetItem.Alive ? ((targetIndex + 1) % matchCount) : (targetIndex % matchCount));
 +			deltaTime -= 1f / itemsPerSecond;
  		}
-+		unconsumedDeltaTime = collectedAny ? deltaTime : 0f;
++		unconsumedDeltaTime = deltaTime;
  	}
  
  	public virtual bool OnFoundCollectible(Entity foundEntity)
- 	{
- 		ItemStack itemStack = foundEntity.OnCollected(entity);
