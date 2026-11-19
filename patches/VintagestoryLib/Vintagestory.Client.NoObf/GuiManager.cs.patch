@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
-index 133e26dd..80f39b2e 100644
+index 133e26d..e31d898 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiManager.cs
 @@ -17,10 +17,32 @@ public class GuiManager : ClientSystem
@@ -167,7 +167,7 @@ index 133e26dd..80f39b2e 100644
  			{
  				continue;
  			}
-@@ -339,11 +383,13 @@ public class GuiManager : ClientSystem
+@@ -339,23 +383,33 @@ public class GuiManager : ClientSystem
  	}
  
  	public override void OnMouseMove(MouseEvent args)
@@ -176,9 +176,35 @@ index 133e26dd..80f39b2e 100644
 -		foreach (GuiDialog item in game.LoadedGuis.ToList())
 +		(_scratchMouseMove ??= new List<GuiDialog>()).Clear();
 +		_scratchMouseMove.AddRange(game.LoadedGuis);
-+		foreach (GuiDialog item in _scratchMouseMove)
++		Vintagestory.Common.InventoryCraftingGrid.BeginMouseMoveBatch();
++		try
  		{
- 			if (item.ShouldReceiveMouseEvents())
+-			if (item.ShouldReceiveMouseEvents())
++			foreach (GuiDialog item in _scratchMouseMove)
  			{
- 				item.OnMouseMove(args);
- 				if (args.Handled)
+-				item.OnMouseMove(args);
+-				if (args.Handled)
++				if (item.ShouldReceiveMouseEvents())
+ 				{
+-					OnMouseMoveOver(item);
+-					return;
++					item.OnMouseMove(args);
++					if (args.Handled)
++					{
++						OnMouseMoveOver(item);
++						return;
++					}
+ 				}
+ 			}
++			OnMouseMoveOver(null);
++		}
++		finally
++		{
++			Vintagestory.Common.InventoryCraftingGrid.EndMouseMoveBatch();
+ 		}
+-		OnMouseMoveOver(null);
+ 	}
+ 
+ 	private void OnMouseMoveOver(GuiDialog nowMouseOverDialog)
+ 	{
+ 		if ((nowMouseOverDialog != prevMousedOverDialog || nowMouseOverDialog == null) && !didHoverSlotEventTrigger && prevHoverSlot != null)

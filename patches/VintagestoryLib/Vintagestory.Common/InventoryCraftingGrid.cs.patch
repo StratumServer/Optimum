@@ -1,8 +1,190 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs b/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs
-index 5c5c71f..2b788e8 100644
+index 5c5c71f..b98c44b 100644
 --- a/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs
 +++ b/VintagestoryLib/Vintagestory.Common/InventoryCraftingGrid.cs
-@@ -165,6 +165,7 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+@@ -19,10 +19,19 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 
+ 	public GridRecipe MatchingRecipe;
+ 
+ 	private bool isCrafting;
+ 
++	[ThreadStatic]
++	private static int t_mouseMoveBatchDepth;
++
++	[ThreadStatic]
++	private static InventoryCraftingGrid t_pendingGrid;
++
++	[ThreadStatic]
++	private static List<InventoryCraftingGrid> t_pendingOverflow;
++
+ 	public override int Count => GridSizeSq + 1;
+ 
+ 	public override ItemSlot this[int slotId]
+ 	{
+ 		get
+@@ -107,15 +116,134 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 			return 0f;
+ 		}
+ 		return base.GetTransitionSpeedMul(transType, stack);
+ 	}
+ 
++	internal static void BeginMouseMoveBatch()
++	{
++		t_mouseMoveBatchDepth++;
++	}
++
++	internal static void EndMouseMoveBatch()
++	{
++		if (t_mouseMoveBatchDepth <= 0)
++		{
++			t_mouseMoveBatchDepth = 0;
++			return;
++		}
++		t_mouseMoveBatchDepth--;
++		if (t_mouseMoveBatchDepth > 0)
++		{
++			return;
++		}
++		FlushAllPendingRecipeSearches();
++	}
++
++	private static void FlushAllPendingRecipeSearches()
++	{
++		try
++		{
++			while (true)
++			{
++				InventoryCraftingGrid pending = t_pendingGrid;
++				if (pending != null)
++				{
++					t_pendingGrid = null;
++					pending.FindMatchingRecipe();
++					continue;
++				}
++				List<InventoryCraftingGrid> overflow = t_pendingOverflow;
++				if (overflow == null || overflow.Count == 0)
++				{
++					break;
++				}
++				int last = overflow.Count - 1;
++				pending = overflow[last];
++				overflow.RemoveAt(last);
++				pending.FindMatchingRecipe();
++			}
++		}
++		finally
++		{
++			t_pendingGrid = null;
++			t_pendingOverflow?.Clear();
++		}
++	}
++
++	private void ScheduleOrFindMatchingRecipe()
++	{
++		if (t_mouseMoveBatchDepth > 0 && Api?.Side == EnumAppSide.Client)
++		{
++			EnqueuePendingRecipeSearch();
++			return;
++		}
++		FindMatchingRecipe();
++	}
++
++	private void EnqueuePendingRecipeSearch()
++	{
++		if (t_pendingGrid == this)
++		{
++			return;
++		}
++		if (t_pendingGrid == null)
++		{
++			t_pendingGrid = this;
++			return;
++		}
++		List<InventoryCraftingGrid> overflow = t_pendingOverflow;
++		if (overflow == null)
++		{
++			overflow = new List<InventoryCraftingGrid>(2);
++			t_pendingOverflow = overflow;
++		}
++		for (int i = 0; i < overflow.Count; i++)
++		{
++			if (overflow[i] == this)
++			{
++				return;
++			}
++		}
++		overflow.Add(this);
++	}
++
++	private void FlushPendingRecipeSearch()
++	{
++		if (ClearPendingRecipeSearch())
++		{
++			FindMatchingRecipe();
++		}
++	}
++
++	private bool ClearPendingRecipeSearch()
++	{
++		if (t_pendingGrid == this)
++		{
++			t_pendingGrid = null;
++			return true;
++		}
++		List<InventoryCraftingGrid> overflow = t_pendingOverflow;
++		if (overflow != null)
++		{
++			for (int i = 0; i < overflow.Count; i++)
++			{
++				if (overflow[i] == this)
++				{
++					overflow.RemoveAt(i);
++					return true;
++				}
++			}
++		}
++		return false;
++	}
++
+ 	public override object ActivateSlot(int slotId, ItemSlot sourceSlot, ref ItemStackMoveOperation op)
+ 	{
+ 		object result;
+ 		if (slotId == GridSizeSq)
+ 		{
++			FlushPendingRecipeSearch();
+ 			BeginCraft();
+ 			result = base.ActivateSlot(slotId, sourceSlot, ref op);
+ 			if (!outputSlot.Empty && op.ShiftDown)
+ 			{
+ 				if (Api.Side == EnumAppSide.Client)
+@@ -139,11 +267,11 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 	public override void OnItemSlotModified(ItemSlot slot)
+ 	{
+ 		if (!isCrafting && !(slot is ItemSlotCraftingOutput))
+ 		{
+ 			DropSlotIfHot(slot, base.Player);
+-			FindMatchingRecipe();
++			ScheduleOrFindMatchingRecipe();
+ 		}
+ 	}
+ 
+ 	public override void DidModifyItemSlot(ItemSlot slot, ItemStack extractedStack = null)
+ 	{
+@@ -153,20 +281,22 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 	public override bool TryMoveItemStack(IPlayer player, string[] invIds, int[] slotIds, ref ItemStackMoveOperation op)
+ 	{
+ 		bool num = base.TryMoveItemStack(player, invIds, slotIds, ref op);
+ 		if (num)
+ 		{
+-			FindMatchingRecipe();
++			ScheduleOrFindMatchingRecipe();
+ 		}
+ 		return num;
+ 	}
+ 
+ 	internal void FindMatchingRecipe()
+ 	{
++		ClearPendingRecipeSearch();
  		MatchingRecipe = null;
  		outputSlot.Itemstack = null;
  		List<GridRecipe> list = new List<GridRecipe>();
@@ -10,7 +192,11 @@ index 5c5c71f..2b788e8 100644
  		IPlayer forPlayer = Api.World.PlayerByUid(playerUID);
  		System.Collections.Generic.OrderedDictionary<IRecipeIngredientBase, List<IRecipeBase>> fastSearchRecipesByIngredient = Api.World.FastSearchRecipesByIngredient;
  		ItemSlot[] array = slots;
-@@ -183,9 +184,9 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 		for (int i = 0; i < array.Length; i++)
+ 		{
+@@ -181,13 +311,13 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 				{
+ 					continue;
  				}
  				foreach (IRecipeBase item2 in item.Value)
  				{
@@ -22,3 +208,17 @@ index 5c5c71f..2b788e8 100644
  					}
  				}
  			}
+ 		}
+ 		foreach (GridRecipe item3 in list)
+@@ -216,10 +346,11 @@ public class InventoryCraftingGrid : InventoryBasePlayer
+ 		dirtySlots.Add(GridSizeSq);
+ 	}
+ 
+ 	internal GridRecipe ConsumeIngredients(ItemSlot outputSlot)
+ 	{
++		FlushPendingRecipeSearch();
+ 		if (MatchingRecipe == null || outputSlot.Itemstack == null)
+ 		{
+ 			return null;
+ 		}
+ 		GridRecipe matchingRecipe = MatchingRecipe;
