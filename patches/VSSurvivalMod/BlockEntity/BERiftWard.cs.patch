@@ -1,0 +1,25 @@
+diff --git a/VSSurvivalMod/BlockEntity/BERiftWard.cs b/VSSurvivalMod/BlockEntity/BERiftWard.cs
+--- a/VSSurvivalMod/BlockEntity/BERiftWard.cs
++++ b/VSSurvivalMod/BlockEntity/BERiftWard.cs
+@@ -180,6 +180,7 @@
+ 
+         public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldAccessForResolve)
+         {
++            bool prevOn = On;
+             base.FromTreeAttributes(tree, worldAccessForResolve);
+ 
+             fuelDays = tree.GetDouble("fuelUntilTotalDays", 0);
+@@ -187,8 +188,11 @@
+             On = tree.GetBool("on");
+             riftsBlocked = tree.GetInt("riftsBlocked");
+ 
+-            if (On) Activate();
+-            else Deactivate();
++            if (On != prevOn)
++            {
++                if (On) Activate();
++                else Deactivate();
++            }
+         }
+ 
+         public override void ToTreeAttributes(ITreeAttribute tree)

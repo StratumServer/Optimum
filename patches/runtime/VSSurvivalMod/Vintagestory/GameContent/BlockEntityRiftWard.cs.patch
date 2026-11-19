@@ -1,0 +1,33 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityRiftWard.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityRiftWard.cs
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockEntityRiftWard.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockEntityRiftWard.cs
+@@ -188,18 +188,22 @@
+ 
+ 	public override void FromTreeAttributes(ITreeAttribute tree, IWorldAccessor worldAccessForResolve)
+ 	{
++		bool prevOn = On;
+ 		base.FromTreeAttributes(tree, worldAccessForResolve);
+ 		fuelDays = tree.GetDouble("fuelUntilTotalDays");
+ 		lastUpdateTotalDays = tree.GetDouble("lastUpdateTotalDays");
+ 		On = tree.GetBool("on");
+ 		riftsBlocked = tree.GetInt("riftsBlocked");
+-		if (On)
+-		{
+-			Activate();
+-		}
+-		else
+-		{
+-			Deactivate();
++		if (On != prevOn)
++		{
++			if (On)
++			{
++				Activate();
++			}
++			else
++			{
++				Deactivate();
++			}
+ 		}
+ 	}
+ 
