@@ -106,3 +106,8 @@ patches/VintagestoryLib/Vintagestory.Server/PlayerDataManager.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerMapChunk.cs.patch
 patches/VintagestoryLib/Vintagestory.Server/ServerMapRegion.cs.patch
+
+# Issue #642: allow Packet_BlockEntity to carry a pooled byte[] slice reference internally while
+# Packet_BlockEntitySerializer emits/reads identical field 5 wire bytes without extra per-BE byte[].
+patches/VintagestoryLib/Packet_BlockEntity.cs.patch
+patches/VintagestoryLib/Packet_BlockEntitySerializer.cs.patch

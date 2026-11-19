@@ -1,8 +1,64 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-index 277d286..27aafb7 100644
+index 277d286..d716ce8 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -80,37 +80,42 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -56,61 +56,90 @@ internal class ServerSystemSendChunks : ServerSystem
+ 		{
+ 			return;
+ 		}
+ 		packetsWithEntities.Clear();
+ 		packetsWithoutEntities.Clear();
+-		IPlayer[] allOnlinePlayers = server.AllOnlinePlayers;
+-		foreach (IMiniDimension value in server.LoadedMiniDimensions.Values)
++		try
+ 		{
+-			value.CollectChunksForSending(allOnlinePlayers);
++			IPlayer[] allOnlinePlayers = server.AllOnlinePlayers;
++			foreach (IMiniDimension value in server.LoadedMiniDimensions.Values)
++			{
++				value.CollectChunksForSending(allOnlinePlayers);
++			}
++			foreach (ConnectedClient value2 in server.Clients.Values)
++			{
++				if (value2.State.ConnectedOrPlaying())
++				{
++					sendAndEnqueueChunks(value2);
++				}
++			}
+ 		}
+-		foreach (ConnectedClient value2 in server.Clients.Values)
++		finally
+ 		{
+-			if (value2.State.ConnectedOrPlaying())
++			ReleaseCachedPacketSlabs(packetsWithEntities);
++			ReleaseCachedPacketSlabs(packetsWithoutEntities);
++			packetsWithEntities.Clear();
++			packetsWithoutEntities.Clear();
++		}
++	}
++
++	private static void ReleaseCachedPacketSlabs(Dictionary<long, Packet_ServerChunk> dict)
++	{
++		foreach (Packet_ServerChunk chunk in dict.Values)
++		{
++			if (chunk != null && chunk.BlockEntitiesCount > 0 && chunk.BlockEntities != null)
+ 			{
+-				sendAndEnqueueChunks(value2);
++				Packet_BlockEntity first = chunk.BlockEntities[0];
++				if (first?.optimumSlab != null)
++				{
++					first.optimumSlab.Release();
++					first.optimumSlab = null;
++				}
+ 			}
+ 		}
+-		packetsWithEntities.Clear();
+-		packetsWithoutEntities.Clear();
+ 	}
+ 
+ 	private void OnClientLeaveChunk(ClientStatistics clientstats)
+ 	{
+ 		clientstats.client.CurrentChunkSentRadius = 0;
  	}
  
  	private void sendAndEnqueueChunks(ConnectedClient client)
@@ -59,7 +115,7 @@ index 277d286..27aafb7 100644
  		{
  			ServerChunk loadedChunk = server.GetLoadedChunk(forceSendChunk);
  			if (loadedChunk != null)
-@@ -203,10 +208,15 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -203,10 +232,15 @@ internal class ServerSystemSendChunks : ServerSystem
  				server.SendPacketFast(client.Id, value3.ToPacket(vec3i.X, vec3i.Z));
  				client.SetMapRegionSent(forceSendMapRegion);
  			}

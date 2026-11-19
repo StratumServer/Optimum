@@ -1,8 +1,8 @@
 diff --git a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
-index ac15150..d2d76a8 100644
+index ac15150..fc498fa 100644
 --- a/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
 +++ b/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs
-@@ -155,13 +155,75 @@ namespace Vintagestory.API.Datastructures
+@@ -155,32 +155,86 @@ namespace Vintagestory.API.Datastructures
              RegisterAttribute(14, typeof(TreeArrayAttribute));
              RegisterAttribute(15, typeof(LongArrayAttribute));
              RegisterAttribute(16, typeof(BoolArrayAttribute));
@@ -17,10 +17,13 @@ index ac15150..d2d76a8 100644
 +            {
 +                customBuiltInRegistered = true;
 +            }
-+        }
-+
++            Vintagestory.API.Config.OptimumApiBridge.OnTreeAttributeRegistered(attrId, type);
+         }
+ 
+-        public TreeAttribute()
 +        private static Type GetDefaultAttributeType(int attrId)
-+        {
+         {
+-
 +            switch (attrId)
 +            {
 +                case 1: return typeof(IntAttribute);
@@ -41,14 +44,19 @@ index ac15150..d2d76a8 100644
 +                case 16: return typeof(BoolArrayAttribute);
 +                default: return null;
 +            }
-+        }
-+
+         }
+ 
+-        public static TreeAttribute CreateFromBytes(byte[] blockEntityData)
 +        public static IAttribute CreateAttribute(byte attrId)
-+        {
+         {
+-            TreeAttribute tree = new TreeAttribute();
+-            using (MemoryStream ms = new MemoryStream(blockEntityData))
 +            if (!customBuiltInRegistered)
-+            {
+             {
+-                using (BinaryReader reader = new BinaryReader(ms))
 +                switch (attrId)
-+                {
+                 {
+-                    tree.FromBytes(reader);
 +                    case 1: return new IntAttribute();
 +                    case 2: return new LongAttribute();
 +                    case 3: return new DoubleAttribute();
@@ -65,20 +73,31 @@ index ac15150..d2d76a8 100644
 +                    case 14: return new TreeArrayAttribute();
 +                    case 15: return new LongArrayAttribute();
 +                    case 16: return new BoolArrayAttribute();
-+                }
-+            }
-+
+                 }
+             }
+ 
+-            return tree;
 +            if (AttributeIdMapping.TryGetValue(attrId, out Type t))
 +            {
 +                return (IAttribute)Activator.CreateInstance(t);
 +            }
 +            throw new Exception($"Cannot find attribute id mapping for {attrId}");
++        }
++
++        public TreeAttribute()
++        {
++
++        }
++
++        public static TreeAttribute CreateFromBytes(byte[] blockEntityData)
++        {
++            return Vintagestory.API.Config.OptimumApiBridge.CreateTreeFromBytes(blockEntityData);
          }
  
-         public TreeAttribute()
-         {
  
-@@ -196,12 +258,11 @@ namespace Vintagestory.API.Datastructures
+ 
+         public virtual void FromBytes(BinaryReader stream)
+@@ -196,12 +250,11 @@ namespace Vintagestory.API.Datastructures
              byte attrId;
              while ((attrId = stream.ReadByte()) != 0)
              {
@@ -92,7 +111,40 @@ index ac15150..d2d76a8 100644
                  {
                      ((TreeAttribute)attr).depth = depth + 1;
                  }
-@@ -962,11 +1023,11 @@ namespace Vintagestory.API.Datastructures
+@@ -212,30 +265,16 @@ namespace Vintagestory.API.Datastructures
+             }
+         }
+ 
+         public virtual byte[] ToBytes()
+         {
+-            using (MemoryStream ms = new MemoryStream())
+-            {
+-                using (BinaryWriter writer = new BinaryWriter(ms))
+-                {
+-                    ToBytes(writer);
+-                }
+-
+-                return ms.ToArray();
+-            }
++            return Vintagestory.API.Config.OptimumApiBridge.TreeToBytes(this);
+         }
+ 
+         public virtual void FromBytes(byte[] data)
+         {
+-            using (MemoryStream ms = new MemoryStream(data))
+-            {
+-                using (BinaryReader reader = new BinaryReader(ms))
+-                {
+-                    FromBytes(reader);
+-                }
+-            }
++            Vintagestory.API.Config.OptimumApiBridge.ReadTreeFromBytes(this, data);
+         }
+ 
+ 
+         public virtual void ToBytes(BinaryWriter stream)
+         {
+@@ -962,11 +1001,11 @@ namespace Vintagestory.API.Datastructures
              return ToJsonToken(attributes);
          }
  
@@ -105,7 +157,7 @@ index ac15150..d2d76a8 100644
          public static string ToJsonToken(IEnumerable<KeyValuePair<string, IAttribute>> attributes)
          {
              StringBuilder sb = new StringBuilder();
-@@ -1035,14 +1096,14 @@ namespace Vintagestory.API.Datastructures
+@@ -1035,14 +1074,14 @@ namespace Vintagestory.API.Datastructures
              {
                  dstTree.attributes[srcKey] = srcAttr.Clone();
              }

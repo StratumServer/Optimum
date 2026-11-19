@@ -1,0 +1,75 @@
+diff --git a/VintagestoryLib/Packet_BlockEntitySerializer.cs b/VintagestoryLib/Packet_BlockEntitySerializer.cs
+index 23ebbbe..df95b08 100644
+--- a/VintagestoryLib/Packet_BlockEntitySerializer.cs
++++ b/VintagestoryLib/Packet_BlockEntitySerializer.cs
+@@ -1,6 +1,8 @@
+ using System;
++using System.IO;
++using Vintagestory.API.Config;
+ 
+ public class Packet_BlockEntitySerializer
+ {
+ 	private const int field = 8;
+ 
+@@ -47,11 +49,26 @@ public class Packet_BlockEntitySerializer
+ 				break;
+ 			case 32:
+ 				instance.PosZ = ProtocolParser.ReadUInt32(stream);
+ 				break;
+ 			case 42:
+-				instance.Data = ProtocolParser.ReadBytes(stream);
++				if (OptimumConfig.SpanBlockEntitySerializationEnabled && stream.GetBuffer() != null)
++				{
++					int dataLength = ProtocolParser.ReadUInt32(stream);
++					int dataOffset = stream.Position();
++					byte[] sourceBuffer = stream.GetBuffer();
++					if (dataLength < 0 || dataLength > stream.GetLength() - dataOffset)
++					{
++						throw new InvalidDataException("Expected " + dataLength + " bytes in Packet_BlockEntity");
++					}
++					instance.SetOptimumSlice(sourceBuffer, dataOffset, dataLength);
++					stream.Seek(dataLength, CitoSeekOrigin.Current);
++				}
++				else
++				{
++					instance.Data = ProtocolParser.ReadBytes(stream);
++				}
+ 				break;
+ 			default:
+ 				ProtocolParser.SkipKey(stream, Key.Create(num));
+ 				break;
+ 			}
+@@ -93,14 +110,15 @@ public class Packet_BlockEntitySerializer
+ 		if (instance.PosZ != 0)
+ 		{
+ 			stream.WriteByte(32);
+ 			ProtocolParser.WriteUInt32(stream, instance.PosZ);
+ 		}
+-		if (instance.Data != null)
++		if (instance.TryGetOptimumDataSpan(out byte[] dataBuf, out int dataOffset, out int dataLength))
+ 		{
+ 			stream.WriteByte(42);
+-			ProtocolParser.WriteBytes(stream, instance.Data);
++			ProtocolParser.WriteUInt32_(stream, dataLength);
++			stream.Write(dataBuf, dataOffset, dataLength);
+ 		}
+ 	}
+ 
+ 	public static int GetSize(Packet_BlockEntity instance)
+ 	{
+@@ -119,13 +137,13 @@ public class Packet_BlockEntitySerializer
+ 		}
+ 		if (instance.PosZ != 0)
+ 		{
+ 			num += ProtocolParser.GetSize(instance.PosZ) + 1;
+ 		}
+-		if (instance.Data != null)
++		if (instance.TryGetOptimumDataSpan(out _, out _, out int sizeLen))
+ 		{
+-			num += ProtocolParser.GetSize(instance.Data) + 1;
++			num += ProtocolParser.GetSize(sizeLen) + sizeLen + 1;
+ 		}
+ 		instance.size = num;
+ 		return num;
+ 	}
+ 

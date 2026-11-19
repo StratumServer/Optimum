@@ -2161,4 +2161,60 @@ public static class OptimumApiBridge
             kf!.Elements = deduplicated;
         }
     }
+
+    // Issue #642: TreeAttribute / BlockEntity span serialization bridge methods.
+    public static void OnTreeAttributeRegistered(int attrId, Type type)
+    {
+        OptimumTreeAttributeCodec.OnAttributeRegistered(attrId, type);
+    }
+
+    public static IAttribute CreateTreeAttribute(byte attrId)
+    {
+        return OptimumTreeAttributeCodec.CreateBuiltInOrMappedAttribute(attrId);
+    }
+
+    public static TreeAttribute CreateTreeFromBytes(byte[] blockEntityData)
+    {
+        if (!OptimumConfig.SpanBlockEntitySerializationEnabled || blockEntityData == null)
+        {
+            TreeAttribute fallback = new TreeAttribute();
+            using (MemoryStream ms = new MemoryStream(blockEntityData!))
+            using (BinaryReader reader = new BinaryReader(ms))
+            {
+                fallback.FromBytes(reader);
+            }
+            return fallback;
+        }
+        return OptimumTreeAttributeCodec.CreateTreeFromBytes(blockEntityData);
+    }
+
+    public static void ReadTreeFromBytes(TreeAttribute tree, byte[] data)
+    {
+        if (!OptimumConfig.SpanBlockEntitySerializationEnabled || data == null)
+        {
+            using (MemoryStream ms = new MemoryStream(data!))
+            using (BinaryReader reader = new BinaryReader(ms))
+            {
+                tree.FromBytes(reader);
+            }
+            return;
+        }
+        OptimumTreeAttributeCodec.ReadTreeFromBytes(tree, data);
+    }
+
+    public static byte[] TreeToBytes(TreeAttribute tree)
+    {
+        if (!OptimumConfig.SpanBlockEntitySerializationEnabled)
+        {
+            using (MemoryStream ms = new MemoryStream())
+            {
+                using (BinaryWriter writer = new BinaryWriter(ms))
+                {
+                    tree.ToBytes(writer);
+                }
+                return ms.ToArray();
+            }
+        }
+        return OptimumTreeAttributeCodec.TreeToBytes(tree);
+    }
 }

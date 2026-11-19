@@ -703,6 +703,7 @@ var membersToInject = new Dictionary<string, List<string>>
     ["Vintagestory.Server.ServerChunk"] = new()
     {
         "optimumToBytesStream",
+        "GetBlockEntitiesPacketsPooled",
     },
     ["Vintagestory.Server.ServerMapChunk"] = new()
     {
@@ -776,6 +777,26 @@ var membersToInject = new Dictionary<string, List<string>>
         "t_bulkEntityDebugAttributes",
         "t_bulkEntityDebugAttributesWrapper",
         "t_reusableBlockEntityTree",
+        "WriteBlockEntityData",
+    },
+    ["Packet_BlockEntity"] = new()
+    {
+        "optimumSharedBuffer",
+        "optimumSharedOffset",
+        "optimumSharedLength",
+        "optimumSlab",
+        "HasOptimumData",
+        "SetOptimumSlice",
+        "ClearOptimumSlice",
+        "TryGetOptimumDataSpan",
+    },
+    ["Vintagestory.Server.ServerSystemSendChunks"] = new()
+    {
+        "ReleaseCachedPacketSlabs",
+    },
+    ["Vintagestory.Client.NoObf.ClientSystemEntities"] = new()
+    {
+        "UpdateBlockEntityFromPacket",
     },
     // HandlePlayerIdentification/CreatePacketIdentification (a version-string bump
     // each) and Launch() (needs PlayerAntiAbuseMonitor, itself gated on ServerConfig's
@@ -1373,8 +1394,11 @@ var targets = new List<MethodTarget>
     // DisposeOptimumChunkReadPool is injected and called by an IL hook immediately
     // before the vanilla GameDatabase.Dispose call instead.
     new("Vintagestory.Server.ServerSystemSendChunks", "sendAndEnqueueChunks", 1),
+    new("Vintagestory.Server.ServerSystemSendChunks", "OnServerTick", 1),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "GetUpdateInterval", 0),
     new("Vintagestory.Server.ServerSystemBlockSimulation", "OnSeparateThreadTick", 0),
+    new("Vintagestory.Server.ServerSystemBlockSimulation", "SendDirtyBlockEntities", 0),
+    new("Vintagestory.Server.ServerSystemBlockSimulation", "BlockEntityToPacket", 2),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "UnloadGeneratingChunkColumns", 1),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "FindUnloadableChunkColumnCandidates", 0),
     new("Vintagestory.Server.ServerSystemUnloadChunks", "SendOutOfRangeChunkUnloads", 1),
@@ -1418,11 +1442,22 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Server.ServerMain", "WaitOnBuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "BuildServerAssetsPacket", 0),
     new("Vintagestory.Server.ServerMain", "Dispose", 0),
+    new("Vintagestory.Server.ServerMain", "SendBlockEntity", 2),
     new("Vintagestory.Server.ServerChunk", "ToBytes", 0),
     new("Vintagestory.Server.ServerChunk", "ToBytes", 1),
     new("Vintagestory.Server.ServerChunk", "ToPacket", 4),
     new("Vintagestory.Server.ServerChunk", "GetEntitiesPackets", 0),
     new("Vintagestory.Server.ServerChunk", "GetBlockEntitiesPackets", 0),
+    new("Vintagestory.Server.ServerChunk", "AfterDeserialization", 1),
+    new("Vintagestory.Server.ServerChunk", "FastSerializeBlockEntities", 4),
+    new("Vintagestory.Common.DummyNetConnection", "SendServerPacketDirectly", 1),
+    new("Packet_BlockEntitySerializer", "Deserialize", 2),
+    new("Packet_BlockEntitySerializer", "Serialize", 2),
+    new("Packet_BlockEntitySerializer", "GetSize", 1),
+    new("Vintagestory.Client.NoObf.ClientChunk", "PreLoadBlockEntitiesFromPacket", 3),
+    new("Vintagestory.Client.NoObf.ClientChunk", "AddOrUpdateBlockEntityFromPacket", 2),
+    new("Vintagestory.Client.NoObf.ClientSystemEntities", "createBlockEntityFromPacket", 2),
+    new("Vintagestory.Client.NoObf.ClientSystemEntities", "UpdateBlockEntityData", 4),
     new("Vintagestory.Server.ServerMapChunk", "ToBytes", 0),
     new("Vintagestory.Server.ServerMapRegion", "ToBytes", 0),
 };

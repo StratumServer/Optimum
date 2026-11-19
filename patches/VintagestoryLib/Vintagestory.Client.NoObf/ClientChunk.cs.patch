@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-index 7be6b24..c1fe8a9 100644
+index 7be6b24..3bb09dc 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 @@ -1,9 +1,10 @@
@@ -153,3 +153,109 @@ index 7be6b24..c1fe8a9 100644
  		CullVisible[(bufIndex + 1) % 2] = visible;
  	}
  
+@@ -256,19 +375,31 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+ 	}
+ 
+ 	internal void PreLoadBlockEntitiesFromPacket(Packet_BlockEntity[] blockEntities, int blockEntitiesCount, ClientMain game)
+ 	{
+ 		BlockEntities.Clear();
+-		for (int i = 0; i < blockEntitiesCount; i++)
++		bool spanMode = Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled;
++		try
+ 		{
+-			Packet_BlockEntity packet_BlockEntity = blockEntities[i];
+-			BlockEntity blockEntity = ClientMain.ClassRegistry.CreateBlockEntity(packet_BlockEntity.Classname);
+-			using (MemoryStream input = new MemoryStream(packet_BlockEntity.Data))
++			for (int i = 0; i < blockEntitiesCount; i++)
+ 			{
+-				using BinaryReader stream = new BinaryReader(input);
++				Packet_BlockEntity packet_BlockEntity = blockEntities[i];
++				BlockEntity blockEntity = ClientMain.ClassRegistry.CreateBlockEntity(packet_BlockEntity.Classname);
+ 				TreeAttribute treeAttribute = new TreeAttribute();
+-				treeAttribute.FromBytes(stream);
++				if (packet_BlockEntity.TryGetOptimumDataSpan(out byte[] dataBuf, out int dataOffset, out int dataLength))
++				{
++					if (spanMode)
++					{
++						Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadTreeFromBytes(treeAttribute, dataBuf, dataOffset, dataLength);
++					}
++					else
++					{
++						using MemoryStream input = new MemoryStream(dataBuf, dataOffset, dataLength);
++						using BinaryReader stream = new BinaryReader(input);
++						treeAttribute.FromBytes(stream);
++					}
++				}
+ 				Block localBlockAtBlockPos = GetLocalBlockAtBlockPos(game, treeAttribute.GetInt("posx"), treeAttribute.GetInt("posy"), treeAttribute.GetInt("posz"));
+ 				try
+ 				{
+ 					blockEntity.CreateBehaviors(localBlockAtBlockPos, game);
+ 					blockEntity.FromTreeAttributes(treeAttribute, game);
+@@ -278,14 +409,25 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+ 					BlockPos blockPos = new BlockPos(packet_BlockEntity.PosX, packet_BlockEntity.PosY, packet_BlockEntity.PosZ);
+ 					game.Logger.Error("At position " + blockPos?.ToString() + " with block " + localBlockAtBlockPos.Code.ToShortString() + ", {0} threw an error when being created:", packet_BlockEntity.Classname);
+ 					game.Logger.Error(e);
+ 					continue;
+ 				}
++				BlockEntities[blockEntity.Pos] = blockEntity;
++			}
++			BlockEntitiesCount = blockEntitiesCount;
++		}
++		finally
++		{
++			if (blockEntities != null && blockEntitiesCount > 0)
++			{
++				blockEntities[0]?.optimumSlab?.Release();
++				for (int i = 0; i < blockEntitiesCount && i < blockEntities.Length; i++)
++				{
++					blockEntities[i]?.ClearOptimumSlice();
++				}
+ 			}
+-			BlockEntities[blockEntity.Pos] = blockEntity;
+ 		}
+-		BlockEntitiesCount = blockEntitiesCount;
+ 	}
+ 
+ 	internal void InitBlockEntitiesFromPacket(ClientMain game)
+ 	{
+ 		foreach (BlockEntity value in BlockEntities.Values)
+@@ -322,23 +464,35 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+ 	}
+ 
+ 	internal void AddOrUpdateBlockEntityFromPacket(Packet_BlockEntity p, ClientMain game)
+ 	{
+ 		BlockPos blockPos = new BlockPos(p.PosX, p.PosY, p.PosZ);
+-		if (p.Data == null && p.Classname == null)
++		if (!p.HasOptimumData() && p.Classname == null)
+ 		{
+ 			RemoveBlockEntity(game, blockPos);
+ 			return;
+ 		}
+ 		if (BlockEntities.TryGetValue(blockPos, out var value))
+ 		{
+ 			Type blockEntityType = ClientMain.ClassRegistry.GetBlockEntityType(p.Classname);
+ 			if (value.GetType() == blockEntityType)
+ 			{
+-				BinaryReader stream = new BinaryReader(new MemoryStream(p.Data));
+-				ITreeAttribute treeAttribute = new TreeAttribute();
+-				treeAttribute.FromBytes(stream);
++				TreeAttribute treeAttribute = new TreeAttribute();
++				if (p.TryGetOptimumDataSpan(out byte[] dataBuf, out int dataOffset, out int dataLength))
++				{
++					if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled)
++					{
++						Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadTreeFromBytes(treeAttribute, dataBuf, dataOffset, dataLength);
++					}
++					else
++					{
++						using MemoryStream input = new MemoryStream(dataBuf, dataOffset, dataLength);
++						using BinaryReader stream = new BinaryReader(input);
++						treeAttribute.FromBytes(stream);
++					}
++				}
++				p.ClearOptimumSlice();
+ 				try
+ 				{
+ 					value.FromTreeAttributes(treeAttribute, game);
+ 					return;
+ 				}

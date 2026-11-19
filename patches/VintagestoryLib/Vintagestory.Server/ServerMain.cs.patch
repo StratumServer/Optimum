@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerMain.cs b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
-index 593f5a4..3c3ebfe 100644
+index 593f5a4..b39ade9 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerMain.cs
 @@ -255,10 +255,14 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
@@ -100,7 +100,73 @@ index 593f5a4..3c3ebfe 100644
  		worldMetaDataPacketAlreadySentToSinglePlayer = false;
  		if (Systems != null)
  		{
-@@ -4245,11 +4299,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -3916,30 +3970,61 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+ 	}
+ 
+ 	internal void SendBlockEntity(IServerPlayer targetPlayer, BlockEntity blockentity)
+ 	{
+ 		Packet_BlockEntity[] array = new Packet_BlockEntity[1];
++		string classname = ClassRegistry.blockEntityTypeToClassnameMapping[blockentity.GetType()];
++		if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled)
++		{
++			FastMemoryStream ms = Vintagestory.API.Config.OptimumTreeAttributeCodec.LeaseThreadWriteStream(1024);
++			Packet_BlockEntity packet = new Packet_BlockEntity
++			{
++				Classname = classname,
++				PosX = blockentity.Pos.X,
++				PosY = blockentity.Pos.InternalY,
++				PosZ = blockentity.Pos.Z
++			};
++			array[0] = packet;
++			Packet_BlockEntities packet_BlockEntities = new Packet_BlockEntities();
++			packet_BlockEntities.SetBlockEntitites(array);
++			try
++			{
++				int length = Vintagestory.API.Config.OptimumTreeAttributeCodec.WriteBlockEntityToStream(blockentity, ms);
++				packet.SetOptimumSlice(ms.GetBuffer(), 0, length);
++				SendPacket(targetPlayer, new Packet_Server
++				{
++					Id = 48,
++					BlockEntities = packet_BlockEntities
++				});
++			}
++			finally
++			{
++				packet.ClearOptimumSlice();
++				Vintagestory.API.Config.OptimumTreeAttributeCodec.ReturnThreadWriteStream(ms);
++			}
++			return;
++		}
+ 		int num = 0;
+ 		MemoryStream memoryStream = new MemoryStream();
+ 		BinaryWriter stream = new BinaryWriter(memoryStream);
+ 		TreeAttribute treeAttribute = new TreeAttribute();
+ 		blockentity.ToTreeAttributes(treeAttribute);
+ 		treeAttribute.ToBytes(stream);
+ 		array[num] = new Packet_BlockEntity
+ 		{
+-			Classname = ClassRegistry.blockEntityTypeToClassnameMapping[blockentity.GetType()],
++			Classname = classname,
+ 			Data = memoryStream.ToArray(),
+ 			PosX = blockentity.Pos.X,
+ 			PosY = blockentity.Pos.InternalY,
+ 			PosZ = blockentity.Pos.Z
+ 		};
+-		Packet_BlockEntities packet_BlockEntities = new Packet_BlockEntities();
+-		packet_BlockEntities.SetBlockEntitites(array);
++		Packet_BlockEntities fallbackBlockEntities = new Packet_BlockEntities();
++		fallbackBlockEntities.SetBlockEntitites(array);
+ 		SendPacket(targetPlayer, new Packet_Server
+ 		{
+ 			Id = 48,
+-			BlockEntities = packet_BlockEntities
++			BlockEntities = fallbackBlockEntities
+ 		});
+ 	}
+ 
+ 	public void SendBlockEntityMessagePacket(IServerPlayer player, int x, int y, int z, int packetId, byte[] data = null)
+ 	{
+@@ -4245,11 +4330,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  
  	internal void BroadcastArbitraryPacket(byte[] data, params IServerPlayer[] skipPlayers)
  	{
@@ -113,7 +179,7 @@ index 593f5a4..3c3ebfe 100644
  			}
  		}
  	}
-@@ -4259,11 +4313,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4259,11 +4344,11 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  		Serialize_(packet);
  		byte[] array = null;
  		bool compressed = false;
@@ -126,7 +192,7 @@ index 593f5a4..3c3ebfe 100644
  				{
  					array = client.Socket.PreparePacketForSending(reusableBuffer, Config.CompressPackets, out compressed);
  				}
-@@ -4278,17 +4332,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4278,17 +4363,30 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  
  	internal void BroadcastArbitraryUdpPacket(Packet_UdpPacket data, params IServerPlayer[] skipPlayers)
  	{
@@ -158,7 +224,7 @@ index 593f5a4..3c3ebfe 100644
  		if (packetBenchmark.ContainsKey(packetId))
  		{
  			packetBenchmark[packetId]++;
-@@ -4477,200 +4544,252 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
+@@ -4477,200 +4575,252 @@ public sealed class ServerMain : GameMain, IServerWorldAccessor, IWorldAccessor,
  	{
  		if (player == null || player.ConnectionState == EnumClientState.Offline)
  		{
@@ -388,14 +454,14 @@ index 593f5a4..3c3ebfe 100644
 +				if (IsDedicatedServer)
 +				{
 +					if (Config.CompressPackets)
++					{
++						serverAssetsPacket.CacheCompressedAndRelease(packet_Server, OptimumConfig.CompactServerAssetsEnabled);
++					}
++					else
  					{
 -						Thread.Sleep(5);
-+						serverAssetsPacket.CacheCompressedAndRelease(packet_Server, OptimumConfig.CompactServerAssetsEnabled);
- 					}
-+					else
-+					{
 +						serverAssetsPacket.Serialize(packet_Server);
-+					}
+ 					}
 +					serverAssetsPacketBuilt = true;
 +					return;
  				}
@@ -500,16 +566,16 @@ index 593f5a4..3c3ebfe 100644
 -			{
 -				if (DummyNetConnection.SendServerAssetsPacketDirectly(packet_Server))
 +				if (compact && serverAssetsSentLocally && serverAssetsPacket.compressedBuffer != null)
++				{
++					serverAssetsPacket.ReleaseUncompressedSource();
++				}
++				else if (compact)
  				{
 -					serverAssetsSentLocally = true;
 -					worldMetaDataPacketAlreadySentToSinglePlayer = DummyNetConnection.SendServerPacketDirectly(WorldMetaDataPacket());
-+					serverAssetsPacket.ReleaseUncompressedSource();
++					serverAssetsPacket.packet = packet_Server;
  				}
 -				Logger.VerboseDebug("Single player: sent server assets packet to client");
-+				else if (compact)
-+				{
-+					serverAssetsPacket.packet = packet_Server;
-+				}
 +				serverAssetsPacketBuilt = true;
  			}
 +			catch (ThreadAbortException)

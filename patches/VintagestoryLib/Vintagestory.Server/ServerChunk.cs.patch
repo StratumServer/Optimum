@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerChunk.cs b/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
-index 82fead7..48aa5a3 100644
+index 82fead7..36d3d7f 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerChunk.cs
 @@ -20,10 +20,13 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
@@ -63,7 +63,73 @@ index 82fead7..48aa5a3 100644
  		}
  	}
  
-@@ -567,11 +589,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+@@ -417,29 +439,48 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 				EntitiesCount = entitiesCount;
+ 				EntitiesSerialized = null;
+ 			}
+ 			if (BlockEntitiesSerialized != null)
+ 			{
++				bool spanMode = Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled;
+ 				foreach (byte[] item in BlockEntitiesSerialized)
+ 				{
+-					using MemoryStream input2 = new MemoryStream(item);
+-					using BinaryReader binaryReader2 = new BinaryReader(input2);
+ 					string text2;
++					int bodyOffset = 0;
+ 					try
+ 					{
+-						text2 = binaryReader2.ReadString();
++						if (spanMode)
++						{
++							Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadBlockEntityClassname(item, 0, item.Length, out text2, out bodyOffset);
++						}
++						else
++						{
++							using MemoryStream inputHeader = new MemoryStream(item);
++							using BinaryReader readerHeader = new BinaryReader(inputHeader);
++							text2 = readerHeader.ReadString();
++							bodyOffset = (int)inputHeader.Position;
++						}
+ 					}
+ 					catch (Exception)
+ 					{
+ 						ServerMain.Logger.Error("Badly corrupted BlockEntity data in a chunk. Will discard it. Sorry.");
+-						goto end_IL_0162;
++						continue;
+ 					}
+ 					string text3 = null;
+ 					try
+ 					{
+ 						TreeAttribute treeAttribute = new TreeAttribute();
+-						treeAttribute.FromBytes(binaryReader2);
++						if (spanMode)
++						{
++							Vintagestory.API.Config.OptimumTreeAttributeCodec.ReadTreeFromBytes(treeAttribute, item, bodyOffset, item.Length - bodyOffset);
++						}
++						else
++						{
++							using MemoryStream input2 = new MemoryStream(item, bodyOffset, item.Length - bodyOffset);
++							using BinaryReader binaryReader2 = new BinaryReader(input2);
++							treeAttribute.FromBytes(binaryReader2);
++						}
+ 						BlockEntity blockEntity = ServerMain.ClassRegistry.CreateBlockEntity(text2);
+ 						Block block = null;
+ 						text3 = treeAttribute.GetString("blockCode");
+ 						if (text3 != null)
+ 						{
+@@ -470,11 +511,10 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 					catch (Exception ex3)
+ 					{
+ 						ServerMain.Logger.Error("Failed loading blockentity {0} for block {1} in a chunk. Will discard it. Sorry. Exception logged to verbose debug.", text2, text3);
+ 						ServerMain.Logger.VerboseDebug("Failed loading a blockentity in a chunk. Will discard it. Sorry. Exception: {0}", LoggerBase.CleanStackTrace(ex3.ToString()));
+ 					}
+-					end_IL_0162:;
+ 				}
+ 				BlockEntitiesCount = BlockEntities.Count;
+ 				BlockEntitiesSerialized = null;
+ 			}
+ 			if (DecorsSerialized != null && DecorsSerialized.Length != 0)
+@@ -567,14 +607,22 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
  			packet_ServerChunk.SetLight(lightCompressed);
  			packet_ServerChunk.SetLightSat(lightSatCompressed);
  			packet_ServerChunk.SetLiquids(liquidsCompressed);
@@ -73,10 +139,22 @@ index 82fead7..48aa5a3 100644
 +		packet_ServerChunk.SetModdata(SerializerUtil.Serialize(moddata, reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream(16384))));
  		if (BlockEntities.Count > 0)
  		{
- 			packet_ServerChunk.SetBlockEntities(GetBlockEntitiesPackets());
+-			packet_ServerChunk.SetBlockEntities(GetBlockEntitiesPackets());
++			if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled)
++			{
++				Packet_BlockEntity[] bePackets = GetBlockEntitiesPacketsPooled(out int beCount);
++				packet_ServerChunk.SetBlockEntities(bePackets, beCount, bePackets.Length);
++			}
++			else
++			{
++				packet_ServerChunk.SetBlockEntities(GetBlockEntitiesPackets());
++			}
  		}
  		if (LightPositions != null && LightPositions.Count > 0)
-@@ -602,11 +624,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 		{
+ 			packet_ServerChunk.SetLightPositions(LightPositions.ToArray());
+ 		}
+@@ -602,11 +650,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
  	internal Packet_Entity[] GetEntitiesPackets()
  	{
  		Packet_Entity[] array = new Packet_Entity[(Entities != null) ? EntitiesCount : 0];
@@ -89,7 +167,7 @@ index 82fead7..48aa5a3 100644
  			int num = 0;
  			Entity[] entities = Entities;
  			for (int i = 0; i < entities.Length; i++)
-@@ -633,11 +655,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+@@ -633,11 +681,11 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
  	}
  
  	internal Packet_BlockEntity[] GetBlockEntitiesPackets()
@@ -102,3 +180,104 @@ index 82fead7..48aa5a3 100644
  		int num = 0;
  		Dictionary<Type, string> blockEntityTypeToClassnameMapping = ServerMain.ClassRegistry.blockEntityTypeToClassnameMapping;
  		foreach (BlockEntity value2 in BlockEntities.Values)
+@@ -648,10 +696,64 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 			}
+ 		}
+ 		return array;
+ 	}
+ 
++	internal Packet_BlockEntity[] GetBlockEntitiesPacketsPooled(out int count)
++	{
++		int capacity = BlockEntities.Count;
++		if (capacity == 0)
++		{
++			count = 0;
++			return Array.Empty<Packet_BlockEntity>();
++		}
++		Packet_BlockEntity[] array = new Packet_BlockEntity[capacity];
++		FastMemoryStream fastMemoryStream = reusableSerializationStream ?? (reusableSerializationStream = new FastMemoryStream(16384));
++		fastMemoryStream.Reset();
++		int num = 0;
++		Dictionary<Type, string> blockEntityTypeToClassnameMapping = ServerMain.ClassRegistry.blockEntityTypeToClassnameMapping;
++		foreach (BlockEntity value2 in BlockEntities.Values)
++		{
++			if (value2 != null && blockEntityTypeToClassnameMapping.TryGetValue(value2.GetType(), out var value))
++			{
++				int offset = (int)fastMemoryStream.Position;
++				int length = ServerPackets.WriteBlockEntityData(value2, fastMemoryStream);
++				array[num++] = new Packet_BlockEntity
++				{
++					Classname = value,
++					PosX = value2.Pos.X,
++					PosY = value2.Pos.InternalY,
++					PosZ = value2.Pos.Z,
++					optimumSharedOffset = offset,
++					optimumSharedLength = length
++				};
++			}
++		}
++		count = num;
++		if (num == 0)
++		{
++			return array;
++		}
++		int totalBytes = (int)fastMemoryStream.Position;
++		Vintagestory.API.Config.OptimumPooledSlab slab = Vintagestory.API.Config.OptimumPooledSlab.Rent(totalBytes);
++		byte[] slabBuffer = slab.Buffer;
++		if (totalBytes > 0)
++		{
++			Buffer.BlockCopy(fastMemoryStream.GetBuffer(), 0, slabBuffer, 0, totalBytes);
++		}
++		for (int i = 0; i < num; i++)
++		{
++			array[i].optimumSharedBuffer = slabBuffer;
++		}
++		array[0].optimumSlab = slab;
++		if (fastMemoryStream.GetBuffer().Length > 1048576)
++		{
++			reusableSerializationStream = null;
++		}
++		return array;
++	}
++
+ 	public override void MarkModified()
+ 	{
+ 		base.MarkModified();
+ 		DirtyForSaving = true;
+ 	}
+@@ -735,22 +837,30 @@ public class ServerChunk : WorldChunk, IServerChunk, IWorldChunk, IWithFastSeria
+ 	}
+ 
+ 	private void FastSerializeBlockEntities(FastMemoryStream ms, int idEntitySerialized, ref int count, ref int savedPosition)
+ 	{
+ 		FastMemoryStream fastMemoryStream = reusableSerializationStream;
+-		BinaryWriter binaryWriter = new BinaryWriter(fastMemoryStream);
++		bool spanMode = Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled;
++		BinaryWriter binaryWriter = spanMode ? null : new BinaryWriter(fastMemoryStream);
+ 		int num = 0;
+ 		foreach (BlockEntity value2 in BlockEntities.Values)
+ 		{
+ 			try
+ 			{
+ 				fastMemoryStream.Reset();
+ 				string value = ServerMain.ClassRegistry.blockEntityTypeToClassnameMapping[value2.GetType()];
+-				binaryWriter.Write(value);
+-				TreeAttribute treeAttribute = new TreeAttribute();
+-				value2.ToTreeAttributes(treeAttribute);
+-				treeAttribute.ToBytes(binaryWriter);
++				if (spanMode)
++				{
++					Vintagestory.API.Config.OptimumTreeAttributeCodec.WriteBlockEntityToStream(value, value2, fastMemoryStream, writeClassname: true);
++				}
++				else
++				{
++					binaryWriter.Write(value);
++					TreeAttribute treeAttribute = new TreeAttribute();
++					value2.ToTreeAttributes(treeAttribute);
++					treeAttribute.ToBytes(binaryWriter);
++				}
+ 				FastSerializer.Write(ms, idEntitySerialized, fastMemoryStream);
+ 			}
+ 			catch (Exception e)
+ 			{
+ 				ServerMain.Logger.Error("Error thrown trying to serialize block entity {0} at {1}, will not save, sorry!", value2?.GetType(), value2?.Pos);
