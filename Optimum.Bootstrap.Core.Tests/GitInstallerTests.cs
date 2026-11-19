@@ -141,10 +141,163 @@ public sealed class GitInstallerTests
         }
     }
 
-    private static FakeSystemProbe WindowsProbe(string localAppData) => new()
+    [Theory]
+    [InlineData(Architecture.X64, "MinGit-2.56.1-64-bit.zip")]
+    [InlineData(Architecture.Arm64, "MinGit-2.56.1-arm64.zip")]
+    [InlineData(Architecture.X86, "MinGit-2.56.1-32-bit.zip")]
+    public async Task InstallsPublishedMinGitAssetForWindowsDotOneTagAcrossArchitectures(
+        Architecture arch, string expectedAsset)
+    {
+        string localAppData = NewTempDirectory();
+        try
+        {
+            FakeSystemProbe probe = WindowsProbe(localAppData, arch);
+            byte[] archive = PortableArchive();
+            string digest = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
+            var handler = new ReleaseHandler(
+                archive,
+                digest,
+                tag: "v2.56.1.windows.1",
+                publishedAssets:
+                [
+                    "MinGit-2.56.1-32-bit.zip",
+                    "MinGit-2.56.1-64-bit.zip",
+                    "MinGit-2.56.1-arm64.zip",
+                    "MinGit-2.56.1-busybox-32-bit.zip",
+                    "MinGit-2.56.1-busybox-64-bit.zip",
+                    "MinGit-2.56.1-busybox-arm64.zip",
+                    "MinGit-2.56.1-mingw64.zip",
+                ]);
+            using var http = new HttpClient(handler);
+            var activatedPaths = new List<string>();
+            string gitPath = GitInstaller.PortableExecutable(probe);
+            probe.OnCommand(gitPath, "--version", "git version 2.56.1.windows.1\n");
+            var installer = new GitInstaller(probe, http, directory => activatedPaths.Add(directory));
+
+            Assert.Equal(PrerequisiteState.Missing, new PrerequisiteScanner(probe, "").ScanGit().State);
+
+            ToolAcquisitionResult result = await installer.InstallAsync(NullObserver.Instance, CancellationToken.None);
+
+            Assert.True(result.Ok, result.Message);
+            Assert.Equal(gitPath, result.InstalledPath);
+            Assert.Equal([expectedAsset], handler.DownloadedAssets);
+            Assert.Single(activatedPaths);
+            Assert.Equal(Path.GetDirectoryName(gitPath), activatedPaths[0]);
+
+            probe.Path.Insert(0, activatedPaths[0]);
+            probe.AddFile(gitPath);
+            PrerequisiteResult detected = new PrerequisiteScanner(probe, "").ScanGit();
+            Assert.Equal(PrerequisiteState.Ok, detected.State);
+            Assert.False(detected.BlocksBuild);
+            Assert.Equal(gitPath.Replace('\\', '/'), detected.DetectedPath!.Replace('\\', '/'));
+            Assert.Equal("2.56.1.windows.1", detected.DetectedVersion);
+        }
+        finally
+        {
+            Directory.Delete(localAppData, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("v2.56.1.windows.1", Architecture.X64, "MinGit-2.56.1-64-bit.zip", new[] { "MinGit-2.56.1-64-bit.zip", "MinGit-2.56.1-busybox-64-bit.zip" })]
+    [InlineData("v2.56.1.windows.1", Architecture.Arm64, "MinGit-2.56.1-arm64.zip", new[] { "MinGit-2.56.1-arm64.zip", "MinGit-2.56.1-busybox-arm64.zip" })]
+    [InlineData("v2.56.1.windows.1", Architecture.X86, "MinGit-2.56.1-32-bit.zip", new[] { "MinGit-2.56.1-32-bit.zip", "MinGit-2.56.1-busybox-32-bit.zip" })]
+    [InlineData("v2.56.0.windows.2", Architecture.X64, "MinGit-2.56.0-64-bit.zip", new[] { "MinGit-2.56.0-64-bit.zip", "MinGit-2.56.0-busybox-64-bit.zip" })]
+    [InlineData("v2.56.1", Architecture.X64, "MinGit-2.56.1-64-bit.zip", new[] { "MinGit-2.56.1-64-bit.zip" })]
+    [InlineData("v2.56.1.windows.1", Architecture.X64, "MinGit-2.56.1.1-64-bit.zip", new[] { "MinGit-2.56.1.1-64-bit.zip" })]
+    public async Task ResolvesPublishedMinGitAssetAcrossTagAndFilenameShapesWhenRateLimited(
+        string tag, Architecture arch, string expectedAsset, string[] publishedAssets)
+    {
+        string localAppData = NewTempDirectory();
+        try
+        {
+            FakeSystemProbe probe = WindowsProbe(localAppData, arch);
+            byte[] archive = PortableArchive();
+            string digest = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
+            var handler = new ReleaseHandler(
+                archive,
+                digest,
+                rateLimitApi: true,
+                tag: tag,
+                publishedAssets: publishedAssets);
+            using var http = new HttpClient(handler);
+            string gitPath = GitInstaller.PortableExecutable(probe);
+            probe.OnCommand(gitPath, "--version", "git version 2.56.1.windows.1\n");
+            var installer = new GitInstaller(probe, http, _ => { });
+
+            ToolAcquisitionResult result = await installer.InstallAsync(NullObserver.Instance, CancellationToken.None);
+
+            Assert.True(result.Ok, result.Message);
+            Assert.Equal(1, handler.ReleasePageRequests);
+            Assert.Equal([expectedAsset], handler.DownloadedAssets);
+        }
+        finally
+        {
+            Directory.Delete(localAppData, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task FallsBackToBusyBoxWhenOnlyBusyBoxIsPublishedAndRejectsTamperedDigest()
+    {
+        string localAppData = NewTempDirectory();
+        try
+        {
+            FakeSystemProbe probe = WindowsProbe(localAppData);
+            byte[] archive = PortableArchive();
+            string digest = Convert.ToHexString(SHA256.HashData(archive)).ToLowerInvariant();
+            var busyboxHandler = new ReleaseHandler(
+                archive,
+                digest,
+                tag: "v2.56.1.windows.1",
+                publishedAssets: ["MinGit-2.56.1-busybox-64-bit.zip"]);
+            using var httpOk = new HttpClient(busyboxHandler);
+            string gitPath = GitInstaller.PortableExecutable(probe);
+            probe.OnCommand(gitPath, "--version", "git version 2.56.1.windows.1\n");
+            var installer = new GitInstaller(probe, httpOk, _ => { });
+
+            ToolAcquisitionResult result = await installer.InstallAsync(NullObserver.Instance, CancellationToken.None);
+
+            Assert.True(result.Ok, result.Message);
+            Assert.Equal(["MinGit-2.56.1-busybox-64-bit.zip"], busyboxHandler.DownloadedAssets);
+
+            // Fresh cache check: tampered digest on MinGit-2.56.1-64-bit.zip must still reject install.
+            string badLocalAppData = NewTempDirectory();
+            FakeSystemProbe badProbe = WindowsProbe(badLocalAppData);
+            try
+            {
+                var badHandler = new ReleaseHandler(
+                    archive,
+                    new string('0', 64),
+                    tag: "v2.56.1.windows.1",
+                    publishedAssets: ["MinGit-2.56.1-64-bit.zip", "MinGit-2.56.1-busybox-64-bit.zip"]);
+                using var httpBad = new HttpClient(badHandler);
+                var badInstaller = new GitInstaller(badProbe, httpBad, _ => { });
+
+                ToolAcquisitionResult failed = await badInstaller.InstallAsync(NullObserver.Instance, CancellationToken.None);
+
+                Assert.False(failed.Ok);
+                Assert.Contains("SHA-256", failed.Message);
+                Assert.Equal(
+                    ["MinGit-2.56.1-64-bit.zip", "MinGit-2.56.1-busybox-64-bit.zip"],
+                    badHandler.DownloadedAssets);
+            }
+            finally
+            {
+                if (Directory.Exists(badLocalAppData))
+                    Directory.Delete(badLocalAppData, recursive: true);
+            }
+        }
+        finally
+        {
+            Directory.Delete(localAppData, recursive: true);
+        }
+    }
+
+    private static FakeSystemProbe WindowsProbe(string localAppData, Architecture arch = Architecture.X64) => new()
     {
         Os = Optimum.Bootstrap.Core.Platform.OsKind.Windows,
-        Arch = Architecture.X64,
+        Arch = arch,
         HomeDirectory = "C:/Users/tester",
         Environment = { ["LOCALAPPDATA"] = localAppData },
     };
@@ -169,8 +322,16 @@ public sealed class GitInstallerTests
         byte[] archive,
         string digest,
         bool corruptRegularAsset = false,
-        bool rateLimitApi = false) : HttpMessageHandler
+        bool rateLimitApi = false,
+        string tag = "v2.56.0.windows.3",
+        string[]? publishedAssets = null) : HttpMessageHandler
     {
+        private readonly string[] _publishedAssets = publishedAssets ??
+        [
+            "MinGit-2.56.0.3-64-bit.zip",
+            "MinGit-2.56.0.3-busybox-64-bit.zip",
+        ];
+
         public List<string> DownloadedAssets { get; } = [];
         public int ReleasePageRequests { get; private set; }
 
@@ -189,21 +350,24 @@ public sealed class GitInstallerTests
                     });
                 }
 
-                string regularDigest = corruptRegularAsset ? new string('0', 64) : digest;
+                string assetJson = string.Join(",\n", _publishedAssets.Select(name =>
+                {
+                    string assetDigest = corruptRegularAsset && !name.Contains("busybox", StringComparison.Ordinal)
+                        ? new string('0', 64)
+                        : digest;
+                    return $$"""
+                    {
+                      "name": "{{name}}",
+                      "browser_download_url": "https://github.com/git-for-windows/git/releases/download/{{tag}}/{{name}}",
+                      "digest": "sha256:{{assetDigest}}"
+                    }
+                    """;
+                }));
                 string metadata = $$"""
                 {
-                  "tag_name": "v2.56.0.windows.3",
+                  "tag_name": "{{tag}}",
                   "assets": [
-                    {
-                      "name": "MinGit-2.56.0.3-64-bit.zip",
-                      "browser_download_url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.3/MinGit-2.56.0.3-64-bit.zip",
-                      "digest": "sha256:{{regularDigest}}"
-                    },
-                    {
-                      "name": "MinGit-2.56.0.3-busybox-64-bit.zip",
-                      "browser_download_url": "https://github.com/git-for-windows/git/releases/download/v2.56.0.windows.3/MinGit-2.56.0.3-busybox-64-bit.zip",
-                      "digest": "sha256:{{digest}}"
-                    }
+                {{assetJson}}
                   ]
                 }
                 """;
@@ -216,19 +380,24 @@ public sealed class GitInstallerTests
             if (request.RequestUri.AbsoluteUri == "https://github.com/git-for-windows/git/releases/latest")
             {
                 ReleasePageRequests++;
-                string regularDigest = corruptRegularAsset ? new string('0', 64) : digest;
+                string rows = string.Join("\n", _publishedAssets.Select(name =>
+                {
+                    string assetDigest = corruptRegularAsset && !name.Contains("busybox", StringComparison.Ordinal)
+                        ? new string('0', 64)
+                        : digest;
+                    return $"        <tr><td>{name}</td><td>{assetDigest}</td></tr>";
+                }));
                 string html = $$"""
                     <html>
                       <table><tbody>
-                        <tr><td>MinGit-2.56.0.3-64-bit.zip</td><td>{{regularDigest}}</td></tr>
-                        <tr><td>MinGit-2.56.0.3-busybox-64-bit.zip</td><td>{{digest}}</td></tr>
+                    {{rows}}
                       </tbody></table>
                     </html>
                     """;
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     RequestMessage = new HttpRequestMessage(HttpMethod.Get,
-                        "https://github.com/git-for-windows/git/releases/tag/v2.56.0.windows.3"),
+                        $"https://github.com/git-for-windows/git/releases/tag/{tag}"),
                     Content = new StringContent(html, Encoding.UTF8, "text/html"),
                 });
             }
