@@ -1,0 +1,139 @@
+diff --git a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorTrapDoor.cs b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorTrapDoor.cs
+index 81befdf..a11e6bd 100644
+--- a/VSSurvivalMod/BlockEntityBehavior/BEBehaviorTrapDoor.cs
++++ b/VSSurvivalMod/BlockEntityBehavior/BEBehaviorTrapDoor.cs
+@@ -28,10 +28,11 @@ namespace Vintagestory.GameContent
+     [AddDocumentationProperty("easingSpeed", "Affects animation speed of trapdoor opening or closing", "System.Single", "Optional", "10", true)]
+     public class BEBehaviorTrapDoor : BEBehaviorAnimatable, IInteractable, IRotatable
+     {
+         protected bool opened;
+         protected MeshData mesh;
++        protected OptimumOpenDoorState optimumBakeState;
+         protected Cuboidf[] boxesClosed, boxesOpened;
+ 
+         public int AttachedFace;
+         public int RotDeg; 
+ 
+@@ -72,11 +73,14 @@ namespace Vintagestory.GameContent
+ 
+             SetupRotationsAndColSelBoxes(false);
+ 
+             if (opened && animUtil != null && !animUtil.activeAnimationsByAnimCode.ContainsKey("opened"))
+             {
+-                ToggleDoorWing(true);
++                if (!GetOrCreateOptimumBakeState().TryBakeOnLoad(Api, opened, animUtil.animator, BuildOptimumOpenedMesh))
++                {
++                    ToggleDoorWing(true);
++                }
+             }
+         }
+ 
+         protected void SetupRotationsAndColSelBoxes(bool initalSetup)
+         {
+@@ -104,10 +108,11 @@ namespace Vintagestory.GameContent
+             mesh = doorBh.animatableOrigMesh.Clone();
+ 
+             Matrixf mat = getTfMatrix();
+             mesh.MatrixTransform(mat.Values);
+             animUtil.renderer.CustomTransform = mat.Values;
++            optimumBakeState?.RefreshOpenedMeshIfBaked(BuildOptimumOpenedMesh);
+         }
+ 
+         private Matrixf getTfMatrix(float rotz=0)
+         {
+             if (BlockFacing.ALLFACES[AttachedFace].IsVertical)
+@@ -207,27 +212,72 @@ namespace Vintagestory.GameContent
+             {
+                 Api.World.BlockAccessor.TriggerNeighbourBlockUpdate(Pos);
+             }
+         }
+ 
+-        private void ToggleDoorWing(bool opened)
++        private OptimumOpenDoorState GetOrCreateOptimumBakeState()
+         {
+-            this.opened = opened;
+-            if (!opened)
+-            {
+-                animUtil.StopAnimation("opened");
+-            }
+-            else
++            if (optimumBakeState == null)
+             {
+-                float easingSpeed = Blockentity.Block.Attributes?["easingSpeed"].AsFloat(10) ?? 10;
+-                animUtil.StartAnimation(new AnimationMetaData() { Animation = "opened", Code = "opened", EaseInSpeed = easingSpeed, EaseOutSpeed = easingSpeed });
++                optimumBakeState = new OptimumOpenDoorState();
+             }
++            return optimumBakeState;
++        }
++
++        private AnimationMetaData CreateOptimumOpenedMeta()
++        {
++            float easingSpeed = Blockentity.Block.Attributes?["easingSpeed"].AsFloat(10) ?? 10;
++            return OptimumOpenDoorBake.CreateOpenedMeta(easingSpeed);
++        }
++
++        private bool IsOptimumDoorOpened()
++        {
++            return opened;
++        }
++
++        private void ExecuteOptimumFallbackRestore()
++        {
++            optimumBakeState?.ExecuteFallbackRestore(Blockentity, animUtil, opened, CreateOptimumOpenedMeta());
++        }
++
++        private MeshData BuildOptimumOpenedMesh()
++        {
++            if (doorBh?.animatableOrigMesh == null) return null;
++            float easingSpeed = Blockentity.Block.Attributes?["easingSpeed"].AsFloat(10) ?? 10;
++            MeshData openedOrig = OptimumOpenDoorBake.EnsureOpenedOrigMesh(
++                doorBh,
++                ref doorBh.animatableOpenedOrigMesh,
++                doorBh.animatableOrigMesh,
++                animUtil?.animator,
++                easingSpeed);
++            return openedOrig != null ? OptimumOpenDoorBake.TransformTrapDoorInstanceMesh(openedOrig, getTfMatrix().Values) : null;
++        }
++
++        private void ToggleDoorWing(bool opened)
++        {
++            this.opened = opened;
++            GetOrCreateOptimumBakeState().HandleToggle(
++                Blockentity,
++                animUtil,
++                opened,
++                CreateOptimumOpenedMeta(),
++                IsOptimumDoorOpened,
++                BuildOptimumOpenedMesh);
+             Blockentity.MarkDirty();
+         }
+ 
+         public override bool OnTesselation(ITerrainMeshPool mesher, ITesselatorAPI tessThreadTesselator)
+         {
++            if (optimumBakeState != null && optimumBakeState.TryGetStaticMeshForTesselation(
++                    Api,
++                    out MeshData bakedMesh,
++                    ExecuteOptimumFallbackRestore))
++            {
++                mesher.AddMeshData(bakedMesh);
++                return true;
++            }
++
+             bool skipMesh = base.OnTesselation(mesher, tessThreadTesselator);
+             if (!skipMesh)
+             {
+                 mesher.AddMeshData(mesh);
+             }
+@@ -246,11 +296,11 @@ namespace Vintagestory.GameContent
+ 
+             if (opened != beforeOpened && animUtil != null) ToggleDoorWing(opened);
+             if (Api != null && Api.Side is EnumAppSide.Client)
+             {
+                 UpdateMeshAndAnimations();
+-                if (opened && !beforeOpened && animUtil != null && !animUtil.activeAnimationsByAnimCode.ContainsKey("opened"))
++                if (opened && !beforeOpened && animUtil != null && !animUtil.activeAnimationsByAnimCode.ContainsKey("opened") && optimumBakeState?.IsBakedOpen != true)
+                 {
+                     ToggleDoorWing(true);
+                 }
+                 UpdateHitBoxes();
+                 Api.World.BlockAccessor.MarkBlockDirty(Pos);

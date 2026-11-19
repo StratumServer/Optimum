@@ -791,6 +791,10 @@ public static class OptimumConfig
     // Packet_NatFloat equivalents) when avg, var, dist, and zero offset match.
     public static bool ReuseCommonNatFloatEnabled = true;
 
+    // Issue #634: Bake settled open doors, gates, trapdoors, and cabinet doors into
+    // static chunk meshes so idle open doors emit zero AnimatableRenderer draw calls.
+    public static bool BakeOpenDoorsEnabled = true;
+
     internal static bool IsIntelArcRenderer(string? glRenderer)
     {
         return !string.IsNullOrEmpty(glRenderer)
@@ -1563,6 +1567,7 @@ public static class OptimumConfig
         (nameof(OptimumConfigData.CompactServerAssets), CompactServerAssetsEnabled.ToString()),
         (nameof(OptimumConfigData.FirepitIdleRenderer), FirepitIdleRendererEnabled.ToString()),
         (nameof(OptimumConfigData.ReuseCommonNatFloat), ReuseCommonNatFloatEnabled.ToString()),
+        (nameof(OptimumConfigData.BakeOpenDoors), BakeOpenDoorsEnabled.ToString()),
     };
 
     /// <summary>
@@ -1701,6 +1706,7 @@ public static class OptimumConfig
             CompactServerAssetsEnabled = data.CompactServerAssets;
             FirepitIdleRendererEnabled = data.FirepitIdleRenderer;
             ReuseCommonNatFloatEnabled = data.ReuseCommonNatFloat;
+            BakeOpenDoorsEnabled = data.BakeOpenDoors;
         }
         catch (Exception)
         {
@@ -1802,6 +1808,7 @@ public static class OptimumConfig
             CompactServerAssets = CompactServerAssetsEnabled,
             FirepitIdleRenderer = FirepitIdleRendererEnabled,
             ReuseCommonNatFloat = ReuseCommonNatFloatEnabled,
+            BakeOpenDoors = BakeOpenDoorsEnabled,
         };
 
         try
@@ -1927,6 +1934,7 @@ internal sealed class OptimumConfigData
     public bool CompactServerAssets { get; set; } = true;
     public bool FirepitIdleRenderer { get; set; } = true;
     public bool ReuseCommonNatFloat { get; set; } = true;
+    public bool BakeOpenDoors { get; set; } = true;
 }
 
 public static class OptimumDiagnostics
@@ -2881,6 +2889,7 @@ public static class OptimumDiagnostics
         ResetSsaoDepthPositionDiagnostics();
         ResetDynamicRenderScaleDiagnostics();
         ResetCommonNatFloatCounters();
+        ResetOpenDoorBakeCounters();
     }
 
     // Game launch task diagnostics. The client intentionally runs at most one
@@ -3920,6 +3929,43 @@ public static class OptimumDiagnostics
         return string.Create(
             CultureInfo.InvariantCulture,
             $"Optimum common NatFloat reuse: enabled={OptimumConfig.ReuseCommonNatFloatEnabled}, natReused={natReused}, natAllocated={natAlloc}, natReusePct={natPct:0.0}%, packetReused={pktReused}, packetAllocated={pktAlloc}, packetReusePct={pktPct:0.0}%");
+    }
+
+    // Issue #634: Open door / trapdoor / cabinet static mesh bake diagnostics.
+    private static long _openDoorsBakedFromTransition;
+    private static long _openDoorsBakedFromLoad;
+    private static long _openDoorsReopenedAnimation;
+    private static long _openDoorsDynamicOrSkipped;
+
+    public static long OpenDoorsBakedFromTransition => Interlocked.Read(ref _openDoorsBakedFromTransition);
+    public static long OpenDoorsBakedFromLoad => Interlocked.Read(ref _openDoorsBakedFromLoad);
+    public static long OpenDoorsReopenedAnimation => Interlocked.Read(ref _openDoorsReopenedAnimation);
+    public static long OpenDoorsDynamicOrSkipped => Interlocked.Read(ref _openDoorsDynamicOrSkipped);
+
+    public static void RecordOpenDoorBakedFromTransition() => Interlocked.Increment(ref _openDoorsBakedFromTransition);
+    public static void RecordOpenDoorBakedFromLoad() => Interlocked.Increment(ref _openDoorsBakedFromLoad);
+    public static void RecordOpenDoorReopened() => Interlocked.Increment(ref _openDoorsReopenedAnimation);
+    public static void RecordOpenDoorDynamicOrSkipped() => Interlocked.Increment(ref _openDoorsDynamicOrSkipped);
+
+    public static void ResetOpenDoorBakeCounters()
+    {
+        Interlocked.Exchange(ref _openDoorsBakedFromTransition, 0);
+        Interlocked.Exchange(ref _openDoorsBakedFromLoad, 0);
+        Interlocked.Exchange(ref _openDoorsReopenedAnimation, 0);
+        Interlocked.Exchange(ref _openDoorsDynamicOrSkipped, 0);
+    }
+
+    public static string GetOpenDoorBakeSummary()
+    {
+        long bakedTransition = OpenDoorsBakedFromTransition;
+        long bakedLoad = OpenDoorsBakedFromLoad;
+        long bakedTotal = bakedTransition + bakedLoad;
+        long reopened = OpenDoorsReopenedAnimation;
+        long skipped = OpenDoorsDynamicOrSkipped;
+
+        return string.Create(
+            CultureInfo.InvariantCulture,
+            $"Optimum open-door bake: enabled={OptimumConfig.BakeOpenDoorsEnabled}, bakedTotal={bakedTotal} (transition={bakedTransition}, load={bakedLoad}), reopened={reopened}, dynamicOrSkipped={skipped}");
     }
 }
 

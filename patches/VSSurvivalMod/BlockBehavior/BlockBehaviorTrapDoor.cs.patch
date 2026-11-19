@@ -1,0 +1,16 @@
+diff --git a/VSSurvivalMod/BlockBehavior/BlockBehaviorTrapDoor.cs b/VSSurvivalMod/BlockBehavior/BlockBehaviorTrapDoor.cs
+index 2c844f0..ed6ef50 100644
+--- a/VSSurvivalMod/BlockBehavior/BlockBehaviorTrapDoor.cs
++++ b/VSSurvivalMod/BlockBehavior/BlockBehaviorTrapDoor.cs
+@@ -58,10 +58,11 @@ namespace Vintagestory.GameContent
+         [DocumentAsJson("Optional", "True", true)]
+         public bool airtight;
+ 
+         ICoreAPI api;
+         public MeshData animatableOrigMesh;
++        public MeshData animatableOpenedOrigMesh;
+         public Shape animatableShape;
+         public string animatableDictKey;
+ 
+         public BlockBehaviorTrapDoor(Block block) : base(block)
+         {

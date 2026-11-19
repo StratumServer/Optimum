@@ -1,0 +1,17 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorTrapDoor.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorTrapDoor.cs
+index 054953b..8c3ef80 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorTrapDoor.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorTrapDoor.cs
+@@ -27,10 +27,12 @@ public class BlockBehaviorTrapDoor : StrongBlockBehavior, IClaimTraverseable
+ 
+ 	private ICoreAPI api;
+ 
+ 	public MeshData animatableOrigMesh;
+ 
++	public MeshData animatableOpenedOrigMesh;
++
+ 	public Shape animatableShape;
+ 
+ 	public string animatableDictKey;
+ 
+ 	public BlockBehaviorTrapDoor(Block block)

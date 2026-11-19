@@ -1,0 +1,16 @@
+diff --git a/VSSurvivalMod/BlockBehavior/BehaviorDoor.cs b/VSSurvivalMod/BlockBehavior/BehaviorDoor.cs
+index 97b54a8..19a2153 100644
+--- a/VSSurvivalMod/BlockBehavior/BehaviorDoor.cs
++++ b/VSSurvivalMod/BlockBehavior/BehaviorDoor.cs
+@@ -82,10 +82,11 @@ namespace Vintagestory.GameContent
+         [DocumentAsJson("Optional", "1.0 for each block", true)]
+         public float[][] liquidBarrierHeight;
+ 
+         ICoreAPI api;
+         public MeshData animatableOrigMesh;
++        public MeshData animatableOpenedOrigMesh;
+         public Shape animatableShape;
+         public string animatableDictKey;
+ 
+         public BlockBehaviorDoor(Block block) : base(block)
+         {

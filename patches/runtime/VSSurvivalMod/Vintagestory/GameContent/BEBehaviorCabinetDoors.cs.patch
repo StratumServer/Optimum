@@ -1,0 +1,182 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCabinetDoors.cs b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCabinetDoors.cs
+index b6e6bb6..93d8d6e 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCabinetDoors.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BEBehaviorCabinetDoors.cs
+@@ -1,9 +1,10 @@
+ using System;
+ using System.Collections.Generic;
+ using Vintagestory.API.Client;
+ using Vintagestory.API.Common;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+ 
+ namespace Vintagestory.GameContent;
+ 
+@@ -19,38 +20,100 @@ public class BEBehaviorCabinetDoors : BEBehaviorAnimatable, IInteractable
+ 
+ 	protected ItemStack? doorStack;
+ 
+ 	private MeshData? doorMesh;
+ 
++	protected OptimumOpenDoorState? optimumBakeState;
++
++	private bool optimumSkipEnsureAnimUpdate;
++
+ 	public ItemStack? DoorStack => doorStack;
+ 
+ 	public BEBehaviorCabinetDoors(BlockEntity blockentity)
+ 		: base(blockentity)
+ 	{
+ 	}
+ 
++	private OptimumOpenDoorState GetOrCreateOptimumBakeState()
++	{
++		if (optimumBakeState == null)
++		{
++			optimumBakeState = new OptimumOpenDoorState();
++		}
++		return optimumBakeState;
++	}
++
++	private static AnimationMetaData CreateOptimumOpenedMeta()
++	{
++		return OptimumOpenDoorBake.CreateOpenedMeta(10f, 0.7f, 4f);
++	}
++
++	private bool IsOptimumDoorOpened()
++	{
++		return opened;
++	}
++
++	private void ExecuteOptimumFallbackRestore()
++	{
++		optimumBakeState?.ExecuteFallbackRestore(Blockentity, animUtil, opened, CreateOptimumOpenedMeta());
++	}
++
++	private MeshData? BuildOptimumOpenedMesh()
++	{
++		if (doorMesh == null && capi != null && doorStack != null)
++		{
++			optimumSkipEnsureAnimUpdate = true;
++			try
++			{
++				ensureMeshExists(capi.Tesselator);
++			}
++			finally
++			{
++				optimumSkipEnsureAnimUpdate = false;
++			}
++		}
++		if (doorMesh == null || animUtil?.animator == null)
++		{
++			return null;
++		}
++		float[] array = OptimumOpenDoorBake.EvaluateSettledOpenPoseMatrices(animUtil.animator, 10f);
++		if (array == null)
++		{
++			return null;
++		}
++		return OptimumOpenDoorBake.BakeJointPoseMesh(doorMesh, array);
++	}
++
+ 	public override void Initialize(ICoreAPI api, JsonObject properties)
+ 	{
+ 		base.Initialize(api, properties);
+ 		capi = api as ICoreClientAPI;
++		if (opened && doorStack != null && capi != null && OptimumConfig.BakeOpenDoorsEnabled)
++		{
++			optimumSkipEnsureAnimUpdate = true;
++			try
++			{
++				ensureMeshExists(capi.Tesselator);
++			}
++			finally
++			{
++				optimumSkipEnsureAnimUpdate = false;
++			}
++			if (GetOrCreateOptimumBakeState().TryBakeOnLoad(Api, opened, animUtil?.animator, BuildOptimumOpenedMesh))
++			{
++				return;
++			}
++		}
+ 		updateAnimationState();
+ 	}
+ 
+ 	private void updateAnimationState()
+ 	{
+-		if (!opened)
++		if (animUtil != null)
+ 		{
+-			animUtil?.StopAnimation("opened");
+-			return;
++			GetOrCreateOptimumBakeState().HandleToggle(Blockentity, animUtil, opened, CreateOptimumOpenedMeta(), IsOptimumDoorOpened, BuildOptimumOpenedMesh);
+ 		}
+-		animUtil?.StartAnimation(new AnimationMetaData
+-		{
+-			Animation = "opened",
+-			Code = "opened",
+-			AnimationSpeed = 0.7f,
+-			EaseOutSpeed = 4f
+-		});
+ 	}
+ 
+ 	public bool OnBlockInteractStart(IWorldAccessor world, IPlayer byPlayer, BlockSelection blockSel, ref EnumHandling handling)
+ 	{
+ 		if (doorStack == null)
+@@ -90,10 +153,11 @@ public class BEBehaviorCabinetDoors : BEBehaviorAnimatable, IInteractable
+ 				}
+ 				playDoorPlaceRemoveSound(DoorStack, byPlayer);
+ 				doorStack = null;
+ 				doorMesh = null;
+ 				opened = false;
++				optimumBakeState?.Reset(Blockentity);
+ 				animUtil.animator = null;
+ 				animUtil.renderer?.Dispose();
+ 				animUtil.renderer = null;
+ 				handling = EnumHandling.PreventSubsequent;
+ 				Blockentity.MarkDirty(redrawOnClient: true);
+@@ -164,18 +228,23 @@ public class BEBehaviorCabinetDoors : BEBehaviorAnimatable, IInteractable
+ 		if (doorStack == null)
+ 		{
+ 			return false;
+ 		}
+ 		ensureMeshExists(tessThreadTesselator);
+-		if (animUtil.activeAnimationsByAnimCode.Count > 0 || (animUtil.animator != null && animUtil.animator.ActiveAnimationCount > 0))
+-		{
+-			return false;
+-		}
+ 		float radY = Blockentity.GetBehavior<IRotatablePlaceable>()?.MeshAngleRad ?? 0f;
+ 		float[] values = new Matrixf().Translate(0.5f, 0f, 0.5f).RotateYDeg(base.Block.Shape.rotateY).RotateY(radY)
+ 			.Translate(-0.5f, 0f, -0.5f)
+ 			.Values;
++		if (optimumBakeState != null && optimumBakeState.TryGetStaticMeshForTesselation(Api, out var bakedMesh, ExecuteOptimumFallbackRestore))
++		{
++			mesher.AddMeshData(bakedMesh, values);
++			return false;
++		}
++		if (animUtil.activeAnimationsByAnimCode.Count > 0 || (animUtil.animator != null && animUtil.animator.ActiveAnimationCount > 0))
++		{
++			return false;
++		}
+ 		mesher.AddMeshData(doorMesh, values);
+ 		return false;
+ 	}
+ 
+ 	private void ensureMeshExists(ITesselatorAPI tesselator)
+@@ -192,11 +261,14 @@ public class BEBehaviorCabinetDoors : BEBehaviorAnimatable, IInteractable
+ 			Dictionary<string, string> materials = collectibleBehaviorTypedTexture.GetMaterials(doorStack);
+ 			materials["section"] = base.Block.Variant["section"];
+ 			TypedTextureSource texSource = new TypedTextureSource(capi, capi.BlockTextureAtlas, doorStack.Collectible.Code.Domain, collectibleBehaviorTypedTexture.TextureMapping, materials);
+ 			doorMesh = animUtil.CreateMesh(nameForLogging, shape, out var resultingShape, texSource, new TesselationMetaData());
+ 			animUtil.InitializeAnimator(cacheDictKey, doorMesh, resultingShape, rotation);
+-			updateAnimationState();
++			if (!optimumSkipEnsureAnimUpdate)
++			{
++				updateAnimationState();
++			}
+ 		}
+ 	}
+ 
+ 	public Cuboidf[]? GetSelectionBoxes()
+ 	{

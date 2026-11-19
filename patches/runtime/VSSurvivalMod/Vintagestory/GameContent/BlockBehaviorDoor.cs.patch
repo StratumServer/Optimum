@@ -1,0 +1,17 @@
+diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorDoor.cs b/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorDoor.cs
+index d808056..cf47121 100644
+--- a/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorDoor.cs
++++ b/VSSurvivalMod/Vintagestory/GameContent/BlockBehaviorDoor.cs
+@@ -36,10 +36,12 @@ public class BlockBehaviorDoor : StrongBlockBehavior, IMultiBlockColSelBoxes, IM
+ 
+ 	private ICoreAPI api;
+ 
+ 	public MeshData animatableOrigMesh;
+ 
++	public MeshData animatableOpenedOrigMesh;
++
+ 	public Shape animatableShape;
+ 
+ 	public string animatableDictKey;
+ 
+ 	public BlockBehaviorDoor(Block block)
