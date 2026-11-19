@@ -4361,32 +4361,58 @@ public static class ApiPatcher
         int count = 0;
         foreach (var type in contracts.MainModule.Types)
         {
-            if (type.Name == "<Module>") continue;
+            if (type.Name.StartsWith("<", StringComparison.Ordinal)) continue;
             if (existingForwards.Contains(type.FullName)) continue;
             // Skip types already defined in the vanilla assembly (e.g. if they
             // were injected by a prior phase or exist in the original vanilla).
             if (vanilla.MainModule.GetType(type.FullName) != null) continue;
 
-            vanilla.MainModule.ExportedTypes.Add(
-                new ExportedType(type.Namespace, type.Name, vanilla.MainModule, existingRef));
+            var topExport = new ExportedType(type.Namespace, type.Name, vanilla.MainModule, existingRef)
+            {
+                IsForwarder = true,
+            };
+            vanilla.MainModule.ExportedTypes.Add(topExport);
+            existingForwards.Add(type.FullName);
             count++;
 
-            // Forward nested types as well.
-            foreach (var nested in type.NestedTypes)
-            {
-                string nestedFullName = $"{type.FullName}/{nested.Name}";
-                if (existingForwards.Contains(nestedFullName)) continue;
-                if (vanilla.MainModule.GetType(nestedFullName) != null) continue;
-
-                var nestedExport = new ExportedType(type.Namespace, nested.Name, vanilla.MainModule, existingRef);
-                nestedExport.Attributes = TypeAttributes.NestedPublic;
-                vanilla.MainModule.ExportedTypes.Add(nestedExport);
-                count++;
-            }
+            // Forward non-compiler-generated nested types under their declaring ExportedType.
+            count += AddNestedTypeForwards(type, topExport, vanilla, existingRef, existingForwards);
         }
 
         if (count > 0)
             Console.WriteLine($"  API PATCHED: {count} type forward(s) to {contractsName.Name}");
+        return count;
+    }
+
+    private static int AddNestedTypeForwards(
+        TypeDefinition parentType,
+        ExportedType parentExport,
+        AssemblyDefinition vanilla,
+        AssemblyNameReference contractsRef,
+        HashSet<string> existingForwards)
+    {
+        int count = 0;
+        foreach (var nested in parentType.NestedTypes)
+        {
+            if (nested.Name.StartsWith("<", StringComparison.Ordinal)) continue;
+            string nestedFullName = $"{parentType.FullName}/{nested.Name}";
+            if (existingForwards.Contains(nestedFullName)) continue;
+            if (vanilla.MainModule.GetType(nestedFullName) != null) continue;
+
+            var nestedExport = new ExportedType(string.Empty, nested.Name, vanilla.MainModule, contractsRef)
+            {
+                DeclaringType = parentExport,
+                Attributes = TypeAttributes.NestedPublic,
+            };
+            vanilla.MainModule.ExportedTypes.Add(nestedExport);
+            existingForwards.Add(nestedFullName);
+            count++;
+
+            if (nested.HasNestedTypes)
+            {
+                count += AddNestedTypeForwards(nested, nestedExport, vanilla, contractsRef, existingForwards);
+            }
+        }
         return count;
     }
 
