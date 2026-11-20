@@ -773,12 +773,13 @@ public sealed class GamePatcherTests
                 {
                     firstWaveStarted.Signal();
                     Assert.True(firstWaveStarted.Wait(TimeSpan.FromSeconds(10)));
-                }
-
-                if (fileName == "VintagestoryLib.dll")
-                {
+                    // Hold BOTH in-flight first-wave workers until the test cancels the token,
+                    // so neither worker can dequeue queued targets before cancellation is requested.
                     Assert.True(allowInFlightExit.Wait(TimeSpan.FromSeconds(10)));
-                    stagingExistedAtWorkerExit = Directory.Exists(Path.GetDirectoryName(outputPath)!);
+                    if (fileName == "VintagestoryLib.dll")
+                    {
+                        stagingExistedAtWorkerExit = Directory.Exists(Path.GetDirectoryName(outputPath)!);
+                    }
                 }
 
                 File.WriteAllText(outputPath, $"patched-{fileName}\n");
@@ -853,7 +854,7 @@ public sealed class GamePatcherTests
                 {
                     Assert.True(apiFailed.Wait(TimeSpan.FromSeconds(10)));
                     // Yield briefly so API failure cancels linkedCts before Lib finishes.
-                    Thread.Sleep(25);
+                    Thread.Sleep(100);
                 }
 
                 File.WriteAllText(outputPath, $"patched-{fileName}\n");
