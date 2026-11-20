@@ -164,6 +164,71 @@ function Convert-ToLf([string]$Root) {
     }
 }
 
+# Fingerprints of the official client this Optimum release is built against live in forks.json
+# (vintageStoryPins). The client is always downloaded, verified against them and extracted here;
+# a Vintage Story installed on this machine is never used as a source.
+function Get-VanillaPins {
+    $forksFile = Join-Path $repoRoot 'forks.json'
+    if (-not (Test-Path -LiteralPath $forksFile)) { return $null }
+    # A forks.json that exists but cannot be read is an error. Treating it as "no pins" would skip the check.
+    try { $all = (Get-Content -LiteralPath $forksFile -Raw | ConvertFrom-Json).vintageStoryPins }
+    catch { throw "The pinned checksums in $forksFile could not be read: $($_.Exception.Message)" }
+    if (-not $all) { return $null }
+    return $all.$Version
+}
+
+# Remove a client cache without following links. A link at any level, left by an older installer that pointed it
+# at a game installed on this machine, is unlinked and never deleted through.
+function Remove-VanillaCache([string]$Path) {
+    $vanillaRoot = Join-Path $repoRoot '.vanilla'
+    foreach ($component in @($vanillaRoot, (Split-Path -Parent $Path), $Path)) {
+        if (-not (Test-Path -LiteralPath $component)) { continue }
+        if ((Get-Item -LiteralPath $component -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            [System.IO.Directory]::Delete($component, $false)
+            return
+        }
+    }
+    Remove-Item -Recurse -Force -LiteralPath $Path -ErrorAction SilentlyContinue
+}
+
+function Get-FileSha256([string]$Path) {
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+# True when the archive is the pinned official one, or when its name is not pinned (with a warning).
+function Test-PinnedArchive([string]$Path, [string]$Name) {
+    if (-not $Name) { $Name = Split-Path -Leaf $Path }
+    $pins = Get-VanillaPins
+    $pin = if ($pins -and $pins.archives) { $pins.archives.$Name } else { $null }
+    if (-not $pin) {
+        Write-Warning "$Name is not pinned in forks.json, so its contents are not verified."
+        return $true
+    }
+    $size = (Get-Item -LiteralPath $Path).Length
+    $actual = Get-FileSha256 $Path
+    if ($size -ne [int64]$pin.bytes -or $actual -ne $pin.sha256) {
+        Write-Host "$Name is not the official Vintage Story $Version build this Optimum release was tested with"
+        Write-Host "  size $size (expected $($pin.bytes)), SHA-256 $actual (expected $($pin.sha256))."
+        return $false
+    }
+    Write-Host "Verified ${Name}: size and SHA-256 match the pinned official build."
+    return $true
+}
+
+# True when the pristine VintagestoryLib.vanilla.dll is the official build, or is not pinned.
+function Test-PinnedExtraction {
+    $pins = Get-VanillaPins
+    $expected = if ($pins -and $pins.extractedFiles) { $pins.extractedFiles.'VintagestoryLib.vanilla.dll' } else { $null }
+    if (-not $expected) { return $true }
+    $actual = Get-FileSha256 $pristineLibPath
+    if ($actual -ne $expected) {
+        Write-Host "The extracted VintagestoryLib.vanilla.dll is not the official $Version build (SHA-256 $actual, expected $expected)."
+        return $false
+    }
+    Write-Host 'Verified the extracted VintagestoryLib.vanilla.dll against the pinned official build.'
+    return $true
+}
+
 function Get-PinnedIlspycmdVersion {
     $manifest = Join-Path $repoRoot '.config/dotnet-tools.json'
     if (-not (Test-Path $manifest)) { return $null }
@@ -715,7 +780,12 @@ try {
     }
     if ($extractedVersion -and $extractedVersion -ne $Version -and -not $skipDownload) {
         Write-Host "Cached win-x64 client is $extractedVersion, requested $Version - re-extracting"
-        Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+        Remove-VanillaCache $winVanillaDir
+    }
+
+    if ((Test-Path -LiteralPath $pristineLibPath) -and -not (Test-PinnedExtraction)) {
+        Write-Host "Cached Vintage Story client is not the official $Version build - extracting it again"
+        Remove-VanillaCache $winVanillaDir
     }
 
     if (Test-Path (Join-Path $winVanillaDir 'Vintagestory.exe')) {
@@ -731,8 +801,14 @@ try {
         }
         New-Item -ItemType Directory -Force -Path $zipCacheDir | Out-Null
         $exeName = "vs_install_win-x64_$Version.exe"
+        # A path that already carries the official name is a cache: a copy that does not match is downloaded again.
+        $explicitArchive = [bool]$ClientArchive -and ((Split-Path -Leaf $ClientArchive) -ne $exeName)
         if (-not $ClientArchive) {
             $ClientArchive = Join-Path $zipCacheDir $exeName
+        }
+        if ((Test-Path $ClientArchive) -and -not $explicitArchive -and -not (Test-PinnedArchive $ClientArchive $exeName)) {
+            Write-Host "Cached $ClientArchive is not the official build; downloading it again."
+            Remove-Item -Force $ClientArchive
         }
         if (-not (Test-Path $ClientArchive)) {
             $url = "https://cdn.vintagestory.at/gamefiles/stable/$exeName"
@@ -752,8 +828,16 @@ try {
                 throw "Download failed: $url"
             }
 
+            if (-not (Test-PinnedArchive $partial $exeName)) {
+                Remove-Item -Force -ErrorAction SilentlyContinue $partial
+                throw "The download was discarded because it is not the official Vintage Story $Version build. Check your network for a proxy or antivirus that rewrites downloads."
+            }
+
             Move-Item -Force $partial $ClientArchive
         } else {
+            if ($explicitArchive -and -not (Test-PinnedArchive $ClientArchive $exeName)) {
+                throw "The archive passed with -ClientArchive was rejected: $ClientArchive"
+            }
             Write-Host "Using cached $ClientArchive"
         }
 
@@ -893,7 +977,7 @@ try {
             }
 
             if (Test-Path $winVanillaDir) {
-                Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+                Remove-VanillaCache $winVanillaDir
             }
             New-Item -ItemType Directory -Force -Path $winVanillaDir | Out-Null
             if ($isWin -and (Get-Command robocopy.exe -ErrorAction SilentlyContinue)) {
@@ -912,6 +996,10 @@ try {
 
         $freshExtract = $true
         Copy-Item -LiteralPath (Join-Path $winVanillaDir 'VintagestoryLib.dll') -Destination $pristineLibPath -Force
+        if (-not (Test-PinnedExtraction)) {
+            Remove-VanillaCache $winVanillaDir
+            throw "The extracted Vintage Story client is not the official $Version build. It was removed."
+        }
         Write-Host "Extraction complete."
     }
 
@@ -942,7 +1030,7 @@ try {
         if ($freshExtract) {
             # Wipe the poisoned extraction so the next run re-extracts
             # instead of reusing it via the "Using existing" fast path.
-            Remove-Item -Recurse -Force $winVanillaDir -ErrorAction SilentlyContinue
+            Remove-VanillaCache $winVanillaDir
             throw "innoextract produced $($corrupt.Count) empty/truncated file(s); the extraction was discarded. Re-run to retry.`n  $names"
         }
         throw "Vanilla client files are corrupt ($($corrupt.Count) empty/truncated file(s)):`n  $names`nIf $winVanillaDir is Optimum's own cache, delete it and retry; if it points at your Vintage Story install, repair or reinstall Vintage Story $Version first."

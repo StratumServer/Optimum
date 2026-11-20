@@ -385,11 +385,8 @@ copy_tree_fresh() {
   cp -a "$1" "$2"
 }
 
-download_client_archive() {
-  local cache_dir="$1"
-  mkdir -p "$cache_dir"
-
-  # Detect platform for download URL.
+# The file name of the official client archive for this machine, which is also the name its pin is filed under.
+client_archive_name() {
   local os_arch
   case "$(uname -s)-$(uname -m)" in
     Linux-x86_64)  os_arch="linux-x64" ;;
@@ -398,19 +395,25 @@ download_client_archive() {
     Darwin-arm64)  os_arch="osx-arm64" ;;
     *)             os_arch="linux-x64" ;;
   esac
+  printf 'vs_client_%s_%s.tar.gz\n' "$os_arch" "$version"
+}
 
-  local ext="tar.gz"
-  local archive_name="vs_client_${os_arch}_${version}.${ext}"
+download_client_archive() {
+  local cache_dir="$1"
+  mkdir -p "$cache_dir"
+
+  local archive_name
+  archive_name="$(client_archive_name)"
   local archive_path="$cache_dir/$archive_name"
 
   if [[ -f "$archive_path" ]]; then
-    if archive_is_complete "$archive_path"; then
+    if archive_is_complete "$archive_path" && verify_pinned_archive "$archive_path" >&2; then
       echo "Using cached $archive_path" >&2
       printf '%s\n' "$archive_path"
       return
     fi
 
-    echo "Cached $archive_path is incomplete; downloading it again." >&2
+    echo "Cached $archive_path is incomplete or not the official build; downloading it again." >&2
     rm -f "$archive_path"
   fi
 
@@ -430,6 +433,12 @@ download_client_archive() {
     return 1
   fi
 
+  if ! verify_pinned_archive "$partial" "$archive_name" >&2; then
+    rm -f "$partial"
+    echo "The download was discarded. Check your network for a proxy that rewrites downloads." >&2
+    return 1
+  fi
+
   mv -f "$partial" "$archive_path"
   printf '%s\n' "$archive_path"
 }
@@ -437,6 +446,9 @@ download_client_archive() {
 ensure_client_archive() {
   if [[ -z "$client_archive" ]]; then
     client_archive="$(download_client_archive "$zip_cache_dir")"
+  elif ! verify_pinned_archive "$client_archive" "$(client_archive_name)" >&2; then
+    echo "The archive passed with --client-archive was rejected." >&2
+    exit 1
   fi
 }
 
@@ -462,16 +474,20 @@ sources_dir="$repo_root/sources"
 runtime_donor_dir="$vanilla_dir/runtime-donors"
 fresh_extract=0
 
-hash_files() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$@"
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$@"
-  else
-    echo "sha256sum or shasum is required for runtime donor snapshots." >&2
-    exit 1
+# hash_files, vanilla_pin, verify_pinned_archive and verify_pinned_extraction: the pinned official client
+# checks, shared with package-linux.sh and package-macos.sh.
+# shellcheck source=scripts/_vanilla_pins.sh
+source "$repo_root/scripts/_vanilla_pins.sh"
+
+# The client cache must be a real folder this script extracted itself. A link at any level, left by an older
+# installer that pointed it at a game installed on this machine, is removed without being followed, so no
+# later rm -rf can reach the files it points at.
+for vanilla_link in "$repo_root/.vanilla" "$vanilla_dir" "$vanilla_dir/vintagestory"; do
+  if [[ -L "$vanilla_link" ]]; then
+    echo "Removing the link $vanilla_link; the client is downloaded and verified instead of reused from elsewhere."
+    rm -f "$vanilla_link"
   fi
-}
+done
 
 if [[ "$refresh" == "1" ]]; then
   rm -rf "$vanilla_dir" "$snapshot_dir"
@@ -530,11 +546,21 @@ if [[ -d "$vanilla_dir/vintagestory/assets" ]]; then
     | head -1 | sed -E 's#.*/version-([0-9.]+)\.txt#\1#')"
 fi
 
+if [[ -f "$vanilla_lib_pristine" ]] && ! verify_pinned_extraction; then
+  echo "Cached Vintage Story client is not the official $version build - extracting it again"
+  rm -rf "$vanilla_dir" "$snapshot_dir"
+  rm -f "$repo_root/.bootstrap-complete"
+fi
+
 if [[ ! -d "$vanilla_dir/vintagestory" ]]; then
   ensure_client_archive
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+  if ! verify_pinned_extraction; then
+    rm -rf "$vanilla_dir"
+    exit 1
+  fi
   fresh_extract=1
 elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracted client is $extracted_version, requested $version - re-extracting"
@@ -544,6 +570,10 @@ elif [[ -n "$extracted_version" && "$extracted_version" != "$version" ]]; then
   echo "Extracting $client_archive"
   extract_archive "$client_archive" "$vanilla_dir"
   cp "$vanilla_dir/vintagestory/VintagestoryLib.dll" "$vanilla_lib_pristine"
+  if ! verify_pinned_extraction; then
+    rm -rf "$vanilla_dir"
+    exit 1
+  fi
   fresh_extract=1
 elif [[ ! -f "$vanilla_lib_pristine" ]]; then
   echo "WARNING: $vanilla_lib_pristine is missing." >&2

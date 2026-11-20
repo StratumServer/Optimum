@@ -313,6 +313,13 @@ public static class Program
         {
             try
             {
+                if (VanillaIntegrity.FindProblem(gameDir) is { } integrityProblem)
+                {
+                    Logger.LogError($"[Optimum] {integrityProblem}");
+                    failureReason = integrityProblem;
+                    return;
+                }
+
                 for (int i = 0; i < PatchTargets.Length; i++)
                 {
                     var target = PatchTargets[i];

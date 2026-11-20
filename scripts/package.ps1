@@ -142,8 +142,6 @@ function Resolve-WindowsVanilla {
             return $winDir
         }
 
-        $legacyWin = Join-Path (Join-Path $RepoRoot '.vanilla') 'vintagestory'
-        if (Test-Path (Join-Path $legacyWin 'Vintagestory.exe')) { return $legacyWin }
         if (Test-Path (Join-Path $winDir 'Vintagestory.exe')) {
             $reported = if ($cachedVersion) { $cachedVersion } else { 'unknown' }
             throw "Cached Windows client at $winDir is version $reported, requested $RequestedVersion. Pass -VanillaDir with the correct installation or refresh the cache."
