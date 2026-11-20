@@ -513,6 +513,30 @@ public class InstallerReleaseCoverageTests
     }
 
     [Fact]
+    public void RuntimeDonorReferenceResolutionPrefersPatchedBuildOutput()
+    {
+        // The vanilla donor snapshot holds an unpatched VintagestoryAPI.dll. If
+        // it is probed before the build output, the Windows donor build loses
+        // Optimum-only API members (v0.4.1 overlay failure).
+        string bash = Read("scripts/prepare-runtime-donors.sh");
+        string powershell = Read("scripts/prepare-runtime-donors.ps1");
+
+        int bashOutput = bash.IndexOf("my @dirs = ($ENV{OUTPUT_ROOT},", StringComparison.Ordinal);
+        int bashDonor = bash.IndexOf("\"$ENV{RUNTIME_DONOR_DIR}/Lib\"", bashOutput, StringComparison.Ordinal);
+        Assert.True(bashOutput >= 0 && bashDonor > bashOutput, "Bash must probe the build output before the donor directories");
+
+        Match search = Regex.Match(
+            powershell,
+            @"\$searchPaths = @\((?<body>.*?)\r?\n\s*\)",
+            RegexOptions.Singleline);
+        Assert.True(search.Success, "PowerShell search path list is missing");
+        string body = search.Groups["body"].Value;
+        int psOutput = body.IndexOf("$outputRoot", StringComparison.Ordinal);
+        int psDonor = body.IndexOf("$runtimeDonorDir", StringComparison.Ordinal);
+        Assert.True(psOutput >= 0 && psDonor > psOutput, "PowerShell must probe the build output before the donor directories");
+    }
+
+    [Fact]
     public void RuntimeDonorPreparationUsesProtectedVanillaSnapshot()
     {
         string bash = Read("scripts/prepare-runtime-donors.sh");

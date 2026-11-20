@@ -3,12 +3,18 @@ name: Release RiftLauncher overlays
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build and attach overlays for (for example v0.4.1)
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-overlay-${{ github.event.release.tag_name }}
+  group: release-overlay-${{ inputs.tag || github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +38,7 @@ jobs:
       - name: Resolve release and client versions
         id: versions
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -103,7 +109,7 @@ jobs:
       - name: Resolve release and client versions
         id: versions
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         shell: bash
         run: |
           set -euo pipefail
@@ -172,7 +178,7 @@ jobs:
       - name: Validate and upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ inputs.tag || github.event.release.tag_name }}
         shell: bash
         run: |
           set -euo pipefail
