@@ -20,6 +20,12 @@
     <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <!-- The fingerprints of the official client (forks.json, vintageStoryPins) travel inside Optimum.exe, so the
+         launcher can refuse to patch game files that are not the build it was made for. -->
+    <Compile Include="..\Optimum.Bootstrap.Core\Acquisition\VanillaArchivePins.cs" Link="VanillaArchivePins.cs" />
+    <EmbeddedResource Include="..\forks.json" LogicalName="forks.json" />
+  </ItemGroup>
+  <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" />
     <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" />
   </ItemGroup>

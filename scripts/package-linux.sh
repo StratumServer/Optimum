@@ -160,16 +160,36 @@ if [[ -z "$CLIENT_ARCHIVE" ]]; then
     CLIENT_ARCHIVE="$ZIP_CACHE/vs_client_linux-x64_${VERSION}.tar.gz"
 fi
 
+# Verify the archive against the checksums pinned in forks.json, under its official name.
+repo_root="$REPO_ROOT"
+version="$VERSION"
+# shellcheck source=scripts/_vanilla_pins.sh
+source "$REPO_ROOT/scripts/_vanilla_pins.sh"
+OFFICIAL_ARCHIVE_NAME="vs_client_linux-x64_${VERSION}.tar.gz"
+
 ensure_client_archive() {
     mkdir -p "$ZIP_CACHE"
     if [[ -f "$CLIENT_ARCHIVE" ]]; then
-        echo "Using cached $CLIENT_ARCHIVE"
-        return
+        if verify_pinned_archive "$CLIENT_ARCHIVE" "$OFFICIAL_ARCHIVE_NAME"; then
+            echo "Using cached $CLIENT_ARCHIVE"
+            return
+        fi
+        if [[ "$CLIENT_ARCHIVE" != "$ZIP_CACHE/$OFFICIAL_ARCHIVE_NAME" ]]; then
+            echo "The archive passed with --client-archive was rejected." >&2
+            exit 1
+        fi
+        echo "The cached archive is not the official build; downloading it again." >&2
+        rm -f "$CLIENT_ARCHIVE"
     fi
     URL="https://cdn.vintagestory.at/gamefiles/stable/vs_client_linux-x64_${VERSION}.tar.gz"
     echo "Downloading $URL"
     PARTIAL="$CLIENT_ARCHIVE.partial"
     if curl -L --fail --retry 5 --retry-delay 2 --retry-connrefused -C - -o "$PARTIAL" "$URL"; then
+        if ! verify_pinned_archive "$PARTIAL" "$OFFICIAL_ARCHIVE_NAME"; then
+            rm -f "$PARTIAL"
+            echo "The download was discarded. Check your network for a proxy that rewrites downloads." >&2
+            exit 1
+        fi
         mv -f "$PARTIAL" "$CLIENT_ARCHIVE"
     else
         echo "Download failed: $URL" >&2

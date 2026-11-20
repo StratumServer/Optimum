@@ -556,7 +556,9 @@ public class InstallerReleaseCoverageTests
         Assert.Contains("Invoke-NativeStep", powershell);
         Assert.DoesNotContain("--reverse", powershell);
         Assert.Contains("snapshot_runtime_donors", bootstrap);
-        Assert.Contains("shasum -a 256", bootstrap);
+        // hash_files moved into the helpers that bootstrap.sh and the package scripts share.
+        Assert.Contains("_vanilla_pins.sh", bootstrap);
+        Assert.Contains("shasum -a 256", Read("scripts/_vanilla_pins.sh"));
         Assert.Contains("New-RuntimeDonorSnapshot", bootstrapPowerShell);
         Assert.Contains("-RuntimeDonorDir", package);
 

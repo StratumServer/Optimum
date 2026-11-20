@@ -4,6 +4,7 @@ on:
   push:
     paths: &script_paths
       - 'scripts/**'
+      - 'forks.json'
       - 'patches/**'
       - 'sources/shaders/**'
       - 'Makefile'
@@ -120,6 +121,35 @@ jobs:
       - name: Run patch batching test under PowerShell 7
         shell: pwsh
         run: ./scripts/tests/bootstrap-patch-batching.ps1
+
+  vanilla-pins:
+    name: "Pinned official client checks (Linux and macOS)"
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Vanilla pins test
+        run: bash scripts/tests/vanilla-pins.sh
+
+  windows-vanilla-pins:
+    name: "Pinned official client checks in Windows PowerShell 5.1 and 7"
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run the pins test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/vanilla-pins.ps1
+
+      - name: Run the pins test under PowerShell 7
+        shell: pwsh
+        run: ./scripts/tests/vanilla-pins.ps1
 
   donor-dotnet-selection:
     name: Runtime donor dotnet candidate resolution
