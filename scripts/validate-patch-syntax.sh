@@ -25,6 +25,7 @@ fi
 
 failed=0
 total=0
+patches=()
 
 while IFS= read -r -d '' patch; do
   total=$((total + 1))
@@ -45,12 +46,18 @@ while IFS= read -r -d '' patch; do
     continue
   fi
 
-  if ! output="$(git apply --stat "$patch" 2>&1 >/dev/null)"; then
-    echo "Invalid patch syntax: ${patch#$repo_root/}" >&2
-    printf '  %s\n' "$output" >&2
-    failed=1
-  fi
+  patches+=("$patch")
 done < <(find "$patches_dir" -type f -name '*.patch' -print0 | sort_null)
+
+if [[ "${#patches[@]}" -gt 0 ]] && ! git apply --stat "${patches[@]}" >/dev/null 2>&1; then
+  for patch in "${patches[@]}"; do
+    if ! output="$(git apply --stat "$patch" 2>&1 >/dev/null)"; then
+      echo "Invalid patch syntax: ${patch#$repo_root/}" >&2
+      printf '  %s\n' "$output" >&2
+      failed=1
+    fi
+  done
+fi
 
 if [[ "$failed" == "1" ]]; then
   exit 1
