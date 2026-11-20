@@ -621,6 +621,10 @@ var membersToInject = new Dictionary<string, List<string>>
         "PrepareSlotGridWindow",
         "BeginInitialInventoryMeshPrefetch",
         "OptimumTesselateBlockForInventory",
+        "PopulateLazyBlockColormapFlags",
+        "BlockCompositeShapeUsesColormap",
+        "ShapeAssetUsesColormap",
+        "ShapeElementsUseColormap",
     },
 
     // Load-bearing dependency, wire before ServerSystemSupplyChunks: dispatchClaim's

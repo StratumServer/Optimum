@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..c831723 100644
+index dae3e90..5b7709f 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -100,7 +100,7 @@ index dae3e90..c831723 100644
  	internal void ReloadTesselator()
  	{
  		TLTesselator = null;
-@@ -101,29 +165,47 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -101,29 +165,48 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		TesselateBlocks_Pre();
  		TyronThreadPool.QueueTask(delegate
  		{
@@ -109,6 +109,7 @@ index dae3e90..c831723 100644
 -		for (int num = 0; num < game.Blocks.Count; num = TesselateBlocksForInventory(game.Blocks, num, game.Blocks.Count))
 +		if (OptimumConfig.LazyInventoryMeshesEnabled)
  		{
++			PopulateLazyBlockColormapFlags(game.Blocks);
 +			BlockTesselationHalfCompleted();
 +			ResetLazyItemInventoryMeshes(game.Items);
  		}
@@ -150,7 +151,7 @@ index dae3e90..c831723 100644
  			if (!shape.Value.keepLoaded)
  			{
  				shape.Value.Unload();
-@@ -132,10 +214,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -132,10 +215,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  	}
  
  	public void PrepareToLoadShapes()
@@ -163,7 +164,7 @@ index dae3e90..c831723 100644
  		shapes3 = new Dictionary<AssetLocation, UnloadableShape>();
  		shapes4 = new Dictionary<AssetLocation, UnloadableShape>();
  		itemshapes = new Dictionary<AssetLocation, UnloadableShape>();
-@@ -224,18 +308,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -224,18 +309,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		blockModelDatas = new MeshData[count + 1];
  		altblockModelDatasLod0 = new MeshData[count + 1][];
  		altblockModelDatasLod1 = new MeshData[count + 1][];
@@ -184,7 +185,7 @@ index dae3e90..c831723 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -723,10 +808,15 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +809,16 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		return i;
  	}
  
@@ -192,6 +193,7 @@ index dae3e90..c831723 100644
  	{
 +		if (OptimumConfig.LazyInventoryMeshesEnabled && ReferenceEquals(blocks, game.Blocks))
 +		{
++			PopulateLazyBlockColormapFlags(blocks);
 +			BlockTesselationHalfCompleted();
 +			return;
 +		}
@@ -200,7 +202,7 @@ index dae3e90..c831723 100644
  			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
  		}
  		MeshData[] meshes = new MeshData[blocks.Count];
-@@ -856,31 +946,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -856,31 +948,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			}
  		}
  	}
@@ -262,7 +264,7 @@ index dae3e90..c831723 100644
  		int num = 0;
  		int i;
  		for (i = offset; i < maxCount; i++)
-@@ -928,11 +1042,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -928,11 +1044,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  
  	private void TesselateBlock(Block block, bool lazyLoad)
  	{
@@ -276,7 +278,7 @@ index dae3e90..c831723 100644
  		int num = Tesselator.AltTexturesCount(block);
  		int val = ((block.Shape.BakedAlternates != null) ? block.Shape.BakedAlternates.Length : 0);
  		int num2 = Tesselator.TileTexturesCount(block);
-@@ -953,17 +1068,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -953,17 +1070,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			{
  				setLod0Flag(array[num3]);
  				num3++;
@@ -298,7 +300,7 @@ index dae3e90..c831723 100644
  		if (block.IsMissing)
  		{
  			return unknownBlockModelData;
-@@ -1081,10 +1199,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1081,10 +1201,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -313,7 +315,7 @@ index dae3e90..c831723 100644
  		refs = itemModelRefsInventory;
  		DisposeArray(refs);
  		int num = 0;
-@@ -1110,16 +1232,409 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1110,16 +1234,550 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -720,12 +722,153 @@ index dae3e90..c831723 100644
 +			}
 +		}
 +		reloaded.Clear();
++	}
++
++	internal void PopulateLazyBlockColormapFlags(IList<Block> blocks)
++	{
++		if (blocks == null)
++		{
++			return;
++		}
++		Dictionary<AssetLocation, bool> shapeColormapCache = null;
++		for (int i = 0; i < blocks.Count; i++)
++		{
++			Block block = blocks[i];
++			if (block == null || block.Code == null || block.BlockId == 0 || block.IsMissing || block.ShapeUsesColormap)
++			{
++				continue;
++			}
++			CompositeShape shape = block.Shape;
++			if (shape == null || shape.VoxelizeTexture)
++			{
++				continue;
++			}
++			CompositeShape inventoryShape = block.ShapeInventory ?? shape;
++			if (BlockCompositeShapeUsesColormap(block, inventoryShape, ref shapeColormapCache)
++				|| (!ReferenceEquals(inventoryShape, shape) && BlockCompositeShapeUsesColormap(block, shape, ref shapeColormapCache)))
++			{
++				block.ShapeUsesColormap = true;
++			}
++		}
++	}
++
++	private bool BlockCompositeShapeUsesColormap(Block block, CompositeShape compositeShape, ref Dictionary<AssetLocation, bool> shapeColormapCache)
++	{
++		if (compositeShape == null || compositeShape.Format != EnumShapeFormat.VintageStory || compositeShape.VoxelizeTexture)
++		{
++			return false;
++		}
++		if (block.ClimateColorMap != null || block.SeasonColorMap != null)
++		{
++			return true;
++		}
++		if (ShapeAssetUsesColormap(compositeShape.Base, ref shapeColormapCache))
++		{
++			return true;
++		}
++		CompositeShape[] overlays = compositeShape.Overlays;
++		if (overlays != null)
++		{
++			for (int i = 0; i < overlays.Length; i++)
++			{
++				CompositeShape overlay = overlays[i];
++				if (overlay != null && overlay.Format == EnumShapeFormat.VintageStory && !overlay.VoxelizeTexture && ShapeAssetUsesColormap(overlay.Base, ref shapeColormapCache))
++				{
++					return true;
++				}
++			}
++		}
++		CompositeShape[] alternates = compositeShape.BakedAlternates;
++		if (alternates != null)
++		{
++			for (int i = 0; i < alternates.Length; i++)
++			{
++				CompositeShape alt = alternates[i];
++				if (alt != null && alt.Format == EnumShapeFormat.VintageStory && !alt.VoxelizeTexture)
++				{
++					if (ShapeAssetUsesColormap(alt.Base, ref shapeColormapCache))
++					{
++						return true;
++					}
++					CompositeShape[] altOverlays = alt.Overlays;
++					if (altOverlays != null)
++					{
++						for (int j = 0; j < altOverlays.Length; j++)
++						{
++							CompositeShape altOverlay = altOverlays[j];
++							if (altOverlay != null && altOverlay.Format == EnumShapeFormat.VintageStory && !altOverlay.VoxelizeTexture && ShapeAssetUsesColormap(altOverlay.Base, ref shapeColormapCache))
++							{
++								return true;
++							}
++						}
++					}
++				}
++			}
++		}
++		return false;
++	}
++
++	private bool ShapeAssetUsesColormap(AssetLocation shapeLoc, ref Dictionary<AssetLocation, bool> shapeColormapCache)
++	{
++		if (shapeLoc == null || shapes == null)
++		{
++			return false;
++		}
++		shapeColormapCache ??= new Dictionary<AssetLocation, bool>();
++		if (shapeColormapCache.TryGetValue(shapeLoc, out bool cached))
++		{
++			return cached;
++		}
++		bool usesColormap = false;
++		if (shapes.TryGetValue(shapeLoc, out UnloadableShape shape) && shape != null)
++		{
++			shape.AcquirePin();
++			try
++			{
++				if (!shape.Loaded && game != null)
++				{
++					shape.Load(game, new AssetLocationAndSource(shapeLoc));
++				}
++				usesColormap = ShapeElementsUseColormap(shape.Elements);
++			}
++			finally
++			{
++				shape.ReleasePin();
++			}
++		}
++		shapeColormapCache[shapeLoc] = usesColormap;
++		return usesColormap;
++	}
++
++	private static bool ShapeElementsUseColormap(ShapeElement[] elements)
++	{
++		if (elements == null)
++		{
++			return false;
++		}
++		for (int i = 0; i < elements.Length; i++)
++		{
++			ShapeElement element = elements[i];
++			if (element == null)
++			{
++				continue;
++			}
++			if (element.HasFaces() && (!string.IsNullOrEmpty(element.ClimateColorMap) || !string.IsNullOrEmpty(element.SeasonColorMap)))
++			{
++				return true;
++			}
++			if (element.Children != null && ShapeElementsUseColormap(element.Children))
++			{
++				return true;
++			}
++		}
++		return false;
  	}
  
  	public Shape GetCachedShape(AssetLocation location)
  	{
  		shapes.TryGetValue(location, out var value);
-@@ -1140,11 +1655,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1140,11 +1798,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  		if (texSource == null)
  		{
