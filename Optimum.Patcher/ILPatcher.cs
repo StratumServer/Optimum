@@ -452,7 +452,8 @@ public static class ILPatcher
                 // merge the donor members that the transplanted body references.
                 // Replacing the type would invalidate vanilla methods that still
                 // reference its original fields or lambda helpers.
-                MergeNestedTypeMembers(srcNested, existingNested, vanillaAsm.MainModule);
+                MergeNestedTypeMembers(
+                    srcNested, existingNested, vanillaAsm, compiledAsm, compiledMethod.Name);
             }
         }
     }
@@ -602,8 +603,11 @@ public static class ILPatcher
     private static void MergeNestedTypeMembers(
         TypeDefinition source,
         TypeDefinition target,
-        ModuleDefinition targetModule)
+        AssemblyDefinition vanillaAsm,
+        AssemblyDefinition compiledAsm,
+        string ownerMethodName)
     {
+        var targetModule = vanillaAsm.MainModule;
         foreach (var sourceField in source.Fields)
         {
             var targetField = target.Fields.FirstOrDefault(field => field.Name == sourceField.Name);
@@ -629,14 +633,31 @@ public static class ILPatcher
 
         foreach (var sourceMethod in source.Methods)
         {
-            if (target.Methods.Any(method => MethodSignature.Matches(method, sourceMethod)))
+            var existingMethod = target.Methods.FirstOrDefault(method => MethodSignature.Matches(method, sourceMethod));
+            if (existingMethod != null)
             {
+                // A donor lambda with the same name and signature as vanilla's is the
+                // closure body of the method being transplanted (the C# compiler names
+                // it <OwnerMethod>b__N). Keeping vanilla's body would leave it reading
+                // closure fields the transplanted owner no longer writes, for example
+                // the vanilla `mesh` field while the donor writes `mesh2`. Replace it.
+                // Closure members that belong to any other method keep vanilla's body.
+                if (IsLambdaOf(sourceMethod, ownerMethodName) && sourceMethod.HasBody && existingMethod.HasBody)
+                {
+                    TransplantBody(existingMethod, sourceMethod, vanillaAsm, compiledAsm);
+                    Console.WriteLine($"    TRANSPLANTED NESTED METHOD: {target.FullName}::{sourceMethod.Name}");
+                }
                 continue;
             }
 
             target.Methods.Add(CloneNestedMethod(sourceMethod, targetModule));
             Console.WriteLine($"    INJECTED NESTED METHOD: {target.FullName}::{sourceMethod.Name}");
         }
+    }
+
+    private static bool IsLambdaOf(MethodDefinition lambda, string ownerMethodName)
+    {
+        return lambda.Name.StartsWith("<" + ownerMethodName + ">", StringComparison.Ordinal);
     }
 
     private static MethodDefinition CloneNestedMethod(MethodDefinition source, ModuleDefinition targetModule)
