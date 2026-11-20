@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
 using Optimum.Bootstrap.Core.Patch;
@@ -536,5 +537,89 @@ public sealed class GamePatcherTests
         }
 
         return (gameDir, overlayDir);
+    }
+
+    [Fact]
+    public async Task InProcessPatcherReusesPatchedSha256WithoutRehashingStagedOutputs()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-inproc-sha256-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: false);
+            File.Delete(Path.Combine(overlayDir, OperatingSystem.IsWindows() ? "Optimum.Patcher.bat" : "Optimum.Patcher"));
+            File.Copy(typeof(Vintagestory.Client.ClientProgram).Assembly.Location, Path.Combine(overlayDir, "Optimum.Patcher.dll"), overwrite: true);
+            Optimum.Patcher.Program.OmitDigest = false;
+
+            var hashedPaths = new List<string>();
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator())
+            {
+                OnComputeSha256 = p => hashedPaths.Add(p),
+            };
+
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(result.Ok, result.Message);
+
+            // Only the 3 vanilla sources are hashed via ComputeSha256; none of the staged output DLLs are re-opened.
+            Assert.Equal(3, hashedPaths.Count);
+            Assert.DoesNotContain(hashedPaths, p => p.Contains("staging-", StringComparison.OrdinalIgnoreCase));
+
+            string manifestJson = File.ReadAllText(Path.Combine(gameDir, PatchInstallManifest.RelativePath));
+            PatchInstallManifest? manifest = PatchInstallManifest.Deserialize(manifestJson);
+            Assert.NotNull(manifest);
+            Assert.Equal(3, manifest!.Targets.Count);
+
+            foreach (PatchTargetRecord target in manifest.Targets)
+            {
+                string livePath = Path.Combine(gameDir, target.Assembly.Replace('/', Path.DirectorySeparatorChar));
+                string expectedLiveHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(livePath)));
+                Assert.Equal(expectedLiveHash, target.PatchedHash);
+            }
+        }
+        finally
+        {
+            Optimum.Patcher.Program.OmitDigest = false;
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InProcessPatcherWithoutDigestFallsBackToHashingStagedOutputs()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-legacy-inproc-sha256-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: false);
+            File.Delete(Path.Combine(overlayDir, OperatingSystem.IsWindows() ? "Optimum.Patcher.bat" : "Optimum.Patcher"));
+            File.Copy(typeof(Vintagestory.Client.ClientProgram).Assembly.Location, Path.Combine(overlayDir, "Optimum.Patcher.dll"), overwrite: true);
+            Optimum.Patcher.Program.OmitDigest = true;
+
+            var hashedPaths = new List<string>();
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator())
+            {
+                OnComputeSha256 = p => hashedPaths.Add(p),
+            };
+
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(result.Ok, result.Message);
+
+            // 3 vanilla inputs + 3 staged fallback hashes = 6 total ComputeSha256 calls.
+            Assert.Equal(6, hashedPaths.Count);
+            Assert.Equal(3, hashedPaths.Count(p => p.Contains("staging-", StringComparison.OrdinalIgnoreCase)));
+
+            string manifestJson = File.ReadAllText(Path.Combine(gameDir, PatchInstallManifest.RelativePath));
+            PatchInstallManifest? manifest = PatchInstallManifest.Deserialize(manifestJson);
+            Assert.NotNull(manifest);
+            foreach (PatchTargetRecord target in manifest!.Targets)
+            {
+                string livePath = Path.Combine(gameDir, target.Assembly.Replace('/', Path.DirectorySeparatorChar));
+                string expectedLiveHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(livePath)));
+                Assert.Equal(expectedLiveHash, target.PatchedHash);
+            }
+        }
+        finally
+        {
+            Optimum.Patcher.Program.OmitDigest = false;
+            Directory.Delete(root, recursive: true);
+        }
     }
 }

@@ -160,10 +160,68 @@ public sealed class PdbSymbolFallbackTests
                 "Optimum.SymbolOutputFixture",
                 ModuleKind.Dll);
 
-            AssemblyWriter.Write(assembly, outputPath, writeSymbols: false);
+            string writtenHash = AssemblyWriter.Write(assembly, outputPath, writeSymbols: false);
 
             Assert.True(File.Exists(outputPath));
             Assert.False(File.Exists(outputPdbPath));
+            string expectedHash = "sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(outputPath)));
+            Assert.Equal(expectedHash, writtenHash);
+            Assert.Equal(expectedHash, AssemblyWriter.ConsumeLastWrittenSha256());
+            Assert.Null(AssemblyWriter.ConsumeLastWrittenSha256());
+        }
+        finally
+        {
+            DeleteFixture(root);
+        }
+    }
+
+    [Fact]
+    public void ProgramRunOutOverloadReturnsDigestOnSuccessAndClearsStateOnFailure()
+    {
+        using AssemblyDefinition assembly = AssemblyDefinition.CreateAssembly(
+            new AssemblyNameDefinition("Optimum.DigestClearFixture", new Version(1, 0, 0, 0)),
+            "Optimum.DigestClearFixture",
+            ModuleKind.Dll);
+
+        string root = Path.Combine(Path.GetTempPath(), $"optimum-digest-clear-{Guid.NewGuid():N}");
+        try
+        {
+            Directory.CreateDirectory(root);
+            AssemblyWriter.Write(assembly, Path.Combine(root, "seed.dll"), writeSymbols: false);
+
+            int exitCode = Optimum.Patcher.Program.Run(
+                [Path.Combine(root, "missing.dll"), Path.Combine(root, "missing2.dll"), Path.Combine(root, "out.dll")],
+                out string? patchedSha256);
+            Assert.NotEqual(0, exitCode);
+            Assert.Null(patchedSha256);
+            Assert.Null(AssemblyWriter.ConsumeLastWrittenSha256());
+
+            AssemblyWriter.Write(assembly, Path.Combine(root, "seed2.dll"), writeSymbols: false);
+            Assert.Throws<FileNotFoundException>(() =>
+                Optimum.Patcher.Program.Run(
+                    ["--api", Path.Combine(root, "missing.dll"), Path.Combine(root, "missing2.dll"), Path.Combine(root, "out.dll")],
+                    out _));
+            Assert.Null(AssemblyWriter.ConsumeLastWrittenSha256());
+
+            string outputDirectory = Path.GetDirectoryName(typeof(PdbSymbolFallbackTests).Assembly.Location)!;
+            var dir = new DirectoryInfo(outputDirectory);
+            while (dir != null && !File.Exists(Path.Combine(dir.FullName, "VintageStory.slnx")))
+            {
+                dir = dir.Parent;
+            }
+            string? vanillaPath = dir != null
+                ? Path.Combine(dir.FullName, ".vanilla", "win-x64", "runtime-donors", "VintagestoryAPI.dll")
+                : null;
+            string contractsPath = Path.Combine(outputDirectory, "Optimum.Api.Contracts.dll");
+            if (vanillaPath != null && File.Exists(vanillaPath) && File.Exists(contractsPath))
+            {
+                string outputPath = Path.Combine(root, "VintagestoryAPI-patched.dll");
+                int apiExit = Optimum.Patcher.Program.Run(["--api", vanillaPath, contractsPath, outputPath], out string? apiSha256);
+                Assert.Equal(0, apiExit);
+                string expectedApiSha256 = "sha256:" + Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(outputPath)));
+                Assert.Equal(expectedApiSha256, apiSha256);
+                Assert.Null(AssemblyWriter.ConsumeLastWrittenSha256());
+            }
         }
         finally
         {

@@ -10,7 +10,24 @@ public static class Program
 {
     public static int Main(string[] args) => Run(args);
 
-    public static int Run(string[] args)
+    public static int Run(string[] args) => Run(args, out _);
+
+    public static int Run(string[] args, out string? patchedSha256)
+    {
+        AssemblyWriter.ClearLastWrittenSha256();
+        try
+        {
+            int exitCode = RunCore(args);
+            patchedSha256 = exitCode == 0 ? AssemblyWriter.ConsumeLastWrittenSha256() : null;
+            return exitCode;
+        }
+        finally
+        {
+            AssemblyWriter.ClearLastWrittenSha256();
+        }
+    }
+
+    private static int RunCore(string[] args)
     {
         // Verification mode for check-vanilla-compat.sh: report decompiler
         // type-misbinding artifacts (same-named cast target bound to the wrong

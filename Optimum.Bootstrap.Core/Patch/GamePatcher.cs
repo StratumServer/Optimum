@@ -56,6 +56,11 @@ public sealed class GamePatcher(
     /// </summary>
     internal Action<string>? FailAtCommitStep { get; init; }
 
+    /// <summary>
+    /// Test seam invoked whenever <see cref="ComputeSha256"/> hashes a file from disk.
+    /// </summary>
+    internal Action<string>? OnComputeSha256 { get; init; }
+
     public Task<PatchResult> PatchAsync(
         PatchRequest request,
         IBuildObserver? observer = null,
@@ -822,7 +827,7 @@ public sealed class GamePatcher(
         return null;
     }
 
-    private ProcessOutcome RunPatcher(string patcherPath, bool isDll, IReadOnlyList<string> args)
+    internal ProcessOutcome RunPatcher(string patcherPath, bool isDll, IReadOnlyList<string> args)
     {
         if (isDll && Path.GetFileName(patcherPath).Equals("Optimum.Patcher.dll", StringComparison.OrdinalIgnoreCase) && File.Exists(patcherPath))
         {
@@ -830,8 +835,30 @@ public sealed class GamePatcher(
             {
                 var asm = System.Reflection.Assembly.LoadFrom(patcherPath);
                 var entryType = asm.GetType("Optimum.Patcher.Program") ?? asm.GetType("Program");
-                var runMethod = entryType?.GetMethod("Run", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
-                    ?? entryType?.GetMethod("Main", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+                const System.Reflection.BindingFlags StaticFlags =
+                    System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static;
+
+                var runWithHashMethod = entryType?.GetMethod(
+                    "Run",
+                    StaticFlags,
+                    binder: null,
+                    types: [typeof(string[]), typeof(string).MakeByRefType()],
+                    modifiers: null);
+                if (runWithHashMethod != null)
+                {
+                    string[] runnerArgs = [.. args];
+                    object?[] invokeArgs = [runnerArgs, null];
+                    var result = runWithHashMethod.Invoke(null, invokeArgs);
+                    int exitCode = result is int code ? code : 0;
+                    string? patchedHash = exitCode == 0 ? invokeArgs[1] as string : null;
+                    string standardOutput = !string.IsNullOrEmpty(patchedHash)
+                        ? $"PATCHED SHA256: {patchedHash}"
+                        : string.Empty;
+                    return new ProcessOutcome(Started: true, ExitCode: exitCode, StandardOutput: standardOutput, StandardError: string.Empty);
+                }
+
+                var runMethod = entryType?.GetMethod("Run", StaticFlags, binder: null, types: [typeof(string[])], modifiers: null)
+                    ?? entryType?.GetMethod("Main", StaticFlags, binder: null, types: [typeof(string[])], modifiers: null);
                 if (runMethod != null)
                 {
                     string[] runnerArgs = [.. args];
@@ -842,7 +869,8 @@ public sealed class GamePatcher(
             }
             catch (Exception ex)
             {
-                return new ProcessOutcome(Started: true, ExitCode: 1, StandardOutput: string.Empty, StandardError: ex.Message);
+                Exception root = ex.InnerException ?? ex;
+                return new ProcessOutcome(Started: true, ExitCode: 1, StandardOutput: string.Empty, StandardError: root.Message);
             }
         }
 
@@ -937,8 +965,9 @@ public sealed class GamePatcher(
         return candidate.StartsWith("sha256:", StringComparison.OrdinalIgnoreCase) ? candidate : null;
     }
 
-    private static string ComputeSha256(string path)
+    private string ComputeSha256(string path)
     {
+        OnComputeSha256?.Invoke(path);
         try
         {
             using var stream = File.OpenRead(path);
