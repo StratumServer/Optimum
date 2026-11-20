@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-index 277d286..d716ce8 100644
+index 277d286..2a35f5a 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemSendChunks.cs
-@@ -56,61 +56,90 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -56,61 +56,85 @@ internal class ServerSystemSendChunks : ServerSystem
  		{
  			return;
  		}
@@ -28,8 +28,7 @@ index 277d286..d716ce8 100644
  		}
 -		foreach (ConnectedClient value2 in server.Clients.Values)
 +		finally
- 		{
--			if (value2.State.ConnectedOrPlaying())
++		{
 +			ReleaseCachedPacketSlabs(packetsWithEntities);
 +			ReleaseCachedPacketSlabs(packetsWithoutEntities);
 +			packetsWithEntities.Clear();
@@ -40,16 +39,12 @@ index 277d286..d716ce8 100644
 +	private static void ReleaseCachedPacketSlabs(Dictionary<long, Packet_ServerChunk> dict)
 +	{
 +		foreach (Packet_ServerChunk chunk in dict.Values)
-+		{
+ 		{
+-			if (value2.State.ConnectedOrPlaying())
 +			if (chunk != null && chunk.BlockEntitiesCount > 0 && chunk.BlockEntities != null)
  			{
 -				sendAndEnqueueChunks(value2);
-+				Packet_BlockEntity first = chunk.BlockEntities[0];
-+				if (first?.optimumSlab != null)
-+				{
-+					first.optimumSlab.Release();
-+					first.optimumSlab = null;
-+				}
++				chunk.BlockEntities[0]?.optimumSlab?.Release();
  			}
  		}
 -		packetsWithEntities.Clear();
@@ -115,7 +110,7 @@ index 277d286..d716ce8 100644
  		{
  			ServerChunk loadedChunk = server.GetLoadedChunk(forceSendChunk);
  			if (loadedChunk != null)
-@@ -203,10 +232,15 @@ internal class ServerSystemSendChunks : ServerSystem
+@@ -203,10 +227,15 @@ internal class ServerSystemSendChunks : ServerSystem
  				server.SendPacketFast(client.Id, value3.ToPacket(vec3i.X, vec3i.Z));
  				client.SetMapRegionSent(forceSendMapRegion);
  			}

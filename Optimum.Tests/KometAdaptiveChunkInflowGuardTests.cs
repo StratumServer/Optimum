@@ -1,5 +1,7 @@
 using System.Linq;
 using System.Threading;
+using Komet.Chunks;
+using Komet.Interop;
 using Komet.Runtime;
 using Vintagestory.API.Config;
 using Xunit;
@@ -15,6 +17,9 @@ public sealed class KometAdaptiveChunkInflowGuardTests : System.IDisposable
         OptimumCompatibilityGuard.ResetForTests();
         OptimumInterop.ResetYieldsForTests();
         InflowBrake.Enabled = false;
+        JoinPacer.Enabled = false;
+        KometInterop.AnswersFeature = true;
+        KometInterop.OverrideState = null;
         OptimumConfig.AdaptiveRadiusEnabled = true;
     }
 
@@ -23,6 +28,9 @@ public sealed class KometAdaptiveChunkInflowGuardTests : System.IDisposable
         OptimumCompatibilityGuard.ResetForTests();
         OptimumInterop.ResetYieldsForTests();
         InflowBrake.Enabled = false;
+        JoinPacer.Enabled = false;
+        KometInterop.AnswersFeature = true;
+        KometInterop.OverrideState = null;
         OptimumConfig.AdaptiveRadiusEnabled = true;
     }
 
@@ -35,6 +43,15 @@ public sealed class KometAdaptiveChunkInflowGuardTests : System.IDisposable
         Assert.True(OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled());
 
         InflowBrake.Enabled = false;
+        Assert.False(OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled());
+
+        // Komet 3.x renamed InflowBrake.Enabled to Komet.Chunks.JoinPacer.Enabled and does not
+        // register a vsmod-interop/1 provider; ensure reflective fallback reads JoinPacer.Enabled.
+        KometInterop.AnswersFeature = false;
+        JoinPacer.Enabled = true;
+        Assert.True(OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled());
+
+        JoinPacer.Enabled = false;
         Assert.False(OptimumCompatibilityGuard.IsKometAdaptiveChunkInflowEnabled());
     }
 

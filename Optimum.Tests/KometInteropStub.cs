@@ -1,3 +1,4 @@
+using Komet.Chunks;
 using Komet.Runtime;
 
 namespace Komet.Interop;
@@ -5,8 +6,8 @@ namespace Komet.Interop;
 /// <summary>
 /// Test-only stand-in for the provider Komet gains from the interop protocol: same namespace,
 /// type name and member shape as the real one, answering from the same <see cref="InflowBrake"/>
-/// flag. It lets Optimum's consumer side be exercised without Komet in the process, and the two
-/// switches below let a test pin which source Optimum actually used.
+/// or <see cref="JoinPacer"/> flag. It lets Optimum's consumer side be exercised without Komet in
+/// the process, and the two switches below let a test pin which source Optimum actually used.
 /// </summary>
 public static class KometInterop
 {
@@ -24,7 +25,7 @@ public static class KometInterop
     {
         active = false;
         if (!AnswersFeature || featureId != FeatureAdaptiveChunkInflow) return false;
-        active = OverrideState ?? InflowBrake.Enabled;
+        active = OverrideState ?? (InflowBrake.Enabled || JoinPacer.Enabled);
         return true;
     }
 

@@ -1,10 +1,21 @@
-namespace Komet.Runtime;
-
-/// <summary>
-/// Test-only stand-in for Komet's public runtime switch. Komet 1.2.0
-/// exposes this exact field and Optimum reads it by reflection.
-/// </summary>
-public static class InflowBrake
+namespace Komet.Runtime
 {
-    public static bool Enabled;
+    /// <summary>
+    /// Test-only stand-in for Komet 1.x/2.x's public runtime switch.
+    /// </summary>
+    public static class InflowBrake
+    {
+        public static bool Enabled;
+    }
+}
+
+namespace Komet.Chunks
+{
+    /// <summary>
+    /// Test-only stand-in for Komet 3.x's public join-pacer switch (Komet.Chunks.JoinPacer.Enabled).
+    /// </summary>
+    public static class JoinPacer
+    {
+        public static bool Enabled;
+    }
 }
