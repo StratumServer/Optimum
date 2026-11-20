@@ -490,6 +490,31 @@ install_ilspycmd_if_missing
 
 # 2. Decompile all closed-source DLLs.
 # Produces .csproj projects in build/snapshot/{name}/ copied to working dirs.
+# Prevent host GAC assemblies (e.g. Newtonsoft.Json 13.0.0.0 in the Windows GAC)
+# from leaking into ilspycmd when Vintage Story's third-party DLLs live in Lib/
+# rather than next to the target DLL. Passing -r with 0-byte placeholders for
+# Lib/*.dll makes ILSpy's UniversalAssemblyResolver match them before
+# GetAssemblyInGac(), catch BadImageFormatException, and treat them as unresolved
+# deterministically across hosts.
+gac_shield_dir=""
+trap '[[ -n "${gac_shield_dir:-}" ]] && rm -rf "$gac_shield_dir"' EXIT
+prepare_gac_shield_dir() {
+  local lib_dir="$vanilla_dir/vintagestory/Lib"
+  local root_dir="$vanilla_dir/vintagestory"
+  if [[ ! -d "$lib_dir" ]]; then
+    return
+  fi
+  gac_shield_dir="$(mktemp -d "${TMPDIR:-/tmp}/optimum-gac-shield.XXXXXX")"
+  local lib_dll base_name
+  for lib_dll in "$lib_dir"/*.dll "$lib_dir"/*.DLL; do
+    [[ -f "$lib_dll" ]] || continue
+    base_name="$(basename "$lib_dll")"
+    if [[ ! -f "$root_dir/$base_name" ]]; then
+      : > "$gac_shield_dir/$base_name"
+    fi
+  done
+}
+
 decompile_targets=("VintagestoryLib:build/VintagestoryLib" "Vintagestory:build/Vintagestory")
 
 for entry in "${decompile_targets[@]}"; do
@@ -514,11 +539,18 @@ for entry in "${decompile_targets[@]}"; do
   dll_hash="$(hash_files "$dll_path" | cut -d ' ' -f1)"
   ilspy_version="$(ilspycmd --version | head -1)"
   if [[ "$refresh" == "1" || ! -d "$out" || ! -f "$manifest" ]] ||
-    ! cmp -s "$manifest" <(printf '%s\n' "$dll_hash" "$ilspy_version"); then
+    ! cmp -s "$manifest" <(printf '%s\n' "$dll_hash" "$ilspy_version" "gac-shield=v1"); then
+    if [[ -z "$gac_shield_dir" ]]; then
+      prepare_gac_shield_dir
+    fi
     echo "Decompiling $dll_base.dll with $ilspy_version"
     rm -rf "$out"
     mkdir -p "$out"
-    ilspycmd "$dll_path" --project -o "$out" >/dev/null 2>&1
+    if [[ -n "$gac_shield_dir" ]]; then
+      ilspycmd -r "$gac_shield_dir" "$dll_path" --project -o "$out" >/dev/null 2>&1
+    else
+      ilspycmd "$dll_path" --project -o "$out" >/dev/null 2>&1
+    fi
     decompiled_project="$out/$(basename "$dll_path" .dll).csproj"
     if [[ ! -f "$out/$dll_base.csproj" && -f "$decompiled_project" ]]; then
       mv "$decompiled_project" "$out/$dll_base.csproj"
@@ -532,7 +564,7 @@ for entry in "${decompile_targets[@]}"; do
       exit 1
     fi
     mkdir -p "$(dirname "$manifest")"
-    printf '%s\n' "$dll_hash" "$ilspy_version" > "$manifest"
+    printf '%s\n' "$dll_hash" "$ilspy_version" "gac-shield=v1" > "$manifest"
   fi
 
   decompiled_project="$out/$(basename "$dll_path" .dll).csproj"
@@ -548,6 +580,10 @@ for entry in "${decompile_targets[@]}"; do
   copy_tree_fresh "$out" "$repo_root/$work_dir"
   normalize_lf "$repo_root/$work_dir"
 done
+if [[ -n "$gac_shield_dir" ]]; then
+  rm -rf "$gac_shield_dir"
+  gac_shield_dir=""
+fi
 
 # 3. Clone compile-target forks (VintagestoryApi, Cairo).
 forks_file="$repo_root/forks.json"

@@ -790,11 +790,18 @@ try {
     Install-IlspycmdIfMissing
 
     # Produces .csproj projects in build/snapshot/{name}/ copied to build/{name}/.
+    # Prevent Windows GAC assemblies (e.g. Newtonsoft.Json 13.0.0.0) from leaking into
+    # ilspycmd when Vintage Story's third-party DLLs live in Lib/ rather than next to
+    # the target DLL. Passing -r with 0-byte placeholders for Lib/*.dll makes ILSpy's
+    # UniversalAssemblyResolver match them before GetAssemblyInGac(), catch
+    # BadImageFormatException, and treat them as unresolved deterministically across hosts.
     $decompileTargets = [ordered]@{
         'VintagestoryLib' = 'build/VintagestoryLib'
         'Vintagestory'    = 'build/Vintagestory'
     }
 
+    $gacShieldDir = $null
+    try {
     foreach ($dllBase in $decompileTargets.Keys) {
         $workDir = $decompileTargets[$dllBase]
         if ($dllBase -eq 'VintagestoryLib') {
@@ -808,7 +815,7 @@ try {
         $manifest = Join-Path (Join-Path $snapshotDir '.decompile-manifests') "$dllBase.manifest"
         $dllHash = (Get-FileHash -LiteralPath $dllPath.FullName -Algorithm SHA256).Hash
         $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
-        $expectedManifest = "$dllHash`n$verLine"
+        $expectedManifest = "$dllHash`n$verLine`ngac-shield=v1"
 
         $cachedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
         $cachedSource = @(Get-ChildItem -Path $out -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
@@ -818,10 +825,25 @@ try {
         }
 
         if (-not $cacheValid -or $Refresh) {
+            if (-not $gacShieldDir) {
+                $vanillaLibDir = Join-Path $winVanillaDir 'Lib'
+                if (Test-Path -LiteralPath $vanillaLibDir -PathType Container) {
+                    $gacShieldDir = Join-Path ([System.IO.Path]::GetTempPath()) ("optimum-gac-shield-" + [Guid]::NewGuid().ToString('N'))
+                    New-Item -ItemType Directory -Force -Path $gacShieldDir | Out-Null
+                    Get-ChildItem -LiteralPath $vanillaLibDir -Filter '*.dll' -File | ForEach-Object {
+                        if (-not (Test-Path -LiteralPath (Join-Path $winVanillaDir $_.Name) -PathType Leaf)) {
+                            [System.IO.File]::WriteAllBytes((Join-Path $gacShieldDir $_.Name), [byte[]]@())
+                        }
+                    }
+                }
+            }
             Write-Host "Decompiling $dllBase.dll with $verLine"
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
-            Invoke-NativeStep { ilspycmd $dllPath.FullName --project --disable-updatecheck -o $out 2>$null | Out-Null }
+            $ilspyArgs = @()
+            if ($gacShieldDir) { $ilspyArgs += @('-r', $gacShieldDir) }
+            $ilspyArgs += @($dllPath.FullName, '--project', '--disable-updatecheck', '-o', $out)
+            Invoke-NativeStep { & ilspycmd @ilspyArgs 2>$null | Out-Null }
             # ILSpy can report a spurious version warning after successful output;
             # validate both the project and source before stamping this cache.
             $producedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
@@ -855,6 +877,11 @@ try {
         Convert-ToLf $out
         Copy-TreeFresh $out (Join-Path $repoRoot $workDir)
         Convert-ToLf (Join-Path $repoRoot $workDir)
+    }
+    } finally {
+        if ($gacShieldDir -and (Test-Path -LiteralPath $gacShieldDir)) {
+            Remove-Item -LiteralPath $gacShieldDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # --- 3. Clone compile-target forks (VintagestoryApi, Cairo, ...) ---
