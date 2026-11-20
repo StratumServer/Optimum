@@ -496,6 +496,31 @@ function Invoke-GitApplyOptimumPatch {
     return @{ Success = $false; Output = $firstOutput }
 }
 
+# Windows rejects a CreateProcess command line over 32,766 characters ("The
+# filename or extension is too long"), and a git.cmd shim over 8,191. A full
+# bootstrap passes 300+ absolute patch paths to git, and install roots such as
+# C:\Users\<name>\AppData\Local\optimum\src-v0.4.1 make that list longer than
+# the limit. Every git call that takes patch paths goes through this splitter.
+function Split-GitPathArguments {
+    param([string[]]$Paths, [int]$FixedLength = 0, [int]$MaxLength = 7000)
+    $chunks = New-Object 'System.Collections.Generic.List[string[]]'
+    $current = New-Object 'System.Collections.Generic.List[string]'
+    $length = $FixedLength
+    foreach ($path in $Paths) {
+        # One separating space, plus the quotes PowerShell adds around a path with spaces.
+        $cost = $path.Length + 3
+        if ($current.Count -gt 0 -and ($length + $cost) -gt $MaxLength) {
+            $chunks.Add($current.ToArray())
+            $current = New-Object 'System.Collections.Generic.List[string]'
+            $length = $FixedLength
+        }
+        $current.Add($path)
+        $length += $cost
+    }
+    if ($current.Count -gt 0) { $chunks.Add($current.ToArray()) }
+    return , $chunks.ToArray()
+}
+
 function Invoke-GitApplyOptimumPatchBatch {
     param([string[]]$PatchPaths, [string]$DirArg, [string]$RepoRoot)
 
@@ -531,25 +556,37 @@ function Invoke-GitApplyOptimumPatchBatch {
 
     $fallbackPatches = @()
     if ($canBatch -and $defaultPatches.Count -gt 0) {
-        $applyArgs = @('apply', '--whitespace=nowarn')
-        if ($DirArg) { $applyArgs += $DirArg }
-        $applyArgs += $defaultPatches
+        $baseArgs = @('apply', '--whitespace=nowarn')
+        if ($DirArg) { $baseArgs += $DirArg }
+        $fixedLength = (($baseArgs -join ' ').Length) + 16
 
-        # Default git apply is atomic: if any patch in the batch fails at the
-        # default strip level (-p1), git apply writes nothing to the working tree
-        # and exits non-zero.
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $null = & git @applyArgs 2>&1
-        $batchCode = $LASTEXITCODE
-        $ErrorActionPreference = $prevEAP
+        # git apply is atomic only within one patch file. Given several files it
+        # applies them in order and stops at the first failure, which leaves the
+        # earlier ones written. Each chunk is therefore checked before it is
+        # applied: a chunk that does not check clean writes nothing and goes to
+        # the per-patch fallback on its own.
+        $chunks = Split-GitPathArguments -Paths $defaultPatches -FixedLength $fixedLength
+        foreach ($chunk in $chunks) {
+            $checkArgs = $baseArgs + @('--check') + $chunk
+            $applyArgs = $baseArgs + $chunk
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $null = & git @checkArgs 2>&1
+            $checkCode = $LASTEXITCODE
+            $batchCode = 1
+            if ($checkCode -eq 0) {
+                $null = & git @applyArgs 2>&1
+                $batchCode = $LASTEXITCODE
+            }
+            $ErrorActionPreference = $prevEAP
 
-        if ($batchCode -eq 0) {
-            $applied += $defaultPatches.Count
-            $fallbackPatches = $p0Patches
-        } else {
-            $fallbackPatches = $PatchPaths
+            if ($batchCode -eq 0) {
+                $applied += $chunk.Count
+            } else {
+                $fallbackPatches += $chunk
+            }
         }
+        $fallbackPatches += $p0Patches
     } else {
         $fallbackPatches = $PatchPaths
     }
@@ -604,22 +641,27 @@ function Test-PatchSyntaxBatch([string[]]$PatchPaths, [string]$RepoRoot) {
     }
 
     if ($headerValid.Count -gt 0) {
-        $statArgs = @('apply', '--stat') + $headerValid
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        $null = & git @statArgs 2>&1
-        $statCode = $LASTEXITCODE
-        $ErrorActionPreference = $prevEAP
+        # --stat only parses, so a failing chunk wrote nothing and only its own
+        # files need the per-file diagnosis.
+        $suspectPatches = @()
+        $chunks = Split-GitPathArguments -Paths $headerValid -FixedLength 24
+        foreach ($chunk in $chunks) {
+            $statArgs = @('apply', '--stat') + $chunk
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            $null = & git @statArgs 2>&1
+            $statCode = $LASTEXITCODE
+            $ErrorActionPreference = $prevEAP
+            if ($statCode -ne 0) { $suspectPatches += $chunk }
+        }
 
-        if ($statCode -ne 0) {
-            foreach ($patchPath in $headerValid) {
-                $syntax = Test-PatchSyntax $patchPath
-                if (-not $syntax.Success) {
-                    $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
-                    $failures += $rel
-                    Write-Host "  FAILED: $rel"
-                    if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
-                }
+        foreach ($patchPath in $suspectPatches) {
+            $syntax = Test-PatchSyntax $patchPath
+            if (-not $syntax.Success) {
+                $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
+                $failures += $rel
+                Write-Host "  FAILED: $rel"
+                if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
             }
         }
     }
