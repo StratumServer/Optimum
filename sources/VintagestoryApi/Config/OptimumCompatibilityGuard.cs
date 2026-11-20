@@ -48,7 +48,8 @@ public static class OptimumCompatibilityGuard
     public static bool OptiTimeAdvisoryLogged { get; private set; }
     public static bool WorldJoinAdvisorySent { get; private set; }
 
-    private static FieldInfo? _kometInflowEnabledField;
+    private static FieldInfo? _kometJoinPacerEnabledField;
+    private static FieldInfo? _kometLegacyInflowEnabledField;
     private static bool _kometInflowFieldLookupComplete;
 
     public static void ResetDetection()
@@ -65,7 +66,8 @@ public static class OptimumCompatibilityGuard
         KometAdvisoryLogged = false;
         OptiTimeAdvisoryLogged = false;
         WorldJoinAdvisorySent = false;
-        _kometInflowEnabledField = null;
+        _kometJoinPacerEnabledField = null;
+        _kometLegacyInflowEnabledField = null;
         _kometInflowFieldLookupComplete = false;
     }
 
@@ -265,7 +267,11 @@ public static class OptimumCompatibilityGuard
                 if (name == null) continue;
 
                 if (!OptimumConfig.KometDetected && !IsModDisabled(KometModId, null, name, disabledSet) &&
-                    (string.Equals(name, KometModId, StringComparison.OrdinalIgnoreCase) || asm.GetType("Komet.KometModSystem") != null))
+                    (string.Equals(name, KometModId, StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(name, "Komet.Core", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(name, "Komet.Chunks", StringComparison.OrdinalIgnoreCase) ||
+                     asm.GetType("Komet.KometModSystem") != null ||
+                     asm.GetType("Komet.Chunks.JoinPacer") != null))
                 {
                     OptimumConfig.KometDetected = true;
                     KometDetectionSource = "AppDomain";
@@ -321,22 +327,47 @@ public static class OptimumCompatibilityGuard
 
         if (!_kometInflowFieldLookupComplete)
         {
-            _kometInflowEnabledField = FindKometInflowEnabledField();
+            FindKometInflowEnabledFields(out _kometJoinPacerEnabledField, out _kometLegacyInflowEnabledField);
             _kometInflowFieldLookupComplete = true;
         }
 
-        FieldInfo? enabledField = _kometInflowEnabledField;
-        if (enabledField == null || enabledField.FieldType != typeof(bool)) return true;
+        FieldInfo? joinPacerField = _kometJoinPacerEnabledField;
+        FieldInfo? legacyField = _kometLegacyInflowEnabledField;
+        bool hasReadableField = false;
 
-        try
+        if (joinPacerField != null && joinPacerField.FieldType == typeof(bool))
         {
-            object? value = enabledField.GetValue(null);
-            return value is bool enabled ? enabled : true;
+            try
+            {
+                if (joinPacerField.GetValue(null) is bool joinPacerEnabled)
+                {
+                    if (joinPacerEnabled) return true;
+                    hasReadableField = true;
+                }
+            }
+            catch (Exception)
+            {
+                return true;
+            }
         }
-        catch (Exception)
+
+        if (legacyField != null && legacyField.FieldType == typeof(bool))
         {
-            return true;
+            try
+            {
+                if (legacyField.GetValue(null) is bool legacyEnabled)
+                {
+                    if (legacyEnabled) return true;
+                    hasReadableField = true;
+                }
+            }
+            catch (Exception)
+            {
+                return true;
+            }
         }
+
+        return !hasReadableField;
     }
 
     public static bool HasKometInteropProvider => ModInterop.IsProviderAvailable("komet");
@@ -358,23 +389,36 @@ public static class OptimumCompatibilityGuard
             LogKometAdvisoryOnce(logger);
     }
 
-    private static FieldInfo? FindKometInflowEnabledField()
+    private static void FindKometInflowEnabledFields(out FieldInfo? joinPacerEnabled, out FieldInfo? legacyInflowEnabled)
     {
+        joinPacerEnabled = null;
+        legacyInflowEnabled = null;
         try
         {
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
             {
-                Type? inflowBrake = assembly.GetType("Komet.Runtime.InflowBrake", throwOnError: false);
-                FieldInfo? enabled = inflowBrake?.GetField("Enabled", BindingFlags.Public | BindingFlags.Static);
-                if (enabled != null) return enabled;
+                if (joinPacerEnabled == null)
+                {
+                    Type? joinPacer = assembly.GetType("Komet.Chunks.JoinPacer", throwOnError: false);
+                    joinPacerEnabled = joinPacer?.GetField("Enabled", BindingFlags.Public | BindingFlags.Static);
+                }
+
+                if (legacyInflowEnabled == null)
+                {
+                    Type? inflowBrake = assembly.GetType("Komet.Runtime.InflowBrake", throwOnError: false);
+                    legacyInflowEnabled = inflowBrake?.GetField("Enabled", BindingFlags.Public | BindingFlags.Static);
+                }
+
+                if (joinPacerEnabled != null && legacyInflowEnabled != null)
+                {
+                    break;
+                }
             }
         }
         catch (Exception)
         {
             // Treat an unreadable Komet runtime state as enabled (fail closed).
         }
-
-        return null;
     }
 
     /// <summary>
@@ -400,7 +444,14 @@ public static class OptimumCompatibilityGuard
         Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
         for (int i = 0; i < assemblies.Length; i++)
         {
-            vaoType = assemblies[i].GetType("Vintagestory.Client.NoObf.VAO", throwOnError: false);
+            try
+            {
+                vaoType = assemblies[i].GetType("Vintagestory.Client.NoObf.VAO", throwOnError: false);
+            }
+            catch (Exception)
+            {
+                continue;
+            }
             if (vaoType != null)
             {
                 break;

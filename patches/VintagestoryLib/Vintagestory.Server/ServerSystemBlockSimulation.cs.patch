@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
-index 6b3cdd0..43678d9 100644
+index 6b3cdd0..f9c8bed 100644
 --- a/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
 +++ b/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs
 @@ -650,13 +650,28 @@ public class ServerSystemBlockSimulation : ServerSystem
@@ -32,7 +32,7 @@ index 6b3cdd0..43678d9 100644
  		HandleDirtyAndUpdatedBlocks();
  		SendDirtyBlockEntities();
  	}
-@@ -725,53 +740,70 @@ public class ServerSystemBlockSimulation : ServerSystem
+@@ -725,53 +740,84 @@ public class ServerSystemBlockSimulation : ServerSystem
  			return;
  		}
  		blockEntitiesPacked.Clear();
@@ -40,6 +40,7 @@ index 6b3cdd0..43678d9 100644
  		positionsDone.Clear();
 -		ConcurrentQueue<BlockPos> dirtyBlockEntities = server.DirtyBlockEntities;
 -		if (!dirtyBlockEntities.IsEmpty)
++		Vintagestory.API.Config.OptimumPooledSlab dirtySlab = null;
 +		try
  		{
 -			using FastMemoryStream ms = reusableSendingStream ?? (reusableSendingStream = new FastMemoryStream());
@@ -53,12 +54,9 @@ index 6b3cdd0..43678d9 100644
 +				ms.Reset();
 +				BlockPos result;
 +				while (!dirtyBlockEntities.IsEmpty && server.DirtyBlockEntities.TryDequeue(out result))
- 				{
--					BlockEntity blockEntity = server.WorldMap.GetBlockEntity(result);
--					if (blockEntity != null)
++				{
 +					if (positionsDone.Add(result))
- 					{
--						blockEntitiesPacked.Add(BlockEntityToPacket(blockEntity, ms));
++					{
 +						BlockEntity blockEntity = server.WorldMap.GetBlockEntity(result);
 +						if (blockEntity != null)
 +						{
@@ -68,18 +66,52 @@ index 6b3cdd0..43678d9 100644
 +						{
 +							noblockEntities.Add(result);
 +						}
++					}
++				}
++				if (Vintagestory.API.Config.OptimumConfig.SpanBlockEntitySerializationEnabled && blockEntitiesPacked.Count > 0)
+ 				{
+-					BlockEntity blockEntity = server.WorldMap.GetBlockEntity(result);
+-					if (blockEntity != null)
++					int totalBytes = (int)ms.Position;
++					dirtySlab = Vintagestory.API.Config.OptimumPooledSlab.Rent(totalBytes);
++					byte[] slabBuffer = dirtySlab.Buffer;
++					if (totalBytes > 0)
+ 					{
+-						blockEntitiesPacked.Add(BlockEntityToPacket(blockEntity, ms));
++						Buffer.BlockCopy(ms.GetBuffer(), 0, slabBuffer, 0, totalBytes);
  					}
 -					else
-+				}
-+			}
++					for (int i = 0; i < blockEntitiesPacked.Count; i++)
+ 					{
+-						noblockEntities.Add(result);
++						Packet_BlockEntity packed = blockEntitiesPacked[i];
++						packed.optimumSharedBuffer = slabBuffer;
++						packed.optimumSlab = dirtySlab;
+ 					}
+ 				}
+ 			}
+-		}
+-		if (blockEntitiesPacked.Count <= 0 && noblockEntities.Count <= 0)
+-		{
+-			return;
+-		}
+-		foreach (ConnectedClient value in server.Clients.Values)
+-		{
+-			if (value.State == EnumClientState.Offline)
 +			if (blockEntitiesPacked.Count <= 0 && noblockEntities.Count <= 0)
-+			{
+ 			{
+-				continue;
 +				return;
-+			}
+ 			}
+-			playerBlockEntitiesPacked.Clear();
+-			foreach (Packet_BlockEntity item in blockEntitiesPacked)
 +			foreach (ConnectedClient value in server.Clients.Values)
-+			{
+ 			{
+-				long index3d = server.WorldMap.ChunkIndex3D(new ChunkPos(item.PosX / 32, item.PosY / 32, item.PosZ / 32));
+-				if (value.DidSendChunk(index3d))
 +				if (value.State == EnumClientState.Offline)
-+				{
+ 				{
+-					playerBlockEntitiesPacked.Add(item);
 +					continue;
 +				}
 +				playerBlockEntitiesPacked.Clear();
@@ -87,43 +119,24 @@ index 6b3cdd0..43678d9 100644
 +				{
 +					long index3d = server.WorldMap.ChunkIndex3D(new ChunkPos(item.PosX / 32, item.PosY / 32, item.PosZ / 32));
 +					if (value.DidSendChunk(index3d))
- 					{
--						noblockEntities.Add(result);
++					{
 +						playerBlockEntitiesPacked.Add(item);
- 					}
- 				}
++					}
++				}
 +				if (playerBlockEntitiesPacked.Count + noblockEntities.Count > 0)
 +				{
 +					SendBlockEntitiesPacket(value, playerBlockEntitiesPacked, noblockEntities);
-+				}
+ 				}
  			}
- 		}
--		if (blockEntitiesPacked.Count <= 0 && noblockEntities.Count <= 0)
+-			if (playerBlockEntitiesPacked.Count + noblockEntities.Count > 0)
++		}
 +		finally
- 		{
--			return;
--		}
--		foreach (ConnectedClient value in server.Clients.Values)
--		{
--			if (value.State == EnumClientState.Offline)
-+			for (int i = 0; i < blockEntitiesPacked.Count; i++)
- 			{
--				continue;
-+				blockEntitiesPacked[i].ClearOptimumSlice();
- 			}
++		{
++			dirtySlab?.Release();
 +			blockEntitiesPacked.Clear();
- 			playerBlockEntitiesPacked.Clear();
--			foreach (Packet_BlockEntity item in blockEntitiesPacked)
++			playerBlockEntitiesPacked.Clear();
 +			if (reusableSendingStream != null && reusableSendingStream.GetBuffer().Length > 1048576)
  			{
--				long index3d = server.WorldMap.ChunkIndex3D(new ChunkPos(item.PosX / 32, item.PosY / 32, item.PosZ / 32));
--				if (value.DidSendChunk(index3d))
--				{
--					playerBlockEntitiesPacked.Add(item);
--				}
--			}
--			if (playerBlockEntitiesPacked.Count + noblockEntities.Count > 0)
--			{
 -				SendBlockEntitiesPacket(value, playerBlockEntitiesPacked, noblockEntities);
 +				reusableSendingStream = null;
  			}
@@ -131,7 +144,7 @@ index 6b3cdd0..43678d9 100644
  	}
  
  	public override void OnServerTick(float dt)
-@@ -864,20 +896,30 @@ public class ServerSystemBlockSimulation : ServerSystem
+@@ -864,20 +910,30 @@ public class ServerSystemBlockSimulation : ServerSystem
  				}
  			}
  		}
@@ -162,7 +175,7 @@ index 6b3cdd0..43678d9 100644
  	private void tickChunk(long index3d, ServerChunk chunk)
  	{
  		ChunkPos chunkPos = server.WorldMap.ChunkPosFromChunkIndex3D(index3d);
-@@ -926,27 +968,38 @@ public class ServerSystemBlockSimulation : ServerSystem
+@@ -926,27 +982,38 @@ public class ServerSystemBlockSimulation : ServerSystem
  		return true;
  	}
  
@@ -209,3 +222,16 @@ index 6b3cdd0..43678d9 100644
  	}
  
  	private void SendBlockEntitiesPacket(ConnectedClient client, List<Packet_BlockEntity> blockEntitiesPacked, List<BlockPos> noBlockEntities)
+@@ -969,11 +1036,11 @@ public class ServerSystemBlockSimulation : ServerSystem
+ 				PosZ = blockPos.Z
+ 			};
+ 		}
+ 		Packet_BlockEntities packet_BlockEntities = new Packet_BlockEntities();
+ 		packet_BlockEntities.SetBlockEntitites(array);
+-		server.SendPacket(client.Id, new Packet_Server
++		server.SendPacket(client.Player, new Packet_Server
+ 		{
+ 			Id = 48,
+ 			BlockEntities = packet_BlockEntities
+ 		});
+ 	}

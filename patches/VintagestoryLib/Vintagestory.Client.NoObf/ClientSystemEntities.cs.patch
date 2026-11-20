@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
-index 9ad9ecc..1797217 100644
+index 9ad9ecc..e46fb2a 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs
 @@ -370,19 +370,52 @@ public class ClientSystemEntities : ClientSystem
@@ -29,7 +29,7 @@ index 9ad9ecc..1797217 100644
 +				treeAttribute.FromBytes(stream);
 +			}
 +		}
-+		packet.ClearOptimumSlice();
++		packet.ReleaseAndClearOptimumSlice();
 +		if (isNew)
 +		{
 +			Block blockRaw = game.BlockAccessor.GetBlockRaw(treeAttribute.GetInt("posx"), treeAttribute.GetInt("posy"), treeAttribute.GetInt("posz"), 1);

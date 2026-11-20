@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using Komet.Chunks;
 using Komet.Interop;
 using Komet.Runtime;
 using Vintagestory.API.Config;
@@ -24,6 +25,8 @@ public sealed class ModInteropProtocolTests : IDisposable
         OptimumConfig.AdaptiveRadiusEnabled = true;
         KometInterop.AnswersFeature = true;
         KometInterop.OverrideState = null;
+        InflowBrake.Enabled = false;
+        JoinPacer.Enabled = false;
         ModInterop.ResetCacheForTests();
     }
 
@@ -38,6 +41,7 @@ public sealed class ModInteropProtocolTests : IDisposable
         // collection read that flag, so it has to go back the way it was found.
         OptimumCompatibilityGuard.ResetForTests();
         InflowBrake.Enabled = false;
+        JoinPacer.Enabled = false;
     }
 
     [Fact]

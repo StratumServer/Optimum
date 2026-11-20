@@ -111,7 +111,10 @@ public class BlockEntitySpanSerializationTests
         string treePatch = PatchReader.ReadPatch("patches/VintagestoryApi/Datastructures/AttributeTree/TreeAttribute.cs.patch");
         string serverPacketsPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerPackets.cs.patch");
         string serverChunkPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerChunk.cs.patch");
+        string serverMainPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerMain.cs.patch");
+        string serverBlockSimPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Server/ServerSystemBlockSimulation.cs.patch");
         string clientChunkPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch");
+        string clientEntitiesPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs.patch");
         string packetBePatch = PatchReader.ReadPatch("patches/VintagestoryLib/Packet_BlockEntity.cs.patch");
         string packetSerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Packet_BlockEntitySerializer.cs.patch");
         string apiPatcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/api-patcher.cs"));
@@ -122,12 +125,20 @@ public class BlockEntitySpanSerializationTests
         Assert.Contains("OptimumApiBridge.CreateTreeFromBytes", treePatch);
         Assert.Contains("OptimumTreeAttributeCodec.WriteBlockEntityToStream", serverPacketsPatch);
         Assert.Contains("GetBlockEntitiesPacketsPooled", serverChunkPatch);
+        Assert.Contains("OptimumPooledSlab.Rent", serverMainPatch);
+        Assert.Contains("OptimumPooledSlab.Rent", serverBlockSimPatch);
         Assert.Contains("OptimumTreeAttributeCodec.ReadTreeFromBytes", clientChunkPatch);
+        Assert.Contains("ReleaseAndClearOptimumSlice", clientChunkPatch);
+        Assert.Contains("ReleaseAndClearOptimumSlice", clientEntitiesPatch);
         Assert.Contains("SetOptimumSlice", packetBePatch);
+        Assert.Contains("ReleaseAndClearOptimumSlice", packetBePatch);
         Assert.Contains("TryGetOptimumDataSpan", packetSerPatch);
 
         Assert.Contains("PatchTreeAttributeSerialization(", apiPatcherSource);
         Assert.Contains("\"Packet_BlockEntity\"", programSource);
+        Assert.Contains("\"ReleaseAndClearOptimumSlice\"", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"SendPacketFast\", 2)", programSource);
+        Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"Serialize_\", 1)", programSource);
         Assert.Contains("new(\"Packet_BlockEntitySerializer\", \"Deserialize\", 2)", programSource);
         Assert.Contains("new(\"Vintagestory.Server.ServerChunk\", \"AfterDeserialization\", 1)", programSource);
         Assert.Contains("new(\"Vintagestory.Client.NoObf.ClientChunk\", \"PreLoadBlockEntitiesFromPacket\", 3)", programSource);
@@ -486,6 +497,40 @@ public class BlockEntitySpanSerializationTests
 
             slabType.GetMethod("Release", Type.EmptyTypes)!.Invoke(slab, null);
             Assert.Null(slabType.GetProperty("Buffer")!.GetValue(slab));
+
+            // Verify ReleaseAndClearOptimumSlice releases attached slab and clears slice fields.
+            object directHandoffSlab = slabType.GetMethod("Rent", new[] { typeof(int) })!.Invoke(null, new object[] { payload.Length })!;
+            byte[] directHandoffBuf = (byte[])slabType.GetProperty("Buffer")!.GetValue(directHandoffSlab)!;
+            Buffer.BlockCopy(payload, 0, directHandoffBuf, 0, payload.Length);
+            object directHandoffPacket = CreatePacket(null);
+            setSlice.Invoke(directHandoffPacket, new object[] { directHandoffBuf, 0, payload.Length });
+            packetType.GetField("optimumSlab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!
+                .SetValue(directHandoffPacket, directHandoffSlab);
+            MethodInfo releaseAndClear = packetType.GetMethod("ReleaseAndClearOptimumSlice", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)!;
+            releaseAndClear.Invoke(directHandoffPacket, null);
+            Assert.False((bool)hasData.Invoke(directHandoffPacket, null)!);
+            Assert.Null(slabType.GetProperty("Buffer")!.GetValue(directHandoffSlab));
+
+            // Verify ServerMain.SendPacketFast and Serialize_ manage Retain/Release slab lifecycle
+            // while leaving ServerMain.SendPacket(int, Packet_Server) at its vanilla IL body for Komet's fingerprint check.
+            using (var module = Mono.Cecil.ModuleDefinition.ReadModule(patchedLib))
+            {
+                Mono.Cecil.TypeDefinition serverMainDef = module.Types.First(t => t.FullName == "Vintagestory.Server.ServerMain");
+                Mono.Cecil.MethodDefinition sendPacketFastDef = serverMainDef.Methods.First(m =>
+                    m.Name == "SendPacketFast" && m.Parameters.Count == 2);
+                Mono.Cecil.MethodDefinition serializeDef = serverMainDef.Methods.First(m =>
+                    m.Name == "Serialize_" && m.Parameters.Count == 1);
+                var fastCalls = sendPacketFastDef.Body.Instructions
+                    .Where(i => i.Operand is Mono.Cecil.MethodReference)
+                    .Select(i => ((Mono.Cecil.MethodReference)i.Operand).Name)
+                    .ToList();
+                var serializeCalls = serializeDef.Body.Instructions
+                    .Where(i => i.Operand is Mono.Cecil.MethodReference)
+                    .Select(i => ((Mono.Cecil.MethodReference)i.Operand).Name)
+                    .ToList();
+                Assert.Contains("OptimumRetainBlockEntityPacketSlabs", fastCalls);
+                Assert.Contains("OptimumReleaseBlockEntityPacketSlabs", serializeCalls);
+            }
         }
         finally
         {
