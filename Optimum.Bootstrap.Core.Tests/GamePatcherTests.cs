@@ -16,6 +16,49 @@ public sealed class GamePatcherTests
         public RuntimeValidationResult Validate(string packageDirectory) => new(ok, detail);
     }
 
+    // Vintage Story ships three-part file versions ("1.22.7") in its assemblies.
+    // Reading one as "1.22" made every overlay patch fail the version check
+    // against a manifest that lists "1.22.7".
+    [Theory]
+    [InlineData("1.22.7", "1.22.7")]
+    [InlineData("1.22.7.0", "1.22.7")]
+    [InlineData("1.22.7.3", "1.22.7.3")]
+    [InlineData("1.22.0", "1.22.0")]
+    [InlineData("1.22", "1.22")]
+    [InlineData("1.22.7+abc123", "1.22.7")]
+    [InlineData(" 1.22.7 ", "1.22.7")]
+    [InlineData("not-a-version", "not-a-version")]
+    public void NormalizeGameVersionKeepsThePatchNumber(string fileVersion, string expected)
+    {
+        Assert.Equal(expected, GamePatcher.NormalizeGameVersion(fileVersion));
+    }
+
+    [Fact]
+    public async Task PatchAcceptsAThreePartDetectedVersionListedInTheManifest()
+    {
+        var probe = new FakeSystemProbe();
+        probe.AddDirectory("/game");
+        probe.AddFile("/game/VintagestoryLib.dll", "lib");
+        probe.AddFile("/game/VintagestoryAPI.dll", "api");
+        probe.AddDirectory("/overlay");
+        probe.AddFile("/overlay/optimum-manifest.json", """
+        {
+          "optimumVersion": "1.0.0",
+          "supportedGameVersions": ["1.22.7"],
+          "rid": "linux-x64"
+        }
+        """);
+
+        var patcher = new GamePatcher(
+            probe,
+            new StubRuntimeValidator(),
+            _ => GamePatcher.NormalizeGameVersion("1.22.7"));
+
+        var result = await patcher.PatchAsync(new PatchRequest("/game", OverlayDirectory: "/overlay"));
+
+        Assert.NotEqual(FailureReason.UnsupportedVersion, result.Reason);
+    }
+
     [Fact]
     public async Task PatchRejectsMissingGameDirectory()
     {

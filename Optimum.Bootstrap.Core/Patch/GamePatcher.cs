@@ -1183,24 +1183,33 @@ public sealed class GamePatcher(
             if (string.IsNullOrEmpty(version))
                 return null;
 
-            int plusIndex = version.IndexOf('+');
-            if (plusIndex >= 0) version = version[..plusIndex];
-
-            if (Version.TryParse(version, out var parsed))
-            {
-                if (parsed.Build >= 0 && parsed.Revision == 0)
-                    return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}";
-                if (parsed.Build >= 0 && parsed.Revision > 0)
-                    return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}.{parsed.Revision}";
-                return $"{parsed.Major}.{parsed.Minor}";
-            }
-
-            return version;
+            return NormalizeGameVersion(version);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reduces a file version to the form release manifests use. A three-part
+    /// version such as the "1.22.7" that Vintage Story ships in
+    /// VintagestoryLib.dll keeps its patch number, and a fourth part of zero is dropped.
+    /// </summary>
+    internal static string NormalizeGameVersion(string version)
+    {
+        version = version.Trim();
+        int plusIndex = version.IndexOf('+');
+        if (plusIndex >= 0) version = version[..plusIndex];
+
+        if (!Version.TryParse(version, out var parsed))
+            return version;
+
+        if (parsed.Build >= 0 && parsed.Revision > 0)
+            return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}.{parsed.Revision}";
+        if (parsed.Build >= 0)
+            return $"{parsed.Major}.{parsed.Minor}.{parsed.Build}";
+        return $"{parsed.Major}.{parsed.Minor}";
     }
 
     private static string TrimOutput(ProcessOutcome outcome)
