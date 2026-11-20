@@ -80,4 +80,43 @@ cmp -s "$manifest_file" <(printf '%s\n' "abc123" "ilspycmd: 11.0.0.9375" "gac-sh
   exit 1
 }
 
+# 4. Verify single ilspycmd --version reuse and incomplete cache rejection in bootstrap.sh
+grep -qF 'ilspy_version="${resolved_ilspy_version:-$(ilspycmd --version | head -1)}"' "$REPO_ROOT/scripts/bootstrap.sh" || {
+  echo "Expected cached ilspy_version reuse before decompile loop in scripts/bootstrap.sh" >&2
+  exit 1
+}
+grep -qF 'decompile_cache_is_valid()' "$REPO_ROOT/scripts/bootstrap.sh" || {
+  echo "Expected decompile_cache_is_valid helper in scripts/bootstrap.sh" >&2
+  exit 1
+}
+
+decompile_cache_is_valid() {
+  local cache_dir="$1" dll_name="$2" manifest_file="$3" expected_hash="$4" expected_ver="$5"
+  [[ -d "$cache_dir" && -f "$manifest_file" ]] || return 1
+  [[ -f "$cache_dir/$dll_name.csproj" || -f "$cache_dir/${dll_name}.vanilla.csproj" ]] || return 1
+  [[ -n "$(find "$cache_dir" -type f -name '*.cs' -print -quit 2>/dev/null)" ]] || return 1
+  cmp -s "$manifest_file" <(printf '%s\n' "$expected_hash" "$expected_ver" "gac-shield=v1")
+}
+
+cache_dir="$TEST_ROOT/cache/VintagestoryLib"
+mkdir -p "$cache_dir"
+if decompile_cache_is_valid "$cache_dir" "VintagestoryLib" "$manifest_file" "abc123" "ilspycmd: 11.0.0.9375"; then
+  echo "Empty cache directory with manifest must be rejected" >&2
+  exit 1
+fi
+printf '<Project />' > "$cache_dir/VintagestoryLib.csproj"
+if decompile_cache_is_valid "$cache_dir" "VintagestoryLib" "$manifest_file" "abc123" "ilspycmd: 11.0.0.9375"; then
+  echo "Cache directory without .cs source files must be rejected" >&2
+  exit 1
+fi
+printf 'class C {}' > "$cache_dir/Dummy.cs"
+decompile_cache_is_valid "$cache_dir" "VintagestoryLib" "$manifest_file" "abc123" "ilspycmd: 11.0.0.9375" || {
+  echo "Complete cache directory with matching manifest, csproj, and .cs file must be accepted" >&2
+  exit 1
+}
+if decompile_cache_is_valid "$cache_dir" "VintagestoryLib" "$manifest_file" "wrong-hash" "ilspycmd: 11.0.0.9375"; then
+  echo "Cache directory with mismatched input hash must be rejected" >&2
+  exit 1
+fi
+
 echo "All Bash GAC shield tests passed."

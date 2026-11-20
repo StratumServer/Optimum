@@ -139,6 +139,8 @@ ilspycmd_version_supported() {
     ilspycmd_version_at_most "$current" "$maximum"
 }
 
+resolved_ilspy_version=""
+
 install_ilspycmd_if_missing() {
   local dotnet_tools="$HOME/.dotnet/tools"
   if [[ -x "$dotnet_tools/ilspycmd" ]]; then
@@ -149,10 +151,17 @@ install_ilspycmd_if_missing() {
   pinned="$(pinned_ilspycmd_version)"
 
   if command -v ilspycmd >/dev/null 2>&1; then
-    if [[ -z "$pinned" ]]; then return; fi
-    local current
-    current="$(ilspycmd --version 2>/dev/null | head -1 | awk '{print $2}')"
-    if ilspycmd_version_supported "$current"; then return; fi
+    local version_line current
+    version_line="$(ilspycmd --version 2>/dev/null | head -1 || true)"
+    if [[ -z "$pinned" ]]; then
+      resolved_ilspy_version="$version_line"
+      return
+    fi
+    current="$(printf '%s\n' "$version_line" | awk '{print $2}')"
+    if ilspycmd_version_supported "$current"; then
+      resolved_ilspy_version="$version_line"
+      return
+    fi
     echo "ilspycmd $current is unsupported by this patch set, installing $pinned" >&2
     dotnet tool uninstall -g ilspycmd >/dev/null 2>&1 || true
   fi
@@ -165,6 +174,7 @@ install_ilspycmd_if_missing() {
     dotnet tool install -g ilspycmd >/dev/null
   fi
   export PATH="$dotnet_tools:$PATH"
+  resolved_ilspy_version="$(ilspycmd --version 2>/dev/null | head -1 || true)"
 }
 
 extract_archive() {
@@ -515,7 +525,16 @@ prepare_gac_shield_dir() {
   done
 }
 
+decompile_cache_is_valid() {
+  local cache_dir="$1" dll_name="$2" manifest_file="$3" expected_hash="$4" expected_ver="$5"
+  [[ -d "$cache_dir" && -f "$manifest_file" ]] || return 1
+  [[ -f "$cache_dir/$dll_name.csproj" || -f "$cache_dir/${dll_name}.vanilla.csproj" ]] || return 1
+  [[ -n "$(find "$cache_dir" -type f -name '*.cs' -print -quit 2>/dev/null)" ]] || return 1
+  cmp -s "$manifest_file" <(printf '%s\n' "$expected_hash" "$expected_ver" "gac-shield=v1")
+}
+
 decompile_targets=("VintagestoryLib:build/VintagestoryLib" "Vintagestory:build/Vintagestory")
+ilspy_version="${resolved_ilspy_version:-$(ilspycmd --version | head -1)}"
 
 for entry in "${decompile_targets[@]}"; do
   IFS=':' read -r dll_base work_dir <<< "$entry"
@@ -526,6 +545,8 @@ for entry in "${decompile_targets[@]}"; do
       exit 1
     fi
     dll_path="$vanilla_lib_pristine"
+  elif [[ -f "$vanilla_dir/vintagestory/${dll_base}.dll" ]]; then
+    dll_path="$vanilla_dir/vintagestory/${dll_base}.dll"
   else
     dll_path="$(find "$vanilla_dir" -type f -name "${dll_base}.dll" -print 2>/dev/null | head -n 1)"
   fi
@@ -537,14 +558,12 @@ for entry in "${decompile_targets[@]}"; do
   out="$snapshot_dir/$dll_base"
   manifest="$snapshot_dir/.decompile-manifests/$dll_base.manifest"
   dll_hash="$(hash_files "$dll_path" | cut -d ' ' -f1)"
-  ilspy_version="$(ilspycmd --version | head -1)"
-  if [[ "$refresh" == "1" || ! -d "$out" || ! -f "$manifest" ]] ||
-    ! cmp -s "$manifest" <(printf '%s\n' "$dll_hash" "$ilspy_version" "gac-shield=v1"); then
+  if [[ "$refresh" == "1" ]] || ! decompile_cache_is_valid "$out" "$dll_base" "$manifest" "$dll_hash" "$ilspy_version"; then
     if [[ -z "$gac_shield_dir" ]]; then
       prepare_gac_shield_dir
     fi
     echo "Decompiling $dll_base.dll with $ilspy_version"
-    rm -rf "$out"
+    rm -rf "$manifest" "$out"
     mkdir -p "$out"
     if [[ -n "$gac_shield_dir" ]]; then
       ilspycmd -r "$gac_shield_dir" "$dll_path" --project -o "$out" >/dev/null 2>&1
