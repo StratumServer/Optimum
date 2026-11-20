@@ -314,6 +314,71 @@ git_apply_optimum_patch() {
   return 1
 }
 
+git_apply_optimum_patch_batch() {
+  local dir_arg="$1"
+  local -n _applied_ref="$2"
+  local -n _failed_ref="$3"
+  shift 3
+  local patches=("$@")
+  [[ "${#patches[@]}" -gt 0 ]] || return 0
+
+  local patch rel output
+  local default_patches=()
+  local p0_patches=()
+  local -A seen_targets=()
+  local can_batch=true
+  for patch in "${patches[@]}"; do
+    rel="${patch#$repo_root/}"
+    echo "Applying $rel"
+    local target_line
+    target_line="$(grep -m1 '^+++ ' "$patch" || true)"
+    if [[ -n "$target_line" && -n "${seen_targets[$target_line]:-}" ]]; then
+      can_batch=false
+    fi
+    if [[ -n "$target_line" ]]; then
+      seen_targets["$target_line"]=1
+    fi
+    if grep -q '^--- a/' "$patch" && grep -q '^+++ b/' "$patch"; then
+      default_patches+=("$patch")
+    else
+      p0_patches+=("$patch")
+    fi
+  done
+
+  local args=(--whitespace=nowarn)
+  if [[ -n "$dir_arg" ]]; then
+    args+=("$dir_arg")
+  fi
+
+  local fallback_patches=()
+  if [[ "$can_batch" == true && "${#default_patches[@]}" -gt 0 ]]; then
+    # Default git apply is atomic: if any patch in the batch cannot apply cleanly
+    # at the default strip level (-p1), git apply writes nothing to the working
+    # tree and exits non-zero.
+    if git apply "${args[@]}" "${default_patches[@]}" >/dev/null 2>&1; then
+      _applied_ref=$((_applied_ref + ${#default_patches[@]}))
+      fallback_patches=("${p0_patches[@]}")
+    else
+      fallback_patches=("${patches[@]}")
+    fi
+  else
+    fallback_patches=("${patches[@]}")
+  fi
+
+  for patch in "${fallback_patches[@]}"; do
+    rel="${patch#$repo_root/}"
+    if ! output="$(git_apply_optimum_patch "$patch" "$dir_arg" 2>&1)"; then
+      _failed_ref+=("$rel")
+      (set +o pipefail; printf '%s\n' "  FAILED: $output" | head -3)
+    else
+      if [[ -n "$output" ]]; then
+        echo "  $output"
+      fi
+      _applied_ref=$((_applied_ref + 1))
+    fi
+  done
+}
+
 copy_tree_fresh() {
   rm -rf "$2"
   mkdir -p "$(dirname "$2")"
@@ -1634,22 +1699,25 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
       git add -f build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ 2>/dev/null || true
       bridge_failed=()
       bridge_applied=0
+      bridge_batch=()
+      bridge_batch_dir_arg=""
       while IFS= read -r -d '' patch; do
         rel="${patch#$repo_root/}"
-        echo "Applying $rel"
         bridge_top_proj="$(echo "$rel" | cut -d/ -f2)"
         bridge_dir_arg=""
         if echo "$vanilla_patch_projects" | grep -qw "$bridge_top_proj"; then
           bridge_dir_arg="--directory=build"
         fi
-        if ! output="$(git_apply_optimum_patch "$patch" "$bridge_dir_arg" 2>&1)"; then
-          bridge_failed+=("$rel")
-          echo "  FAILED: $output" | head -3
-        else
-          [[ -n "$output" ]] && echo "  $output"
-          ((bridge_applied++)) || true
+        if [[ "${#bridge_batch[@]}" -gt 0 && "$bridge_dir_arg" != "$bridge_batch_dir_arg" ]]; then
+          git_apply_optimum_patch_batch "$bridge_batch_dir_arg" bridge_applied bridge_failed "${bridge_batch[@]}"
+          bridge_batch=()
         fi
+        bridge_batch_dir_arg="$bridge_dir_arg"
+        bridge_batch+=("$patch")
       done < <(find "$bridge_dir" -type f -name '*.patch' -print0 | sort_null)
+      if [[ "${#bridge_batch[@]}" -gt 0 ]]; then
+        git_apply_optimum_patch_batch "$bridge_batch_dir_arg" bridge_applied bridge_failed "${bridge_batch[@]}"
+      fi
       git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true
       echo "Bridge patches: $bridge_applied applied, ${#bridge_failed[@]} failed"
       if [[ "${#bridge_failed[@]}" -gt 0 ]]; then
@@ -1675,6 +1743,8 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
   failed=()
   applied=0
   skipped=0
+  patch_batch=()
+  patch_batch_dir_arg=""
 
   while IFS= read -r -d '' patch; do
     rel="${patch#$repo_root/}"
@@ -1695,23 +1765,22 @@ if [[ -d "$patches_dir" ]] && (set +o pipefail; find "$patches_dir" -name '*.pat
       fi
     fi
 
-    echo "Applying $rel"
     top_proj="$(echo "$rel" | cut -d/ -f2)"
     dir_arg=""
     if echo "$vanilla_patch_projects" | grep -qw "$top_proj"; then
       dir_arg="--directory=build"
     fi
 
-    if ! output="$(git_apply_optimum_patch "$patch" "$dir_arg" 2>&1)"; then
-      failed+=("$rel")
-      echo "  FAILED: $output" | head -3
-    else
-      if [[ -n "$output" ]]; then
-        echo "  $output"
-      fi
-      ((applied++)) || true
+    if [[ "${#patch_batch[@]}" -gt 0 && "$dir_arg" != "$patch_batch_dir_arg" ]]; then
+      git_apply_optimum_patch_batch "$patch_batch_dir_arg" applied failed "${patch_batch[@]}"
+      patch_batch=()
     fi
+    patch_batch_dir_arg="$dir_arg"
+    patch_batch+=("$patch")
   done < <(find "$patches_dir" -type f -name '*.patch' -not -path '*/runtime/*' -print0 | sort_null)
+  if [[ "${#patch_batch[@]}" -gt 0 ]]; then
+    git_apply_optimum_patch_batch "$patch_batch_dir_arg" applied failed "${patch_batch[@]}"
+  fi
 
   # Unstage: the index staging was temporary.
   git reset HEAD -- build/ VintagestoryApi/ Cairo/ VSEssentials/ VSSurvivalMod/ VSCreativeMod/ >/dev/null 2>&1 || true

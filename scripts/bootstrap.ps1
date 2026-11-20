@@ -496,6 +496,80 @@ function Invoke-GitApplyOptimumPatch {
     return @{ Success = $false; Output = $firstOutput }
 }
 
+function Invoke-GitApplyOptimumPatchBatch {
+    param([string[]]$PatchPaths, [string]$DirArg, [string]$RepoRoot)
+
+    $failed = @()
+    $applied = 0
+    if (-not $PatchPaths -or $PatchPaths.Count -eq 0) {
+        return @{ Applied = 0; Failed = @() }
+    }
+
+    $defaultPatches = @()
+    $p0Patches = @()
+    $seenTargets = @{}
+    $canBatch = $true
+    foreach ($patchPath in $PatchPaths) {
+        $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
+        Write-Host "Applying $rel"
+        $text = [System.IO.File]::ReadAllText($patchPath)
+        $targetMatch = [regex]::Match($text, '(?m)^\+\+\+\s+\S+')
+        if ($targetMatch.Success) {
+            if ($seenTargets.ContainsKey($targetMatch.Value)) {
+                $canBatch = $false
+            }
+            $seenTargets[$targetMatch.Value] = $true
+        }
+        $hasAbOld = $text.StartsWith('--- a/') -or $text.Contains("`n--- a/")
+        $hasAbNew = $text.StartsWith('+++ b/') -or $text.Contains("`n+++ b/")
+        if ($hasAbOld -and $hasAbNew) {
+            $defaultPatches += $patchPath
+        } else {
+            $p0Patches += $patchPath
+        }
+    }
+
+    $fallbackPatches = @()
+    if ($canBatch -and $defaultPatches.Count -gt 0) {
+        $applyArgs = @('apply', '--whitespace=nowarn')
+        if ($DirArg) { $applyArgs += $DirArg }
+        $applyArgs += $defaultPatches
+
+        # Default git apply is atomic: if any patch in the batch fails at the
+        # default strip level (-p1), git apply writes nothing to the working tree
+        # and exits non-zero.
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $null = & git @applyArgs 2>&1
+        $batchCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($batchCode -eq 0) {
+            $applied += $defaultPatches.Count
+            $fallbackPatches = $p0Patches
+        } else {
+            $fallbackPatches = $PatchPaths
+        }
+    } else {
+        $fallbackPatches = $PatchPaths
+    }
+
+    foreach ($patchPath in $fallbackPatches) {
+        $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
+        $result = Invoke-GitApplyOptimumPatch -PatchPath $patchPath -DirArg $DirArg
+        if (-not $result.Success) {
+            $failed += $rel
+            $firstLines = ($result.Output -split "`n") | Select-Object -First 3
+            Write-Host "  FAILED: $($firstLines -join "`n")"
+        } else {
+            if ($result.Output) { Write-Host "  $($result.Output)" }
+            $applied++
+        }
+    }
+
+    return @{ Applied = $applied; Failed = $failed }
+}
+
 function Test-PatchSyntax([string]$PatchPath) {
     $lines = Get-Content -LiteralPath $PatchPath
     $hasOldHeader = [bool]($lines | Where-Object { $_.StartsWith('--- ') } | Select-Object -First 1)
@@ -510,6 +584,47 @@ function Test-PatchSyntax([string]$PatchPath) {
     $code = $LASTEXITCODE
     $ErrorActionPreference = $prevEAP
     return @{ Success = ($code -eq 0); Output = $output.Trim() }
+}
+
+function Test-PatchSyntaxBatch([string[]]$PatchPaths, [string]$RepoRoot) {
+    $failures = @()
+    $headerValid = @()
+    foreach ($patchPath in $PatchPaths) {
+        $text = [System.IO.File]::ReadAllText($patchPath)
+        $hasOldHeader = $text.StartsWith('--- ') -or $text.Contains("`n--- ")
+        $hasNewHeader = $text.StartsWith('+++ ') -or $text.Contains("`n+++ ")
+        if (-not $hasOldHeader -or -not $hasNewHeader) {
+            $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
+            $failures += $rel
+            Write-Host "  FAILED: $rel"
+            Write-Host '    missing unified-diff file header (expected --- and +++)'
+        } else {
+            $headerValid += $patchPath
+        }
+    }
+
+    if ($headerValid.Count -gt 0) {
+        $statArgs = @('apply', '--stat') + $headerValid
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $null = & git @statArgs 2>&1
+        $statCode = $LASTEXITCODE
+        $ErrorActionPreference = $prevEAP
+
+        if ($statCode -ne 0) {
+            foreach ($patchPath in $headerValid) {
+                $syntax = Test-PatchSyntax $patchPath
+                if (-not $syntax.Success) {
+                    $rel = $patchPath.Substring($RepoRoot.Length + 1) -creplace '\\', '/'
+                    $failures += $rel
+                    Write-Host "  FAILED: $rel"
+                    if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
+                }
+            }
+        }
+    }
+
+    return , $failures
 }
 
 # ===========================================================================
@@ -1830,16 +1945,8 @@ try {
             Write-Host "Applying $Version upstream bridge patches (source reconstruction, not Optimum features - see $bridgeDir/README.md)"
             Convert-ToLf $bridgeDir
 
-            $bridgeSyntaxFailures = @()
-            $bridgePatches = Get-ChildItem -Path $bridgeDir -Recurse -Filter '*.patch' -File | Sort-Object FullName
-            foreach ($patch in $bridgePatches) {
-                $syntax = Test-PatchSyntax $patch.FullName
-                if (-not $syntax.Success) {
-                    $bridgeSyntaxFailures += $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
-                    Write-Host "  FAILED: $($bridgeSyntaxFailures[-1])"
-                    if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
-                }
-            }
+            $bridgePatches = @(Get-ChildItem -Path $bridgeDir -Recurse -Filter '*.patch' -File | Sort-Object FullName)
+            $bridgeSyntaxFailures = Test-PatchSyntaxBatch -PatchPaths @($bridgePatches | ForEach-Object { $_.FullName }) -RepoRoot $repoRoot
             if ($bridgeSyntaxFailures.Count -gt 0) {
                 Write-Error "Bridge patch syntax validation failed for $($bridgeSyntaxFailures.Count) file(s)."
                 exit 1
@@ -1852,20 +1959,25 @@ try {
 
             $bridgeFailed = @()
             $bridgeApplied = 0
+            $bridgeBatch = @()
+            $bridgeBatchDirArg = ''
             foreach ($patch in $bridgePatches) {
                 $rel = $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
-                Write-Host "Applying $rel"
                 $topProj = ($rel -split '/')[1]
                 $dirArg = if ($vanillaPatchProjects -contains $topProj) { '--directory=build' } else { '' }
-                $result = Invoke-GitApplyOptimumPatch -PatchPath $patch.FullName -DirArg $dirArg
-                if (-not $result.Success) {
-                    $bridgeFailed += $rel
-                    $firstLines = ($result.Output -split "`n") | Select-Object -First 3
-                    Write-Host "  FAILED: $($firstLines -join "`n")"
-                } else {
-                    if ($result.Output) { Write-Host "  $($result.Output)" }
-                    $bridgeApplied++
+                if ($bridgeBatch.Count -gt 0 -and $dirArg -ne $bridgeBatchDirArg) {
+                    $batchResult = Invoke-GitApplyOptimumPatchBatch -PatchPaths $bridgeBatch -DirArg $bridgeBatchDirArg -RepoRoot $repoRoot
+                    $bridgeApplied += $batchResult.Applied
+                    $bridgeFailed += $batchResult.Failed
+                    $bridgeBatch = @()
                 }
+                $bridgeBatchDirArg = $dirArg
+                $bridgeBatch += $patch.FullName
+            }
+            if ($bridgeBatch.Count -gt 0) {
+                $batchResult = Invoke-GitApplyOptimumPatchBatch -PatchPaths $bridgeBatch -DirArg $bridgeBatchDirArg -RepoRoot $repoRoot
+                $bridgeApplied += $batchResult.Applied
+                $bridgeFailed += $batchResult.Failed
             }
             Write-Host "Bridge patches: $bridgeApplied applied, $($bridgeFailed.Count) failed"
             if ($bridgeFailed.Count -gt 0) {
@@ -1886,19 +1998,11 @@ try {
         $applied = 0
         $skipped = 0
 
-        $patches = Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File |
+        $patches = @(Get-ChildItem -Path $patchesDir -Recurse -Filter '*.patch' -File |
             Where-Object { $_.FullName -notmatch '[/\\]runtime[/\\]' } |
-            Sort-Object FullName
+            Sort-Object FullName)
 
-        $syntaxFailures = @()
-        foreach ($patch in $patches) {
-            $syntax = Test-PatchSyntax $patch.FullName
-            if (-not $syntax.Success) {
-                $syntaxFailures += $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
-                Write-Host "  FAILED: $($syntaxFailures[-1])"
-                if ($syntax.Output) { Write-Host "    $($syntax.Output)" }
-            }
-        }
+        $syntaxFailures = Test-PatchSyntaxBatch -PatchPaths @($patches | ForEach-Object { $_.FullName }) -RepoRoot $repoRoot
         if ($syntaxFailures.Count -gt 0) {
             $prevEAP = $ErrorActionPreference
             $ErrorActionPreference = 'Continue'
@@ -1908,6 +2012,8 @@ try {
             exit 1
         }
 
+        $patchBatch = @()
+        $patchBatchDirArg = ''
         foreach ($patch in $patches) {
             $rel = $patch.FullName.Substring($repoRoot.Length + 1) -creplace '\\', '/'
 
@@ -1920,19 +2026,21 @@ try {
                 if ($skip) { $skipped++; continue }
             }
 
-            Write-Host "Applying $rel"
             $topProj = ($rel -split '/')[1]
             $dirArg = if ($vanillaPatchProjects -contains $topProj) { '--directory=build' } else { '' }
-
-            $result = Invoke-GitApplyOptimumPatch -PatchPath $patch.FullName -DirArg $dirArg
-            if (-not $result.Success) {
-                $failed += $rel
-                $firstLines = ($result.Output -split "`n") | Select-Object -First 3
-                Write-Host "  FAILED: $($firstLines -join "`n")"
-            } else {
-                if ($result.Output) { Write-Host "  $($result.Output)" }
-                $applied++
+            if ($patchBatch.Count -gt 0 -and $dirArg -ne $patchBatchDirArg) {
+                $batchResult = Invoke-GitApplyOptimumPatchBatch -PatchPaths $patchBatch -DirArg $patchBatchDirArg -RepoRoot $repoRoot
+                $applied += $batchResult.Applied
+                $failed += $batchResult.Failed
+                $patchBatch = @()
             }
+            $patchBatchDirArg = $dirArg
+            $patchBatch += $patch.FullName
+        }
+        if ($patchBatch.Count -gt 0) {
+            $batchResult = Invoke-GitApplyOptimumPatchBatch -PatchPaths $patchBatch -DirArg $patchBatchDirArg -RepoRoot $repoRoot
+            $applied += $batchResult.Applied
+            $failed += $batchResult.Failed
         }
 
         # Unstage: the index staging was temporary.

@@ -96,6 +96,31 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/bootstrap-gac-shield.ps1
 
+  patch-batching:
+    name: "Batched patch apply and syntax validation preserve per-patch fallback"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Patch batching test
+        run: bash scripts/tests/bootstrap-patch-batching.sh
+
+  windows-patch-batching:
+    name: "Windows PowerShell 5.1 and 7 batched patch apply"
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run patch batching test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/bootstrap-patch-batching.ps1
+
+      - name: Run patch batching test under PowerShell 7
+        shell: pwsh
+        run: ./scripts/tests/bootstrap-patch-batching.ps1
+
   donor-dotnet-selection:
     name: Runtime donor dotnet candidate resolution
     runs-on: ubuntu-latest
