@@ -76,6 +76,10 @@ public class OptimumLazyInventoryMeshesTests
             "\"EnsureCompositeShapeLoaded\"",
             "\"EnsureLoadedForLazy\"",
             "\"ReUnloadTemporaryShapes\"",
+            "\"PopulateLazyBlockColormapFlags\"",
+            "\"BlockCompositeShapeUsesColormap\"",
+            "\"ShapeAssetUsesColormap\"",
+            "\"ShapeElementsUseColormap\"",
             "new(\"Vintagestory.Client.NoObf.ShapeTesselatorManager\", \"TesselateBlocksAndItems\", 0)",
             "new(\"Vintagestory.Client.NoObf.ShapeTesselatorManager\", \"TesselateBlocksForInventory_ASync\", 1)",
             "new(\"Vintagestory.Client.NoObf.ShapeTesselatorManager\", \"TesselateItems_Pre\", 1)",
@@ -174,6 +178,10 @@ public class OptimumLazyInventoryMeshesTests
             "ResetLazyItemInventoryMeshes",
             "EnsureCompositeShapeLoaded",
             "ReUnloadTemporaryShapes",
+            "PopulateLazyBlockColormapFlags",
+            "BlockCompositeShapeUsesColormap",
+            "ShapeAssetUsesColormap",
+            "ShapeElementsUseColormap",
         })
         {
             Assert.Contains(stmType!.Methods, m => m.Name == name);
@@ -489,5 +497,183 @@ public class OptimumLazyInventoryMeshesTests
             var composeOverlays = gridType.Methods.Single(m => m.Name == "ComposeSlotOverlays");
             Assert.Contains(composeOverlays.Body.Instructions, i => i.Operand is FieldReference fr && fr.Name == "renderedSlots");
         }
+    }
+
+    [Fact]
+    public void PopulateLazyBlockColormapFlags_SetsShapeUsesColormap_ForBlockAndShapeLevelColormaps()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type stmType = donorAsm.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager", throwOnError: true)!;
+        Type unloadableShapeType = donorAsm.GetType("Vintagestory.Client.NoObf.UnloadableShape", throwOnError: true)!;
+        Type orderedDictType = typeof(Vintagestory.API.Datastructures.OrderedDictionary<,>).MakeGenericType(typeof(AssetLocation), unloadableShapeType);
+
+        object stm = RuntimeHelpers.GetUninitializedObject(stmType);
+        object shapesDict = Activator.CreateInstance(orderedDictType)!;
+        MethodInfo addShape = orderedDictType.GetMethod("Add", new[] { typeof(AssetLocation), unloadableShapeType })!;
+
+        object MakeShape(ShapeElement[] elements)
+        {
+            object s = Activator.CreateInstance(unloadableShapeType)!;
+            unloadableShapeType.GetField("Loaded")!.SetValue(s, true);
+            ((Shape)s).Elements = elements;
+            return s;
+        }
+
+        ShapeElement MakeFaceElement(string? climateMap = null, string? seasonMap = null, ShapeElement[]? children = null)
+        {
+            var el = new ShapeElement
+            {
+                ClimateColorMap = climateMap,
+                SeasonColorMap = seasonMap,
+                Children = children,
+            };
+            el.FacesResolved![0] = new ShapeElementFace();
+            return el;
+        }
+
+        var plainShapeLoc = new AssetLocation("block/basic/cube");
+        var sodShapeLoc = new AssetLocation("block/roofing/sod");
+        var overlayShapeLoc = new AssetLocation("block/overlay/grass");
+        var altShapeLoc = new AssetLocation("block/alt/tinted");
+
+        addShape.Invoke(shapesDict, new[] { plainShapeLoc, MakeShape(new[] { MakeFaceElement() }) });
+        addShape.Invoke(shapesDict, new[]
+        {
+            sodShapeLoc,
+            MakeShape(new[]
+            {
+                new ShapeElement
+                {
+                    Children = new[] { MakeFaceElement(climateMap: "climatePlantTint") },
+                },
+            }),
+        });
+        addShape.Invoke(shapesDict, new[] { overlayShapeLoc, MakeShape(new[] { MakeFaceElement(seasonMap: "seasonalGrass") }) });
+        addShape.Invoke(shapesDict, new[] { altShapeLoc, MakeShape(new[] { MakeFaceElement(climateMap: "climatePlantTint") }) });
+
+        stmType.GetField("shapes")!.SetValue(stm, shapesDict);
+
+        // 1. Liquid block (like water-still-7): ClimateColorMap set on Block, DrawType.Liquid, Frostable=false.
+        var waterBlock = new Block
+        {
+            BlockId = 1,
+            Code = new AssetLocation("water-still-7"),
+            DrawType = EnumDrawType.Liquid,
+            ClimateColorMap = "climateWaterTint",
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.VintageStory },
+        };
+
+        // 2. Block with SeasonColorMap only.
+        var seasonBlock = new Block
+        {
+            BlockId = 2,
+            Code = new AssetLocation("leaves-oak"),
+            SeasonColorMap = "seasonalFoliage",
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.VintageStory },
+        };
+
+        // 3. Block with no block-level colormap, but a nested shape element sets ClimateColorMap (like sod roofing).
+        var sodBlock = new Block
+        {
+            BlockId = 3,
+            Code = new AssetLocation("sodroofing-free"),
+            Shape = new CompositeShape { Base = sodShapeLoc, Format = EnumShapeFormat.VintageStory },
+        };
+
+        // 4. Block whose overlay shape sets SeasonColorMap.
+        var overlayBlock = new Block
+        {
+            BlockId = 4,
+            Code = new AssetLocation("overlay-grass"),
+            Shape = new CompositeShape
+            {
+                Base = plainShapeLoc,
+                Format = EnumShapeFormat.VintageStory,
+                Overlays = new[] { new CompositeShape { Base = overlayShapeLoc, Format = EnumShapeFormat.VintageStory } },
+            },
+        };
+
+        // 5. Block whose alternate shape sets ClimateColorMap.
+        var altBlock = new Block
+        {
+            BlockId = 5,
+            Code = new AssetLocation("alt-tinted"),
+            Shape = new CompositeShape
+            {
+                Base = plainShapeLoc,
+                Format = EnumShapeFormat.VintageStory,
+                BakedAlternates = new[] { new CompositeShape { Base = altShapeLoc, Format = EnumShapeFormat.VintageStory } },
+            },
+        };
+
+        // 6. Plain untinted block stays false.
+        var plainBlock = new Block
+        {
+            BlockId = 6,
+            Code = new AssetLocation("rock-granite"),
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.VintageStory },
+        };
+
+        // 7. Non-VintageStory format (Obj) stays false, matching vanilla ShapeTesselator.TesselateBlock.
+        var objBlock = new Block
+        {
+            BlockId = 7,
+            Code = new AssetLocation("obj-block"),
+            ClimateColorMap = "climatePlantTint",
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.Obj },
+        };
+
+        // 8. VoxelizeTexture block stays false, matching vanilla TesselateBlockForInventory.
+        var voxBlock = new Block
+        {
+            BlockId = 8,
+            Code = new AssetLocation("vox-block"),
+            ClimateColorMap = "climatePlantTint",
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.VintageStory, VoxelizeTexture = true },
+        };
+
+        // 9. Missing block stays false.
+        var missingBlock = new Block
+        {
+            BlockId = 9,
+            Code = new AssetLocation("missing-block"),
+            IsMissing = true,
+            ClimateColorMap = "climateWaterTint",
+            Shape = new CompositeShape { Base = plainShapeLoc, Format = EnumShapeFormat.VintageStory },
+        };
+
+        MethodInfo populate = stmType.GetMethod("PopulateLazyBlockColormapFlags", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance)!;
+        populate.Invoke(stm, new object[]
+        {
+            new Block[]
+            {
+                new Block { BlockId = 0 },
+                waterBlock,
+                seasonBlock,
+                sodBlock,
+                overlayBlock,
+                altBlock,
+                plainBlock,
+                objBlock,
+                voxBlock,
+                missingBlock,
+            },
+        });
+
+        Assert.True(waterBlock.ShapeUsesColormap);
+        Assert.True(seasonBlock.ShapeUsesColormap);
+        Assert.True(sodBlock.ShapeUsesColormap);
+        Assert.True(overlayBlock.ShapeUsesColormap);
+        Assert.True(altBlock.ShapeUsesColormap);
+        Assert.False(plainBlock.ShapeUsesColormap);
+        Assert.False(objBlock.ShapeUsesColormap);
+        Assert.False(voxBlock.ShapeUsesColormap);
+        Assert.False(missingBlock.ShapeUsesColormap);
     }
 }
