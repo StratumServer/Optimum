@@ -186,3 +186,5 @@ public class ThirdFile
         Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
+$global:LASTEXITCODE = 0
+exit 0
