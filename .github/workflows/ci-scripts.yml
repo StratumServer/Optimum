@@ -46,6 +46,31 @@ jobs:
       - name: AssemblyInfo fixup test
         run: bash scripts/tests/bootstrap-assemblyinfo-fixup.sh
 
+  inlinearray-fixup:
+    name: "InlineArray global:: qualification normalizes across OSes"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: InlineArray fixup test
+        run: bash scripts/tests/bootstrap-inlinearray-fixup.sh
+
+  windows-inlinearray-fixup:
+    name: "Windows PowerShell 5.1 and 7 InlineArray global:: normalization"
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run InlineArray fixup test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/bootstrap-inlinearray-fixup.ps1
+
+      - name: Run InlineArray fixup test under PowerShell 7
+        shell: pwsh
+        run: ./scripts/tests/bootstrap-inlinearray-fixup.ps1
+
   donor-dotnet-selection:
     name: Runtime donor dotnet candidate resolution
     runs-on: ubuntu-latest
