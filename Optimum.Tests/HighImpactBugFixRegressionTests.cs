@@ -1538,13 +1538,16 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
     }
 
     [Fact]
-    public void ModLoader_DotPrefixedAndEmptyModInfoAndSidedMods()
+    public void ModLoader_DotPrefixedAndEmptyModInfo()
     {
         string modLoaderPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModLoader.cs.patch");
         Assert.Contains("IsIgnoredDevDirectory(fsInfo.Name)", modLoaderPatch);
         Assert.Contains("IsIgnoredDevDirectory", modLoaderPatch);
-        Assert.Contains("if (mod.Info != null && !mod.Info.Side.Is(side))", modLoaderPatch);
-        Assert.Contains("CompareModRequiresCompilation", modLoaderPatch);
+        // Vanilla loads every enabled mod's assembly and marks wrong-side code mods Unused later, in
+        // ModContainer.InstantiateModSystems. Marking mods Unused before LoadAssembly also dropped
+        // content-only mods of the other side from the loaded mods and the asset origins.
+        Assert.DoesNotContain("mod.Info.Side.Is(side)", modLoaderPatch);
+        Assert.Contains("KeyModRequiresCompilation", modLoaderPatch);
 
         string modContainerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Common/ModContainer.cs.patch");
         Assert.Contains("Failed to deserialize modinfo.json in", modContainerPatch);
