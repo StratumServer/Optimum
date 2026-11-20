@@ -1,24 +1,27 @@
 diff --git a/VintagestoryLib/Vintagestory.Common/ModLoader.cs b/VintagestoryLib/Vintagestory.Common/ModLoader.cs
-index 101dbeb..9aa5be4 100644
+index 101dbeb..0b3a149 100644
 --- a/VintagestoryLib/Vintagestory.Common/ModLoader.cs
 +++ b/VintagestoryLib/Vintagestory.Common/ModLoader.cs
-@@ -202,16 +202,42 @@ public class ModLoader : IModLoader
+@@ -202,10 +202,34 @@ public class ModLoader : IModLoader
  		return CheckAndSortDependencies(mods);
  	}
  
-+	private static int CompareModRequiresCompilation(ModContainer a, ModContainer b)
++	// Vanilla orders with LINQ OrderBy, which is stable. The mods arrive here already sorted by
++	// dependency, so every reordering step must keep equal keys in place. List<T>.Sort is an
++	// unstable in-place introsort above 16 elements and moved libraries behind their dependents.
++	private static bool KeyModRequiresCompilation(ModContainer mod)
 +	{
-+		return a.RequiresCompilation.CompareTo(b.RequiresCompilation);
++		return mod.RequiresCompilation;
 +	}
 +
-+	private static int CompareModFileName(ModContainer a, ModContainer b)
++	private static string KeyModFileName(ModContainer mod)
 +	{
-+		return string.Compare(a.FileName, b.FileName, StringComparison.OrdinalIgnoreCase);
++		return mod.FileName;
 +	}
 +
-+	private static int CompareModSystemExecuteOrder(ModSystem a, ModSystem b)
++	private static double KeyModSystemExecuteOrder(ModSystem system)
 +	{
-+		return a.ExecuteOrder().CompareTo(b.ExecuteOrder());
++		return system.ExecuteOrder();
 +	}
 +
 +	private static bool IsIgnoredDevDirectory(string name)
@@ -31,22 +34,11 @@ index 101dbeb..9aa5be4 100644
  	{
  		List<ModSystem> list = new List<ModSystem>();
 -		mods = mods.OrderBy((ModContainer mod) => mod.RequiresCompilation).ToList();
-+		mods.Sort(CompareModRequiresCompilation);
++		mods = mods.OrderBy(KeyModRequiresCompilation).ToList();
  		using (ModAssemblyLoader loader = new ModAssemblyLoader(ModSearchPaths, mods))
  		{
  			foreach (ModContainer mod in mods)
- 			{
- 				if (mod.Enabled)
- 				{
-+					if (mod.Info != null && !mod.Info.Side.Is(side))
-+					{
-+						mod.Status = ModStatus.Unused;
-+						continue;
-+					}
- 					mod.LoadAssembly(compilationContext, loader);
- 					if (mod.Status == ModStatus.Errored && mod.Error == ModError.ChangedVersion && api is ICoreServerAPI coreServerAPI && !coreServerAPI.Server.IsDedicated)
- 					{
-@@ -221,7 +247,16 @@ public class ModLoader : IModLoader
+@@ -221,7 +245,16 @@ public class ModLoader : IModLoader
  			}
  		}
  		logger.VerboseDebug("{0} assemblies loaded", mods.Count);
@@ -64,7 +56,7 @@ index 101dbeb..9aa5be4 100644
  		{
  			logger.Warning("One or more source code mods failed to compile. Info to modders: In case you cannot find the problem, be aware that the game engine currently can only compile C# code until version 5.0. Any language features from C#6.0 or above will result in compile errors.");
  		}
-@@ -236,8 +271,12 @@ public class ModLoader : IModLoader
+@@ -236,8 +269,12 @@ public class ModLoader : IModLoader
  		contentAssetOrigins = new Vintagestory.API.Datastructures.OrderedDictionary<string, IAssetOrigin>();
  		themeAssetOrigins = new Vintagestory.API.Datastructures.OrderedDictionary<string, IAssetOrigin>();
  		Vintagestory.API.Datastructures.OrderedDictionary<string, int> orderedDictionary = new Vintagestory.API.Datastructures.OrderedDictionary<string, int>();
@@ -78,16 +70,16 @@ index 101dbeb..9aa5be4 100644
  			loadedMods.Add(item.Info.ModID, item);
  			list.AddRange(item.Systems);
  			if (item.FolderPath != null && Directory.Exists(Path.Combine(item.FolderPath, "assets")))
-@@ -253,7 +292,7 @@ public class ModLoader : IModLoader
+@@ -253,7 +290,7 @@ public class ModLoader : IModLoader
  		{
  			TextureSize = orderedDictionary.Values.Last();
  		}
 -		list = list.OrderBy((ModSystem system) => system.ExecuteOrder()).ToList();
-+		list.Sort(CompareModSystemExecuteOrder);
++		list = list.OrderBy(KeyModSystemExecuteOrder).ToList();
  		logger.Notification("Instantiated {0} mod systems from {1} enabled mods", list.Count, Mods.Count());
  		return list;
  	}
-@@ -294,10 +333,16 @@ public class ModLoader : IModLoader
+@@ -294,10 +331,16 @@ public class ModLoader : IModLoader
  
  	private List<ModContainer> CollectMods()
  	{
@@ -108,7 +100,7 @@ index 101dbeb..9aa5be4 100644
  		logger.Notification("Will search the following paths for mods:");
  		foreach (DirectoryInfo item in list)
  		{
-@@ -310,9 +355,27 @@ public class ModLoader : IModLoader
+@@ -310,9 +353,26 @@ public class ModLoader : IModLoader
  				logger.Notification("    {0} (Not found?)", GamePaths.RemoveUsername(item.FullName));
  			}
  		}
@@ -134,8 +126,7 @@ index 101dbeb..9aa5be4 100644
 +				}
 +			}
 +		}
-+		result.Sort(CompareModFileName);
-+		return result;
++		return result.OrderBy(KeyModFileName, StringComparer.OrdinalIgnoreCase).ToList();
  	}
  
  	private int DisableMods(IEnumerable<ModContainer> mods, IEnumerable<string> disabledModsByIdAndVersion)
