@@ -72,7 +72,7 @@ public static class ILPatcher
         bool verifyStaticFieldInitializers = false,
         IReadOnlySet<string>? allowedStaticFieldInitializers = null)
     {
-        var resolver = new DefaultAssemblyResolver();
+        using var resolver = new DefaultAssemblyResolver();
         resolver.AddSearchDirectory(Path.GetDirectoryName(vanillaPath)!);
         resolver.AddSearchDirectory(Path.Combine(Path.GetDirectoryName(vanillaPath)!, "Lib"));
         // Also search alongside the compiled DLL (for VintagestoryAPI.dll etc.)

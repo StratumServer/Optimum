@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Install;
@@ -497,7 +499,11 @@ public sealed class GamePatcherTests
         }
     }
 
-    private static (string GameDir, string OverlayDir) CreateTestGameAndOverlay(string root, bool failOnApi)
+    private static (string GameDir, string OverlayDir) CreateTestGameAndOverlay(
+        string root,
+        bool failOnApi,
+        bool includeEssentials = true,
+        bool includeSurvival = false)
     {
         string gameDir = Path.Combine(root, "game");
         Directory.CreateDirectory(gameDir);
@@ -507,7 +513,10 @@ public sealed class GamePatcherTests
 
         File.WriteAllText(Path.Combine(gameDir, "VintagestoryLib.dll"), "vanilla-lib");
         File.WriteAllText(Path.Combine(gameDir, "VintagestoryAPI.dll"), "vanilla-api");
-        File.WriteAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll"), "vanilla-essentials");
+        if (includeEssentials)
+            File.WriteAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll"), "vanilla-essentials");
+        if (includeSurvival)
+            File.WriteAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll"), "vanilla-survival");
         File.WriteAllText(Path.Combine(gameDir, "assets", "game", "lang", "en.json"), "{\"vanilla-key\": \"Vanilla Value\"}");
 
         string overlayDir = Path.Combine(root, "overlay");
@@ -517,7 +526,10 @@ public sealed class GamePatcherTests
 
         File.WriteAllText(Path.Combine(donorsDir, "VintagestoryLib.Donor.dll"), "donor-lib");
         File.WriteAllText(Path.Combine(donorsDir, "VintagestoryAPI.Contracts.dll"), "donor-api");
-        File.WriteAllText(Path.Combine(donorsDir, "VSEssentials.Donor.dll"), "donor-essentials");
+        if (includeEssentials)
+            File.WriteAllText(Path.Combine(donorsDir, "VSEssentials.Donor.dll"), "donor-essentials");
+        if (includeSurvival)
+            File.WriteAllText(Path.Combine(donorsDir, "VSSurvivalMod.Donor.dll"), "donor-survival");
         File.WriteAllText(Path.Combine(overlayDir, "Optimum.Api.Contracts.dll"), "contracts-dll");
         File.WriteAllText(Path.Combine(overlayDir, "Optimum.GameContent.dll"), "game-content-dll");
         File.WriteAllText(Path.Combine(overlayDir, "assets", "game", "lang", "en.json"), "{\"optimum-key\": \"Optimum Value\"}");
@@ -621,5 +633,390 @@ public sealed class GamePatcherTests
             Optimum.Patcher.Program.OmitDigest = false;
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    [Fact]
+    public async Task ParallelStagingOverlapsTwoWorkersIsolatesStagingDirsAndPreservesCanonicalOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-parallel-order-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(
+                root, failOnApi: false, includeEssentials: true, includeSurvival: true);
+
+            using var firstWaveStarted = new CountdownEvent(2);
+            using var releaseLib = new ManualResetEventSlim(false);
+            int activeWorkers = 0;
+            int maxConcurrentWorkers = 0;
+            var stagedDirectories = new ConcurrentDictionary<string, string>();
+            var completionOrder = new ConcurrentQueue<string>();
+
+            var probe = new InterceptingSystemProbe(SystemProbe.Default, (_, arguments, _) =>
+            {
+                int current = Interlocked.Increment(ref activeWorkers);
+                UpdateMax(ref maxConcurrentWorkers, current);
+                try
+                {
+                    string outputPath = arguments[^1];
+                    string fileName = Path.GetFileName(outputPath);
+                    stagedDirectories[fileName] = Path.GetDirectoryName(outputPath)!;
+
+                    // Verify both initial workers overlap before either completes, and force
+                    // out-of-order completion (API finishes before Lib).
+                    if (fileName is "VintagestoryLib.dll" or "VintagestoryAPI.dll")
+                    {
+                        firstWaveStarted.Signal();
+                        Assert.True(firstWaveStarted.Wait(TimeSpan.FromSeconds(10)), "expected 2 staging workers to run concurrently");
+                    }
+
+                    if (fileName == "VintagestoryLib.dll")
+                    {
+                        Assert.True(releaseLib.Wait(TimeSpan.FromSeconds(10)), "expected API to finish before releasing Lib");
+                    }
+
+                    string content = $"patched-{fileName}\n";
+                    File.WriteAllText(outputPath, content);
+                    File.WriteAllText(Path.ChangeExtension(outputPath, ".pdb"), $"pdb-{fileName}\n");
+                    string digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(outputPath)));
+                    completionOrder.Enqueue(fileName);
+
+                    if (fileName == "VintagestoryAPI.dll")
+                    {
+                        releaseLib.Set();
+                    }
+
+                    return new ProcessOutcome(true, 0, $"PATCHED SHA256: {digest}\n", string.Empty);
+                }
+                finally
+                {
+                    Interlocked.Decrement(ref activeWorkers);
+                }
+            });
+
+            var observer = new RecordingObserver();
+            var patcher = new GamePatcher(probe, new StubRuntimeValidator());
+            var result = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir), observer);
+
+            Assert.True(result.Ok, result.Message);
+            Assert.Equal(2, maxConcurrentWorkers);
+
+            // Every target staged into its own isolated subdirectory under staging-*.
+            Assert.Equal(4, stagedDirectories.Count);
+            Assert.Equal(4, stagedDirectories.Values.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+            Assert.All(stagedDirectories.Values, dir => Assert.Contains("staging-", dir, StringComparison.OrdinalIgnoreCase));
+
+            // API completed before Lib even though canonical output keeps Lib first.
+            string[] completed = completionOrder.ToArray();
+            Assert.True(Array.IndexOf(completed, "VintagestoryAPI.dll") < Array.IndexOf(completed, "VintagestoryLib.dll"));
+
+            string[] expectedOrder =
+            [
+                "VintagestoryLib.dll",
+                "VintagestoryAPI.dll",
+                "Mods/VSEssentials.dll",
+                "Mods/VSSurvivalMod.dll",
+            ];
+            Assert.Equal(expectedOrder, result.PatchedTargets);
+
+            string manifestJson = File.ReadAllText(Path.Combine(gameDir, PatchInstallManifest.RelativePath));
+            PatchInstallManifest? manifest = PatchInstallManifest.Deserialize(manifestJson);
+            Assert.NotNull(manifest);
+            Assert.Equal(expectedOrder, manifest!.Targets.Select(t => t.Assembly).ToArray());
+
+            foreach (PatchTargetRecord target in manifest.Targets)
+            {
+                string livePath = Path.Combine(gameDir, target.Assembly.Replace('/', Path.DirectorySeparatorChar));
+                string expectedHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(livePath)));
+                Assert.Equal(expectedHash, target.PatchedHash);
+                Assert.Equal($"pdb-{Path.GetFileName(livePath)}", File.ReadAllText(Path.ChangeExtension(livePath, ".pdb")).Trim());
+            }
+
+            // Progress percentages reported to observer never regress.
+            int[] patchPercents = observer.Phases.Where(p => p.Phase == ProgressPhase.Patch).Select(p => p.Percent).ToArray();
+            Assert.NotEmpty(patchPercents);
+            for (int i = 1; i < patchPercents.Length; i++)
+            {
+                Assert.True(patchPercents[i] >= patchPercents[i - 1],
+                    $"progress regressed from {patchPercents[i - 1]} to {patchPercents[i]}");
+            }
+
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ParallelStagingCancellationStopsQueuedTargetsAndWaitsForInFlightWorkersBeforeCleanup()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-parallel-cancel-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(
+                root, failOnApi: false, includeEssentials: true, includeSurvival: true);
+
+            using var cts = new CancellationTokenSource();
+            using var firstWaveStarted = new CountdownEvent(2);
+            using var allowInFlightExit = new ManualResetEventSlim(false);
+            var startedTargets = new ConcurrentBag<string>();
+            bool stagingExistedAtWorkerExit = false;
+
+            var probe = new InterceptingSystemProbe(SystemProbe.Default, (_, arguments, _) =>
+            {
+                string outputPath = arguments[^1];
+                string fileName = Path.GetFileName(outputPath);
+                startedTargets.Add(fileName);
+
+                if (fileName is "VintagestoryLib.dll" or "VintagestoryAPI.dll")
+                {
+                    firstWaveStarted.Signal();
+                    Assert.True(firstWaveStarted.Wait(TimeSpan.FromSeconds(10)));
+                    // Hold BOTH in-flight first-wave workers until the test cancels the token,
+                    // so neither worker can dequeue queued targets before cancellation is requested.
+                    Assert.True(allowInFlightExit.Wait(TimeSpan.FromSeconds(10)));
+                    if (fileName == "VintagestoryLib.dll")
+                    {
+                        stagingExistedAtWorkerExit = Directory.Exists(Path.GetDirectoryName(outputPath)!);
+                    }
+                }
+
+                File.WriteAllText(outputPath, $"patched-{fileName}\n");
+                return new ProcessOutcome(true, 0, string.Empty, string.Empty);
+            });
+
+            var patcher = new GamePatcher(probe, new StubRuntimeValidator());
+            Task<PatchResult> patchTask = patcher.PatchAsync(
+                new PatchRequest(gameDir, OverlayDirectory: overlayDir),
+                cancellationToken: cts.Token);
+
+            Assert.True(firstWaveStarted.Wait(TimeSpan.FromSeconds(10)));
+            cts.Cancel();
+            // Give PatchAsync a brief moment to verify it does not delete stagingDir while Lib is still running.
+            await Task.Delay(50);
+            Assert.False(patchTask.IsCompleted);
+            allowInFlightExit.Set();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => patchTask);
+
+            Assert.True(stagingExistedAtWorkerExit, "staging directory was removed while an in-flight worker was still running");
+            Assert.DoesNotContain("VSEssentials.dll", startedTargets);
+            Assert.DoesNotContain("VSSurvivalMod.dll", startedTargets);
+
+            // Live game assemblies must remain untouched vanilla and staging must be cleaned up.
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.Equal("vanilla-survival", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll")).Trim());
+            Assert.False(File.Exists(Path.Combine(gameDir, PatchInstallManifest.RelativePath)));
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ParallelStagingFailureStopsQueuedTargetsLeavesGameUntouchedAndAllowsRetry()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-parallel-fail-retry-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(
+                root, failOnApi: false, includeEssentials: true, includeSurvival: true);
+
+            using var firstWaveStarted = new CountdownEvent(2);
+            using var apiFailed = new ManualResetEventSlim(false);
+            var startedTargets = new ConcurrentBag<string>();
+            bool shouldFailApi = true;
+
+            var probe = new InterceptingSystemProbe(SystemProbe.Default, (_, arguments, _) =>
+            {
+                string outputPath = arguments[^1];
+                string fileName = Path.GetFileName(outputPath);
+                startedTargets.Add(fileName);
+
+                if (shouldFailApi && fileName is "VintagestoryLib.dll" or "VintagestoryAPI.dll")
+                {
+                    firstWaveStarted.Signal();
+                    Assert.True(firstWaveStarted.Wait(TimeSpan.FromSeconds(10)));
+                }
+
+                if (shouldFailApi && fileName == "VintagestoryAPI.dll")
+                {
+                    apiFailed.Set();
+                    return new ProcessOutcome(true, 1, string.Empty, "simulated parallel API conflict");
+                }
+
+                if (shouldFailApi && fileName == "VintagestoryLib.dll")
+                {
+                    Assert.True(apiFailed.Wait(TimeSpan.FromSeconds(10)));
+                    // Yield briefly so API failure cancels linkedCts before Lib finishes.
+                    Thread.Sleep(100);
+                }
+
+                File.WriteAllText(outputPath, $"patched-{fileName}\n");
+                string digest = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(outputPath)));
+                return new ProcessOutcome(true, 0, $"PATCHED SHA256: {digest}\n", string.Empty);
+            });
+
+            var patcher = new GamePatcher(probe, new StubRuntimeValidator());
+            var failedResult = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.False(failedResult.Ok);
+            Assert.Equal(FailureReason.PatchConflict, failedResult.Reason);
+            Assert.Contains("VintagestoryAPI.dll", failedResult.Message);
+            Assert.DoesNotContain("VSEssentials.dll", startedTargets);
+            Assert.DoesNotContain("VSSurvivalMod.dll", startedTargets);
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.Equal("vanilla-survival", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll")).Trim());
+            Assert.False(File.Exists(Path.Combine(gameDir, PatchInstallManifest.RelativePath)));
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+
+            // Retry after clearing failure must succeed cleanly and commit all 4 assemblies.
+            shouldFailApi = false;
+            var retryResult = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.True(retryResult.Ok, retryResult.Message);
+            Assert.Equal(
+                ["VintagestoryLib.dll", "VintagestoryAPI.dll", "Mods/VSEssentials.dll", "Mods/VSSurvivalMod.dll"],
+                retryResult.PatchedTargets);
+            Assert.Equal("patched-VintagestoryLib.dll", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("patched-VintagestoryAPI.dll", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            Assert.Equal("patched-VSEssentials.dll", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            Assert.Equal("patched-VSSurvivalMod.dll", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll")).Trim());
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task ParallelStagingHandlesOptionalModCombinationsRollbackAndRetry(
+        bool includeEssentials,
+        bool includeSurvival)
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-parallel-optional-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(
+                root, failOnApi: false, includeEssentials: includeEssentials, includeSurvival: includeSurvival);
+
+            var expectedTargets = new List<string> { "VintagestoryLib.dll", "VintagestoryAPI.dll" };
+            if (includeEssentials) expectedTargets.Add("Mods/VSEssentials.dll");
+            if (includeSurvival) expectedTargets.Add("Mods/VSSurvivalMod.dll");
+
+            // 1. Validation failure triggers automatic rollback cleanly.
+            var failingPatcher = new GamePatcher(
+                SystemProbe.Default,
+                new StubRuntimeValidator(ok: false, detail: "simulated validation failure"));
+            var failedResult = await failingPatcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.False(failedResult.Ok);
+            Assert.Equal(FailureReason.VerificationFailed, failedResult.Reason);
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            if (includeEssentials)
+                Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            if (includeSurvival)
+                Assert.Equal("vanilla-survival", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll")).Trim());
+            Assert.Empty(Directory.EnumerateDirectories(Path.Combine(gameDir, ".optimum"), "staging-*"));
+
+            // 2. Retry succeeds with canonical target ordering and matching manifest digests.
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator());
+            var retryResult = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+            Assert.True(retryResult.Ok, retryResult.Message);
+            Assert.Equal(expectedTargets, retryResult.PatchedTargets);
+
+            PatchInstallManifest? manifest = PatchInstallManifest.Deserialize(
+                File.ReadAllText(Path.Combine(gameDir, PatchInstallManifest.RelativePath)));
+            Assert.NotNull(manifest);
+            Assert.Equal(expectedTargets, manifest!.Targets.Select(t => t.Assembly).ToArray());
+            foreach (PatchTargetRecord target in manifest.Targets)
+            {
+                string livePath = Path.Combine(gameDir, target.Assembly.Replace('/', Path.DirectorySeparatorChar));
+                string actualHash = "sha256:" + Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(livePath)));
+                Assert.Equal(actualHash, target.PatchedHash);
+            }
+
+            // 3. Explicit rollback restores every present vanilla assembly.
+            var rollbackResult = await patcher.PatchAsync(new PatchRequest(gameDir, Rollback: true));
+            Assert.True(rollbackResult.Ok, rollbackResult.Message);
+            Assert.Equal("vanilla-lib", File.ReadAllText(Path.Combine(gameDir, "VintagestoryLib.dll")).Trim());
+            Assert.Equal("vanilla-api", File.ReadAllText(Path.Combine(gameDir, "VintagestoryAPI.dll")).Trim());
+            if (includeEssentials)
+                Assert.Equal("vanilla-essentials", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSEssentials.dll")).Trim());
+            if (includeSurvival)
+                Assert.Equal("vanilla-survival", File.ReadAllText(Path.Combine(gameDir, "Mods", "VSSurvivalMod.dll")).Trim());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static void UpdateMax(ref int location, int value)
+    {
+        int current;
+        while (value > (current = Volatile.Read(ref location)))
+        {
+            if (Interlocked.CompareExchange(ref location, value, current) == current)
+                break;
+        }
+    }
+
+    private sealed class RecordingObserver : IBuildObserver
+    {
+        private readonly Lock gate = new();
+        private readonly List<(ProgressPhase Phase, int Percent, string Detail)> phases = [];
+
+        public IReadOnlyList<(ProgressPhase Phase, int Percent, string Detail)> Phases
+        {
+            get
+            {
+                lock (gate)
+                    return [.. phases];
+            }
+        }
+
+        public void Phase(ProgressPhase phase, int percent, string detail)
+        {
+            lock (gate)
+                phases.Add((phase, percent, detail));
+        }
+
+        public void Log(LogLevel level, string message) { }
+
+        public void RawOutput(bool isError, string line) { }
+    }
+
+    private sealed class InterceptingSystemProbe(
+        ISystemProbe inner,
+        Func<string, IReadOnlyList<string>, TimeSpan, ProcessOutcome> onRun) : ISystemProbe
+    {
+        public OsKind Os => inner.Os;
+        public Architecture Arch => inner.Arch;
+        public string HomeDirectory => inner.HomeDirectory;
+        public string? GetEnvironmentVariable(string name) => inner.GetEnvironmentVariable(name);
+        public IReadOnlyList<string> PathDirectories => inner.PathDirectories;
+        public bool FileExists(string path) => inner.FileExists(path);
+        public bool IsExecutable(string path) => inner.IsExecutable(path);
+        public bool DirectoryExists(string path) => inner.DirectoryExists(path);
+        public bool PathExists(string path) => inner.PathExists(path);
+        public bool IsSymbolicLink(string path) => inner.IsSymbolicLink(path);
+        public bool CanWriteToDirectory(string path) => inner.CanWriteToDirectory(path);
+        public string? ReadText(string path) => inner.ReadText(path);
+        public IEnumerable<string> EnumerateFiles(string directory, string searchPattern) => inner.EnumerateFiles(directory, searchPattern);
+        public IEnumerable<string> EnumerateDirectories(string directory, string searchPattern) => inner.EnumerateDirectories(directory, searchPattern);
+        public ProcessOutcome Run(string executable, IReadOnlyList<string> arguments, TimeSpan timeout) => onRun(executable, arguments, timeout);
     }
 }
