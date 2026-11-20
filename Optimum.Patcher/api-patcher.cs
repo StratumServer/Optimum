@@ -67,6 +67,15 @@ public static class ApiPatcher
         };
 
         using var vanilla = AssemblyReader.Read(vanillaPath, vanillaReaderParameters, out preserveSymbols);
+        if (vanilla.MainModule.GetMemberReferences().Any(reference =>
+                reference.DeclaringType?.FullName == "Vintagestory.API.Config.OptimumApiBridge"))
+        {
+            throw new InvalidOperationException(
+                "VintagestoryAPI.dll was already patched by Optimum, because it calls OptimumApiBridge. Optimum patches " +
+                "the unmodified game file and cannot patch its own output. Restore the original VintagestoryAPI.dll " +
+                "(the Optimum installer downloads the official client) and delete the .optimum/cache folder.");
+        }
+
         using var contracts = AssemblyDefinition.ReadAssembly(contractsPath, contractsReaderParameters);
         string cairoPath = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(contractsPath))!, "cairo-sharp.dll");
         if (!File.Exists(cairoPath))
@@ -3565,7 +3574,10 @@ public static class ApiPatcher
         if (targetCalls.Length != 1)
         {
             throw new InvalidOperationException(
-                $"Expected one FrustumCulling.InFrustumAndRange call, found {targetCalls.Length}.");
+                $"VintagestoryAPI.dll is not the Vintage Story build this Optimum release patches: expected one " +
+                $"FrustumCulling.InFrustumAndRange call in ModelDataPoolLocation.IsVisible, found {targetCalls.Length}. " +
+                "This Optimum release supports Vintage Story 1.22.7 only. Use the unmodified game files " +
+                "and delete the .optimum/cache folder.");
         }
 
         var processor = isVisible.Body.GetILProcessor();
