@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
-# Optimum installer for macOS (arm64/x64) - runtime patcher model.
+# Optimum uninstaller for macOS (arm64/x64) - runtime patcher model.
 #
-# Installs Optimum INTO the Vintage Story directory. Does NOT modify any
-# vanilla files - only adds Optimum.* files and a .optimum/ directory.
+# This script used to install Optimum by copying the Vintage Story installed on this
+# machine. Optimum no longer does that: its installer always downloads the official
+# client, checks it against the checksums pinned in forks.json and builds from it.
+# Only --uninstall remains, to remove an install that an older version of this script
+# made. Install with the Optimum installer or build the .dmg:
+#
+#   dotnet run --project Optimum.Installer -c Release
+#   ./scripts/package-macos.sh --arch arm64      # or --arch x64, builds a .dmg
 #
 # Usage:
-#   ./install-macos-v2.sh                       # interactive
-#   ./install-macos-v2.sh --vs-dir /path/to/vs  # non-interactive
-#   ./install-macos-v2.sh --uninstall           # remove Optimum
+#   ./install-macos.sh --uninstall --vs-dir /path/to/vs   # remove Optimum from that folder
 
 set -euo pipefail
 
@@ -251,6 +255,10 @@ LAUNCHER
 # ============================================================================
 
 printf "\n${BOLD}  Optimum v${OPTIMUM_VERSION} - macOS Installer${RESET}\n\n"
+
+if [[ "$UNINSTALL" -ne 1 ]]; then
+    die "This script no longer installs Optimum: it copied the Vintage Story installed on this machine, and Optimum now always downloads and verifies the official client. Run 'dotnet run --project Optimum.Installer -c Release' or build the .dmg with scripts/package-macos.sh."
+fi
 
 if [[ -z "$VS_DIR" ]]; then
     if [[ "$INTERACTIVE" -eq 1 ]]; then

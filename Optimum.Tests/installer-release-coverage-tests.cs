@@ -155,8 +155,13 @@ public class InstallerReleaseCoverageTests
         string makefile = Read("Makefile");
         string packageAll = Read("scripts/package-all.sh");
 
-        Assert.Contains("Install Vintage Story $requiredVer before Optimum", installer);
-        Assert.Contains("-VanillaDir $VsPath", installer);
+        // The client is downloaded, verified and extracted by bootstrap.ps1 into the build folder, and the
+        // package step reads it from there. The player's own game is never a source.
+        Assert.Contains("will be downloaded and verified", installer);
+        Assert.Contains("-VanillaDir $vanillaDir", installer);
+        Assert.DoesNotContain("-VanillaDir $VsPath", installer);
+        Assert.DoesNotContain("__skip__", installer);
+        Assert.DoesNotContain("New-Item -ItemType Junction", installer);
         Assert.DoesNotContain("DownloadVs", installer);
         Assert.DoesNotContain("cdn.vintagestory", installer);
         Assert.Contains("[string]$ClientArchive", package);
