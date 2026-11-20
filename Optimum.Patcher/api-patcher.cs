@@ -52,7 +52,7 @@ public static class ApiPatcher
             throw new FileNotFoundException("Optimum contracts assembly not found.", contractsPath);
         }
 
-        var resolver = CreateResolver(vanillaPath, contractsPath);
+        using var resolver = CreateResolver(vanillaPath, contractsPath);
 
         bool preserveSymbols = File.Exists(Path.ChangeExtension(vanillaPath, ".pdb"));
         var vanillaReaderParameters = new ReaderParameters
