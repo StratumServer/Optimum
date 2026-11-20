@@ -378,11 +378,13 @@ function Resolve-ProjectReferences {
     param([string]$ProjectFile)
     $text = [IO.File]::ReadAllText($ProjectFile)
     $projectDir = Split-Path -Parent $ProjectFile
+    # The patched build output must win over the vanilla donor snapshot, which
+    # also contains VintagestoryAPI.dll. Matches resolve_references in the .sh.
     $searchPaths = @(
+        $outputRoot,
         (Join-Path $runtimeDonorDir 'Lib'),
         $runtimeDonorDir,
-        (Join-Path $runtimeDonorDir 'Mods'),
-        $outputRoot
+        (Join-Path $runtimeDonorDir 'Mods')
     )
     # Pass 1: Self-closing references without HintPath
     $text = [regex]::Replace($text, '<Reference Include="([^"]+)"\s*/>', {
