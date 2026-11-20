@@ -4,6 +4,21 @@
   "_1.22.6_bridge": "VERIFIED 2026-08-05: bootstrap.sh --version 1.22.6 + build succeed. patches-1.22.6-bridge/ reconstructs source-level changes for vsapi/vsessentialsmod/vssurvivalmod. See patches-1.22.6-bridge/README.md.",
   "_1.22.7_upgrade": "2026-08-18: Pinned directly to 1.22.7 source refs from ../ref/vintagestory/1.22.7/source/. vsapi, vsessentialsmod, vssurvivalmod advanced; Cairo and vscreativemod unchanged.",
   "vintageStoryVersion": "1.22.7",
+  "vintageStoryPins": {
+    "_comment": "Known-good fingerprints of the official client that this Optimum release is built against. The installer, the bootstrap scripts and the launcher verify downloads and extractions against these and never use the player's own game. Take the sizes and SHA-256 from cdn.vintagestory.at, and check the MD5 against https://api.vintagestory.at/stable.json, when you bump vintageStoryVersion. extractedFiles lists VintagestoryAPI.dll and the pristine VintagestoryLib.vanilla.dll, which are the same bytes in every archive.",
+    "1.22.7": {
+      "archives": {
+        "vs_install_win-x64_1.22.7.exe": { "bytes": 598100896, "sha256": "ebacde36b0610f1aa03cd96a2520f42dbb307e143aca25a000540fc90ec8f106" },
+        "vs_client_linux-x64_1.22.7.tar.gz": { "bytes": 619189956, "sha256": "483cc6827a50c08c5c41ccd0262c6f1223c104e54ca7135c46605278d89f5de1" },
+        "vs_client_osx-x64_1.22.7.tar.gz": { "bytes": 643670069, "sha256": "bf6b2fc57b2d2074bff2b3634f63efb945345d4783507ef79030eb294e54c8b9" },
+        "vs_client_osx-arm64_1.22.7.tar.gz": { "bytes": 637607241, "sha256": "170622b5c001c31f08b1265d8772aec145dad2a23c3941c67ac24b308f5fb989" }
+      },
+      "extractedFiles": {
+        "VintagestoryAPI.dll": "034283e7e9d98eae45ee63005576fd89badc3c995b531cc4c3fe46f3eb2d3296",
+        "VintagestoryLib.vanilla.dll": "e08f22b493b92feaf0aaeb79d22437ea0f7efc38aa7f72a04a47f98bc0e40df0"
+      }
+    }
+  },
   "compile": [
     {
       "name": "VintagestoryApi",

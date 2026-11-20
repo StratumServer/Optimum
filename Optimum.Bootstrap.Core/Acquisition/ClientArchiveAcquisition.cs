@@ -24,7 +24,9 @@ public sealed record ClientArchivePlan(
     long SourceRequiredBytes,
     long TemporaryRequiredBytes,
     string Summary,
-    string? SpaceWarning);
+    string? SpaceWarning,
+    string? OfficialMd5 = null,
+    VanillaArchivePin? Pin = null);
 
 public readonly record struct ClientArchiveProgress(long DownloadedBytes, long ExpectedBytes);
 
@@ -43,6 +45,8 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
     private const long EstimatedSourceWorkspaceBytes = 3L * 1024 * 1024 * 1024;
     private const long EstimatedTemporaryWorkspaceBytes = 1L * 1024 * 1024 * 1024;
     private static readonly Uri ClientCdn = new("https://cdn.vintagestory.at/gamefiles/stable/");
+    private static readonly Uri OfficialManifest = new("https://api.vintagestory.at/stable.json");
+    private static readonly TimeSpan ManifestTimeout = TimeSpan.FromSeconds(10);
     private static readonly HttpClient SharedHttpClient = new(new SocketsHttpHandler
     {
         AllowAutoRedirect = true,
@@ -55,15 +59,18 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
     private readonly ISystemProbe _probe;
     private readonly HttpClient _http;
     private readonly IStorageSpaceProbe _storage;
+    private readonly IVanillaArchivePins? _pinsOverride;
 
     public ClientArchiveAcquisition(
         ISystemProbe probe,
         HttpClient? http = null,
-        IStorageSpaceProbe? storage = null)
+        IStorageSpaceProbe? storage = null,
+        IVanillaArchivePins? pins = null)
     {
         _probe = probe;
         _http = http ?? SharedHttpClient;
         _storage = storage ?? new StorageSpaceProbe();
+        _pinsOverride = pins;
     }
 
     public async Task<ClientArchivePlan> InspectAsync(
@@ -79,9 +86,10 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         string partialPath = archivePath + ".partial";
         string etagPath = partialPath + ".etag";
         string metadataPath = archivePath + ".meta";
+        VanillaArchivePin? pin = (_pinsOverride ?? VanillaArchivePins.ForRepo(repoRoot)).FindArchive(fileName);
 
         if (File.Exists(archivePath)
-            && await IsLocallyValidatedCacheAsync(archivePath, metadataPath, resolvedVersion, cancellationToken)
+            && await IsLocallyValidatedCacheAsync(archivePath, metadataPath, resolvedVersion, pin, cancellationToken)
                 .ConfigureAwait(false))
         {
             long cachedBytes = new FileInfo(archivePath).Length;
@@ -97,7 +105,7 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
             return new ClientArchivePlan(
                 resolvedVersion, url, archivePath, cachedBytes, null, 0, true, false,
                 localSource?.AvailableBytes, localTemporary?.AvailableBytes,
-                sourceRequired, EstimatedTemporaryWorkspaceBytes, localSummary, localWarning);
+                sourceRequired, EstimatedTemporaryWorkspaceBytes, localSummary, localWarning, null, pin);
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Head, url);
@@ -107,6 +115,13 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
 
         long expectedBytes = response.Content.Headers.ContentLength
             ?? throw new HttpRequestException("The client download endpoint did not report its file size.");
+        if (pin is not null && pin.Bytes != expectedBytes)
+        {
+            throw new InvalidDataException(
+                $"The server offers {fileName} with a size of {FormatBytes(expectedBytes)}, but the official " +
+                $"Vintage Story {resolvedVersion} file that Optimum was tested with is {FormatBytes(pin.Bytes)}. " +
+                "Nothing was downloaded. Install the Optimum version that matches your Vintage Story release.");
+        }
         string? entityTag = response.Headers.ETag?.ToString();
         bool supportsRanges = response.Headers.AcceptRanges.Any(value =>
             string.Equals(value, "bytes", StringComparison.OrdinalIgnoreCase));
@@ -122,9 +137,15 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         bool cachedArchiveIsValid = File.Exists(archivePath)
             && new FileInfo(archivePath).Length == expectedBytes
             && await CacheMetadataMatchesAsync(
-                metadataPath, archivePath, expectedBytes, entityTag, cancellationToken).ConfigureAwait(false)
+                metadataPath, archivePath, expectedBytes, entityTag, pin, cancellationToken).ConfigureAwait(false)
             && await ValidateArchiveAsync(
                 archivePath, resolvedVersion, cancellationToken: cancellationToken).ConfigureAwait(false);
+
+        // A pin is the reference for a version Optimum was tested with. Only a version without one falls back
+        // to the checksum that vintagestory.at publishes, and only when a download is about to happen.
+        string? officialMd5 = cachedArchiveIsValid || pin is not null
+            ? null
+            : await FetchOfficialMd5Async(resolvedVersion, fileName, cancellationToken).ConfigureAwait(false);
 
         long remainingDownloadBytes = cachedArchiveIsValid
             ? 0
@@ -144,7 +165,59 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         return new ClientArchivePlan(
             resolvedVersion, url, archivePath, expectedBytes, entityTag, partialBytes,
             cachedArchiveIsValid, partialCanResume, sourceFreeBytes, temporaryFreeBytes,
-            sourceRequiredBytes, temporaryRequiredBytes, summary, warning);
+            sourceRequiredBytes, temporaryRequiredBytes, summary, warning, officialMd5, pin);
+    }
+
+    /// <summary>
+    /// The MD5 that vintagestory.at publishes for this archive in https://api.vintagestory.at/stable.json,
+    /// or null when the manifest is unreachable or does not list the file. The pinned SHA-256 still applies
+    /// when this returns null, so a manifest outage never blocks an install.
+    /// </summary>
+    private async Task<string?> FetchOfficialMd5Async(
+        string version,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        // The shared client has no timeout, so a stalled manifest request must not hold the install.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(ManifestTimeout);
+        try
+        {
+            using HttpResponseMessage response = await _http.GetAsync(
+                OfficialManifest, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await using Stream body = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+            using JsonDocument manifest = await JsonDocument.ParseAsync(body, cancellationToken: timeout.Token)
+                .ConfigureAwait(false);
+            if (!manifest.RootElement.TryGetProperty(version, out JsonElement release)
+                || release.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            foreach (JsonProperty platform in release.EnumerateObject())
+            {
+                if (platform.Value.ValueKind == JsonValueKind.Object
+                    && platform.Value.TryGetProperty("filename", out JsonElement name)
+                    && string.Equals(name.GetString(), fileName, StringComparison.OrdinalIgnoreCase)
+                    && platform.Value.TryGetProperty("md5", out JsonElement md5)
+                    && md5.GetString() is { Length: 32 } value)
+                {
+                    return value;
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested
+                                   && (ex is HttpRequestException or JsonException or IOException
+                                       or OperationCanceledException or InvalidOperationException))
+        {
+            // Includes the manifest timeout; only a cancellation by the caller propagates.
+            return null;
+        }
     }
 
     public async Task<string> EnsureAsync(
@@ -291,12 +364,57 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
             throw new InvalidDataException("The downloaded client archive failed its integrity check and was discarded. Retry the install.");
         }
 
+        string digest;
+        string? md5 = null;
+        await using (var partial = File.OpenRead(partialPath))
+        {
+            using var sha256Hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+            using IncrementalHash? md5Hash = plan.OfficialMd5 is null
+                ? null
+                : IncrementalHash.CreateHash(HashAlgorithmName.MD5);
+            byte[] chunk = new byte[1024 * 1024];
+            int read;
+            while ((read = await partial.ReadAsync(chunk, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                sha256Hash.AppendData(chunk, 0, read);
+                md5Hash?.AppendData(chunk, 0, read);
+            }
+
+            digest = Convert.ToHexString(sha256Hash.GetHashAndReset());
+            if (md5Hash is not null)
+                md5 = Convert.ToHexString(md5Hash.GetHashAndReset());
+        }
+
+        // A pin is the reference. Without one, the checksum vintagestory.at publishes is the only reference.
+        string fileName = Path.GetFileName(plan.ArchivePath);
+        VanillaArchivePin? pin = plan.Pin;
+        string? rejection = null;
+        if (pin is not null && !string.Equals(pin.Sha256, digest, StringComparison.OrdinalIgnoreCase))
+        {
+            rejection = $"{fileName} is not the official Vintage Story {plan.Version} build that Optimum was tested " +
+                        $"with (SHA-256 {digest.ToLowerInvariant()}, expected {pin.Sha256}). Check your network for a " +
+                        "proxy or antivirus that rewrites downloads. If vintagestory.at re-released this version, " +
+                        "install a newer Optimum.";
+        }
+        else if (pin is null && md5 is not null
+                 && !string.Equals(plan.OfficialMd5, md5, StringComparison.OrdinalIgnoreCase))
+        {
+            rejection = $"{fileName} does not match the checksum that vintagestory.at publishes " +
+                        $"(MD5 {md5.ToLowerInvariant()}, expected {plan.OfficialMd5}). " +
+                        "Check your network for a proxy or antivirus that rewrites downloads.";
+        }
+
+        if (rejection is not null)
+        {
+            TryDelete(partialPath);
+            TryDelete(partialTagPath);
+            throw new InvalidDataException($"The downloaded client archive was discarded. {rejection} Retry the install.");
+        }
+
         File.Move(partialPath, plan.ArchivePath, overwrite: true);
         string? partialTag = File.Exists(partialTagPath) ? File.ReadAllText(partialTagPath).Trim() : null;
-        await using var archive = File.OpenRead(plan.ArchivePath);
-        byte[] digest = await SHA256.HashDataAsync(archive, cancellationToken).ConfigureAwait(false);
         WriteAtomic(archiveTagPath, FormatArchiveMetadata(
-            plan.ExpectedBytes, partialTag ?? plan.EntityTag ?? string.Empty, Convert.ToHexString(digest)));
+            plan.ExpectedBytes, partialTag ?? plan.EntityTag ?? string.Empty, digest));
         TryDelete(partialTagPath);
         return plan.ArchivePath;
     }
@@ -347,7 +465,7 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         }
     }
 
-    private static string ArchiveFileName(string version, OsKind os, Architecture architecture) => os switch
+    internal static string ArchiveFileName(string version, OsKind os, Architecture architecture) => os switch
     {
         OsKind.Windows => $"vs_install_win-x64_{version}.exe",
         OsKind.MacOs => $"vs_client_osx-{(architecture == Architecture.Arm64 ? "arm64" : "x64")}_{version}.tar.gz",
@@ -421,6 +539,7 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         string archivePath,
         long expectedBytes,
         string? entityTag,
+        VanillaArchivePin? pin,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(metadataPath))
@@ -435,14 +554,17 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         }
 
         await using var archive = File.OpenRead(archivePath);
-        byte[] digest = await SHA256.HashDataAsync(archive, cancellationToken).ConfigureAwait(false);
-        return string.Equals(metadata[2].Trim(), Convert.ToHexString(digest), StringComparison.OrdinalIgnoreCase);
+        string digest = Convert.ToHexString(
+            await SHA256.HashDataAsync(archive, cancellationToken).ConfigureAwait(false));
+        return string.Equals(metadata[2].Trim(), digest, StringComparison.OrdinalIgnoreCase)
+            && (pin is null || (pin.Bytes == expectedBytes && string.Equals(pin.Sha256, digest, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static async Task<bool> IsLocallyValidatedCacheAsync(
         string archivePath,
         string metadataPath,
         string version,
+        VanillaArchivePin? pin,
         CancellationToken cancellationToken)
     {
         if (!File.Exists(metadataPath))
@@ -456,7 +578,7 @@ public sealed class ClientArchiveAcquisition : IClientArchiveAcquisition
         }
 
         return await CacheMetadataMatchesAsync(
-                metadataPath, archivePath, expectedBytes, entityTag: null, cancellationToken)
+                metadataPath, archivePath, expectedBytes, entityTag: null, pin, cancellationToken)
                 .ConfigureAwait(false)
             && await ValidateArchiveAsync(archivePath, version, cancellationToken: cancellationToken)
                 .ConfigureAwait(false);
