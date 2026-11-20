@@ -270,7 +270,7 @@ public class ScriptBuildDriverPreconditionTests
 
         try
         {
-            BuildResult result = await new ScriptBuildDriver(probe, new UnexpectedArchiveAcquisition()).RunAsync(
+            BuildResult result = await new ScriptBuildDriver(probe, new UnexpectedArchiveAcquisition(), VanillaArchivePins.None).RunAsync(
                 new BuildRequest(repo, Path.Combine(repo, "out"), Version: "1.22.7"),
                 observer, CancellationToken.None);
 

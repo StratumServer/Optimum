@@ -20,7 +20,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         using var cancellation = new CancellationTokenSource();
         using var interruptedHttp = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\"", cancellation));
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), interruptedHttp, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), interruptedHttp, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -34,7 +34,7 @@ public sealed class ClientArchiveAcquisitionTests
             Assert.Equal("\"archive-v1\"", File.ReadAllText(partial + ".etag"));
 
             using var resumedHttp = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
-            var resumedAcquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), resumedHttp, new FixedStorage());
+            var resumedAcquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), resumedHttp, new FixedStorage(), VanillaArchivePins.None);
             ClientArchivePlan retryPlan = await resumedAcquisition.InspectAsync(repo, Version, CancellationToken.None);
 
             Assert.True(retryPlan.PartialCanResume);
@@ -58,7 +58,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         var handler = new ArchiveHandler(archive, "\"archive-v2\"");
         using var http = new HttpClient(handler);
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -88,7 +88,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         var handler = new ArchiveHandler(archive, "\"archive-v1\"");
         using var http = new HttpClient(handler);
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -118,7 +118,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         var handler = new ArchiveHandler(archive, "\"archive-v1\"");
         using var http = new HttpClient(handler);
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -147,7 +147,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] installer = CreateWindowsInstaller();
         var probe = new FakeSystemProbe { Os = OsKind.Windows, Arch = Architecture.X64 };
         using var http = new HttpClient(new ArchiveHandler(installer, "\"archive-v1\""));
-        var acquisition = new ClientArchiveAcquisition(probe, http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(probe, http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -174,7 +174,7 @@ public sealed class ClientArchiveAcquisitionTests
         string repo = NewRepo();
         byte[] archive = CreateClientArchive(Version);
         using var http = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -201,7 +201,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         var handler = new ArchiveHandler(archive, "\"archive-v1\"");
         using var http = new HttpClient(handler);
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -230,7 +230,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         var handler = new ArchiveHandler(archive, "\"archive-v1\"", advertiseRanges: false);
         using var http = new HttpClient(handler);
-        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -266,7 +266,7 @@ public sealed class ClientArchiveAcquisitionTests
         string repo = NewRepo();
         using var http = new HttpClient(new ArchiveHandler(CreateClientArchive(Version), "\"archive-v1\""));
         var probe = new FakeSystemProbe { Os = os, Arch = architecture };
-        var acquisition = new ClientArchiveAcquisition(probe, http, new FixedStorage());
+        var acquisition = new ClientArchiveAcquisition(probe, http, new FixedStorage(), VanillaArchivePins.None);
 
         try
         {
@@ -286,7 +286,7 @@ public sealed class ClientArchiveAcquisitionTests
         byte[] archive = CreateClientArchive(Version);
         using var http = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
         var acquisition = new ClientArchiveAcquisition(
-            new FakeSystemProbe(), http, new FixedStorage(availableBytes: 512L * 1024 * 1024));
+            new FakeSystemProbe(), http, new FixedStorage(availableBytes: 512L * 1024 * 1024), VanillaArchivePins.None);
 
         try
         {
@@ -304,6 +304,261 @@ public sealed class ClientArchiveAcquisitionTests
             Directory.Delete(repo, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task AcceptsADownloadThatMatchesThePinnedOfficialArchive()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        using var http = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
+
+        try
+        {
+            ClientArchiveAcquisition acquisition = await PinnedAsync(repo, http, archive, Sha256Of(archive));
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            string resolved = await acquisition.EnsureAsync(plan, null, CancellationToken.None);
+
+            Assert.Equal(archive, await File.ReadAllBytesAsync(resolved));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsADownloadThatIsNotTheOfficialArchiveAndKeepsNothing()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        byte[] officialSameSize = (byte[])archive.Clone();
+        officialSameSize[^1] ^= 0xFF;
+        using var http = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
+
+        try
+        {
+            ClientArchiveAcquisition acquisition = await PinnedAsync(repo, http, archive, Sha256Of(officialSameSize));
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                acquisition.EnsureAsync(plan, null, CancellationToken.None));
+
+            Assert.Contains("not the official Vintage Story", error.Message);
+            Assert.Contains(Sha256Of(archive).ToLowerInvariant(), error.Message);
+            Assert.False(File.Exists(plan.ArchivePath));
+            Assert.False(File.Exists(plan.ArchivePath + ".partial"));
+            Assert.False(File.Exists(plan.ArchivePath + ".meta"));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RefusesAServerFileOfAnotherSizeBeforeDownloadingAnything()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"");
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            var pins = new VanillaArchivePins(
+                new Dictionary<string, VanillaArchivePin> { [LinuxArchiveName] = new(archive.Length + 1, Sha256Of(archive)) },
+                new Dictionary<string, IReadOnlyDictionary<string, string>>());
+            var acquisition = new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), pins);
+
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                acquisition.InspectAsync(repo, Version, CancellationToken.None));
+
+            Assert.Contains("Nothing was downloaded", error.Message);
+            Assert.Equal(0, handler.GetRequests);
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task DownloadsAgainWhenTheCachedArchiveIsNotThePinnedOne()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        byte[] tampered = (byte[])archive.Clone();
+        tampered[^1] ^= 0xFF;
+        using var http = new HttpClient(new ArchiveHandler(archive, "\"archive-v1\""));
+
+        try
+        {
+            ClientArchiveAcquisition acquisition = await PinnedAsync(repo, http, archive, Sha256Of(archive));
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+            Directory.CreateDirectory(Path.GetDirectoryName(plan.ArchivePath)!);
+            await File.WriteAllBytesAsync(plan.ArchivePath, tampered);
+            await File.WriteAllTextAsync(plan.ArchivePath + ".meta", ArchiveMetadata(tampered, "\"archive-v1\""));
+
+            ClientArchivePlan retryPlan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+            Assert.False(retryPlan.CachedArchiveIsValid);
+
+            string resolved = await acquisition.EnsureAsync(retryPlan, null, CancellationToken.None);
+
+            Assert.Equal(archive, await File.ReadAllBytesAsync(resolved));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectsADownloadThatDoesNotMatchTheMd5TheOfficialManifestPublishes()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"") { ManifestMd5 = new string('0', 32) };
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            var acquisition = new ClientArchiveAcquisition(
+                new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            var error = await Assert.ThrowsAsync<InvalidDataException>(() =>
+                acquisition.EnsureAsync(plan, null, CancellationToken.None));
+
+            Assert.Equal(1, handler.ManifestRequests);
+            Assert.Contains("vintagestory.at publishes", error.Message);
+            Assert.False(File.Exists(plan.ArchivePath));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AcceptsADownloadThatMatchesTheMd5TheOfficialManifestPublishes()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"")
+        {
+            ManifestMd5 = Convert.ToHexString(System.Security.Cryptography.MD5.HashData(archive)).ToLowerInvariant(),
+        };
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            var acquisition = new ClientArchiveAcquisition(
+                new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            string resolved = await acquisition.EnsureAsync(plan, null, CancellationToken.None);
+
+            Assert.Equal(archive, await File.ReadAllBytesAsync(resolved));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task APinnedInstallNeverAsksTheOfficialManifest()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"") { ManifestMd5 = new string('0', 32) };
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            ClientArchiveAcquisition acquisition = await PinnedAsync(repo, http, archive, Sha256Of(archive));
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            string resolved = await acquisition.EnsureAsync(plan, null, CancellationToken.None);
+
+            Assert.Equal(0, handler.ManifestRequests);
+            Assert.Equal(archive, await File.ReadAllBytesAsync(resolved));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task AnUnavailableOfficialManifestNeverBlocksAnUnpinnedInstall()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"") { ManifestStatus = HttpStatusCode.ServiceUnavailable };
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            var acquisition = new ClientArchiveAcquisition(
+                new FakeSystemProbe(), http, new FixedStorage(), VanillaArchivePins.None);
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            string resolved = await acquisition.EnsureAsync(plan, null, CancellationToken.None);
+
+            Assert.Equal(1, handler.ManifestRequests);
+            Assert.Null(plan.OfficialMd5);
+            Assert.Equal(archive, await File.ReadAllBytesAsync(resolved));
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReusesACachedArchiveThatMatchesThePinWithoutAskingTheManifest()
+    {
+        string repo = NewRepo();
+        byte[] archive = CreateClientArchive(Version);
+        var handler = new ArchiveHandler(archive, "\"archive-v1\"");
+        using var http = new HttpClient(handler);
+
+        try
+        {
+            ClientArchiveAcquisition acquisition = await PinnedAsync(repo, http, archive, Sha256Of(archive));
+            ClientArchivePlan plan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+            Directory.CreateDirectory(Path.GetDirectoryName(plan.ArchivePath)!);
+            await File.WriteAllBytesAsync(plan.ArchivePath, archive);
+            await File.WriteAllTextAsync(plan.ArchivePath + ".meta", ArchiveMetadata(archive, "\"archive-v1\""));
+
+            ClientArchivePlan cachedPlan = await acquisition.InspectAsync(repo, Version, CancellationToken.None);
+
+            Assert.True(cachedPlan.CachedArchiveIsValid);
+            Assert.Equal(0, handler.GetRequests);
+            Assert.Equal(0, handler.ManifestRequests);
+        }
+        finally
+        {
+            Directory.Delete(repo, recursive: true);
+        }
+    }
+
+    private static string LinuxArchiveName =>
+        ClientArchiveAcquisition.ArchiveFileName(Version, OsKind.Linux, Architecture.X64);
+
+    private static Task<ClientArchiveAcquisition> PinnedAsync(
+        string repo, HttpClient http, byte[] archive, string officialSha256)
+    {
+        var pins = new VanillaArchivePins(
+            new Dictionary<string, VanillaArchivePin> { [LinuxArchiveName] = new(archive.Length, officialSha256) },
+            new Dictionary<string, IReadOnlyDictionary<string, string>>());
+        return Task.FromResult(new ClientArchiveAcquisition(new FakeSystemProbe(), http, new FixedStorage(), pins));
+    }
+
+    private static string Sha256Of(byte[] bytes) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
 
     private static string NewRepo()
     {
@@ -360,8 +615,25 @@ public sealed class ClientArchiveAcquisitionTests
         public int GetRequests { get; private set; }
         public int RangeRequests { get; private set; }
 
+        public string? ManifestMd5 { get; set; }
+        public HttpStatusCode ManifestStatus { get; set; } = HttpStatusCode.OK;
+        public int ManifestRequests { get; private set; }
+
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            if (request.RequestUri?.Host == "api.vintagestory.at")
+            {
+                ManifestRequests++;
+                string manifest = ManifestMd5 is null
+                    ? "{}"
+                    : "{\"1.22.7\":{\"linux\":{\"filename\":\"" + ClientArchiveAcquisition.ArchiveFileName("1.22.7", OsKind.Linux, Architecture.X64)
+                      + "\",\"md5\":\"" + ManifestMd5 + "\"}}}";
+                return Task.FromResult(new HttpResponseMessage(ManifestStatus)
+                {
+                    Content = new StringContent(manifest),
+                });
+            }
+
             if (request.Method == HttpMethod.Head)
             {
                 HeadRequests++;

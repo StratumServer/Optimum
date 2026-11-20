@@ -23,12 +23,15 @@ file static class Encodings
 /// </summary>
 public sealed class ScriptBuildDriver(
     ISystemProbe probe,
-    IClientArchiveAcquisition? clientArchives = null) : IBuildDriver
+    IClientArchiveAcquisition? clientArchives = null,
+    IVanillaArchivePins? pins = null) : IBuildDriver
 {
     private const long EstimatedSourceWorkspaceBytes = 3L * 1024 * 1024 * 1024;
     private const long EstimatedTemporaryWorkspaceBytes = 1024L * 1024 * 1024;
+    private readonly IVanillaArchivePins? _pinsOverride = pins;
     private readonly IClientArchiveAcquisition _clientArchives =
-        clientArchives ?? new ClientArchiveAcquisition(probe);
+        clientArchives ?? new ClientArchiveAcquisition(probe, pins: pins);
+    private readonly ExtractionCacheGuard _cacheGuard = new(probe);
 
     public async Task<BuildResult> RunAsync(
         BuildRequest request,
@@ -55,6 +58,7 @@ public sealed class ScriptBuildDriver(
             BuildRequest preparedRequest = request;
             if (request.ClientArchive is null)
             {
+                DiscardUnverifiedExtractionCaches(request, observer);
                 if (HasMatchingExtractionCaches(request))
                 {
                     var storage = new StorageSpaceProbe();
@@ -78,6 +82,12 @@ public sealed class ScriptBuildDriver(
                         request.RepoRoot, request.Version, forceful);
                     observer.Phase(ProgressPhase.Decompile, 2, plan.Summary);
                     observer.Log(LogLevel.Info, plan.Summary);
+                    if (plan.Pin is null)
+                    {
+                        observer.Log(LogLevel.Warn,
+                            $"Vintage Story {plan.Version} is not pinned in this Optimum release, so its download " +
+                            "is only compared with the checksum vintagestory.at publishes, when there is one.");
+                    }
                     if (plan.SpaceWarning is not null)
                         observer.Log(LogLevel.Warn, plan.SpaceWarning);
 
@@ -98,6 +108,10 @@ public sealed class ScriptBuildDriver(
 
             Directory.CreateDirectory(request.OutputDirectory);
 
+            // The scripts may replace the extraction, so no earlier stamp may vouch for it while they run.
+            if (preparedRequest.ClientArchive is not null)
+                ExtractionCacheGuard.DeleteStamp(request.RepoRoot);
+
             StepOutcome bootstrap = await RunStep(
                 BootstrapCommand(preparedRequest), request.RepoRoot, ProgressPhase.Decompile, 2, 48, observer,
                 clearPlatformEnv: false, forceful, graceful);
@@ -106,6 +120,13 @@ public sealed class ScriptBuildDriver(
                 return BuildResult.Failure(
                     BootstrapFailureClassifier.Classify(bootstrap.Output),
                     $"bootstrap exited {bootstrap.ExitCode}");
+            }
+
+            if (request.ClientArchive is null && preparedRequest.ClientArchive is { } verifiedArchive
+                && !_cacheGuard.TryWriteStamp(request.RepoRoot, verifiedArchive, PinsFor(request.RepoRoot)))
+            {
+                observer.Log(LogLevel.Warn,
+                    "Could not record that the Vintage Story client was verified. It will be extracted again next time.");
             }
 
             observer.Phase(ProgressPhase.Patch, 50, "patches applied");
@@ -225,13 +246,36 @@ public sealed class ScriptBuildDriver(
     private static string FormatAvailable(StorageSpace? space) =>
         space is null ? "unknown" : FormatBytes(space.AvailableBytes);
 
+    /// <summary>
+    /// Removes a cached extraction that was not made from the verified official archive, so it is downloaded,
+    /// verified and extracted again. Only the installer's own <c>.vanilla</c> cache is touched; the player's
+    /// installed game is never read. See <see cref="ExtractionCacheGuard"/>.
+    /// </summary>
+    internal void DiscardUnverifiedExtractionCaches(BuildRequest request, IBuildObserver observer) =>
+        _cacheGuard.DiscardIfUnverified(
+            request.RepoRoot, ResolveVersion(request), PinsFor(request.RepoRoot),
+            message => observer.Log(LogLevel.Warn, message));
+
+    private (string RepoRoot, IVanillaArchivePins Pins)? _repoPins;
+
+    private IVanillaArchivePins PinsFor(string repoRoot)
+    {
+        if (_pinsOverride is not null)
+            return _pinsOverride;
+
+        if (_repoPins is not { } cached || cached.RepoRoot != repoRoot)
+            _repoPins = cached = (repoRoot, VanillaArchivePins.ForRepo(repoRoot));
+        return cached.Pins;
+    }
+
     internal bool HasMatchingExtractionCaches(BuildRequest request)
     {
         string? version = ResolveVersion(request);
         if (version is null)
             return false;
 
-        string vanilla = Path.Combine(request.RepoRoot, ".vanilla", "win-x64", "vintagestory");
+        ExtractionCachePaths paths = _cacheGuard.PathsFor(request.RepoRoot);
+        string vanilla = paths.Bootstrap;
         bool bootstrapCache = probe.Os == OsKind.Windows
             ? HasVersionMarker(vanilla, version) && File.Exists(Path.Combine(vanilla, "Vintagestory.exe"))
             : HasVersionedExtraction(vanilla, version);
@@ -241,10 +285,7 @@ public sealed class ScriptBuildDriver(
         if (probe.Os == OsKind.Windows)
             return true;
 
-        string packageCache = probe.Os == OsKind.MacOs
-            ? Path.Combine(request.RepoRoot, ".vanilla", $"osx-{(probe.Arch == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "x64")}", "Vintage Story.app")
-            : Path.Combine(request.RepoRoot, ".vanilla", "linux-x64", "vintagestory");
-        return HasVersionedExtraction(packageCache, version);
+        return paths.Package is not null && HasVersionedExtraction(paths.Package, version);
     }
 
     private static bool HasVersionedExtraction(string directory, string version) =>

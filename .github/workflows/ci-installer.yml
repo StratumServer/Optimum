@@ -10,6 +10,7 @@ on:
       - 'Optimum.Installer/**'
       - 'Optimum.Installer.Tests/**'
       - 'Optimum.Installer.slnf'
+      - 'forks.json'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
       - 'global.json'
