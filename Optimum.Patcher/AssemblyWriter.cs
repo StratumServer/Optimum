@@ -10,6 +10,18 @@ namespace Optimum.Patcher;
 /// </summary>
 internal static class AssemblyWriter
 {
+    [ThreadStatic]
+    private static string? lastWrittenSha256;
+
+    internal static void ClearLastWrittenSha256() => lastWrittenSha256 = null;
+
+    internal static string? ConsumeLastWrittenSha256()
+    {
+        string? hash = lastWrittenSha256;
+        lastWrittenSha256 = null;
+        return hash;
+    }
+
     public static string Write(
         AssemblyDefinition assembly,
         string outputPath,
@@ -34,6 +46,7 @@ internal static class AssemblyWriter
             hash = "sha256:" + Convert.ToHexStringLower(digest);
         }
 
+        lastWrittenSha256 = hash;
         Console.WriteLine($"PATCHED SHA256: {hash}");
         return hash;
     }
