@@ -192,7 +192,7 @@ cd Optimum
 .\install-windows.cmd
 ```
 
-The installer detects .NET 10 SDK, Git, ilspycmd, and a local Vintage Story install. Missing tools show with a "Download" checkbox that opens the install page. Choose the install directory, click Install. Done.
+The installer detects .NET 10 SDK, Git and ilspycmd. Missing tools show with a "Download" checkbox that opens the install page. Choose the install directory, click Install. Done. The Vintage Story client is always downloaded from vintagestory.at and checked against the checksums pinned in `forks.json` (`vintageStoryPins`) before it is extracted and patched. A copy of Vintage Story installed on your machine is never used as a source.
 
 **Manual build** (PowerShell):
 
