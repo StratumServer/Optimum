@@ -180,6 +180,66 @@ public class ThirdFile
         Pop-Location
     }
 
+    # 3. Windows rejects a command line over 32,766 characters ("The filename or
+    # extension is too long"). Real install roots such as
+    # C:\Users\<name>\AppData\Local\optimum\src-v0.4.1 push the 300+ absolute
+    # patch paths of a full bootstrap past that limit, so the helpers must split
+    # their git invocations. 400 long-named patches under this temp root exceed
+    # it several times over.
+    $bulkPatchDir = Join-Path $patchDir 'VintagestoryApi/Bulk'
+    $bulkWorkDir = Join-Path $workTree 'VintagestoryApi/Bulk'
+    New-Item -ItemType Directory -Force -Path $bulkPatchDir, $bulkWorkDir | Out-Null
+    $bulkPatches = @()
+    $filler = 'long-patch-name-padding-to-mimic-real-source-paths'
+    for ($i = 1; $i -le 400; $i++) {
+        $id = $i.ToString('000')
+        $patchFile = Join-Path $bulkPatchDir "$id-$filler.patch"
+        $bulkPatches += $patchFile
+        [System.IO.File]::WriteAllText((Join-Path $bulkWorkDir "F$id.cs"), "class F$id { int V() => 1; }`n", $utf8NoBom)
+        [System.IO.File]::WriteAllText($patchFile, @"
+--- a/VintagestoryApi/Bulk/F$id.cs
++++ b/VintagestoryApi/Bulk/F$id.cs
+@@ -1 +1 @@
+-class F$id { int V() => 1; }
++class F$id { int V() => 2; }
+"@.Replace("`r`n", "`n") + "`n", $utf8NoBom)
+    }
+    $bulkArgumentLength = ($bulkPatches | ForEach-Object { $_.Length + 1 } | Measure-Object -Sum).Sum
+    if ($bulkArgumentLength -le 40000) {
+        throw "Bulk patch paths total $bulkArgumentLength characters; the test must exceed the 32,766 character command line limit"
+    }
+
+    $bulkSyntaxFailures = Test-PatchSyntaxBatch -PatchPaths $bulkPatches -RepoRoot $testRoot
+    if ($bulkSyntaxFailures.Count -ne 0) {
+        throw "Expected 0 syntax failures for $($bulkPatches.Count) valid long-path patches, got: $($bulkSyntaxFailures -join ', ')"
+    }
+
+    Push-Location $workTree
+    try {
+        $rBulk = Invoke-GitApplyOptimumPatchBatch -PatchPaths $bulkPatches -DirArg '' -RepoRoot $testRoot
+        if ($rBulk.Applied -ne 400 -or $rBulk.Failed.Count -ne 0) {
+            throw "Long-command-line batch apply returned Applied=$($rBulk.Applied), Failed=$($rBulk.Failed -join ', ')"
+        }
+        $lastBulk = [System.IO.File]::ReadAllText((Join-Path $bulkWorkDir 'F400.cs'))
+        if (-not $lastBulk.Contains('V() => 2;')) {
+            throw 'The last long-command-line patch was not applied'
+        }
+
+        # A conflict in one chunk must fall back per patch for that chunk only.
+        for ($i = 1; $i -le 400; $i++) {
+            $id = $i.ToString('000')
+            $body = if ($i -eq 200) { "class F200 { int Changed() => 9; }`n" } else { "class F$id { int V() => 1; }`n" }
+            [System.IO.File]::WriteAllText((Join-Path $bulkWorkDir "F$id.cs"), $body, $utf8NoBom)
+        }
+        $rChunkFallback = Invoke-GitApplyOptimumPatchBatch -PatchPaths $bulkPatches -DirArg '' -RepoRoot $testRoot
+        $expectedConflict = "patches/VintagestoryApi/Bulk/200-$filler.patch"
+        if ($rChunkFallback.Applied -ne 399 -or $rChunkFallback.Failed.Count -ne 1 -or $rChunkFallback.Failed[0] -ne $expectedConflict) {
+            throw "Expected 399 applied and only $expectedConflict failed across chunks, got Applied=$($rChunkFallback.Applied), Failed=$($rChunkFallback.Failed -join ', ')"
+        }
+    } finally {
+        Pop-Location
+    }
+
     Write-Host "PowerShell patch batching test passed under PowerShell $($PSVersionTable.PSVersion)."
 } finally {
     if (Test-Path -LiteralPath $testRoot) {
