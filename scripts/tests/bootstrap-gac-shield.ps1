@@ -70,6 +70,40 @@ try {
         throw 'Updated 3-line decompile manifest failed to match'
     }
 
+    if (-not $bootstrapContent.Contains('$script:ResolvedIlspycmdVersionLine')) {
+        throw "Expected cached ilspycmd version reuse in $bootstrapPs1"
+    }
+
+    $cacheOut = Join-Path $testRoot 'cache/VintagestoryLib'
+    New-Item -ItemType Directory -Force -Path $cacheOut | Out-Null
+    function Test-DecompileCache([string]$OutDir, [string]$DllBase, [string]$ManifestFile, [string]$Expected) {
+        $hasExpectedProject = (Test-Path -LiteralPath (Join-Path $OutDir "$DllBase.csproj") -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $OutDir "$($DllBase).vanilla.csproj") -PathType Leaf)
+        $cachedSource = if (Test-Path -LiteralPath $OutDir -PathType Container) {
+            @(Get-ChildItem -Path $OutDir -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+        } else { @() }
+        $valid = $hasExpectedProject -and $cachedSource.Count -gt 0 -and (Test-Path -LiteralPath $ManifestFile -PathType Leaf)
+        if ($valid) {
+            $valid = (Get-Content -LiteralPath $ManifestFile -Raw).TrimEnd() -eq $Expected
+        }
+        return $valid
+    }
+
+    if (Test-DecompileCache $cacheOut 'VintagestoryLib' $manifestPath $expectedManifest) {
+        throw 'Empty cache directory with manifest must be rejected'
+    }
+    [System.IO.File]::WriteAllText((Join-Path $cacheOut 'VintagestoryLib.csproj'), '<Project />', $utf8NoBom)
+    if (Test-DecompileCache $cacheOut 'VintagestoryLib' $manifestPath $expectedManifest) {
+        throw 'Cache directory without .cs source files must be rejected'
+    }
+    [System.IO.File]::WriteAllText((Join-Path $cacheOut 'Dummy.cs'), 'class C {}', $utf8NoBom)
+    if (-not (Test-DecompileCache $cacheOut 'VintagestoryLib' $manifestPath $expectedManifest)) {
+        throw 'Complete cache directory with matching manifest, csproj, and .cs file must be accepted'
+    }
+    if (Test-DecompileCache $cacheOut 'VintagestoryLib' $manifestPath "WRONG`n$verLine`ngac-shield=v1") {
+        throw 'Cache directory with mismatched input hash must be rejected'
+    }
+
     Write-Host "GAC shield test passed under PowerShell $($PSVersionTable.PSVersion)."
 } finally {
     if ($gacShieldDir -and (Test-Path -LiteralPath $gacShieldDir)) {

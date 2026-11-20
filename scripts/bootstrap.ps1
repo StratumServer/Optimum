@@ -193,6 +193,8 @@ function Get-IlspycmdVersionRange {
     }
 }
 
+$script:ResolvedIlspycmdVersionLine = $null
+
 function Install-IlspycmdIfMissing {
     $dotnetTools = Join-Path $HOME '.dotnet/tools'
     if (Test-Path (Join-Path $dotnetTools 'ilspycmd.exe')) {
@@ -203,15 +205,21 @@ function Install-IlspycmdIfMissing {
     $existing = Get-Command ilspycmd -ErrorAction SilentlyContinue
 
     if ($existing) {
-        if (-not $pinned) { return }
         $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
+        if (-not $pinned) {
+            $script:ResolvedIlspycmdVersionLine = $verLine
+            return
+        }
         $current = if ($verLine) { ($verLine -split '\s+')[1] } else { '' }
         $range = Get-IlspycmdVersionRange
         $isStableVersion = $current -match '^\d+\.\d+\.\d+\.\d+$'
         $currentVersion = if ($isStableVersion) { [Version]$current } else { $null }
         $currentOk = $null -ne $currentVersion -and
             $currentVersion -ge $range.Minimum -and $currentVersion -le $range.Maximum
-        if ($currentOk) { return }
+        if ($currentOk) {
+            $script:ResolvedIlspycmdVersionLine = $verLine
+            return
+        }
         Write-Host "ilspycmd $current is unsupported by this patch set, installing $pinned"
         Invoke-NativeStep { dotnet tool uninstall -g ilspycmd 2>&1 | Out-Null }
     }
@@ -224,6 +232,7 @@ function Install-IlspycmdIfMissing {
         Invoke-NativeStep { dotnet tool install -g ilspycmd | Out-Null }
     }
     $env:PATH = "$dotnetTools;$env:PATH"
+    $script:ResolvedIlspycmdVersionLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
 }
 
 # --- fix-base-ctor-calls: base._002Ector(args)/this._002Ector(args) -> : base(args)/: this(args) ---
@@ -801,11 +810,18 @@ try {
     }
 
     $gacShieldDir = $null
+    $verLine = if ($script:ResolvedIlspycmdVersionLine) {
+        $script:ResolvedIlspycmdVersionLine
+    } else {
+        Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
+    }
     try {
     foreach ($dllBase in $decompileTargets.Keys) {
         $workDir = $decompileTargets[$dllBase]
         if ($dllBase -eq 'VintagestoryLib') {
             $dllPath = Get-Item -LiteralPath $pristineLibPath
+        } elseif (Test-Path -LiteralPath (Join-Path $winVanillaDir "$dllBase.dll") -PathType Leaf) {
+            $dllPath = Get-Item -LiteralPath (Join-Path $winVanillaDir "$dllBase.dll")
         } else {
             $dllPath = Get-ChildItem -Path $winVanillaDir -Recurse -Filter "$dllBase.dll" -ErrorAction SilentlyContinue | Select-Object -First 1
         }
@@ -814,12 +830,14 @@ try {
         $out = Join-Path $snapshotDir $dllBase
         $manifest = Join-Path (Join-Path $snapshotDir '.decompile-manifests') "$dllBase.manifest"
         $dllHash = (Get-FileHash -LiteralPath $dllPath.FullName -Algorithm SHA256).Hash
-        $verLine = Invoke-NativeStep { & ilspycmd --version 2>$null | Select-Object -First 1 }
         $expectedManifest = "$dllHash`n$verLine`ngac-shield=v1"
 
-        $cachedProjects = @(Get-ChildItem -Path $out -Filter '*.csproj' -File -ErrorAction SilentlyContinue)
-        $cachedSource = @(Get-ChildItem -Path $out -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
-        $cacheValid = $cachedProjects.Count -gt 0 -and $cachedSource.Count -gt 0 -and (Test-Path -LiteralPath $manifest -PathType Leaf)
+        $hasExpectedProject = (Test-Path -LiteralPath (Join-Path $out "$dllBase.csproj") -PathType Leaf) -or
+            (Test-Path -LiteralPath (Join-Path $out "$($dllBase).vanilla.csproj") -PathType Leaf)
+        $cachedSource = if (Test-Path -LiteralPath $out -PathType Container) {
+            @(Get-ChildItem -Path $out -Recurse -Filter '*.cs' -File -ErrorAction SilentlyContinue | Select-Object -First 1)
+        } else { @() }
+        $cacheValid = $hasExpectedProject -and $cachedSource.Count -gt 0 -and (Test-Path -LiteralPath $manifest -PathType Leaf)
         if ($cacheValid) {
             $cacheValid = (Get-Content -LiteralPath $manifest -Raw).TrimEnd() -eq $expectedManifest
         }
@@ -838,6 +856,7 @@ try {
                 }
             }
             Write-Host "Decompiling $dllBase.dll with $verLine"
+            if (Test-Path -LiteralPath $manifest) { Remove-Item -LiteralPath $manifest -Force -ErrorAction SilentlyContinue }
             if (Test-Path $out) { Remove-Item -Recurse -Force $out }
             New-Item -ItemType Directory -Force -Path $out | Out-Null
             $ilspyArgs = @()
