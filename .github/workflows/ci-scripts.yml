@@ -46,6 +46,16 @@ jobs:
       - name: AssemblyInfo fixup test
         run: bash scripts/tests/bootstrap-assemblyinfo-fixup.sh
 
+  inlinearray-fixup:
+    name: InlineArray global:: qualification normalizes across OSes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: InlineArray fixup test
+        run: bash scripts/tests/bootstrap-inlinearray-fixup.sh
+
   donor-dotnet-selection:
     name: Runtime donor dotnet candidate resolution
     runs-on: ubuntu-latest

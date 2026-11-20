@@ -1668,6 +1668,17 @@ try {
         param($t) $t -creplace '\(signal - -4\) switch', '((int)signal - -4) switch'
     }
 
+    # 6y: Normalize compiler-generated InlineArray<N> type references across host OSes.
+    # On Linux, .NET 10's System.Security.Cryptography.dll (OpenSSL backend) defines
+    # an internal <>y__InlineArray6<T> in the global namespace, so ILSpy qualifies
+    # VintagestoryLib's references with global::; Windows and macOS runtimes omit
+    # that type, so ILSpy drops global:: and Linux-extracted patches fail to apply.
+    # Canonicalize every generic type usage to global::_003C_003Ey__InlineArray<N><
+    # while leaving the struct declarations in --y__InlineArray*.cs untouched.
+    Update-TreeInPlace $decompiledDirs {
+        param($t) [regex]::Replace($t, '(?<!struct )(?<!global::)\b_003C_003Ey__InlineArray(\d+)<', 'global::_003C_003Ey__InlineArray$1<')
+    }
+
     Write-Host "Ambiguity and decompiler-artifact fixups applied."
 
     # Snapshot: save post-fixup state as .baseline/ for patch extraction.
