@@ -658,6 +658,8 @@ public class InstallerLogFilterTests
     [InlineData("Restored /home/x", true)]
     [InlineData("  at System.String.Format (Exception)", true)]
     [InlineData("You are not using the latest version of the tool, please update.", true)]
+    [InlineData("    INJECTED DEPENDENCY METHOD: Vintagestory.Common.TCPNetworkConnection::HandleReceiveException(1 params)", false)]
+    [InlineData("  MEMBER EXISTS: Vintagestory.Common.TCPNetworkConnection::HandleReceiveException", false)]
     [InlineData("Determining projects to restore...", false)]
     [InlineData("  copying 1834 files", false)]
     // Routine compiler / SDK warnings are dropped from the visible pane.
@@ -675,6 +677,8 @@ public class InstallerLogFilterTests
     }
 
     [Theory]
+    [InlineData("    INJECTED DEPENDENCY METHOD: Vintagestory.Common.TCPNetworkConnection::HandleReceiveException(1 params)", "info")]
+    [InlineData("  MEMBER EXISTS: Vintagestory.Common.TCPNetworkConnection::HandleReceiveException", "info")]
     [InlineData("Compilação com êxito.", "info")]
     [InlineData("Decompiling exact VSEssentials runtime donor...", "info")]
     [InlineData("Patches: 116 applied, 0 skipped, 0 failed (filter: all)", "info")]
@@ -689,6 +693,7 @@ public class InstallerLogFilterTests
     [InlineData("Core.cs(12,5): error CS1002: ; expected", "error")]
     [InlineData("error: patch failed", "error")]
     [InlineData("hunk #3 FAILED at 210", "error")]
+    [InlineData("Unhandled exception. System.InvalidOperationException: failed", "error")]
     [InlineData("System.IO.IOException: disk full", "error")]
     [InlineData("Build FAILED.", "error")]
     [InlineData("    2 Error(s)", "error")]
