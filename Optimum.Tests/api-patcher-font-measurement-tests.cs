@@ -60,7 +60,9 @@ public sealed class ApiPatcherFontMeasurementTests
         Assert.Equal(2, ApiPatcher.PatchFontMeasurementMetrics(target, contracts.MainModule, cairo.MainModule));
         Assert.Equal(signatures, font.Methods.Select(method => method.FullName).ToArray());
         var initializer = font.Methods.Single(method => method.Name == ".cctor");
-        Assert.Equal(new[] { OpCodes.Ret }, initializer.Body.Instructions.Select(instruction => instruction.OpCode));
+        // Mods lock CairoFont.FontMeasuringContext around measurements, so the vanilla initializer must survive.
+        Assert.Contains(initializer.Body.Instructions, instruction => instruction.OpCode == OpCodes.Stsfld &&
+            ((FieldReference)instruction.Operand).Name == "FontMeasuringContext");
 
         foreach (MethodDefinition method in measurements)
         {
@@ -90,7 +92,7 @@ public sealed class ApiPatcherFontMeasurementTests
         // CairoFont. This catches argument order, accessibility and binding errors.
         var runtimeAssembly = System.Reflection.Assembly.Load(stream.ToArray());
         var runtimeFont = runtimeAssembly.GetType(font.FullName)!;
-        Assert.Null(runtimeFont.GetField("FontMeasuringContext")!.GetValue(null));
+        Assert.NotNull(runtimeFont.GetField("FontMeasuringContext")!.GetValue(null));
         object instance = System.Activator.CreateInstance(runtimeFont)!;
         runtimeFont.GetField("Fontname")!.SetValue(instance, "sans-serif");
         runtimeFont.GetField("FontWeight")!.SetValue(instance, FontWeight.Bold);

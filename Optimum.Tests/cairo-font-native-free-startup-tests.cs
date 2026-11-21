@@ -20,7 +20,9 @@ public sealed class CairoFontNativeFreeStartupTests
 				Assert.True (fontExtents.Height > 0);
 				Assert.True (textExtents.XAdvance > 0);
 			}
-			Assert.Null (CairoFont.FontMeasuringContext);
+			// Mods such as Edge of Lineage Core lock this context around measurements.
+			Assert.NotNull (CairoFont.FontMeasuringContext);
+			lock (CairoFont.FontMeasuringContext) { }
 			Assert.Equal (deniedBefore, CairoNativeGuard.DeniedCount);
 			string[] mappings = CairoNativeGuard.LoadedLibcairoMappings ();
 			if (mappings != null) Assert.Empty (mappings);
