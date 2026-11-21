@@ -489,6 +489,39 @@ public sealed class CairoSurfaceRecorderTests
 	}
 
 	[Fact]
+	public void QueuedUploadCanReadAndDisposeAnUnflushedSurfaceWithAnAttachedContext()
+	{
+		ImageSurface surface = null;
+		Context context = null;
+		Assert.Null (RunOnSeparateThread (() => {
+			surface = ImageSurface.CreateForRecordedGui (Format.Argb32, 8, 8);
+			context = new Context (surface);
+			context.SetSourceRGBA (1, 0, 0, 1);
+			context.Paint ();
+		}));
+
+		Assert.Throws<InvalidOperationException> (() => _ = surface.DataPtr);
+		surface.PrepareForTextureUpload ();
+		var pixels = new byte[surface.Stride * surface.Height];
+		Marshal.Copy (surface.DataPtr, pixels, 0, pixels.Length);
+		Assert.Equal (255, pixels[(4 * 8 + 4) * 4 + 2]);
+		Assert.Equal (255, pixels[(4 * 8 + 4) * 4 + 3]);
+		Assert.Null (RunOnSeparateThread (() => {
+			context.SetSourceRGBA (0, 0, 1, 1);
+			context.Paint ();
+		}));
+
+		surface.PrepareForTextureUpload ();
+		Marshal.Copy (surface.DataPtr, pixels, 0, pixels.Length);
+		context.Dispose ();
+		surface.Dispose ();
+
+		Assert.Equal (255, pixels[(4 * 8 + 4) * 4]);
+		Assert.Equal (0, pixels[(4 * 8 + 4) * 4 + 2]);
+		Assert.Equal (SurfaceRecordingState.Disposed, surface.RecordingState);
+	}
+
+	[Fact]
 	public void FlushedManagedSurfaceAllowsCrossThreadUploadReuseAndDisposal()
 	{
 		bool previousAutomatic = Surface.AutomaticRecordingEnabled;

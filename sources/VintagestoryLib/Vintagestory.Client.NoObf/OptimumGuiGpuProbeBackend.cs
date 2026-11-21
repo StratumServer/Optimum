@@ -239,6 +239,7 @@ namespace Vintagestory.Client.NoObf
 
 		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, int reusableTexture = 0)
 				{
+					const string DisplayListUnavailable = "candidate-display-list-unavailable";
 					bool linearMin = threadLinearMinOverride;
 					candidateTexture = 0;
 					failureReason = null;
@@ -464,16 +465,22 @@ namespace Vintagestory.Client.NoObf
 							using (SKSurface skSurface = SKSurface.Create(context, target, GRSurfaceOrigin.TopLeft, SKColorType.Rgba8888, properties))
 							{
 								if (skSurface == null) throw new InvalidOperationException("Skia rejected the candidate GUI framebuffer.");
-								if (!surface.TryDrawRecordedCommands(skSurface, blur)) throw new InvalidOperationException("The GUI command list could not be sealed.");
-								// One flush-and-submit covers this surface and any offscreen blur work. Each further
-								// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
-								// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
-								// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
-								// from this upload are still caught after the state restore below.
-								context.Flush(submit: true, synchronous: false);
-								context.ResetContext(GRGlBackendState.All);
-								if (ForceGlErrorAfterCandidateForTest) GL.Disable((EnableCap)0);
-								rendered = true;
+								if (!surface.TryDrawRecordedCommands(skSurface, blur))
+								{
+									failureReason = DisplayListUnavailable;
+								}
+								else
+								{
+									// One flush-and-submit covers this surface and any offscreen blur work. Each further
+									// submit only repeated Ganesh's glGetError drain (a driver round trip). That drain
+									// (GrGLGpu::onSubmitToGpu -> clearErrorsAndCheckForOOM, skipped only for WebGL and
+									// Chrome's command buffer) also leaves no error for a glGetError here to see; GL errors
+									// from this upload are still caught after the state restore below.
+									context.Flush(submit: true, synchronous: false);
+									context.ResetContext(GRGlBackendState.All);
+									if (ForceGlErrorAfterCandidateForTest) GL.Disable((EnableCap)0);
+									rendered = true;
+								}
 							}
 						}
 						catch
@@ -554,7 +561,7 @@ namespace Vintagestory.Client.NoObf
 					// A failed Ganesh render can still publish this display list without
 					// entering the legacy Cairo materialization path. Rasterize with Skia's
 					// CPU backend, then upload those pixels into the candidate GL texture.
-					if (!rendered && renderResetReason == null && failureReason != null)
+					if (!rendered && renderResetReason == null && failureReason != null && failureReason != DisplayListUnavailable)
 					{
 						ScreenManager.Platform?.Logger?.Warning("[Optimum] GUI GPU render candidate failed: {0}. Downgrading to Skia CPU.", failureReason);
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
@@ -582,7 +589,7 @@ namespace Vintagestory.Client.NoObf
 						candidateTexture = texture;
 						return true;
 					}
-					if (renderResetReason == null)
+					if (renderResetReason == null && failureReason != DisplayListUnavailable)
 					{
 						Vintagestory.API.Config.OptimumConfig.OnGuiSkiaCpuBackendFailure();
 					}

@@ -1,8 +1,8 @@
 diff --git a/Cairo/wrapper/Surface.cs b/Cairo/wrapper/Surface.cs
-index 6f7730e..70e6a44 100644
+index 6f7730e2..5d3e590e 100644
 --- a/Cairo/wrapper/Surface.cs
 +++ b/Cairo/wrapper/Surface.cs
-@@ -32,37 +32,692 @@
+@@ -32,37 +32,710 @@
  // OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  // WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  //
@@ -276,6 +276,24 @@ index 6f7730e..70e6a44 100644
 +				recorder?.ClearCommandsForPixelCheckpoint ();
 +			}
 +		}
++		internal void PrepareForTextureUpload ()
++		{
++			if (!managedOnly) return;
++			Surface owner = ManagedRecordingOwner;
++			lock (owner.recordingSync) {
++				if (owner.recorder?.State != SurfaceRecordingState.Recording || owner.recordingContext == null ||
++				    ReferenceEquals (owner.recordingOwnerThread, Thread.CurrentThread) ||
++				    owner.IsFlushedWithNoPendingCommands ()) return;
++
++				// A queued upload can receive a completed image with its Context still
++				// attached. The producer must be done drawing before handing it over.
++				owner.CheckDisposed ();
++				owner.recordingOwnerThread = Thread.CurrentThread;
++				owner.recordingFlushedForHandoff = false;
++			}
++			owner.Flush ();
++		}
++
 +		internal void EnsureRecordingOwnerThreadForPixelAccess ()
 +		{
 +			if (aliasOwner != null && managedOnly) { aliasOwner.EnsureRecordingOwnerThreadForPixelAccess (); return; }
@@ -700,7 +718,7 @@ index 6f7730e..70e6a44 100644
  			case SurfaceType.Image:
  				return new ImageSurface (surface, owned);
  			case SurfaceType.Xlib:
-@@ -87,141 +742,305 @@ namespace Cairo
+@@ -87,141 +760,305 @@ namespace Cairo
  		}
  
  

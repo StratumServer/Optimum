@@ -121,6 +121,44 @@ public sealed class GuiSkiaGpuUploadGlTests
     }
 
     [GlContextFact]
+    public void ForeignRecordingUsesTheCallerUploadWithoutDisablingGpu()
+    {
+        using var route = new Route();
+        using var window = Route.OpenWindow();
+        route.Reset();
+        route.UseGpu();
+
+        ImageSurface? surface = null;
+        Context? context = null;
+        var producer = new System.Threading.Thread(() =>
+        {
+            surface = ImageSurface.CreateForRecordedGui(Cairo.Format.Argb32, Width, Height);
+            context = new Context(surface);
+            context.SetSourceRGB(1, 0, 0);
+            context.Paint();
+        });
+        producer.Start();
+        producer.Join();
+
+        Assert.NotNull(surface);
+        try
+        {
+            var result = route.Run(surface);
+            Assert.False(result.ok);
+            Assert.Equal(0, result.texture);
+            Assert.Equal("candidate-display-list-unavailable", result.reason);
+            Assert.Equal(OptimumConfig.GuiRenderBackendSkiaGpu, OptimumConfig.GuiRenderBackend);
+            GL.DeleteTexture(UploadGpu(route, "after a refused recording"));
+        }
+        finally
+        {
+            surface.PrepareForTextureUpload();
+            context?.Dispose();
+            surface.Dispose();
+        }
+    }
+
+    [GlContextFact]
     public void ZeroAreaSurface_IsPublishedWithoutDisablingTheGpuRoute()
     {
         using var route = new Route();
