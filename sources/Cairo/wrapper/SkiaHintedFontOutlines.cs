@@ -236,7 +236,7 @@ namespace Cairo
 
 			internal static WindowsGdiFont GetOrCreate(SKFont font, Matrix matrix)
 			{
-				string family = font.Typeface.FamilyName ?? "Arial";
+				string family = SkiaFontResolver.GdiFaceNameOf(font.Typeface) ?? "Arial";
 				int weight = font.Typeface.FontStyle.Weight >= (int)SKFontStyleWeight.Bold ? 700 : 400;
 				byte italic = font.Typeface.FontStyle.Slant != SKFontStyleSlant.Upright ? (byte)1 : (byte)0;
 				byte quality = font.Edging switch
