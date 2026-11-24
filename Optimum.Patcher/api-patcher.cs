@@ -286,6 +286,8 @@ public static class ApiPatcher
         if (shapeStringDedupPatches != 5) throw new InvalidOperationException($"Expected 5 Shape string deduplication patches, applied {shapeStringDedupPatches}.");
         int treeAttributePatches = PatchTreeAttributeSerialization(vanilla.MainModule, contracts.MainModule);
         if (treeAttributePatches != 5) throw new InvalidOperationException($"Expected 5 TreeAttribute serialization patches, applied {treeAttributePatches}.");
+        int columnNoisePatches = PatchColumnNoiseTls(vanilla.MainModule, contracts.MainModule);
+        if (columnNoisePatches != 3) throw new InvalidOperationException($"Expected 3 ColumnNoise TLS patches, applied {columnNoisePatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -490,6 +492,7 @@ public static class ApiPatcher
                 $"{inventorySearchPatches} inventory search optimizations, " +
                 $"{guiHoverTextPatches} hover text same-text skips, " +
                 $"{guiStatbarPatches} statbar on-demand edits, " +
+                $"{columnNoisePatches} ColumnNoise TLS methods, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -4878,6 +4881,197 @@ public static class ApiPatcher
         }
 
         Console.WriteLine($"  API PATCHED: {treeTypeName} span serialization ({patched}/5)");
+        return patched;
+    }
+
+    internal static int PatchColumnNoiseTls(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string fractalTypeName = "Vintagestory.API.MathTools.NewNormalizedSimplexFractalNoise";
+        const string bufferTypeName = "Vintagestory.API.Config.OptimumColumnNoiseBuffer";
+
+        var fractalType = module.GetType(fractalTypeName)
+            ?? throw new InvalidOperationException($"{fractalTypeName} is missing from the vanilla API.");
+        var columnNoiseType = fractalType.NestedTypes.SingleOrDefault(t => t.Name == "ColumnNoise")
+            ?? throw new InvalidOperationException($"{fractalTypeName}/ColumnNoise is missing from the vanilla API.");
+
+        var bufferType = contractsModule.GetType(bufferTypeName)
+            ?? throw new InvalidOperationException($"{bufferTypeName} is missing from contracts.");
+        var bufferTypeRef = module.ImportReference(bufferType);
+
+        var initMethodRef = module.ImportReference(bufferType.Methods.Single(m =>
+            m.IsStatic && m.Name == "Initialize" && m.Parameters.Count == 11));
+        var noiseSignMethodRef = module.ImportReference(bufferType.Methods.Single(m =>
+            m.IsStatic && m.Name == "NoiseSign" && m.Parameters.Count == 5));
+        var noiseMethodRef = module.ImportReference(bufferType.Methods.Single(m =>
+            m.IsStatic && m.Name == "Noise" && m.Parameters.Count == 4));
+
+        var orderedOctavesField = columnNoiseType.Fields.SingleOrDefault(f =>
+            !f.IsStatic && f.Name == "orderedOctaveEntries")
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.orderedOctaveEntries is missing.");
+        var pastEvalsField = columnNoiseType.Fields.SingleOrDefault(f =>
+            !f.IsStatic && f.Name == "pastEvaluations")
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.pastEvaluations is missing.");
+
+        var setUncurvedBound = columnNoiseType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "set_UncurvedBound" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.set_UncurvedBound is missing.");
+        var setBoundMin = columnNoiseType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "set_BoundMin" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.set_BoundMin is missing.");
+        var setBoundMax = columnNoiseType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "set_BoundMax" && m.Parameters.Count == 1)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.set_BoundMax is missing.");
+
+        var ctor = columnNoiseType.Methods.SingleOrDefault(m =>
+            m.IsConstructor && !m.IsStatic && m.Parameters.Count == 6 && m.HasBody)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}..ctor(6 args) is missing.");
+        var noiseSignMethod = columnNoiseType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "NoiseSign" && m.Parameters.Count == 2 && m.HasBody)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.NoiseSign(double, double) is missing.");
+        var noiseMethod = columnNoiseType.Methods.SingleOrDefault(m =>
+            !m.IsStatic && m.Name == "Noise" && m.Parameters.Count == 1 && m.HasBody)
+            ?? throw new InvalidOperationException($"{columnNoiseType.FullName}.Noise(double) is missing.");
+
+        FieldDefinition EnsurePrivateField(string name, TypeReference fieldType)
+        {
+            var existing = columnNoiseType.Fields.SingleOrDefault(f => !f.IsStatic && f.Name == name);
+            if (existing != null)
+            {
+                return existing;
+            }
+
+            var field = new FieldDefinition(name, FieldAttributes.Private, fieldType);
+            columnNoiseType.Fields.Add(field);
+            return field;
+        }
+
+        var optimumBufferField = EnsurePrivateField("optimumBuffer", bufferTypeRef);
+        var usedOctavesField = EnsurePrivateField("nUsedOctaves", module.TypeSystem.Int32);
+        var generationField = EnsurePrivateField("optimumGeneration", module.TypeSystem.UInt32);
+
+        if (columnNoiseType.Methods.All(m => m.IsStatic || m.Name != "get_UsedOctaves" || m.Parameters.Count != 0))
+        {
+            var getter = new MethodDefinition(
+                "get_UsedOctaves",
+                MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName,
+                module.TypeSystem.Int32);
+            var getterIl = getter.Body.GetILProcessor();
+            getterIl.Emit(OpCodes.Ldarg_0);
+            getterIl.Emit(OpCodes.Ldfld, usedOctavesField);
+            getterIl.Emit(OpCodes.Ret);
+            columnNoiseType.Methods.Add(getter);
+
+            if (columnNoiseType.Properties.All(p => p.Name != "UsedOctaves"))
+            {
+                columnNoiseType.Properties.Add(
+                    new PropertyDefinition("UsedOctaves", PropertyAttributes.None, module.TypeSystem.Int32)
+                    {
+                        GetMethod = getter,
+                    });
+            }
+        }
+
+        int patched = 0;
+
+        ClearDebugInformation(ctor);
+        {
+            ctor.Body.ExceptionHandlers.Clear();
+            ctor.Body.Variables.Clear();
+            ctor.Body.Instructions.Clear();
+            ctor.Body.InitLocals = true;
+
+            var uncurvedBoundVar = new VariableDefinition(module.TypeSystem.Double);
+            var boundMinVar = new VariableDefinition(module.TypeSystem.Double);
+            var boundMaxVar = new VariableDefinition(module.TypeSystem.Double);
+            ctor.Body.Variables.Add(uncurvedBoundVar);
+            ctor.Body.Variables.Add(boundMinVar);
+            ctor.Body.Variables.Add(boundMaxVar);
+
+            var il = ctor.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldnull);
+            il.Emit(OpCodes.Stfld, orderedOctavesField);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldnull);
+            il.Emit(OpCodes.Stfld, pastEvalsField);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Ldarg, ctor.Parameters[3]);
+            il.Emit(OpCodes.Ldarg, ctor.Parameters[4]);
+            il.Emit(OpCodes.Ldarg, ctor.Parameters[5]);
+            il.Emit(OpCodes.Ldloca, uncurvedBoundVar);
+            il.Emit(OpCodes.Ldloca, boundMinVar);
+            il.Emit(OpCodes.Ldloca, boundMaxVar);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldflda, usedOctavesField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldflda, generationField);
+            il.Emit(OpCodes.Call, initMethodRef);
+            il.Emit(OpCodes.Stfld, optimumBufferField);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, uncurvedBoundVar);
+            il.Emit(OpCodes.Call, setUncurvedBound);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, boundMinVar);
+            il.Emit(OpCodes.Call, setBoundMin);
+
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldloc, boundMaxVar);
+            il.Emit(OpCodes.Call, setBoundMax);
+
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        ClearDebugInformation(noiseSignMethod);
+        {
+            noiseSignMethod.Body.ExceptionHandlers.Clear();
+            noiseSignMethod.Body.Variables.Clear();
+            noiseSignMethod.Body.Instructions.Clear();
+            noiseSignMethod.Body.InitLocals = false;
+
+            var il = noiseSignMethod.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, optimumBufferField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, usedOctavesField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, generationField);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Call, noiseSignMethodRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        ClearDebugInformation(noiseMethod);
+        {
+            noiseMethod.Body.ExceptionHandlers.Clear();
+            noiseMethod.Body.Variables.Clear();
+            noiseMethod.Body.Instructions.Clear();
+            noiseMethod.Body.InitLocals = false;
+
+            var il = noiseMethod.Body.GetILProcessor();
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, optimumBufferField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, usedOctavesField);
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldfld, generationField);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Call, noiseMethodRef);
+            il.Emit(OpCodes.Ret);
+            patched++;
+        }
+
+        Console.WriteLine(
+            $"  API PATCHED: {fractalTypeName}.ColumnNoise TLS scratch + aliasing guard ({patched}/3) -> OptimumColumnNoiseBuffer");
         return patched;
     }
 

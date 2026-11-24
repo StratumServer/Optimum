@@ -56,6 +56,7 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Math/ColorUtil.cs.patch"] = ["PatchColorUtil"],
             ["Math/EvolvingNatFloat.cs.patch"] = ["PatchEvolvingNatFloat"],
             ["Math/Matrix/Mat4f.cs.patch"] = ["PatchMat4fInlining"],
+            ["Math/Noise/NewNormalizedSimplexFractalNoise.cs.patch"] = ["PatchColumnNoiseTls"],
             ["Util/ObjectCacheUtil.cs.patch"] = ["PatchObjectCacheUtil"],
             ["Util/WildcardUtil.cs.patch"] = ["PatchWildcardUtil"],
         };
@@ -106,7 +107,6 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Datastructures/UniqueQueue.cs.patch"] = "Legacy unshipped patch (#411 capacity pre-sizing).",
             ["Localization/TranslationService.cs.patch"] = "Legacy unshipped patch (#284/#305 active-language loading).",
             ["Math/CollisionTester.cs.patch"] = "Legacy unshipped patch (#408 cached WalkBlocks delegate).",
-            ["Math/Noise/NewNormalizedSimplexFractalNoise.cs.patch"] = "Legacy unshipped patch (#289 thread-static noise scratch).",
             ["Math/ShapeUtil.cs.patch"] = "Legacy unshipped patch (#495 fixed Vec2i array).",
         };
 
@@ -157,8 +157,8 @@ public sealed class VintagestoryApiPatchDeliveryTests
     public void AuditedLegacyUnshippedList_OnlyShrinksOverTime()
     {
         // Guardrail: new VintagestoryApi patches must be delivered in ApiPatcher, never appended here.
-        Assert.True(AuditedLegacyUnshippedGaps.Count <= 31,
-            $"Legacy unshipped backlog grew beyond 31 ({AuditedLegacyUnshippedGaps.Count}); ship new API patches in api-patcher.cs.");
+        Assert.True(AuditedLegacyUnshippedGaps.Count <= 27,
+            $"Legacy unshipped backlog grew beyond 27 ({AuditedLegacyUnshippedGaps.Count}); ship new API patches in api-patcher.cs.");
     }
 
     private static string ExtractApiPatcherEntryBody(string source)
