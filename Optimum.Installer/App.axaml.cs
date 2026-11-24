@@ -17,7 +17,10 @@ public partial class App : Application
         // light/dark variant. No runtime colour setup is needed.
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            var shell = new MainWindowViewModel(InstallerServices.CreateReal());
+            var services = InstallerServices.CreateReal();
+            desktop.Exit += (_, _) => services.SessionLog?.Dispose();
+
+            var shell = new MainWindowViewModel(services);
             shell.ExitRequested += () => desktop.Shutdown();
             desktop.MainWindow = new MainWindow { DataContext = shell };
         }

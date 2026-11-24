@@ -70,6 +70,14 @@ public sealed partial class CompletionViewModel(InstallOutcome outcome) : ViewMo
     [RelayCommand(CanExecute = nameof(HasLog))]
     private void ViewLog()
     {
-        Process.Start(new ProcessStartInfo(Outcome.RawLogPath) { UseShellExecute = true });
+        try
+        {
+            Process.Start(new ProcessStartInfo(Outcome.RawLogPath) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // Opening the log is a convenience; ignore a failure rather than
+            // breaking the finish screen.
+        }
     }
 }

@@ -201,15 +201,30 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
     [RelayCommand]
     private void KeepInstalling() => ConfirmCancel = false;
 
-    void IBuildObserver.Phase(ProgressPhase phase, int percent, string detail) => Phase(phase, percent, detail);
+    void IBuildObserver.Phase(ProgressPhase phase, int percent, string detail)
+    {
+        _services.SessionLog?.WriteEvent("phase", $"{phase} ({percent}%): {detail}");
+        Phase(phase, percent, detail);
+    }
 
-    void IBuildObserver.Log(LogLevel level, string message) =>
-        _post(() => Log.Add(new LogLine(level.ToString().ToLowerInvariant(), message)));
+    void IBuildObserver.Log(LogLevel level, string message)
+    {
+        string levelName = level.ToString().ToLowerInvariant();
+        _services.SessionLog?.WriteEvent(levelName, message);
+        _post(() => Log.Add(new LogLine(levelName, message)));
+    }
 
     void IBuildObserver.RawOutput(bool isError, string line)
     {
-        lock (_rawLogGate)
-            _rawLog.AppendLine(line);
+        if (_services.SessionLog is { } sessionLog)
+        {
+            sessionLog.WriteRaw(line);
+        }
+        else
+        {
+            lock (_rawLogGate)
+                _rawLog.AppendLine(line);
+        }
 
         // The full stream is in the raw log; the visible pane shows only a real
         // failure or something on the progress / advisory whitelist. A routine
@@ -238,14 +253,25 @@ public sealed partial class ProgressViewModel : ViewModelBase, IBuildObserver
 
     private InstallOutcome WriteOutcome(bool cancelled, string message, string? installDir, string? launcher)
     {
-        string rawLogPath = Path.Combine(Path.GetTempPath(),
-            $"optimum-install-{DateTime.Now:yyyy-MM-ddTHHmmss}.log");
-        try
+        string rawLogPath;
+        if (_services.SessionLog is { } sessionLog)
         {
-            lock (_rawLogGate)
-                File.WriteAllText(rawLogPath, _rawLog.ToString());
+            sessionLog.WriteEvent(
+                installDir is not null ? "complete" : cancelled ? "cancelled" : "failed",
+                message);
+            rawLogPath = sessionLog.FilePath;
         }
-        catch (IOException) { rawLogPath = "(log not written)"; }
+        else
+        {
+            rawLogPath = Path.Combine(Path.GetTempPath(),
+                $"optimum-install-{DateTime.Now:yyyy-MM-ddTHHmmss}.log");
+            try
+            {
+                lock (_rawLogGate)
+                    File.WriteAllText(rawLogPath, _rawLog.ToString());
+            }
+            catch (IOException) { rawLogPath = "(log not written)"; }
+        }
 
         return new InstallOutcome(
             Succeeded: installDir is not null,

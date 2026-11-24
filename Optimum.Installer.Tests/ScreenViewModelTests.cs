@@ -2,6 +2,7 @@ using System.IO;
 using Optimum.Bootstrap.Core;
 using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
+using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Tests;
 using Optimum.Installer.Services;
 using Optimum.Installer.ViewModels;
@@ -648,6 +649,136 @@ public class PrerequisitesViewModelTests
         Assert.False(vm.CanContinue);
         Assert.Contains("git clone failed", vm.Summary);
     }
+
+    [Fact]
+    public void CreateForProbeFindsWindowsCachedSourceAndWritesStartupLogBeforeBuild()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+        string cached = @"C:\Users\tester\AppData\Local\optimum\src-v0.4.4";
+        probe.AddFile($@"{cached}\forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+        probe.AddFile($@"{cached}\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile($@"{cached}\scripts\bootstrap.ps1");
+        probe.AddFile($@"{cached}\scripts\package.ps1");
+
+        string logDir = Path.Combine(Path.GetTempPath(), "optimum-736-startup-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            InstallerServices services = InstallerServices.CreateForProbe(
+                probe,
+                workingDirectory: @"C:\Program Files\Optimum",
+                logDirectory: logDir,
+                version: "0.4.4");
+
+            Assert.Equal(cached, services.RepoRoot);
+            Assert.NotNull(services.SessionLog);
+            Assert.True(services.SessionLog!.IsAvailable);
+            Assert.True(File.Exists(services.SessionLog.FilePath));
+
+            var vm = new PrerequisitesViewModel(services.Probe, services.RepoRoot, uiPost: a => a(), sessionLog: services.SessionLog);
+            Assert.False(vm.RepoRootMissing);
+            Assert.True(vm.CanOpenLog);
+
+            string logText = ReadSharedText(services.SessionLog.FilePath);
+            Assert.Contains($"Resolved Optimum source: {cached}", logText);
+            Assert.Contains("Scanned", logText);
+
+            services.SessionLog.Dispose();
+        }
+        finally
+        {
+            if (Directory.Exists(logDir))
+                Directory.Delete(logDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void CreateForProbeWritesStartupLogEvenWhenSourceIsMissing()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+        string logDir = Path.Combine(Path.GetTempPath(), "optimum-736-missing-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            InstallerServices services = InstallerServices.CreateForProbe(
+                probe,
+                workingDirectory: @"C:\Program Files\Optimum",
+                logDirectory: logDir,
+                version: "0.4.4");
+
+            Assert.Null(services.RepoRoot);
+            Assert.NotNull(services.SessionLog);
+            Assert.True(File.Exists(services.SessionLog!.FilePath));
+
+            var vm = new PrerequisitesViewModel(
+                services.Probe, services.RepoRoot, new FakeSourceProvider(), uiPost: a => a(), sessionLog: services.SessionLog);
+            Assert.True(vm.RepoRootMissing);
+            Assert.True(vm.CanOpenLog);
+
+            string logText = ReadSharedText(services.SessionLog.FilePath);
+            Assert.Contains(@"Expected source cache: C:\Users\tester\AppData\Local\optimum\src-v0.4.4", logText);
+            Assert.Contains("Optimum source was not found", logText);
+            Assert.Contains("Optimum source missing; waiting for download.", logText);
+
+            services.SessionLog.Dispose();
+        }
+        finally
+        {
+            if (Directory.Exists(logDir))
+                Directory.Delete(logDir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task PrerequisitesRescanFindsCachedSourceAndLogsSourceFailures()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = "/home/tester" };
+        probe.Path.Add("/usr/bin");
+        foreach (string tool in new[] { "dotnet", "git", "perl", "python3", "curl", "tar", "chmod", "pwsh", "bash" })
+            probe.AddFile($"/usr/bin/{tool}");
+        probe.OnCommand("/usr/bin/dotnet", "--list-sdks", "10.0.100 [/x]\n");
+        probe.OnCommand("/usr/bin/dotnet", "--version", "10.0.100\n");
+
+        var provider = new FakeSourceProvider
+        {
+            Behaviour = _ => SourceAcquisitionResult.Failure(FailureReason.SourceUnavailable, "git clone failed (exit 128)"),
+        };
+
+        string logDir = Path.Combine(Path.GetTempPath(), "optimum-736-rescan-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var sessionLog = InstallerSessionLog.Create(logDir);
+            var vm = new PrerequisitesViewModel(probe, repoRoot: null, provider, uiPost: a => a(), sessionLog: sessionLog);
+            Assert.True(vm.RepoRootMissing);
+
+            await vm.AcquireSourceCommand.ExecuteAsync(null);
+            Assert.True(vm.RepoRootMissing);
+
+            string cached = SourceCache.Directory(probe, Bootstrap.Core.CoreInfo.Version);
+            probe.AddFile($"{cached}/forks.json", """{ "vintageStoryVersion": "1.22.7" }""");
+            probe.AddFile($"{cached}/Optimum.Launcher/Optimum.Launcher.csproj");
+            probe.AddFile($"{cached}/scripts/bootstrap.sh");
+
+            vm.RescanCommand.Execute(null);
+            Assert.False(vm.RepoRootMissing);
+
+            string logText = ReadSharedText(sessionLog.FilePath);
+            Assert.Contains("git clone failed (exit 128)", logText);
+            Assert.Contains($"Discovered cached Optimum source at {cached}", logText);
+        }
+        finally
+        {
+            if (Directory.Exists(logDir))
+                Directory.Delete(logDir, recursive: true);
+        }
+    }
+
+    private static string ReadSharedText(string path)
+    {
+        using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
 }
 
 public class InstallerLogFilterTests
@@ -869,6 +1000,53 @@ public class ProgressViewModelTests
         Assert.Contains(vm.Log, l => l.Text.Contains("Applying patches"));
         Assert.Contains(vm.Log, l => l.Text.Contains("something broke"));
         Assert.DoesNotContain(vm.Log, l => l.Text.Contains("Determining projects"));
+    }
+
+    [Fact]
+    public async Task ProgressViewModelStreamsIntoSessionLogWithoutCreatingASecondFile()
+    {
+        string logDir = Path.Combine(Path.GetTempPath(), "optimum-736-progress-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var sessionLog = Services.InstallerSessionLog.Create(logDir);
+            sessionLog.WriteEvent("startup", "session started");
+
+            var driver = new FakeBuildDriver
+            {
+                Behaviour = (observer, _) =>
+                {
+                    observer.Phase(ProgressPhase.Decompile, 10, "decompiling");
+                    observer.RawOutput(false, "raw-line-1");
+                    return BuildResult.Success("/tmp/pkg/Optimum-v0.4.4-linux-x64");
+                },
+            };
+            var services = TestServices.Build(driver: driver, sessionLog: sessionLog);
+            var vm = new ProgressViewModel(
+                services,
+                new InstallSession("/repo", "/home/tester/games/optimum", null, null, Bootstrap.Core.Install.ShortcutKinds.None),
+                action => action());
+
+            InstallOutcome? outcome = null;
+            vm.Finished += o => outcome = o;
+            await vm.RunAsync();
+
+            Assert.NotNull(outcome);
+            Assert.Equal(sessionLog.FilePath, outcome!.RawLogPath);
+            Assert.Single(Directory.GetFiles(logDir, "optimum-install-*.log"));
+
+            using var stream = new FileStream(sessionLog.FilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var reader = new StreamReader(stream);
+            string logText = reader.ReadToEnd();
+            Assert.Contains("session started", logText);
+            Assert.Contains("Decompile (10%): decompiling", logText);
+            Assert.Contains("raw-line-1", logText);
+            Assert.Contains("[complete] Optimum is installed.", logText);
+        }
+        finally
+        {
+            if (Directory.Exists(logDir))
+                Directory.Delete(logDir, recursive: true);
+        }
     }
 }
 

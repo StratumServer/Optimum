@@ -10,15 +10,34 @@ namespace Optimum.Bootstrap.Core.Build;
 /// </summary>
 public static class RepoRoot
 {
-    public static string? Discover(ISystemProbe probe, string? explicitRoot = null)
+    public static string? Discover(ISystemProbe probe, string? explicitRoot = null) =>
+        WalkUp(probe, explicitRoot ?? Directory.GetCurrentDirectory());
+
+    /// <summary>
+    /// Discovers an Optimum checkout at or above <paramref name="workingDirectory"/>,
+    /// falling back to the version-matched user source cache when none is found.
+    /// </summary>
+    public static string? DiscoverOrCached(
+        ISystemProbe probe, string? version = null, string? workingDirectory = null, string? cacheRoot = null) =>
+        WalkUp(probe, workingDirectory ?? Directory.GetCurrentDirectory())
+        ?? FindCached(probe, version, cacheRoot);
+
+    /// <summary>
+    /// Returns the version-matched cached Optimum checkout if it exists and is usable.
+    /// </summary>
+    public static string? FindCached(ISystemProbe probe, string? version = null, string? cacheRoot = null)
+    {
+        string cached = SourceCache.Directory(probe, version ?? CoreInfo.Version, cacheRoot);
+        return SourceCache.IsUsableCheckout(probe, cached) ? cached : null;
+    }
+
+    private static string? WalkUp(ISystemProbe probe, string start)
     {
         // An explicit root is already an absolute path in the probe's world, so
         // walk it as given. Only the implicit case needs the real working
         // directory. Resolving an explicit path through Path.GetFullPath would
         // rewrite a POSIX path against the host drive on Windows, which is wrong
         // whenever the probe models a different platform (and in tests).
-        string start = explicitRoot ?? Directory.GetCurrentDirectory();
-
         for (string? dir = start; dir is not null; dir = ParentOf(dir))
         {
             if (SourceCache.IsUsableCheckout(probe, dir))

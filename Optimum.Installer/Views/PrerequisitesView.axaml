@@ -99,11 +99,14 @@
       </StackPanel>
     </ScrollViewer>
 
-    <StackPanel Grid.Row="2" Orientation="Horizontal"
-                HorizontalAlignment="Right" Margin="0,16,0,0">
-      <Button Content="Continue" Classes="accent"
+    <Grid Grid.Row="2" ColumnDefinitions="Auto,*" Margin="0,16,0,0">
+      <Button Grid.Column="0" Content="Open log"
+              IsVisible="{Binding CanOpenLog}"
+              Command="{Binding OpenLogCommand}" />
+      <Button Grid.Column="1" Content="Continue" Classes="accent"
+              HorizontalAlignment="Right"
               IsEnabled="{Binding CanContinue}"
               Command="{Binding ContinueCommand}" />
-    </StackPanel>
+    </Grid>
   </Grid>
 </UserControl>
