@@ -1,10 +1,8 @@
 diff --git a/Cairo/util/SurfaceTransformBlur.cs b/Cairo/util/SurfaceTransformBlur.cs
-index 075e62d..a30f42f 100644
+index 075e62d..1647428 100644
 --- a/Cairo/util/SurfaceTransformBlur.cs
 +++ b/Cairo/util/SurfaceTransformBlur.cs
-@@ -5,10 +5,28 @@ using System.Collections.Generic;
- 
- namespace Cairo
+@@ -7,15 +7,30 @@ namespace Cairo
  {
      public static class SurfaceTransformBlur
      {
@@ -31,29 +29,217 @@ index 075e62d..a30f42f 100644
              BlurPartial(surface, range, blurOnlyEdgeWidth, 0, 0, surface.Width, surface.Height);
          }
          public unsafe static void BlurPartial(this ImageSurface surface, double range, int blurOnlyEdgeWidth, int x1, int y1, int x2, int y2)
-@@ -29,10 +47,12 @@ namespace Cairo
-             if (surface.Width <= 0 || surface.Height <= 0)
+         {
+-            // Seems to crash if blur radius is bigger than width/height?
+-            range = Math.Min(range, Math.Min(surface.Width, surface.Height) / 2 - 1.5);
+-
+             if (x1 == x2 || y1 == y2)
              {
+                 return;
+@@ -31,6 +46,15 @@ namespace Cairo
                  throw new ArgumentException("Image surface width and hight must be above 0");
              }
  
++            if (!GaussianBlur.TryClampPartialBounds(surface.Width, surface.Height, ref x1, ref y1, ref x2, ref y2, ref blurOnlyEdgeWidth))
++            {
++                return;
++            }
++
++            range = GaussianBlur.ClampRange(range, x2 - x1, y2 - y1);
++
 +            if (surface.RecordBlur(range, blurOnlyEdgeWidth, x1, y1, x2, y2, false)) return;
 +
              GaussianBlur blur = new GaussianBlur((int*)surface.DataPtr.ToPointer(), surface.Width, surface.Height);
              blur.ProcessPartial(range, blurOnlyEdgeWidth, x1, y1, x2, y2);
  
-             surface.MarkDirty();
-         }
-@@ -45,10 +65,12 @@ namespace Cairo
+@@ -39,14 +63,15 @@ namespace Cairo
+ 
+         public unsafe static void BlurFull(this ImageSurface surface, double range)
+         {
+-            // Seems to crash if blur radius is bigger than width/height?
+-            range = Math.Min(range, Math.Min(surface.Width, surface.Height) / 2 - 1.5);
+-
              if (surface.Width <= 0 || surface.Height <= 0)
              {
                  throw new ArgumentException("Image surface width and hight must be above 0");
              }
  
++            range = GaussianBlur.ClampRange(range, surface.Width, surface.Height);
++
 +            if (surface.RecordBlur(range, 0, 0, 0, surface.Width, surface.Height, true)) return;
 +
              GaussianBlur blur = new GaussianBlur((int*)surface.DataPtr.ToPointer(), surface.Width, surface.Height);
              blur.ProcessFull(range);
  
-             surface.MarkDirty();
+@@ -69,30 +94,105 @@ namespace Cairo
+ 
+         public unsafe GaussianBlur(int* image, int width, int height)
+         {
+-            w = width;
+-            h = height;
+-            src = new int[w * h];
++            w = Math.Max(0, width);
++            h = Math.Max(0, height);
++            src = (w > 0 && h > 0) ? new int[checked(w * h)] : Array.Empty<int>();
+             LoadImage(image);
          }
+         public unsafe GaussianBlur(int width, int height)
+         {
+-            w = width;
+-            h = height;
+-            src = new int[w * h];
++            w = Math.Max(0, width);
++            h = Math.Max(0, height);
++            src = (w > 0 && h > 0) ? new int[checked(w * h)] : Array.Empty<int>();
+         }
+ 
+         public unsafe void LoadImage(int* image)
+         {
+             this.image = image;
+-            int len = w * h;
++            int len = src.Length;
++            if (image == null || len == 0)
++            {
++                return;
++            }
++
+             for (int i = 0; i < len; i++)
+             {
+                 src[i] = image[i];
+             }
+         }
+ 
++        internal static bool TryClampPartialBounds(int width, int height, ref int x1, ref int y1, ref int x2, ref int y2, ref int blurOnlyEdgeWidth)
++        {
++            if (width <= 0 || height <= 0 || x2 <= x1 || y2 <= y1)
++            {
++                return false;
++            }
++
++            x1 = Math.Clamp(x1, 0, width);
++            x2 = Math.Clamp(x2, 0, width);
++            y1 = Math.Clamp(y1, 0, height);
++            y2 = Math.Clamp(y2, 0, height);
++
++            if (x1 >= x2 || y1 >= y2)
++            {
++                return false;
++            }
++
++            blurOnlyEdgeWidth = Math.Clamp(blurOnlyEdgeWidth, 0, Math.Max(x2 - x1, y2 - y1));
++            return true;
++        }
++
++        internal static double ClampRange(double range, int rectWidth, int rectHeight)
++        {
++            if (double.IsNaN(range) || range <= 0.0)
++            {
++                return 0.0;
++            }
++
++            double maxRange = (Math.Min(rectWidth, rectHeight) / 2) - 1.5;
++            return maxRange <= 0.0 ? 0.0 : Math.Min(range, maxRange);
++        }
++
++        internal static int ClampPassRadius(int radius, int rectWidth, int rectHeight)
++        {
++            int maxRadius = (Math.Min(rectWidth, rectHeight) - 1) / 2;
++            return (maxRadius <= 0 || radius <= 0) ? 0 : Math.Min(radius, maxRadius);
++        }
++
++        internal static int ComputeBoxRadius(double sigma, int pass, int rectWidth, int rectHeight)
++        {
++            int maxRadius = (Math.Min(rectWidth, rectHeight) - 1) / 2;
++            if (maxRadius <= 0 || double.IsNaN(sigma) || sigma <= 0.0)
++            {
++                return 0;
++            }
++
++            double clampedSigma = double.IsPositiveInfinity(sigma) ? maxRadius + 1.0 : Math.Min(sigma, maxRadius + 1.0);
++            double wIdeal = Math.Sqrt(4.0 * clampedSigma * clampedSigma + 1.0);
++            int wl = (int)Math.Floor(wIdeal);
++            if (wl % 2 == 0)
++            {
++                wl--;
++            }
++            if (wl < 1)
++            {
++                wl = 1;
++            }
++
++            int wu = wl + 2;
++            double mIdeal = (12.0 * clampedSigma * clampedSigma - 3.0 * wl * wl - 12.0 * wl - 9.0) / (-4.0 * wl - 4.0);
++            double m = Math.Round(mIdeal);
++            int box = pass < m ? wl : wu;
++            return ClampPassRadius((box - 1) / 2, rectWidth, rectHeight);
++        }
++
+         public void ProcessPartial(double radial, int blurOnlyEdgeWidth, int x1, int y1, int x2, int y2)
+         {
++            if (image == null || src.Length == 0 || !TryClampPartialBounds(w, h, ref x1, ref y1, ref x2, ref y2, ref blurOnlyEdgeWidth))
++            {
++                return;
++            }
++
+             fixed (int* srcP = src)
+             {
+                 gaussBlur_4(srcP, image, false, blurOnlyEdgeWidth, radial, x1, y1, x2, y2);
+@@ -100,6 +200,11 @@ namespace Cairo
+         }
+         public void ProcessFull(double radial)
+         {
++            if (image == null || src.Length == 0)
++            {
++                return;
++            }
++
+             fixed (int* srcP = src)
+             {
+                 gaussBlur_4(srcP, image, true, 0, radial, 0, 0, w, h);
+@@ -108,30 +213,28 @@ namespace Cairo
+ 
+         private void gaussBlur_4(int* srcP, int* destP, bool full, int blurOnlyEdgeWidth, double r, int x1, int y1, int x2, int y2)
+         {
+-            var bxs = boxesForGauss(r, 3);
+-            boxBlur_4(srcP, destP, full, blurOnlyEdgeWidth, (bxs[0] - 1) / 2, x1, y1, x2, y2);
+-            boxBlur_4(destP, srcP, full, blurOnlyEdgeWidth, (bxs[1] - 1) / 2, x1, y1, x2, y2);
+-            boxBlur_4(srcP, destP, full, blurOnlyEdgeWidth, (bxs[2] - 1) / 2, x1, y1, x2, y2);
+-        }
+-
+-        private int[] boxesForGauss(double sigma, int n)
+-        {
+-            var wIdeal = Math.Sqrt((12 * sigma * sigma / n) + 1);
+-            var wl = (int)Math.Floor(wIdeal);
+-            if (wl % 2 == 0) wl--;
+-            var wu = wl + 2;
+-
+-            var mIdeal = (double)(12 * sigma * sigma - n * wl * wl - 4 * n * wl - 3 * n) / (-4 * wl - 4);
+-            var m = Math.Round(mIdeal);
++            int rectW = full ? w : x2 - x1;
++            int rectH = full ? h : y2 - y1;
++            int r0 = ComputeBoxRadius(r, 0, rectW, rectH);
++            int r1 = ComputeBoxRadius(r, 1, rectW, rectH);
++            int r2 = ComputeBoxRadius(r, 2, rectW, rectH);
++            if (r0 == 0 && r1 == 0 && r2 == 0)
++            {
++                return;
++            }
+ 
+-            var sizes = new List<int>();
+-            for (var i = 0; i < n; i++) sizes.Add(i < m ? wl : wu);
+-            return sizes.ToArray();
++            boxBlur_4(srcP, destP, full, blurOnlyEdgeWidth, r0, x1, y1, x2, y2);
++            boxBlur_4(destP, srcP, full, blurOnlyEdgeWidth, r1, x1, y1, x2, y2);
++            boxBlur_4(srcP, destP, full, blurOnlyEdgeWidth, r2, x1, y1, x2, y2);
+         }
+ 
+         private void boxBlur_4(int* srcP, int* destP, bool full, int blurOnlyEdgeWidth, int r, int x1, int y1, int x2, int y2)
+         {
+             for (var i = 0; i < src.Length; i++) destP[i] = srcP[i];
++            if (r <= 0)
++            {
++                return;
++            }
+ 
+             if (!full)
+             {

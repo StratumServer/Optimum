@@ -17,13 +17,10 @@ namespace Cairo
 		internal int Y2 => y2;
 
 		internal int Radius (int pass)
-		{
-			double ideal = Math.Sqrt (4 * range * range + 1);
-			int lower = (int)Math.Floor (ideal);
-			if (lower % 2 == 0) lower--;
-			double count = Math.Round ((12 * range * range - 3 * lower * lower - 12 * lower - 9) / (-4.0 * lower - 4));
-			return ((pass < count ? lower : lower + 2) - 1) / 2;
-		}
+			=> GaussianBlur.ComputeBoxRadius(range, pass, int.MaxValue, int.MaxValue);
+
+		internal int Radius (int pass, int rectWidth, int rectHeight)
+			=> GaussianBlur.ComputeBoxRadius(range, pass, rectWidth, rectHeight);
 
 		internal RecordedBlur (double range, int edge, int x1, int y1, int x2, int y2, bool full)
 		{
@@ -33,6 +30,7 @@ namespace Cairo
 		/// <summary>Applies the blur to tightly packed 32-bit pixels, as <see cref="SurfaceTransformBlur"/> does.</summary>
 		internal unsafe void ApplyToPixels (IntPtr data, int width, int height)
 		{
+			if (data == IntPtr.Zero || width <= 0 || height <= 0) return;
 			var blur = new GaussianBlur ((int*)data.ToPointer (), width, height);
 			if (full) blur.ProcessFull (range); else blur.ProcessPartial (range, edge, x1, y1, x2, y2);
 		}

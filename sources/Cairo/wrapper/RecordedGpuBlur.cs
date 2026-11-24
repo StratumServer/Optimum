@@ -109,21 +109,27 @@ namespace Cairo
 			using var profile = SurfaceRecordingDiagnostics.Profile(SurfaceRecordingDiagnostics.ProfileStage.GpuBlur);
 			int left = blur.Full ? 0 : blur.X1, top = blur.Full ? 0 : blur.Y1;
 			int right = blur.Full ? width : blur.X2, bottom = blur.Full ? height : blur.Y2;
-			if (left < 0 || top < 0 || right > width || bottom > height || left >= right || top >= bottom)
-				throw new NotSupportedException ("Recorded GPU blur rectangle is outside the surface.");
+			int edge = blur.Edge;
+			if (!GaussianBlur.TryClampPartialBounds(width, height, ref left, ref top, ref right, ref bottom, ref edge))
+				return;
+			int rectW = right - left, rectH = bottom - top;
+			int r0 = blur.Radius(0, rectW, rectH);
+			int r1 = blur.Radius(1, rectW, rectH);
+			int r2 = blur.Radius(2, rectW, rectH);
+			if (r0 == 0 && r1 == 0 && r2 == 0)
+				return;
 			EnsureSurfaces (width, height);
 			using (var paint = new SKPaint { BlendMode = SKBlendMode.Src, IsAntialias = false }) {
 				for (int pass = 0; pass < 3; pass++) {
-					int radius = blur.Radius (pass);
-					if (radius < 0 || 2 * radius >= right - left || 2 * radius >= bottom - top)
-						throw new NotSupportedException ("Recorded GPU blur radius exceeds its rectangle.");
+					int radius = pass == 0 ? r0 : (pass == 1 ? r1 : r2);
+					if (radius <= 0) continue;
 					SKRuntimeEffect effect = GetEffect (radius);
 					// GPU snapshots retain their backing textures. No ReadPixels or CPU bitmap is used.
 					using (SKImage original = target.Snapshot ()) {
-						DrawPass (effect, original, original, horizontal, paint, left, top, right, bottom, blur.Edge, true, width, height);
+						DrawPass (effect, original, original, horizontal, paint, left, top, right, bottom, edge, true, width, height);
 						PassCount++;
 						using (SKImage intermediate = horizontal.Snapshot ())
-							DrawPass (effect, intermediate, original, vertical, paint, left, top, right, bottom, blur.Edge, false, width, height);
+							DrawPass (effect, intermediate, original, vertical, paint, left, top, right, bottom, edge, false, width, height);
 						PassCount++;
 					}
 					using (SKImage result = vertical.Snapshot ()) target.Canvas.DrawImage (result, 0, 0, paint);
