@@ -1,5 +1,5 @@
 diff --git a/VSEssentials/Systems/WorldGen/Standard/GenPartial.cs b/VSEssentials/Systems/WorldGen/Standard/GenPartial.cs
-index 25813b8..d973cde 100644
+index 25813b8..9ac9d16 100644
 --- a/VSEssentials/Systems/WorldGen/Standard/GenPartial.cs
 +++ b/VSEssentials/Systems/WorldGen/Standard/GenPartial.cs
 @@ -1,6 +1,7 @@
@@ -11,39 +11,51 @@ index 25813b8..d973cde 100644
  #nullable disable
  
  namespace Vintagestory.ServerMods
-@@ -12,10 +13,11 @@ namespace Vintagestory.ServerMods
+@@ -12,10 +13,12 @@ namespace Vintagestory.ServerMods
          public int airBlockId = 0;
  
          protected abstract int chunkRange { get; }
  
          protected LCGRandom chunkRand;
 +        protected ThreadLocal<LCGRandom> chunkRandThreadLocal;
++        protected bool optimumUseThreadLocalChunkRandOnly;
  
          public override void StartServerSide(ICoreServerAPI api)
          {
              this.api = api;
  
-@@ -26,10 +28,11 @@ namespace Vintagestory.ServerMods
+@@ -26,24 +29,35 @@ namespace Vintagestory.ServerMods
          {
              LoadGlobalConfig(api);
  
              worldheight = api.WorldManager.MapSizeY;
              chunkRand = new LCGRandom(api.WorldManager.Seed);
++            chunkRandThreadLocal?.Dispose();
 +            chunkRandThreadLocal = new ThreadLocal<LCGRandom>(() => new LCGRandom(api.WorldManager.Seed));
          }
  
  
          protected virtual void GenChunkColumn(IChunkColumnGenerateRequest request)
          {
-@@ -39,11 +42,12 @@ namespace Vintagestory.ServerMods
+             var chunks = request.Chunks;
+             int chunkX = request.ChunkX;
+             int chunkZ = request.ChunkZ;
++            LCGRandom threadLocalRand = chunkRandThreadLocal?.Value;
++            bool syncLegacyChunkRand = !optimumUseThreadLocalChunkRandOnly;
  
              for (int dx = -chunkRange; dx <= chunkRange; dx++)
              {
                  for (int dz = -chunkRange; dz <= chunkRange; dz++)
                  {
 -                    chunkRand.InitPositionSeed(chunkX + dx, chunkZ + dz);
-+                    LCGRandom random = chunkRandThreadLocal?.Value ?? chunkRand;
-+                    random.InitPositionSeed(chunkX + dx, chunkZ + dz);
++                    if (threadLocalRand != null)
++                    {
++                        threadLocalRand.InitPositionSeed(chunkX + dx, chunkZ + dz);
++                    }
++                    if ((syncLegacyChunkRand || threadLocalRand == null) && chunkRand != null)
++                    {
++                        chunkRand.InitPositionSeed(chunkX + dx, chunkZ + dz);
++                    }
                      GeneratePartial(chunks, chunkX, chunkZ, dx, dz);
                  }
              }

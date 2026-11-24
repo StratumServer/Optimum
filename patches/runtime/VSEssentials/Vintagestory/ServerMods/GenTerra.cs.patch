@@ -1,0 +1,540 @@
+--- a/VSEssentials/Vintagestory/ServerMods/GenTerra.cs
++++ b/VSEssentials/Vintagestory/ServerMods/GenTerra.cs
+@@ -2,6 +2,7 @@ using System;
+ using System.Collections;
+ using System.Collections.Generic;
+ using System.Runtime.CompilerServices;
++using System.Runtime.Intrinsics;
+ using System.Threading;
+ using System.Threading.Tasks;
+ using Vintagestory.API.Common;
+@@ -12,6 +13,96 @@ using Vintagestory.ServerMods.NoObf;
+ 
+ namespace Vintagestory.ServerMods;
+ 
++internal sealed class OptimumGenTerraTempData
++{
++	public readonly double[] LerpedAmplitudes;
++
++	public readonly double[] LerpedThresholds;
++
++	public readonly float[] LandformWeights;
++
++	public readonly bool[] LocalLayerFullySolid;
++
++	public readonly bool[] LocalLayerFullyEmpty;
++
++	public readonly float[] CompactWeights;
++
++	public readonly float[][] CompactThresholds;
++
++	public OptimumGenTerraTempData(int terrainGenOctaves, int landformCount, int mapHeight)
++	{
++		LerpedAmplitudes = new double[terrainGenOctaves];
++		LerpedThresholds = new double[terrainGenOctaves];
++		LandformWeights = new float[landformCount];
++		LocalLayerFullySolid = new bool[mapHeight];
++		LocalLayerFullyEmpty = new bool[mapHeight];
++		CompactWeights = new float[landformCount];
++		CompactThresholds = new float[landformCount][];
++	}
++
++	public static ThreadLocal<OptimumGenTerraTempData> CreateThreadLocal(int terrainGenOctaves, int mapHeight)
++	{
++		return new ThreadLocal<OptimumGenTerraTempData>(() => new OptimumGenTerraTempData(terrainGenOctaves, NoiseLandforms.landforms.LandFormsByIndex.Length, mapHeight));
++	}
++}
++
++internal sealed class OptimumGenTerraWorkspace
++{
++	public readonly float[] TaperTerrainYPos = new float[1024];
++
++	public readonly float[] TaperWeight = new float[1024];
++
++	public readonly ulong[][] ColumnBlockSolidities;
++
++	public readonly int[] WaterBlockIds = new int[1024];
++
++	public readonly bool[] LayerFullySolid;
++
++	public readonly bool[] LayerFullyEmpty;
++
++	public readonly int[] BorderIndicesByCardinal = new int[8];
++
++	public OptimumGenTerraWorkspace(int mapHeight)
++	{
++		int words = (mapHeight + 63) / 64;
++		ColumnBlockSolidities = new ulong[1024][];
++		for (int i = 0; i < 1024; i++)
++		{
++			ColumnBlockSolidities[i] = new ulong[words];
++		}
++		LayerFullySolid = new bool[mapHeight];
++		LayerFullyEmpty = new bool[mapHeight];
++		BorderIndicesByCardinal[(int)Cardinal.NorthEast] = 992;
++		BorderIndicesByCardinal[(int)Cardinal.SouthEast] = 0;
++		BorderIndicesByCardinal[(int)Cardinal.SouthWest] = 31;
++		BorderIndicesByCardinal[(int)Cardinal.NorthWest] = 1023;
++	}
++
++	public static ThreadLocal<OptimumGenTerraWorkspace> CreateThreadLocal(int mapHeight)
++	{
++		return new ThreadLocal<OptimumGenTerraWorkspace>(() => new OptimumGenTerraWorkspace(mapHeight));
++	}
++
++	[MethodImpl(MethodImplOptions.AggressiveInlining)]
++	public bool IsSolid(int columnIndex, int posY)
++	{
++		return (ColumnBlockSolidities[columnIndex][posY >> 6] & (1UL << (posY & 63))) != 0;
++	}
++
++	[MethodImpl(MethodImplOptions.AggressiveInlining)]
++	public void SetSolid(int columnIndex, int posY)
++	{
++		ColumnBlockSolidities[columnIndex][posY >> 6] |= (1UL << (posY & 63));
++	}
++
++	[MethodImpl(MethodImplOptions.AggressiveInlining)]
++	public void ClearColumn(int columnIndex)
++	{
++		ulong[] bits = ColumnBlockSolidities[columnIndex];
++		Array.Clear(bits, 0, bits.Length);
++	}
++}
++
+ public class GenTerra : ModStdWorldGen
+ {
+ 	private struct ThreadLocalTempData
+@@ -99,6 +190,47 @@ public class GenTerra : ModStdWorldGen
+ 
+ 	private int[] borderIndicesByCardinal;
+ 
++	private ThreadLocal<OptimumGenTerraWorkspace> optimumWorkspaces;
++
++	private ThreadLocal<OptimumGenTerraTempData> optimumTempDataThreadLocal;
++
++	private Lock optimumLandformLock;
++
++	private Lock optimumLandformMapLock;
++
++	private OptimumGenTerraWorkspace GetOptimumWorkspace()
++	{
++		ThreadLocal<OptimumGenTerraWorkspace> tls = Volatile.Read(ref optimumWorkspaces);
++		if (tls == null)
++		{
++			int mapHeight = api.WorldManager.MapSizeY;
++			ThreadLocal<OptimumGenTerraWorkspace> created = OptimumGenTerraWorkspace.CreateThreadLocal(mapHeight);
++			tls = Interlocked.CompareExchange(ref optimumWorkspaces, created, null) ?? created;
++			if (!ReferenceEquals(tls, created))
++			{
++				created.Dispose();
++			}
++		}
++		return tls.Value;
++	}
++
++	private ThreadLocal<OptimumGenTerraTempData> GetOptimumTempDataThreadLocal()
++	{
++		ThreadLocal<OptimumGenTerraTempData> tls = Volatile.Read(ref optimumTempDataThreadLocal);
++		if (tls == null)
++		{
++			int octaves = terrainGenOctaves;
++			int mapHeight = api.WorldManager.MapSizeY;
++			ThreadLocal<OptimumGenTerraTempData> created = OptimumGenTerraTempData.CreateThreadLocal(octaves, mapHeight);
++			tls = Interlocked.CompareExchange(ref optimumTempDataThreadLocal, created, null) ?? created;
++			if (!ReferenceEquals(tls, created))
++			{
++				created.Dispose();
++			}
++		}
++		return tls;
++	}
++
+ 	public override bool ShouldLoad(EnumAppSide side)
+ 	{
+ 		return side == EnumAppSide.Server;
+@@ -129,7 +261,12 @@ public class GenTerra : ModStdWorldGen
+ 	public void initWorldGen()
+ 	{
+ 		LoadGlobalConfig(api);
+-		LandformMapByRegion.Clear();
++		optimumLandformLock ??= new Lock();
++		optimumLandformMapLock ??= new Lock();
++		lock (optimumLandformMapLock)
++		{
++			LandformMapByRegion.Clear();
++		}
+ 		maxThreads = Math.Clamp(Environment.ProcessorCount - (api.Server.IsDedicated ? 4 : 6), 1, api.Server.Config.HostedMode ? 4 : 10);
+ 		if (api.Server.ReducedServerThreads && maxThreads > 1)
+ 		{
+@@ -169,7 +306,14 @@ public class GenTerra : ModStdWorldGen
+ 		borderIndicesByCardinal[(int)Cardinal.SouthEast] = 0;
+ 		borderIndicesByCardinal[(int)Cardinal.SouthWest] = 31;
+ 		borderIndicesByCardinal[(int)Cardinal.NorthWest] = 1023;
+-		landforms = null;
++		int octaves = terrainGenOctaves;
++		int mapHeight = api.WorldManager.MapSizeY;
++		optimumTempDataThreadLocal?.Dispose();
++		optimumTempDataThreadLocal = OptimumGenTerraTempData.CreateThreadLocal(octaves, mapHeight);
++		optimumWorkspaces?.Dispose();
++		optimumWorkspaces = OptimumGenTerraWorkspace.CreateThreadLocal(mapHeight);
++		terrainYThresholds = null;
++		Volatile.Write(ref landforms, null);
+ 	}
+ 
+ 	private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
+@@ -183,6 +327,10 @@ public class GenTerra : ModStdWorldGen
+ 
+ 	private void OnChunkColumnGen(IChunkColumnGenerateRequest request)
+ 	{
++		OptimumGenTerraWorkspace workspace = GetOptimumWorkspace();
++		int[] localBorderIndices = workspace.BorderIndicesByCardinal;
++		float[] taperTerrainYPos = workspace.TaperTerrainYPos;
++		float[] taperWeight = workspace.TaperWeight;
+ 		if (request.RequiresChunkBorderSmoothing && !PreventSmoothing(request.ChunkX, request.ChunkZ))
+ 		{
+ 			ushort[][] neighbourTerrainHeight = request.NeighbourTerrainHeight;
+@@ -208,15 +356,15 @@ public class GenTerra : ModStdWorldGen
+ 			}
+ 			for (int i = 0; i < 32; i++)
+ 			{
+-				borderIndicesByCardinal[(int)Cardinal.North] = 992 + i;
+-				borderIndicesByCardinal[(int)Cardinal.South] = i;
++				localBorderIndices[(int)Cardinal.North] = 992 + i;
++				localBorderIndices[(int)Cardinal.South] = i;
+ 				for (int j = 0; j < 32; j++)
+ 				{
+ 					double num = 0.0;
+ 					double num2 = 0.0;
+ 					float num3 = 0f;
+-					borderIndicesByCardinal[(int)Cardinal.East] = j * 32;
+-					borderIndicesByCardinal[(int)Cardinal.West] = j * 32 + 32 - 1;
++					localBorderIndices[(int)Cardinal.East] = j * 32;
++					localBorderIndices[(int)Cardinal.West] = j * 32 + 32 - 1;
+ 					for (int k = 0; k < Cardinal.ALL.Length; k++)
+ 					{
+ 						ushort[] array = neighbourTerrainHeight[k];
+@@ -252,27 +400,34 @@ public class GenTerra : ModStdWorldGen
+ 							}
+ 							float num5 = Math.Max(0f, 1f - num4);
+ 							float num6 = num5 * num5;
+-							float num7 = (float)(int)array[borderIndicesByCardinal[k]] + 0.5f;
++							float num7 = (float)(int)array[localBorderIndices[k]] + 0.5f;
+ 							num2 += (double)num7 * Math.Max(0.0001, num6);
+ 							num += (double)num6;
+ 							num3 = Math.Max(num3, num6);
+ 						}
+ 					}
+-					taperMap[j * 32 + i] = new WeightedTaper
+-					{
+-						TerrainYPos = (float)(num2 / Math.Max(0.0001, num)),
+-						Weight = num3
+-					};
++					int idx = j * 32 + i;
++					taperTerrainYPos[idx] = (float)(num2 / Math.Max(0.0001, num));
++					taperWeight[idx] = num3;
+ 				}
+ 			}
+ 		}
+-		if (landforms == null)
++		if (Volatile.Read(ref landforms) == null)
+ 		{
+-			landforms = NoiseLandforms.landforms;
+-			terrainYThresholds = new float[landforms.LandFormsByIndex.Length][];
+-			for (int l = 0; l < landforms.LandFormsByIndex.Length; l++)
++			Lock lck = LazyInitializer.EnsureInitialized(ref optimumLandformLock);
++			lock (lck)
+ 			{
+-				terrainYThresholds[l] = landforms.LandFormsByIndex[l].TerrainYThresholds;
++				if (Volatile.Read(ref landforms) == null)
++				{
++					LandformsWorldProperty loadedLandforms = NoiseLandforms.landforms;
++					float[][] thresholds = new float[loadedLandforms.LandFormsByIndex.Length][];
++					for (int l = 0; l < loadedLandforms.LandFormsByIndex.Length; l++)
++					{
++						thresholds[l] = loadedLandforms.LandFormsByIndex[l].TerrainYThresholds;
++					}
++					terrainYThresholds = thresholds;
++					Volatile.Write(ref landforms, loadedLandforms);
++				}
+ 			}
+ 		}
+ 		generate(request.Chunks, request.ChunkX, request.ChunkZ, request.RequiresChunkBorderSmoothing);
+@@ -287,6 +442,13 @@ public class GenTerra : ModStdWorldGen
+ 
+ 	private void generate(IServerChunk[] chunks, int chunkX, int chunkZ, bool requiresChunkBorderSmoothing)
+ 	{
++		OptimumGenTerraWorkspace workspace = GetOptimumWorkspace();
++		ThreadLocal<OptimumGenTerraTempData> localTempData = GetOptimumTempDataThreadLocal();
++		bool[] localLayerFullySolid = workspace.LayerFullySolid;
++		bool[] localLayerFullyEmpty = workspace.LayerFullyEmpty;
++		int[] waterBlockIds = workspace.WaterBlockIds;
++		float[] taperTerrainYPos = workspace.TaperTerrainYPos;
++		float[] taperWeight = workspace.TaperWeight;
+ 		IMapChunk mapChunk = chunks[0].MapChunk;
+ 		int upheavalMapUpLeft = 0;
+ 		int upheavalMapUpRight = 0;
+@@ -329,7 +491,7 @@ public class GenTerra : ModStdWorldGen
+ 		float baseX = (float)(chunkX % num) * num7;
+ 		float baseZ = (float)(chunkZ % num) * num7;
+ 		LerpedWeightedIndex2DMap landLerpMap = GetOrLoadLerpedLandformMap(mapChunk, chunkX / num, chunkZ / num);
+-		float[] landformWeights = tempDataThreadLocal.Value.landformWeights;
++		float[] landformWeights = localTempData.Value.LandformWeights;
+ 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ, landformWeights), out var octNoiseX0, out var octThX0);
+ 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ, landformWeights), out var octNoiseX1, out var octThX1);
+ 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ + num7, landformWeights), out var octNoiseX2, out var octThX2);
+@@ -343,102 +505,154 @@ public class GenTerra : ModStdWorldGen
+ 		double geoUpheavalAmplitude = 255.0;
+ 		float chunkPixelBlockStep = num7 * (1f / 32f);
+ 		double verticalNoiseRelativeFrequency = 0.5 / TerraGenConfig.terrainNoiseVerticalScale;
+-		for (int i = 0; i < layerFullySolid.Length; i++)
+-		{
+-			layerFullySolid[i] = true;
+-		}
+-		for (int j = 0; j < layerFullyEmpty.Length; j++)
+-		{
+-			layerFullyEmpty[j] = true;
+-		}
+-		layerFullyEmpty[mapsizeY - 1] = false;
++		Array.Fill(localLayerFullySolid, true);
++		Array.Fill(localLayerFullyEmpty, true);
++		localLayerFullyEmpty[mapsizeY - 1] = false;
+ 		Parallel.For(0, 1024, new ParallelOptions
+ 		{
+ 			MaxDegreeOfParallelism = maxThreads
+-		}, delegate(int chunkIndex2d)
++		}, () =>
++		{
++			OptimumGenTerraTempData value = localTempData.Value;
++			Array.Fill(value.LocalLayerFullySolid, true);
++			Array.Fill(value.LocalLayerFullyEmpty, true);
++			return value;
++		}, delegate(int chunkIndex2d, ParallelLoopState loopState, OptimumGenTerraTempData threadData)
+ 		{
+ 			int num20 = chunkIndex2d % 32;
+ 			int num21 = chunkIndex2d / 32;
+ 			int num22 = chunkX * 32 + num20;
+ 			int num23 = chunkZ * 32 + num21;
+-			BitArray columnBlockSolidities = columnResults[chunkIndex2d].ColumnBlockSolidities;
+-			columnBlockSolidities.SetAll(value: false);
+-			double[] lerpedAmplitudes = tempDataThreadLocal.Value.LerpedAmplitudes;
+-			double[] lerpedThresholds = tempDataThreadLocal.Value.LerpedThresholds;
+-			float[] landformWeights2 = tempDataThreadLocal.Value.landformWeights;
++			workspace.ClearColumn(chunkIndex2d);
++			double[] lerpedAmplitudes = threadData.LerpedAmplitudes;
++			double[] lerpedThresholds = threadData.LerpedThresholds;
++			float[] landformWeights2 = threadData.LandformWeights;
+ 			landLerpMap.WeightsAt(baseX + (float)num20 * chunkPixelBlockStep, baseZ + (float)num21 * chunkPixelBlockStep, landformWeights2);
+-			for (int k = 0; k < lerpedAmplitudes.Length; k++)
++			float lxFrac = (float)num20 * (1f / 32f);
++			float lzFrac = (float)num21 * (1f / 32f);
++			int octCount = lerpedAmplitudes.Length;
++			int k = 0;
++			if (Vector256.IsHardwareAccelerated)
++			{
++				Vector256<double> vx = Vector256.Create((double)lxFrac);
++				Vector256<double> vz = Vector256.Create((double)lzFrac);
++				for (; k <= octCount - 4; k += 4)
++				{
++					Vector256<double> aTopLeft = Vector256.LoadUnsafe(ref octNoiseX0[k]);
++					Vector256<double> aTopRight = Vector256.LoadUnsafe(ref octNoiseX1[k]);
++					Vector256<double> aBotLeft = Vector256.LoadUnsafe(ref octNoiseX2[k]);
++					Vector256<double> aBotRight = Vector256.LoadUnsafe(ref octNoiseX3[k]);
++					Vector256<double> aTop = aTopLeft + (aTopRight - aTopLeft) * vx;
++					Vector256<double> aBot = aBotLeft + (aBotRight - aBotLeft) * vx;
++					(aTop + (aBot - aTop) * vz).StoreUnsafe(ref lerpedAmplitudes[k]);
++					Vector256<double> tTopLeft = Vector256.LoadUnsafe(ref octThX0[k]);
++					Vector256<double> tTopRight = Vector256.LoadUnsafe(ref octThX1[k]);
++					Vector256<double> tBotLeft = Vector256.LoadUnsafe(ref octThX2[k]);
++					Vector256<double> tBotRight = Vector256.LoadUnsafe(ref octThX3[k]);
++					Vector256<double> tTop = tTopLeft + (tTopRight - tTopLeft) * vx;
++					Vector256<double> tBot = tBotLeft + (tBotRight - tBotLeft) * vx;
++					(tTop + (tBot - tTop) * vz).StoreUnsafe(ref lerpedThresholds[k]);
++				}
++			}
++			for (; k < octCount; k++)
+ 			{
+-				lerpedAmplitudes[k] = GameMath.BiLerp(octNoiseX0[k], octNoiseX1[k], octNoiseX2[k], octNoiseX3[k], (float)num20 * (1f / 32f), (float)num21 * (1f / 32f));
+-				lerpedThresholds[k] = GameMath.BiLerp(octThX0[k], octThX1[k], octThX2[k], octThX3[k], (float)num20 * (1f / 32f), (float)num21 * (1f / 32f));
++				lerpedAmplitudes[k] = GameMath.BiLerp(octNoiseX0[k], octNoiseX1[k], octNoiseX2[k], octNoiseX3[k], lxFrac, lzFrac);
++				lerpedThresholds[k] = GameMath.BiLerp(octThX0[k], octThX1[k], octThX2[k], octThX3[k], lxFrac, lzFrac);
+ 			}
+ 			VectorXZ vectorXZ = NewDistortionNoise(num22, num23);
+ 			VectorXZ vectorXZ2 = ApplyIsotropicDistortionThreshold(vectorXZ * 4.0, 40.0, 763.6753236814714);
+-			float upheavalStrength = GameMath.BiLerp(upheavalMapUpLeft, upheavalMapUpRight, upheavalMapBotLeft, upheavalMapBotRight, (float)num20 * (1f / 32f), (float)num21 * (1f / 32f));
+-			float num24 = GameMath.BiLerp(oceanUpLeft, oceanUpRight, oceanBotLeft, oceanBotRight, (float)num20 * (1f / 32f), (float)num21 * (1f / 32f)) * oceanicityFac;
++			float upheavalStrength = GameMath.BiLerp(upheavalMapUpLeft, upheavalMapUpRight, upheavalMapBotLeft, upheavalMapBotRight, lxFrac, lzFrac);
++			float num24 = GameMath.BiLerp(oceanUpLeft, oceanUpRight, oceanBotLeft, oceanBotRight, lxFrac, lzFrac) * oceanicityFac;
+ 			VectorXZ distGeo = ApplyIsotropicDistortionThreshold(vectorXZ * 10.0, 10.0, 1909.1883092036783);
+ 			float num25 = num24 + ComputeOceanAndUpheavalDistY(upheavalStrength, num22, num23, distGeo);
+-			columnResults[chunkIndex2d].WaterBlockID = ((num24 > 1f) ? gcfg.saltWaterBlockId : gcfg.waterBlockId);
++			waterBlockIds[chunkIndex2d] = ((num24 > 1f) ? gcfg.saltWaterBlockId : gcfg.waterBlockId);
+ 			NewNormalizedSimplexFractalNoise.ColumnNoise columnNoise = terrainNoise.ForColumn(verticalNoiseRelativeFrequency, lerpedAmplitudes, lerpedThresholds, (double)num22 + vectorXZ2.X, (double)num23 + vectorXZ2.Z);
+ 			double boundMin = columnNoise.BoundMin;
+ 			double boundMax = columnNoise.BoundMax;
+-			WeightedTaper weightedTaper = taperMap[chunkIndex2d];
++			float wtaperTerrainYPos = taperTerrainYPos[chunkIndex2d];
++			float wtaperWeight = taperWeight[chunkIndex2d];
+ 			float ySlide = num25 - (float)(int)Math.Floor(num25);
++			float[] compactWeights = threadData.CompactWeights;
++			float[][] compactThresholds = threadData.CompactThresholds;
++			int nzCount = 0;
++			for (int m = 0; m < landformWeights2.Length; m++)
++			{
++				float num26 = landformWeights2[m];
++				if (num26 != 0f)
++				{
++					compactWeights[nzCount] = num26;
++					compactThresholds[nzCount] = terrainYThresholds[m];
++					nzCount++;
++				}
++			}
+ 			for (int l = 1; l <= mapsizeYm2; l++)
+ 			{
+ 				StartSampleDisplacedYThreshold((float)l + num25, mapsizeYm2, out var yBase);
+ 				double threshold = 0.0;
+-				for (int m = 0; m < landformWeights2.Length; m++)
++				for (int m = 0; m < nzCount; m++)
+ 				{
+-					float num26 = landformWeights2[m];
+-					if (num26 != 0f)
+-					{
+-						threshold += (double)(num26 * ContinueSampleDisplacedYThreshold(yBase, ySlide, terrainYThresholds[m]));
+-					}
++					float[] th = compactThresholds[m];
++					threshold += (double)(compactWeights[m] * GameMath.Lerp(th[yBase], th[yBase + 1], ySlide));
+ 				}
+ 				ComputeGeoUpheavalTaper(l, num25, taperThreshold, geoUpheavalAmplitude, mapsizeY, ref threshold);
+ 				if (requiresChunkBorderSmoothing)
+ 				{
+-					double num27 = (((float)l > weightedTaper.TerrainYPos) ? 1 : (-1));
+-					float num28 = Math.Abs((float)l - weightedTaper.TerrainYPos);
++					double num27 = (((float)l > wtaperTerrainYPos) ? 1 : (-1));
++					float num28 = Math.Abs((float)l - wtaperTerrainYPos);
+ 					double num29 = ((num28 > 10f) ? 0.0 : (distort2dx.Noise((double)(-(chunkX * 32 + num20)) / 10.0, (double)l / 10.0, (double)(-(chunkZ * 32 + num21)) / 10.0) / Math.Max(1.0, (double)num28 / 2.0)));
+-					num29 *= (double)GameMath.Clamp(2f * (1f - weightedTaper.Weight), 0f, 1f) * 0.1;
+-					threshold = GameMath.Lerp(threshold, num27 + num29, weightedTaper.Weight);
++					num29 *= (double)GameMath.Clamp(2f * (1f - wtaperWeight), 0f, 1f) * 0.1;
++					threshold = GameMath.Lerp(threshold, num27 + num29, wtaperWeight);
+ 				}
+ 				if (threshold <= boundMin)
+ 				{
+-					columnBlockSolidities[l] = true;
+-					layerFullyEmpty[l] = false;
++					workspace.SetSolid(chunkIndex2d, l);
++					threadData.LocalLayerFullyEmpty[l] = false;
+ 				}
+-				else
++				else if (!(threshold < boundMax))
+ 				{
+-					if (!(threshold < boundMax))
++					threadData.LocalLayerFullySolid[l] = false;
++					if (l < mapsizeYm2)
+ 					{
+-						layerFullySolid[l] = false;
+-						for (int n = l + 1; n <= mapsizeYm2; n++)
+-						{
+-							layerFullySolid[n] = false;
+-						}
+-						break;
++						Array.Fill(threadData.LocalLayerFullySolid, false, l + 1, mapsizeYm2 - l);
+ 					}
++					break;
++				}
++				else
++				{
+ 					double inverseCurvedThresholder = 0.0 - NormalizedSimplexNoise.NoiseValueCurveInverse(threshold);
+ 					inverseCurvedThresholder = columnNoise.NoiseSign(l, inverseCurvedThresholder);
+ 					if (inverseCurvedThresholder > 0.0)
+ 					{
+-						columnBlockSolidities[l] = true;
+-						layerFullyEmpty[l] = false;
++						workspace.SetSolid(chunkIndex2d, l);
++						threadData.LocalLayerFullyEmpty[l] = false;
+ 					}
+ 					else
+ 					{
+-						layerFullySolid[l] = false;
++						threadData.LocalLayerFullySolid[l] = false;
+ 					}
+ 				}
+ 			}
++			return threadData;
++		}, delegate(OptimumGenTerraTempData threadData)
++		{
++			bool[] localSolid = threadData.LocalLayerFullySolid;
++			bool[] localEmpty = threadData.LocalLayerFullyEmpty;
++			for (int n = 0; n < localLayerFullySolid.Length; n++)
++			{
++				if (!localSolid[n])
++				{
++					localLayerFullySolid[n] = false;
++				}
++				if (!localEmpty[n])
++				{
++					localLayerFullyEmpty[n] = false;
++				}
++			}
+ 		});
+ 		IChunkBlocks data = chunks[0].Data;
+ 		data.SetBlockBulk(0, 32, 32, gcfg.mantleBlockId);
+ 		int num8;
+-		for (num8 = 1; num8 < mapsizeY - 1 && layerFullySolid[num8]; num8++)
++		for (num8 = 1; num8 < mapsizeY - 1 && localLayerFullySolid[num8]; num8++)
+ 		{
+ 			if (num8 % 32 == 0)
+ 			{
+@@ -449,7 +663,7 @@ public class GenTerra : ModStdWorldGen
+ 		int seaLevel = TerraGenConfig.seaLevel;
+ 		int num9 = 0;
+ 		int num10 = mapsizeY - 2;
+-		while (num10 >= num8 && layerFullyEmpty[num10])
++		while (num10 >= num8 && localLayerFullyEmpty[num10])
+ 		{
+ 			num10--;
+ 		}
+@@ -464,10 +678,9 @@ public class GenTerra : ModStdWorldGen
+ 			int num13 = ChunkIndex2d(0, num11);
+ 			for (int num14 = 0; num14 < 32; num14++)
+ 			{
+-				ColumnResult columnResult = columnResults[num13];
+-				int waterBlockID = columnResult.WaterBlockID;
++				int waterBlockID = waterBlockIds[num13];
+ 				num9 = waterBlockID;
+-				if (num8 < seaLevel && waterBlockID != gcfg.saltWaterBlockId && !columnResult.ColumnBlockSolidities[seaLevel - 1])
++				if (num8 < seaLevel && waterBlockID != gcfg.saltWaterBlockId && !workspace.IsSolid(num13, seaLevel - 1))
+ 				{
+ 					int unscaledTemp = (GameMath.BiLerpRgbColor((float)num14 * (1f / 32f), (float)num11 * (1f / 32f), unpaddedInt, unpaddedInt2, unpaddedInt3, unpaddedInt4) >> 16) & 0xFF;
+ 					float num15 = (float)distort2dx.Noise(chunkX * 32 + num14, num12) / 20f;
+@@ -482,7 +695,7 @@ public class GenTerra : ModStdWorldGen
+ 				for (int num16 = num8; num16 < num10; num16++)
+ 				{
+ 					int num17 = num16 % 32;
+-					if (columnResult.ColumnBlockSolidities[num16])
++					if (workspace.IsSolid(num13, num16))
+ 					{
+ 						worldGenTerrainHeightMap[num13] = (ushort)num16;
+ 						rainHeightMap[num13] = (ushort)num16;
+@@ -520,13 +733,17 @@ public class GenTerra : ModStdWorldGen
+ 
+ 	private LerpedWeightedIndex2DMap GetOrLoadLerpedLandformMap(IMapChunk mapchunk, int regionX, int regionZ)
+ 	{
+-		LandformMapByRegion.TryGetValue(regionZ * regionMapSize + regionX, out var value);
+-		if (value != null)
++		Lock lck = LazyInitializer.EnsureInitialized(ref optimumLandformMapLock);
++		lock (lck)
+ 		{
+-			return value;
++			LandformMapByRegion.TryGetValue(regionZ * regionMapSize + regionX, out var value);
++			if (value != null)
++			{
++				return value;
++			}
++			IntDataMap2D landformMap = mapchunk.MapRegion.LandformMap;
++			return LandformMapByRegion[regionZ * regionMapSize + regionX] = new LerpedWeightedIndex2DMap(landformMap.Data, landformMap.Size, TerraGenConfig.landFormSmoothingRadius, landformMap.TopLeftPadding, landformMap.BottomRightPadding);
+ 		}
+-		IntDataMap2D landformMap = mapchunk.MapRegion.LandformMap;
+-		return LandformMapByRegion[regionZ * regionMapSize + regionX] = new LerpedWeightedIndex2DMap(landformMap.Data, landformMap.Size, TerraGenConfig.landFormSmoothingRadius, landformMap.TopLeftPadding, landformMap.BottomRightPadding);
+ 	}
+ 
+ 	private void GetInterpolatedOctaves(float[] indices, out double[] amps, out double[] thresholds)

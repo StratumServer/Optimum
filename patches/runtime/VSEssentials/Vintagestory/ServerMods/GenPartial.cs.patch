@@ -1,0 +1,52 @@
+--- a/VSEssentials/Vintagestory/ServerMods/GenPartial.cs
++++ b/VSEssentials/Vintagestory/ServerMods/GenPartial.cs
+@@ -1,3 +1,4 @@
++using System.Threading;
+ using Vintagestory.API.MathTools;
+ using Vintagestory.API.Server;
+ 
+@@ -13,6 +14,10 @@ public abstract class GenPartial : ModStdWorldGen
+ 
+ 	protected LCGRandom chunkRand;
+ 
++	protected ThreadLocal<LCGRandom> chunkRandThreadLocal;
++
++	protected bool optimumUseThreadLocalChunkRandOnly;
++
+ 	protected abstract int chunkRange { get; }
+ 
+ 	public override void StartServerSide(ICoreServerAPI api)
+@@ -25,7 +30,10 @@ public abstract class GenPartial : ModStdWorldGen
+ 	{
+ 		LoadGlobalConfig(api);
+ 		worldheight = api.WorldManager.MapSizeY;
+-		chunkRand = new LCGRandom(api.WorldManager.Seed);
++		int seed = api.WorldManager.Seed;
++		chunkRand = new LCGRandom(seed);
++		chunkRandThreadLocal?.Dispose();
++		chunkRandThreadLocal = new ThreadLocal<LCGRandom>(() => new LCGRandom(seed));
+ 	}
+ 
+ 	protected virtual void GenChunkColumn(IChunkColumnGenerateRequest request)
+@@ -33,11 +41,20 @@ public abstract class GenPartial : ModStdWorldGen
+ 		IServerChunk[] chunks = request.Chunks;
+ 		int chunkX = request.ChunkX;
+ 		int chunkZ = request.ChunkZ;
++		LCGRandom threadLocalRand = chunkRandThreadLocal?.Value;
++		bool syncLegacyChunkRand = !optimumUseThreadLocalChunkRandOnly;
+ 		for (int i = -chunkRange; i <= chunkRange; i++)
+ 		{
+ 			for (int j = -chunkRange; j <= chunkRange; j++)
+ 			{
+-				chunkRand.InitPositionSeed(chunkX + i, chunkZ + j);
++				if (threadLocalRand != null)
++				{
++					threadLocalRand.InitPositionSeed(chunkX + i, chunkZ + j);
++				}
++				if ((syncLegacyChunkRand || threadLocalRand == null) && chunkRand != null)
++				{
++					chunkRand.InitPositionSeed(chunkX + i, chunkZ + j);
++				}
+ 				GeneratePartial(chunks, chunkX, chunkZ, i, j);
+ 			}
+ 		}
