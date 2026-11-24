@@ -68,9 +68,10 @@ namespace Cairo
 			if (!OperatingSystem.IsLinux())
 			{
 				fontconfigHinting = SKFontHinting.Normal;
-				string resolvedFamily = OperatingSystem.IsWindows() ? ResolveWindowsFamilyName(family) : family;
-				return systemTypefaceCache.GetOrAdd((resolvedFamily, weight, slant),
-					static key => SKTypeface.FromFamilyName(key.family, key.weight, SKFontStyleWidth.Normal, key.slant));
+				return systemTypefaceCache.GetOrAdd((family, weight, slant),
+					static key => OperatingSystem.IsWindows()
+						? CreateWindowsTypeface(key.family, key.weight, key.slant)
+						: SKTypeface.FromFamilyName(key.family, key.weight, SKFontStyleWidth.Normal, key.slant));
 			}
 
 			LinuxFontMatch matched = ResolveLinuxMatch(family, weight, slant);
@@ -88,9 +89,9 @@ namespace Cairo
 			fontconfigOrder = SubpixelOrder.Rgb;
 			if (!OperatingSystem.IsLinux())
 			{
-				if (OperatingSystem.IsWindows())
-					family = ResolveWindowsFamilyName(family);
-				return SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
+				return OperatingSystem.IsWindows()
+					? CreateWindowsTypeface(family, weight, slant)
+					: SKTypeface.FromFamilyName(family, weight, SKFontStyleWidth.Normal, slant);
 			}
 
 			LinuxFontMatch matched = ResolveLinuxMatch(family, weight, slant);
@@ -193,6 +194,73 @@ namespace Cairo
 			});
 		}
 
+		// Vanilla's Windows Cairo resolves a toy family through the GDI font mapper, which
+		// accepts names such as "Arial Black" that DirectWrite files under another family.
+		// When DirectWrite does not return the face GDI selected, build the typeface from
+		// that face's font data so the weight and shape match vanilla.
+		internal static SKTypeface CreateWindowsTypeface(string family, SKFontStyleWeight weight, SKFontStyleSlant slant)
+		{
+			string gdiFace = ResolveWindowsFamilyName(family);
+			SKTypeface directWrite = SKTypeface.FromFamilyName(gdiFace, weight, SKFontStyleWidth.Normal, slant);
+			if (!NeedsGdiFaceData(gdiFace, directWrite?.FamilyName)) return directWrite;
+
+			SKTypeface gdi = TryLoadGdiFace(gdiFace, weight, slant);
+			if (gdi == null) return directWrite;
+			directWrite?.Dispose();
+			return gdi;
+		}
+
+		internal static bool NeedsGdiFaceData(string gdiFace, string directWriteFamily)
+			=> !string.Equals(gdiFace, directWriteFamily, StringComparison.OrdinalIgnoreCase);
+
+		const uint GdiError = 0xFFFFFFFF;
+		const uint TtcTag = 0x66637474; // 'ttcf' as GetFontData expects it
+		const uint MaxGdiFontBytes = 64 * 1024 * 1024;
+
+		static SKTypeface TryLoadGdiFace(string gdiFace, SKFontStyleWeight weight, SKFontStyleSlant slant)
+		{
+			IntPtr dc = CreateCompatibleDC(IntPtr.Zero);
+			if (dc == IntPtr.Zero) return null;
+			IntPtr nativeFont = IntPtr.Zero, previousFont = IntPtr.Zero;
+			try
+			{
+				nativeFont = CreateFontW(-24, 0, 0, 0, weight == SKFontStyleWeight.Bold ? 700 : 400, slant == SKFontStyleSlant.Upright ? 0u : 1u, 0, 0, 1, 4, 0, 5, 0, gdiFace);
+				if (nativeFont == IntPtr.Zero) return null;
+				previousFont = SelectObject(dc, nativeFont);
+				if (previousFont == IntPtr.Zero || previousFont == new IntPtr(-1)) return null;
+				var selectedFace = new StringBuilder(64);
+				if (GetTextFaceW(dc, selectedFace.Capacity, selectedFace) <= 0 ||
+					!string.Equals(selectedFace.ToString(), gdiFace, StringComparison.OrdinalIgnoreCase))
+					return null;
+
+				// A collection member's table directory points into the whole file and its
+				// face index is unknown here, so keep DirectWrite's answer for collections.
+				if (GetFontData(dc, TtcTag, 0, null, 0) != GdiError) return null;
+				uint size = GetFontData(dc, 0, 0, null, 0);
+				if (size == GdiError || size == 0 || size > MaxGdiFontBytes) return null;
+				var data = new byte[size];
+				if (GetFontData(dc, 0, 0, data, size) != size) return null;
+
+				using SKData skData = SKData.CreateCopy(data);
+				SKTypeface typeface = SKTypeface.FromData(skData, 0);
+				if (typeface == null) return null;
+				// GDI would synthesize a missing bold or italic; keep DirectWrite's face then.
+				if ((weight == SKFontStyleWeight.Bold && typeface.FontWeight < (int)SKFontStyleWeight.SemiBold) ||
+					(slant != SKFontStyleSlant.Upright && typeface.FontSlant == SKFontStyleSlant.Upright))
+				{
+					typeface.Dispose();
+					return null;
+				}
+				return typeface;
+			}
+			finally
+			{
+				if (previousFont != IntPtr.Zero && previousFont != new IntPtr(-1)) SelectObject(dc, previousFont);
+				if (nativeFont != IntPtr.Zero) DeleteObject(nativeFont);
+				DeleteDC(dc);
+			}
+		}
+
 		// Cairo's Windows toy-font backend advances each glyph on the GDI device
 		// pixel grid when metrics hinting is active, or on the unscaled EM grid when
 		// metrics hinting is disabled or the CTM does not preserve axes.
@@ -226,6 +294,7 @@ namespace Cairo
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern int FcPatternGetBool(IntPtr pattern, [MarshalAs(UnmanagedType.LPUTF8Str)] string objectName, int index, out int value);
 		[DllImport("libfontconfig.so.1", CallingConvention = CallingConvention.Cdecl)] static extern void FcPatternDestroy(IntPtr pattern);
 		[DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern IntPtr CreateFontW(int height, int width, int escapement, int orientation, int weight, uint italic, uint underline, uint strikeOut, uint charSet, uint outputPrecision, uint clipPrecision, uint quality, uint pitchAndFamily, string faceName);
+		[DllImport("gdi32.dll", SetLastError = true)] static extern uint GetFontData(IntPtr dc, uint table, uint offset, byte[] buffer, uint length);
 		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr CreateCompatibleDC(IntPtr dc);
 		[DllImport("gdi32.dll", SetLastError = true)] static extern IntPtr SelectObject(IntPtr dc, IntPtr gdiObject);
 		[DllImport("gdi32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern int GetTextFaceW(IntPtr dc, int count, StringBuilder faceName);

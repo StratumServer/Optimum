@@ -12,6 +12,16 @@ namespace Optimum.Tests;
 public sealed class SkiaWindowsGdiFamilyTests
 {
     [Theory]
+    [InlineData("Arial Black", "Arial", true)]
+    [InlineData("Arial Black", null, true)]
+    [InlineData("Arial", "arial", false)]
+    [InlineData("Segoe UI", "Segoe UI", false)]
+    public void GdiFaceDataIsUsedOnlyWhenDirectWriteReturnsAnotherFamily(string gdiFace, string? directWriteFamily, bool expected)
+    {
+        Assert.Equal(expected, SkiaFontResolver.NeedsGdiFaceData(gdiFace, directWriteFamily!));
+    }
+
+    [Theory]
     [InlineData(SKFontStyleWeight.Normal)]
     [InlineData(SKFontStyleWeight.Bold)]
     public void GdiOnlyFamilyKeepsTheFaceGdiSelects(SKFontStyleWeight weight)
@@ -19,7 +29,7 @@ public sealed class SkiaWindowsGdiFamilyTests
         if (!OperatingSystem.IsWindows()) return;
 
         string gdiFace = SkiaFontResolver.ResolveWindowsFamilyName("Arial Black");
-        bool fontFileExists = File.Exists(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "ariblk.ttf"));
+        bool fontFileExists = File.Exists(System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), "ariblk.ttf"));
         using SKTypeface? matched = SKFontManager.Default.MatchFamily("Arial Black");
         using SKTypeface? raw = SKTypeface.FromFamilyName(gdiFace, weight, SKFontStyleWidth.Normal, SKFontStyleSlant.Upright);
         using SKTypeface resolved = SkiaFontResolver.Resolve("Arial Black", weight, SKFontStyleSlant.Upright, out _, out _, out _);
