@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Assembles a ready-to-run Optimum folder (full game plus optimized DLLs).
 Requires a successful build first (dotnet build VintageStory.slnx -c Release).
@@ -50,6 +50,61 @@ if (-not $Version) {
 }
 . "$PSScriptRoot/_hostcaps.ps1"
 . "$PSScriptRoot/_exec.ps1"
+
+# Verify the staged package preserves pristine vanilla core assemblies and omits stray Lib-owned DLLs.
+function Test-StagedVanillaIntegrity {
+    param(
+        [Parameter(Mandatory = $true)][string]$StageDir,
+        [Parameter(Mandatory = $true)][string]$RepoRoot,
+        [string]$GameVersion
+    )
+
+    foreach ($strayDll in @('OpenTK.Audio.OpenAL.dll', 'cairo-sharp.dll', 'CairoSharp.dll')) {
+        $strayPath = Join-Path $StageDir $strayDll
+        if (Test-Path $strayPath) {
+            throw "Staged root contains stray assembly '$strayDll' that belongs in Lib/. Remove it from Optimum.Launcher output before packaging."
+        }
+    }
+
+    $forksPath = Join-Path $RepoRoot 'forks.json'
+    if (-not (Test-Path $forksPath)) { return }
+
+    $forks = Get-Content -LiteralPath $forksPath -Raw | ConvertFrom-Json
+    if (-not $GameVersion) { $GameVersion = [string]$forks.vintageStoryVersion }
+    if (-not $GameVersion -or -not $forks.vintageStoryPins) { return }
+
+    $versionPins = $forks.vintageStoryPins.PSObject.Properties[$GameVersion]
+    if (-not $versionPins -or -not $versionPins.Value.extractedFiles) { return }
+
+    $extracted = $versionPins.Value.extractedFiles
+    $checks = @(
+        @{ File = 'VintagestoryAPI.dll'; PinKey = 'VintagestoryAPI.dll' },
+        @{ File = 'VintagestoryLib.dll'; PinKey = 'VintagestoryLib.vanilla.dll' }
+    )
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        foreach ($check in $checks) {
+            $pinProp = $extracted.PSObject.Properties[$check.PinKey]
+            if (-not $pinProp -or -not $pinProp.Value) { continue }
+            $expectedHash = ([string]$pinProp.Value).ToLowerInvariant()
+            $stagedPath = Join-Path $StageDir $check.File
+            if (-not (Test-Path $stagedPath)) {
+                throw "Required vanilla assembly missing from staged package: $($check.File)"
+            }
+            $stream = [System.IO.File]::OpenRead($stagedPath)
+            try {
+                $actualHash = ([System.BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '').ToLowerInvariant()
+            } finally {
+                $stream.Dispose()
+            }
+            if ($actualHash -ne $expectedHash) {
+                throw "Staged $($check.File) does not match official Vintage Story $GameVersion (SHA-256 $actualHash, expected $expectedHash). The packaging step must keep the pristine vanilla binary intact."
+            }
+        }
+    } finally {
+        $sha.Dispose()
+    }
+}
 
 # Ensure DOTNET_ROOT and PATH point to the SDK candidate so dotnet build and
 # prepare-runtime-donors can run even when dotnet was installed without adding it to PATH.
@@ -344,11 +399,19 @@ try {
     # Preserve the managed launcher dependencies (OpenTK, SkiaSharp, Cecil).
     # The deps file names these assemblies, but .NET does not bundle them into
     # Optimum.dll, so a fixed list of the apphost/config files is not enough.
-    # Exclude OpenTK.Audio.OpenAL.dll so the game loads it from Lib/ alongside
-    # openal32.dll. Staging it at the root causes OpenTK to probe only the app base
-    # directory and system PATH, failing with DllNotFoundException on Windows.
+    # Exclude OpenTK.Audio.OpenAL.dll (loads from Lib/ alongside openal32.dll)
+    # and game-owned/Lib-owned assemblies so Optimum.Launcher's build output can
+    # never overwrite the pristine vanilla VintagestoryAPI.dll checked at launch.
+    $excludedLauncherDlls = @(
+        'OpenTK.Audio.OpenAL.dll',
+        'VintagestoryAPI.dll',
+        'VintagestoryLib.dll',
+        'Vintagestory.dll',
+        'cairo-sharp.dll',
+        'CairoSharp.dll'
+    )
     Get-ChildItem -Path $launcherOut -Filter '*.dll' -File |
-        Where-Object { $_.Name -ne 'OpenTK.Audio.OpenAL.dll' } |
+        Where-Object { $excludedLauncherDlls -notcontains $_.Name } |
         ForEach-Object { Copy-Item -Force $_.FullName $stageDir }
     # The launcher hosts the game in its own process, and its generated runtimeconfig
     # names only Microsoft.NETCore.App. Mirror the shared frameworks vanilla's own
@@ -494,6 +557,8 @@ try {
             throw "Required package file not found: $requiredStageFile"
         }
     }
+
+    Test-StagedVanillaIntegrity -StageDir $stageDir -RepoRoot $repoRoot -GameVersion $Version
 
     $completionMarker = Join-Path $stageDir '.optimum/package-complete'
     [IO.File]::WriteAllText(

@@ -151,6 +151,21 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/vanilla-pins.ps1
 
+  windows-package-staging:
+    name: "Windows PowerShell 5.1 and 7 package staging integrity"
+    runs-on: windows-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run package staging test under Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/tests/package-windows-staging.ps1
+
+      - name: Run package staging test under PowerShell 7
+        shell: pwsh
+        run: ./scripts/tests/package-windows-staging.ps1
+
   donor-dotnet-selection:
     name: Runtime donor dotnet candidate resolution
     runs-on: ubuntu-latest

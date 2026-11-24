@@ -37,4 +37,16 @@
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="3.119.1" />
     <PackageReference Include="SkiaSharp.NativeAssets.Win32" Version="3.119.1" />
   </ItemGroup>
+  <Target Name="ExcludeGameOwnedAssembliesFromLauncherOutput"
+          AfterTargets="ResolveReferences"
+          BeforeTargets="_CopyFilesMarkedCopyLocal;GenerateBuildDependencyFile;CopyFilesToOutputDirectory">
+    <ItemGroup>
+      <_ExcludedLauncherCopyLocal Include="@(ReferenceCopyLocalPaths)"
+          Condition="'%(Filename)' == 'VintagestoryAPI' Or '%(Filename)' == 'VintagestoryLib' Or '%(Filename)' == 'Vintagestory' Or '%(Filename)' == 'cairo-sharp' Or '%(Filename)' == 'CairoSharp'" />
+      <ReferenceCopyLocalPaths Remove="@(_ExcludedLauncherCopyLocal)" />
+      <_ExcludedLauncherRuntimeItem Include="@(RuntimeCopyLocalItems)"
+          Condition="'%(Filename)' == 'VintagestoryAPI' Or '%(Filename)' == 'VintagestoryLib' Or '%(Filename)' == 'Vintagestory' Or '%(Filename)' == 'cairo-sharp' Or '%(Filename)' == 'CairoSharp'" />
+      <RuntimeCopyLocalItems Remove="@(_ExcludedLauncherRuntimeItem)" />
+    </ItemGroup>
+  </Target>
 </Project>

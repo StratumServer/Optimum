@@ -25,6 +25,13 @@ public static class Program
     private const string ValidateOnlyArgument = "--validate-only";
     private const string ProfileFingerprintArgument = "--optimum-gui-profile-fingerprint";
     private const string ValidateGuiCertificationArgument = "--optimum-gui-validate-certification";
+    private const string DevicePreflightArgument = "--optimum-gui-device-preflight";
+
+    internal static bool IsNonInteractiveControlMode(string[] args) =>
+        HasArgument(args, ValidateOnlyArgument)
+        || HasArgument(args, ProfileFingerprintArgument)
+        || HasArgument(args, ValidateGuiCertificationArgument)
+        || HasArgument(args, DevicePreflightArgument);
 
     private static readonly string Version =
         typeof(Program).Assembly.GetCustomAttribute<System.Reflection.AssemblyInformationalVersionAttribute>()
@@ -45,7 +52,7 @@ public static class Program
     {
         try
         {
-            if (args.Length > 0 && args[0] == "--optimum-gui-device-preflight")
+            if (args.Length > 0 && args[0] == DevicePreflightArgument)
                 return GuiDevicePreflight.RunChild(args);
             return Run(args);
         }
@@ -55,6 +62,7 @@ public static class Program
                 Logger.Init(AppContext.BaseDirectory);
             Logger.LogError($"[Optimum] Fatal error: {ex.Message}");
             Logger.LogError(ex.StackTrace ?? "(no stack trace)");
+            LaunchErrorDialog.TryShow(ex.Message, Logger.LogPath, IsNonInteractiveControlMode(args));
             return 1;
         }
     }
@@ -127,6 +135,7 @@ public static class Program
 
         var cache = new CacheManager(gameDir, cacheDir, donorDir, Version);
         bool validateOnly = HasArgument(args, ValidateOnlyArgument);
+        bool showErrorDialog = !IsNonInteractiveControlMode(args);
 
         // --- Cache validation ---
         var requiredAssemblies = PatchTargets.Select(target => target.AssemblyPath).ToArray();
@@ -146,7 +155,7 @@ public static class Program
         catch (Exception ex)
         {
             Logger.LogError($"[Optimum] Cache validation failed: {ex.Message}");
-            return AbortLaunch(gameDir, cache, ex.Message);
+            return AbortLaunch(gameDir, cache, ex.Message, showErrorDialog);
         }
 
         CacheManifest? activeManifest = null;
@@ -177,12 +186,12 @@ public static class Program
             try
             {
                 patchExitCode = RunPatching(
-                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly, out activeManifest);
+                    gameDir, donorDir, cacheDir, cache, sw, showSplash: !validateOnly, out activeManifest, showErrorDialog);
             }
             catch (Exception ex)
             {
                 Logger.LogError($"[Optimum] Runtime patch setup failed: {ex.Message}");
-                return AbortLaunch(gameDir, cache, ex.Message);
+                return AbortLaunch(gameDir, cache, ex.Message, showErrorDialog);
             }
             if (patchExitCode is int code)
             {
@@ -201,7 +210,7 @@ public static class Program
             catch (Exception ex)
             {
                 Logger.LogError($"[Optimum] Runtime validation failed: {ex.Message}");
-                return AbortLaunch(gameDir, cache, ex.Message);
+                return AbortLaunch(gameDir, cache, ex.Message, showErrorDialog);
             }
         }
 
@@ -215,7 +224,7 @@ public static class Program
         catch (Exception ex)
         {
             Logger.LogError($"[Optimum] Patched mod deployment failed: {ex.Message}");
-            return AbortLaunch(gameDir, cache, ex.Message);
+            return AbortLaunch(gameDir, cache, ex.Message, showErrorDialog);
         }
 
         if (args.Length > 0 && args[0] == ProfileFingerprintArgument)
@@ -282,7 +291,8 @@ public static class Program
         CacheManager cache,
         Stopwatch sw,
         bool showSplash,
-        out CacheManifest? rebuiltManifest)
+        out CacheManifest? rebuiltManifest,
+        bool showErrorDialog = true)
     {
         rebuiltManifest = null;
         Logger.Log($"[Optimum] Optimum v{Version}");
@@ -434,7 +444,7 @@ public static class Program
 
         if (failureReason is not null)
         {
-            return AbortLaunch(gameDir, cache, failureReason);
+            return AbortLaunch(gameDir, cache, failureReason, showErrorDialog);
         }
 
         rebuiltManifest = cache.CreateManifest(patchedTargets);
@@ -604,7 +614,7 @@ public static class Program
             .ToArray();
     }
 
-    private static int AbortLaunch(string gameDir, CacheManager cache, string reason)
+    private static int AbortLaunch(string gameDir, CacheManager cache, string reason, bool showDialog = true)
     {
         if (!cache.TryInvalidate(out var invalidationError))
         {
@@ -615,6 +625,7 @@ public static class Program
         Logger.LogError($"[Optimum] Reason: {reason}");
         TryRestoreVanillaMods(gameDir);
         Logger.LogError();
+        LaunchErrorDialog.TryShow(reason, Logger.LogPath, nonInteractiveMode: !showDialog);
         return 1;
     }
 
@@ -987,6 +998,8 @@ public static class Program
     internal static readonly string[] AssembliesShadowingLib =
     [
         "OpenTK.Audio.OpenAL.dll",
+        "cairo-sharp.dll",
+        "CairoSharp.dll",
     ];
 
     /// <summary>
