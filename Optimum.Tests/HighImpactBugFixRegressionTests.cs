@@ -956,17 +956,17 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
         Assert.Contains("onOptimumFsrSharpnessChanged", guiPatch);
         Assert.Contains("((GuiElementSlider)optimumControls[\"optFsrSharpness\"]).SetValues", guiPatch);
 
-        // 3. Verify ClientPlatformWindows patch caches sharpness and passes uniform to fsrRcas
+        // 3. Verify ClientPlatformWindows patch caches sharpness per program and passes uniform to fsrRcas
         string platformPatch = File.ReadAllText(
             PatchReader.FindRepositoryFile("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch"));
-        Assert.Contains("_optimumLastFsrSharpness", platformPatch);
-        Assert.Contains("fsrRcas.Uniform(\"sharpness\", _optimumLastFsrSharpness);", platformPatch);
+        Assert.Contains("optimumLastFsrSharpness", platformPatch);
+        Assert.Contains("fsrRcas.Uniform(\"sharpness\", sharpness);", platformPatch);
 
         // 4. Verify Program.cs injects members
         string programSource = File.ReadAllText(
             PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
         Assert.Contains("\"OptimumFsrSharpness\"", programSource);
-        Assert.Contains("\"_optimumLastFsrSharpness\"", programSource);
+        Assert.Contains("\"optimumLastFsrSharpness\"", programSource);
         Assert.Contains("\"onOptimumFsrSharpnessChanged\"", programSource);
     }
 

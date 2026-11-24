@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f849..e860cc2b 100644
+index 4d08f84..6fa2186 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
@@ -101,7 +101,7 @@ index 4d08f849..e860cc2b 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1752,322 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1752,317 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -371,13 +371,8 @@ index 4d08f849..e860cc2b 100644
 +		ClientSettings.OptimumRenderScale = scale;
 +		Vintagestory.API.Config.OptimumConfig.RenderScale = scale;
 +		Vintagestory.API.Config.OptimumConfig.Save();
-+		// FSR render scale works by lowering SSAA below 1.0 and upscaling.
-+		// Override SSAA when render scale < 1.0; restore to 1.0 when native.
-+		if (scale < 1.0f)
-+		{
-+			ClientSettings.SSAA = scale;
-+		}
-+		else
++		// Restore legacy SSAA values below 1.0 when switching back to Native.
++		if (scale >= 1.0f && ClientSettings.SSAA < 1.0f)
 +		{
 +			ClientSettings.SSAA = 1.0f;
 +		}
@@ -424,7 +419,7 @@ index 4d08f849..e860cc2b 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2142,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2137,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);
