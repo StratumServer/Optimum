@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 using SkiaSharp;
@@ -207,12 +208,19 @@ namespace Cairo
 			SKTypeface gdi = TryLoadGdiFace(gdiFace, weight, slant);
 			if (gdi == null) return directWrite;
 			directWrite?.Dispose();
+			gdiFaceNames.Add(gdi, gdiFace);
 			return gdi;
 		}
+
+		// The font data of "Arial Black" reports the family "Arial", so GDI metrics for
+		// glyphs of that typeface must be requested by the name GDI selected it under.
+		internal static string GdiFaceNameOf(SKTypeface typeface)
+			=> gdiFaceNames.TryGetValue(typeface, out string gdiFace) ? gdiFace : typeface.FamilyName;
 
 		internal static bool NeedsGdiFaceData(string gdiFace, string directWriteFamily)
 			=> !string.Equals(gdiFace, directWriteFamily, StringComparison.OrdinalIgnoreCase);
 
+		static readonly ConditionalWeakTable<SKTypeface, string> gdiFaceNames = new ConditionalWeakTable<SKTypeface, string>();
 		const uint GdiError = 0xFFFFFFFF;
 		const uint TtcTag = 0x66637474; // 'ttcf' as GetFontData expects it
 		const uint MaxGdiFontBytes = 64 * 1024 * 1024;
