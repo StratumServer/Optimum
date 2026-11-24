@@ -153,6 +153,74 @@ public sealed class CairoRecorderPixelStepTests
 		Assert.Equal (new byte[] { 213, 117, 66, 255 }, native[0..4]);
 	}
 
+	[Theory]
+	[InlineData (-10, -5, 240, 160, 9.0, 19)]
+	[InlineData (0, 0, 200, 12, 9.0, 19)]
+	[InlineData (-50, -50, -10, -10, 9.0, 19)]
+	[InlineData (180, 100, 260, 180, 12.0, -5)]
+	[InlineData (0, 0, 200, 120, -4.0, 9999)]
+	[InlineData (0, 0, 200, 120, double.NaN, 10)]
+	[InlineData (0, 0, 200, 120, double.PositiveInfinity, 10)]
+	public void OutOfBoundsAndDegeneratePartialBlurDoesNotCrashOnRecordedOrDirectPaths (int x1, int y1, int x2, int y2, double range, int edge)
+	{
+		const int width = 200, height = 120;
+		using var recorded = ImageSurface.CreateForRecordedGui (Format.Argb32, width, height);
+		using (var ctx = new Context (recorded)) {
+			ctx.SetSourceRGBA (0.2, 0.4, 0.7, 0.9);
+			ctx.Rectangle (0, 0, width, height);
+			ctx.Fill ();
+		}
+		recorded.BlurPartial (range, edge, x1, y1, x2, y2);
+		recorded.Finish ();
+		using var skSurface = SKSurface.Create (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		Assert.True (recorded.TryDrawRecordedCommands (skSurface.Canvas));
+
+		using var native = new ImageSurface (Format.Argb32, width, height);
+		using (var ctx = new Context (native)) {
+			ctx.SetSourceRGBA (0.2, 0.4, 0.7, 0.9);
+			ctx.Rectangle (0, 0, width, height);
+			ctx.Fill ();
+		}
+		native.BlurPartial (range, edge, x1, y1, x2, y2);
+
+		var rawPixels = new int[width * height];
+		var recordedBlur = new RecordedBlur (range, edge, x1, y1, x2, y2, false);
+		recordedBlur.ApplyToPixels (IntPtr.Zero, width, height);
+		var handle = System.Runtime.InteropServices.GCHandle.Alloc (rawPixels, System.Runtime.InteropServices.GCHandleType.Pinned);
+		try {
+			recordedBlur.ApplyToPixels (handle.AddrOfPinnedObject (), width, height);
+		} finally {
+			handle.Free ();
+		}
+	}
+
+	[Theory]
+	[InlineData (1, 1)]
+	[InlineData (2, 2)]
+	[InlineData (3, 3)]
+	[InlineData (1, 32)]
+	public void TinySurfacesHandleBlurPartialAndBlurFullSafely (int width, int height)
+	{
+		using var recorded = ImageSurface.CreateForRecordedGui (Format.Argb32, width, height);
+		using (var ctx = new Context (recorded)) {
+			ctx.SetSourceRGBA (0.3, 0.5, 0.8, 1.0);
+			ctx.Rectangle (0, 0, width, height);
+			ctx.Fill ();
+		}
+		recorded.BlurFull (9.0);
+		recorded.BlurPartial (9.0, 19, -2, -2, width + 5, height + 5);
+		using var skSurface = SKSurface.Create (new SKImageInfo (width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+		Assert.True (recorded.TryDrawRecordedCommands (skSurface.Canvas));
+	}
+
+	[Fact]
+	public void InvertedBlurPartialBoundsStillThrowArgumentException ()
+	{
+		using var surface = new ImageSurface (Format.Argb32, 32, 32);
+		Assert.Throws<ArgumentException> (() => surface.BlurPartial (3.0, 0, 10, 4, 8, 16));
+		Assert.Throws<ArgumentException> (() => surface.BlurPartial (3.0, 0, 4, 16, 12, 8));
+	}
+
 
 
 	static void RoundRectangle (Context context, double x, double y, double width, double height, double radius)
