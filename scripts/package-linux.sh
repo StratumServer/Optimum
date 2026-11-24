@@ -300,14 +300,39 @@ cp -f "$MOD_OUT/VSCreativeMod.dll" "$STAGE_DIR/Mods/"
 cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/"
 cp -f "$MOD_OUT/cairo-sharp.dll" "$STAGE_DIR/Lib/CairoSharp.dll"
 
-# 5aa. Overlay drop-in native Cairo shim (libcairo.so.2) if available
-if [[ -f "$REPO_ROOT/tools/cairo-native-shim/Makefile" ]]; then
-    make -C "$REPO_ROOT/tools/cairo-native-shim" all
-    if [[ -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" ]]; then
-        cp -f "$REPO_ROOT/tools/cairo-native-shim/libcairo.so.2" "$STAGE_DIR/Lib/"
-        (cd "$STAGE_DIR/Lib" && ln -sf libcairo.so.2 libcairo.so && ln -sf libcairo.so.2 libcairo.so.2.11804.4)
+stage_cairo_native_shim() {
+    local repo_root="$1"
+    local stage_dir="$2"
+    local shim_dir="$repo_root/tools/cairo-native-shim"
+    local shim_lib="$shim_dir/libcairo.so.2"
+    local shim_cc=""
+
+    if [[ -f "$shim_dir/Makefile" ]]; then
+        if [[ -n "${CC:-}" ]] && command -v "$CC" >/dev/null 2>&1; then
+            shim_cc="$CC"
+        elif command -v gcc >/dev/null 2>&1; then
+            shim_cc="gcc"
+        elif command -v cc >/dev/null 2>&1; then
+            shim_cc="cc"
+        elif command -v clang >/dev/null 2>&1; then
+            shim_cc="clang"
+        fi
+
+        if command -v make >/dev/null 2>&1 && [[ -n "$shim_cc" ]]; then
+            make -C "$shim_dir" CC="$shim_cc" all
+        elif [[ ! -f "$shim_lib" ]]; then
+            echo "Note: skipping optional native Cairo shim build (make or C compiler not available)."
+        fi
     fi
-fi
+
+    if [[ -f "$shim_lib" ]]; then
+        cp -f "$shim_lib" "$stage_dir/Lib/"
+        (cd "$stage_dir/Lib" && ln -sf libcairo.so.2 libcairo.so && ln -sf libcairo.so.2 libcairo.so.2.11804.4)
+    fi
+}
+
+# 5aa. Overlay drop-in native Cairo shim (libcairo.so.2) if available
+stage_cairo_native_shim "$REPO_ROOT" "$STAGE_DIR"
 
 # 5a. Set up runtime donors for the launcher.
 # The launcher patches assemblies at first run and needs donor DLLs in .optimum/donors/.
