@@ -210,6 +210,7 @@ public static class TestServices
         IIlspycmdAcquisition? ilspycmd = null,
         IGitAcquisition? git = null,
         IDistroPackageAcquisition? distroPackages = null,
+        IInstallerLog? sessionLog = null,
         bool dotnetPresent = true)
     {
         probe ??= new FakeSystemProbe();
@@ -245,6 +246,7 @@ public static class TestServices
             Ilspycmd = ilspycmd,
             Git = git,
             DistroPackages = distroPackages,
+            SessionLog = sessionLog,
         };
     }
 }

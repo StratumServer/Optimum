@@ -172,6 +172,75 @@ public class RepoRootTests
 
         Assert.Equal("/repo", RepoRoot.Discover(probe, "/repo"));
     }
+
+    [Fact]
+    public void DiscoverOrCachedFindsWindowsSourceCacheWhenWorkingDirectoryHasNoCheckout()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+        string cached = @"C:\Users\tester\AppData\Local\optimum\src-v0.4.4";
+        probe.AddFile($@"{cached}\forks.json");
+        probe.AddFile($@"{cached}\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile($@"{cached}\scripts\bootstrap.ps1");
+        probe.AddFile($@"{cached}\scripts\package.ps1");
+
+        Assert.Equal(
+            cached,
+            RepoRoot.DiscoverOrCached(probe, version: "0.4.4", workingDirectory: @"C:\Program Files\Optimum"));
+    }
+
+    [Fact]
+    public void DiscoverOrCachedPrefersWorkingDirectoryCheckoutOverCachedSource()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+        string cached = @"C:\Users\tester\AppData\Local\optimum\src-v0.4.4";
+        probe.AddFile($@"{cached}\forks.json");
+        probe.AddFile($@"{cached}\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile($@"{cached}\scripts\bootstrap.ps1");
+        probe.AddFile($@"{cached}\scripts\package.ps1");
+
+        probe.AddFile(@"C:\dev\optimum\forks.json");
+        probe.AddFile(@"C:\dev\optimum\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile(@"C:\dev\optimum\scripts\bootstrap.ps1");
+        probe.AddFile(@"C:\dev\optimum\scripts\package.ps1");
+
+        Assert.Equal(
+            @"C:\dev\optimum",
+            RepoRoot.DiscoverOrCached(probe, version: "0.4.4", workingDirectory: @"C:\dev\optimum\Optimum.Installer"));
+    }
+
+    [Fact]
+    public void DiscoverOrCachedIgnoresOlderVersionCachesAndIncompleteCaches()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Windows };
+        probe.Environment["LOCALAPPDATA"] = @"C:\Users\tester\AppData\Local";
+
+        string older = @"C:\Users\tester\AppData\Local\optimum\src-v0.3.22";
+        probe.AddFile($@"{older}\forks.json");
+        probe.AddFile($@"{older}\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile($@"{older}\scripts\bootstrap.ps1");
+        probe.AddFile($@"{older}\scripts\package.ps1");
+
+        string incompleteCurrent = @"C:\Users\tester\AppData\Local\optimum\src-v0.4.4";
+        probe.AddFile($@"{incompleteCurrent}\forks.json");
+        probe.AddFile($@"{incompleteCurrent}\Optimum.Launcher\Optimum.Launcher.csproj");
+        probe.AddFile($@"{incompleteCurrent}\scripts\bootstrap.ps1");
+
+        Assert.Null(RepoRoot.DiscoverOrCached(probe, version: "0.4.4", workingDirectory: @"C:\Program Files\Optimum"));
+    }
+
+    [Fact]
+    public void DiscoverWithExplicitRootDoesNotFallBackToSourceCache()
+    {
+        var probe = new FakeSystemProbe { Os = OsKind.Linux, HomeDirectory = "/home/tester" };
+        string cached = "/home/tester/.cache/optimum/src-v0.4.4";
+        probe.AddFile($"{cached}/forks.json");
+        probe.AddFile($"{cached}/Optimum.Launcher/Optimum.Launcher.csproj");
+        probe.AddFile($"{cached}/scripts/bootstrap.sh");
+
+        Assert.Null(RepoRoot.Discover(probe, "/not-a-repo"));
+    }
 }
 
 public class GitSourceProviderTests

@@ -46,12 +46,34 @@ public sealed record InstallerServices(
     /// <summary>Installs a selected Linux distro package after user confirmation.</summary>
     public IDistroPackageAcquisition? DistroPackages { get; init; }
 
-    public static InstallerServices CreateReal()
+    /// <summary>Session log written from startup through install completion.</summary>
+    public IInstallerLog? SessionLog { get; init; }
+
+    public static InstallerServices CreateReal() => CreateForProbe(SystemProbe.Default);
+
+    internal static InstallerServices CreateForProbe(
+        ISystemProbe probe,
+        string? workingDirectory = null,
+        string? logDirectory = null,
+        string? version = null)
     {
-        var probe = SystemProbe.Default;
+        string effectiveVersion = version ?? Optimum.Bootstrap.Core.CoreInfo.Version;
+        string effectiveWorkingDirectory = workingDirectory ?? Directory.GetCurrentDirectory();
+        string expectedCache = SourceCache.Directory(probe, effectiveVersion);
+        string? repoRoot = Optimum.Bootstrap.Core.Build.RepoRoot.DiscoverOrCached(
+            probe, effectiveVersion, effectiveWorkingDirectory);
+
+        InstallerSessionLog sessionLog = InstallerSessionLog.Create(logDirectory);
+        sessionLog.WriteEvent("startup", $"Optimum Installer {effectiveVersion} ({probe.Os}/{probe.Arch})");
+        sessionLog.WriteEvent("startup", $"Working directory: {effectiveWorkingDirectory}");
+        sessionLog.WriteEvent("startup", $"Expected source cache: {expectedCache}");
+        sessionLog.WriteEvent("startup", repoRoot is not null
+            ? $"Resolved Optimum source: {repoRoot}"
+            : "Optimum source was not found in the working directory hierarchy or version-matched cache.");
+
         return new InstallerServices(
             probe,
-            Optimum.Bootstrap.Core.Build.RepoRoot.Discover(probe),
+            repoRoot,
             new ScriptBuildDriver(probe),
             new PackageDeployer(probe))
         {
@@ -62,6 +84,7 @@ public sealed record InstallerServices(
             Ilspycmd = new IlspycmdInstaller(probe),
             Git = new GitInstaller(probe),
             DistroPackages = new DistroPackageAcquisition(probe),
+            SessionLog = sessionLog,
         };
     }
 }

@@ -7,6 +7,7 @@ using Optimum.Bootstrap.Core.Acquisition;
 using Optimum.Bootstrap.Core.Build;
 using Optimum.Bootstrap.Core.Platform;
 using Optimum.Bootstrap.Core.Prerequisites;
+using Optimum.Installer.Services;
 
 namespace Optimum.Installer.ViewModels;
 
@@ -40,6 +41,9 @@ public sealed class PrerequisiteRowActions
 
     /// <summary>Exact package and command shown in the confirmation step.</summary>
     public string? ConfirmationDetail { get; init; }
+
+    /// <summary>Optional session log receiving prerequisite installation output.</summary>
+    public IInstallerLog? SessionLog { get; init; }
 }
 
 /// <summary>
@@ -222,9 +226,10 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
         SetManualFallbackAvailable(false);
         _installCancellation = _actions.InstallCancellable is null ? null : new CancellationTokenSource();
         ActionStatus = $"Installing {Name}...";
+        _actions.SessionLog?.WriteEvent("prerequisite", $"Starting install for {Name}");
         try
         {
-            var observer = new RowObserver(this, _actions.Post);
+            var observer = new RowObserver(this, _actions.Post, _actions.SessionLog);
             ToolAcquisitionResult result;
             if (_actions.InstallCancellable is { } cancellable)
             {
@@ -237,6 +242,9 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
             }
             SetManualFallbackAvailable(!result.Ok && result.Reason != FailureReason.Cancelled);
             ActionStatus = result.Ok ? "Installed." : result.Message ?? "Installation failed.";
+            _actions.SessionLog?.WriteEvent("prerequisite", result.Ok
+                ? $"{Name}: installed ({result.InstalledPath ?? "ok"})"
+                : $"{Name}: failed ({result.Reason}): {result.Message ?? "Installation failed."}");
             if (result.Ok)
                 _actions.OnInstalled?.Invoke();
         }
@@ -244,6 +252,7 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
         {
             SetManualFallbackAvailable(ex is not OperationCanceledException);
             ActionStatus = $"Installation failed: {ex.Message}";
+            _actions.SessionLog?.WriteEvent("prerequisite", $"{Name}: exception ({ex.GetType().Name}): {ex.Message}");
         }
         finally
         {
@@ -265,7 +274,8 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
     }
 
     /// <summary>Pipes an installer's last line of output into the row detail.</summary>
-    private sealed class RowObserver(PrerequisiteRowViewModel row, Action<Action>? post) : IBuildObserver
+    private sealed class RowObserver(
+        PrerequisiteRowViewModel row, Action<Action>? post, IInstallerLog? sessionLog) : IBuildObserver
     {
         private void Show(string text)
         {
@@ -277,11 +287,23 @@ public sealed class PrerequisiteRowViewModel : ObservableObject
                 post(() => row.ActionStatus = text.Trim());
         }
 
-        public void Phase(ProgressPhase phase, int percent, string detail) => Show(detail);
+        public void Phase(ProgressPhase phase, int percent, string detail)
+        {
+            sessionLog?.WriteEvent("prerequisite", $"{row.Name} ({phase} {percent}%): {detail}");
+            Show(detail);
+        }
 
-        public void Log(LogLevel level, string message) => Show(message);
+        public void Log(LogLevel level, string message)
+        {
+            sessionLog?.WriteEvent("prerequisite", $"{row.Name} [{level}]: {message}");
+            Show(message);
+        }
 
-        public void RawOutput(bool isError, string line) => Show(line);
+        public void RawOutput(bool isError, string line)
+        {
+            sessionLog?.WriteRaw(line);
+            Show(line);
+        }
     }
 }
 
@@ -294,6 +316,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
     private readonly IIlspycmdAcquisition? _ilspycmd;
     private readonly IGitAcquisition? _git;
     private readonly IDistroPackageAcquisition? _distroPackages;
+    private readonly IInstallerLog? _sessionLog;
     private readonly Action<Action> _post;
     private string? _repoRoot;
     private bool _gitReadyForSource;
@@ -307,7 +330,8 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         ISdkAcquisition? sdk = null,
         IIlspycmdAcquisition? ilspycmd = null,
         IGitAcquisition? git = null,
-        IDistroPackageAcquisition? distroPackages = null)
+        IDistroPackageAcquisition? distroPackages = null,
+        IInstallerLog? sessionLog = null)
     {
         _probe = probe;
         _repoRoot = repoRoot;
@@ -317,6 +341,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         _ilspycmd = ilspycmd;
         _git = git;
         _distroPackages = distroPackages;
+        _sessionLog = sessionLog;
         _post = uiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
         Rescan();
     }
@@ -362,8 +387,25 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
     public bool CanAcquireSource => RepoRootMissing && !AcquiringSource && _sourceProvider is not null
         && (_probe.Os != OsKind.Windows || _git is null || _gitReadyForSource);
 
+    public bool CanOpenLog => _sessionLog is { IsAvailable: true } && File.Exists(_sessionLog.FilePath);
+
     /// <summary>Raised with the resolved repo root once the user moves on.</summary>
     public event Action<string>? ContinueRequested;
+
+    [RelayCommand(CanExecute = nameof(CanOpenLog))]
+    private void OpenLog()
+    {
+        if (_sessionLog is not { IsAvailable: true })
+            return;
+        try
+        {
+            Process.Start(new ProcessStartInfo(_sessionLog.FilePath) { UseShellExecute = true });
+        }
+        catch (Exception)
+        {
+            // Opening the log is a convenience; ignore a failure when no viewer is registered.
+        }
+    }
 
     [RelayCommand]
     private void Continue()
@@ -381,8 +423,9 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         AcquiringSource = true;
         SourceError = null;
         SourceStatus = "Starting download...";
+        _sessionLog?.WriteEvent("source", $"Starting Optimum source acquisition for {CoreInfo.Version}");
 
-        var observer = new StatusObserver(text => _post(() => SourceStatus = text));
+        var observer = new StatusObserver(text => _post(() => SourceStatus = text), _sessionLog);
         SourceAcquisitionResult result;
         try
         {
@@ -401,12 +444,15 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
             {
                 _repoRoot = result.RepoRoot;
                 SourceStatus = "Source ready.";
+                _sessionLog?.WriteEvent("source", $"Optimum source ready at {result.RepoRoot}");
                 Rescan();
             }
             else
             {
                 SourceError = result.Message ?? "The download failed.";
                 SourceStatus = string.Empty;
+                _sessionLog?.WriteEvent("source",
+                    $"Source acquisition failed ({result.Reason}): {SourceError}");
             }
         });
     }
@@ -432,13 +478,25 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
 
         if (_repoRoot is null)
         {
+            string? cached = RepoRoot.FindCached(_probe, CoreInfo.Version);
+            if (cached is not null)
+            {
+                _repoRoot = cached;
+                _sessionLog?.WriteEvent("prerequisites", $"Discovered cached Optimum source at {cached}");
+            }
+        }
+
+        if (_repoRoot is null)
+        {
             RepoRootMissing = true;
             BlockingCount = 0;
             AttentionRows.Clear();
+            _sessionLog?.WriteEvent("prerequisites", "Optimum source missing; waiting for download.");
             if (_probe.Os == OsKind.Windows)
             {
                 PrerequisiteResult git = new PrerequisiteScanner(_probe, string.Empty).ScanGit();
                 _gitReadyForSource = git.State == PrerequisiteState.Ok;
+                _sessionLog?.WriteEvent("prerequisites", $"Git check for source download: {git.State} ({git.Label})");
                 if (git.State != PrerequisiteState.Ok)
                     AttentionRows.Add(new PrerequisiteRowViewModel(git, ActionsFor(git)));
             }
@@ -448,6 +506,8 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
             }
             OnPropertyChanged(nameof(CanAcquireSource));
             OnPropertyChanged(nameof(Summary));
+            OnPropertyChanged(nameof(CanOpenLog));
+            (OpenLogCommand as RelayCommand)?.NotifyCanExecuteChanged();
             return;
         }
 
@@ -466,6 +526,11 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
                 AttentionRows.Add(row);
         }
         BlockingCount = results.Count(r => r.BlocksBuild);
+        _sessionLog?.WriteEvent("prerequisites",
+            $"Scanned {_repoRoot}: {results.Count} checks, {BlockingCount} blocking.");
+        foreach (var result in results)
+            _sessionLog?.WriteEvent("prerequisites", $"  {result.Definition.Id}: {result.State} ({result.Label})");
+
         ReadySummary = ready.Count switch
         {
             0 => string.Empty,
@@ -474,6 +539,8 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
         };
         OnPropertyChanged(nameof(Summary));
         OnPropertyChanged(nameof(CanAcquireSource));
+        OnPropertyChanged(nameof(CanOpenLog));
+        (OpenLogCommand as RelayCommand)?.NotifyCanExecuteChanged();
     }
 
     /// <summary>
@@ -524,6 +591,7 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
                     : null,
             Post = _post,
             OnInstalled = () => _post(Rescan),
+            SessionLog = _sessionLog,
         };
     }
 
@@ -551,14 +619,23 @@ public sealed partial class PrerequisitesViewModel : ViewModelBase
     }
 
     /// <summary>Bridges the source download's progress to a single status line.</summary>
-    private sealed class StatusObserver(Action<string> onText) : IBuildObserver
+    private sealed class StatusObserver(Action<string> onText, IInstallerLog? sessionLog) : IBuildObserver
     {
-        public void Phase(ProgressPhase phase, int percent, string detail) => onText(detail);
+        public void Phase(ProgressPhase phase, int percent, string detail)
+        {
+            sessionLog?.WriteEvent("source", $"{phase} ({percent}%): {detail}");
+            onText(detail);
+        }
 
-        public void Log(LogLevel level, string message) => onText(message);
+        public void Log(LogLevel level, string message)
+        {
+            sessionLog?.WriteEvent("source", $"[{level}] {message}");
+            onText(message);
+        }
 
         public void RawOutput(bool isError, string line)
         {
+            sessionLog?.WriteRaw(line);
             string trimmed = line.Trim();
             if (trimmed.Length > 0)
                 onText(trimmed);

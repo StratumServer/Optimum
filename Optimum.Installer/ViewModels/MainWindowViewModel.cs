@@ -51,7 +51,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Action<Action> post = _services.UiPost ?? (a => Avalonia.Threading.Dispatcher.UIThread.Post(a));
         Prerequisites = new PrerequisitesViewModel(
             services.Probe, services.RepoRoot, services.SourceProvider, services.Appimagetool, post,
-            services.Sdk, services.Ilspycmd, services.Git, services.DistroPackages);
+            services.Sdk, services.Ilspycmd, services.Git, services.DistroPackages, services.SessionLog);
         Prerequisites.ContinueRequested += root =>
         {
             // Keep the user's Options choices when they step back to Prerequisites
@@ -287,6 +287,9 @@ public sealed partial class MainWindowViewModel : ViewModelBase
         Progress = progress;
         CurrentScreen = WizardScreen.Progress;
 
+        _services.SessionLog?.WriteEvent("install",
+            $"Starting build and install (repo={_repoRoot}, dest={Options.InstallDirectory}, dataPath={Options.ResolvedDataPath ?? "(default)"}, version={Options.SelectedVersion ?? "(default)"}, clean={Options.CleanInstallDirectory})");
+
         await progress.RunAsync();
     }
 
@@ -305,6 +308,7 @@ public sealed partial class MainWindowViewModel : ViewModelBase
 
     private void RestartFromPrerequisites()
     {
+        _services.SessionLog?.WriteEvent("install", "Retrying from Prerequisites.");
         _installStarted = false;
         Prerequisites.Rescan();
         Options = BuildOptions();
