@@ -107,6 +107,31 @@ public sealed class StrayRootAssemblyCleanupTests
     }
 
     [Fact]
+    public void CleanupStrayRootAssembliesDeletesStrayRootCairoWhenLibCopyExists()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "optimum-stray-tests", Guid.NewGuid().ToString("N"));
+        string libDir = Path.Combine(root, "Lib");
+        Directory.CreateDirectory(libDir);
+
+        string rootCairo = Path.Combine(root, "cairo-sharp.dll");
+        string libCairo = Path.Combine(libDir, "cairo-sharp.dll");
+        File.WriteAllText(rootCairo, "root-cairo");
+        File.WriteAllText(libCairo, "lib-cairo");
+
+        try
+        {
+            Program.CleanupStrayRootAssemblies(root);
+            Assert.False(File.Exists(rootCairo), "Root cairo-sharp.dll should be removed when Lib copy exists.");
+            Assert.True(File.Exists(libCairo), "Lib cairo-sharp.dll must remain intact.");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void ResolveUnmanagedLibraryReturnsZeroForUnknownLibrary()
     {
         string root = Path.Combine(Path.GetTempPath(), "optimum-stray-tests", Guid.NewGuid().ToString("N"));

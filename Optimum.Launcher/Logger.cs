@@ -19,6 +19,8 @@ internal static class Logger
 
     public static bool IsInitialized => _logPath is not null;
 
+    internal static string? LogPath => _logPath;
+
     /// <summary>
     /// Starts a fresh log file at {dataPath}/Logs/optimum-launcher.log for this
     /// run. Safe to call with an unwritable dataPath: logging degrades to

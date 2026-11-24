@@ -45,6 +45,41 @@ public class SplashScreenPackagingTests
     }
 
     [Fact]
+    public void WindowsPackagingScriptExcludesGameOwnedDllsAndVerifiesVanillaIntegrity()
+    {
+        string script = Read("scripts/package.ps1");
+        Assert.Contains("'VintagestoryAPI.dll'", script);
+        Assert.Contains("'VintagestoryLib.dll'", script);
+        Assert.Contains("'Vintagestory.dll'", script);
+        Assert.Contains("'cairo-sharp.dll'", script);
+        Assert.Contains("Test-StagedVanillaIntegrity", script);
+    }
+
+    [Fact]
+    public void LauncherBuildOutputOmitsGameOwnedDlls()
+    {
+        var root = FindRepositoryRoot();
+        string config = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Release";
+        string launcherOut = Path.Combine(root.FullName, "Optimum.Launcher", "bin", config, "net10.0");
+        if (!Directory.Exists(launcherOut))
+            return;
+
+        foreach (string excluded in new[]
+        {
+            "VintagestoryAPI.dll",
+            "VintagestoryLib.dll",
+            "Vintagestory.dll",
+            "cairo-sharp.dll",
+            "CairoSharp.dll",
+        })
+        {
+            Assert.False(
+                File.Exists(Path.Combine(launcherOut, excluded)),
+                $"Optimum.Launcher output must not contain {excluded}.");
+        }
+    }
+
+    [Fact]
     public void MacSplashDisablesRetinaFramebufferBeforeCreatingWindow()
     {
         string source = Read("Optimum.Launcher/PatchSplashScreen.cs");
