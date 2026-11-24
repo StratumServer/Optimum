@@ -193,4 +193,77 @@ EOF
     fi
 done
 
+# --- Optional cairo-native-shim staging on hosts without make or C compiler ---
+
+eval "$(sed -n '/^stage_cairo_native_shim()/,/^}/p' "$REPO_ROOT/scripts/package-linux.sh")"
+declare -F stage_cairo_native_shim >/dev/null
+
+SHIM_BIN_NO_CC="$TEST_ROOT/shim-bin-nocc"
+mkdir -p "$SHIM_BIN_NO_CC"
+for tool in cp ln; do
+    ln -s "$(command -v "$tool")" "$SHIM_BIN_NO_CC/$tool"
+done
+
+# 1. Missing make and C compiler: skips build gracefully and exits 0.
+(
+    REPO_MOCK="$TEST_ROOT/shim-repo-1"
+    STAGE_MOCK="$TEST_ROOT/shim-stage-1"
+    mkdir -p "$REPO_MOCK/tools/cairo-native-shim" "$STAGE_MOCK/Lib"
+    printf 'all:\n\texit 1\n' > "$REPO_MOCK/tools/cairo-native-shim/Makefile"
+    PATH="$SHIM_BIN_NO_CC" CC="" stage_cairo_native_shim "$REPO_MOCK" "$STAGE_MOCK" >"$TEST_ROOT/shim-1.out"
+    grep -Fq 'skipping optional native Cairo shim build' "$TEST_ROOT/shim-1.out"
+    [[ ! -e "$STAGE_MOCK/Lib/libcairo.so.2" ]]
+)
+
+# 2. Missing make/compiler with prebuilt libcairo.so.2: stages prebuilt binary and symlinks.
+(
+    REPO_MOCK="$TEST_ROOT/shim-repo-2"
+    STAGE_MOCK="$TEST_ROOT/shim-stage-2"
+    mkdir -p "$REPO_MOCK/tools/cairo-native-shim" "$STAGE_MOCK/Lib"
+    printf 'all:\n\texit 1\n' > "$REPO_MOCK/tools/cairo-native-shim/Makefile"
+    printf 'ELF-PREBUILT' > "$REPO_MOCK/tools/cairo-native-shim/libcairo.so.2"
+    PATH="$SHIM_BIN_NO_CC" CC="" stage_cairo_native_shim "$REPO_MOCK" "$STAGE_MOCK"
+    [[ -f "$STAGE_MOCK/Lib/libcairo.so.2" ]]
+    [[ "$(readlink "$STAGE_MOCK/Lib/libcairo.so")" == "libcairo.so.2" ]]
+    [[ "$(readlink "$STAGE_MOCK/Lib/libcairo.so.2.11804.4")" == "libcairo.so.2" ]]
+)
+
+# 3. make and gcc available: invokes make with resolved CC and stages built shim.
+(
+    SHIM_BIN_CC="$TEST_ROOT/shim-bin-cc"
+    REPO_MOCK="$TEST_ROOT/shim-repo-3"
+    STAGE_MOCK="$TEST_ROOT/shim-stage-3"
+    mkdir -p "$SHIM_BIN_CC" "$REPO_MOCK/tools/cairo-native-shim" "$STAGE_MOCK/Lib"
+    for tool in cp ln cat bash; do
+        ln -s "$(command -v "$tool")" "$SHIM_BIN_CC/$tool"
+    done
+    printf '#!/usr/bin/env bash\nexit 0\n' > "$SHIM_BIN_CC/gcc"
+    cat > "$SHIM_BIN_CC/make" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+dir=""
+cc_arg=""
+for arg in "$@"; do
+    case "$arg" in
+        -C) dir="NEXT" ;;
+        CC=*) cc_arg="${arg#CC=}" ;;
+        *)
+            if [[ "$dir" == "NEXT" ]]; then
+                dir="$arg"
+            fi
+            ;;
+    esac
+done
+printf '%s\n' "$cc_arg" > "$dir/invoked_cc"
+printf 'ELF-BUILT' > "$dir/libcairo.so.2"
+EOF
+    chmod +x "$SHIM_BIN_CC/gcc" "$SHIM_BIN_CC/make"
+    printf 'all:\n\techo built\n' > "$REPO_MOCK/tools/cairo-native-shim/Makefile"
+    PATH="$SHIM_BIN_CC" CC="" stage_cairo_native_shim "$REPO_MOCK" "$STAGE_MOCK"
+    [[ "$(cat "$REPO_MOCK/tools/cairo-native-shim/invoked_cc")" == "gcc" ]]
+    [[ -f "$STAGE_MOCK/Lib/libcairo.so.2" ]]
+    [[ "$(readlink "$STAGE_MOCK/Lib/libcairo.so")" == "libcairo.so.2" ]]
+    [[ "$(readlink "$STAGE_MOCK/Lib/libcairo.so.2.11804.4")" == "libcairo.so.2" ]]
+)
+
 echo 'Linux installer staging test passed.'
