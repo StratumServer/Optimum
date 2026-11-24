@@ -1,0 +1,244 @@
+--- a/VSEssentials/Vintagestory/ServerMods/GenRockStrataNew.cs
++++ b/VSEssentials/Vintagestory/ServerMods/GenRockStrataNew.cs
+@@ -1,5 +1,6 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+@@ -8,6 +9,38 @@
+ 
+ namespace Vintagestory.ServerMods;
+ 
++internal sealed class OptimumRockStrataWorkspace
++{
++	public readonly float[] RockGroupMaxThickness = new float[4];
++
++	public readonly int[] RockGroupCurrentThickness = new int[4];
++
++	public IMapChunk MapChunk;
++
++	public ushort[] HeightMap;
++
++	public int Rdx;
++
++	public int Rdz;
++
++	public LerpedWeightedIndex2DMap Map;
++
++	public float LerpMapInv;
++
++	public float ChunkInRegionX;
++
++	public float ChunkInRegionZ;
++
++	public GeologicProvinces Provinces;
++
++	public float[] ProvinceWeights;
++
++	public static ThreadLocal<OptimumRockStrataWorkspace> CreateThreadLocal()
++	{
++		return new ThreadLocal<OptimumRockStrataWorkspace>(() => new OptimumRockStrataWorkspace());
++	}
++}
++
+ public class GenRockStrataNew : ModStdWorldGen
+ {
+ 	private ICoreServerAPI api;
+@@ -52,6 +85,25 @@
+ 
+ 	private GeologicProvinces provinces = NoiseGeoProvince.provinces;
+ 
++	private ThreadLocal<OptimumRockStrataWorkspace> optimumWorkspaces;
++
++	private Lock optimumProvinceMapLock;
++
++	private OptimumRockStrataWorkspace GetOptimumWorkspace()
++	{
++		ThreadLocal<OptimumRockStrataWorkspace> tls = Volatile.Read(ref optimumWorkspaces);
++		if (tls == null)
++		{
++			ThreadLocal<OptimumRockStrataWorkspace> created = OptimumRockStrataWorkspace.CreateThreadLocal();
++			tls = Interlocked.CompareExchange(ref optimumWorkspaces, created, null) ?? created;
++			if (!ReferenceEquals(tls, created))
++			{
++				created.Dispose();
++			}
++		}
++		return tls.Value;
++	}
++
+ 	public override bool ShouldLoad(EnumAppSide side)
+ 	{
+ 		return side == EnumAppSide.Server;
+@@ -100,12 +152,7 @@
+ 			double[] array3 = (double[])obj.Thresholds.Clone();
+ 			if (array.Length != array2.Length || array.Length != array3.Length)
+ 			{
+-				global::_003C_003Ey__InlineArray4<object> buffer = default(global::_003C_003Ey__InlineArray4<object>);
+-				buffer[0] = j;
+-				buffer[1] = array.Length;
+-				buffer[2] = array2.Length;
+-				buffer[3] = array3.Length;
+-				throw new ArgumentException(string.Format("Bug in rockstrata.json, variant {0}: The list of amplitudes ({1} elements), frequencies ({2} elements) and thresholds ({3} elements) are not of the same length!", (ReadOnlySpan<object?>)buffer));
++				throw new ArgumentException(string.Format("Bug in rockstrata.json, variant {0}: The list of amplitudes ({1} elements), frequencies ({2} elements) and thresholds ({3} elements) are not of the same length!", new object[] { j, array.Length, array2.Length, array3.Length }));
+ 			}
+ 			for (int k = 0; k < array2.Length; k++)
+ 			{
+@@ -115,6 +162,9 @@
+ 			}
+ 			strataNoises[j] = new MapLayerCustomPerlin(api.World.Seed + 23423 + j, array, array2, array3);
+ 		}
++		optimumProvinceMapLock ??= new Lock();
++		optimumWorkspaces?.Dispose();
++		optimumWorkspaces = OptimumRockStrataWorkspace.CreateThreadLocal();
+ 		api.Logger.VerboseDebug("Initialised GenRockStrata");
+ 	}
+ 
+@@ -150,37 +200,64 @@
+ 
+ 	public void preLoad(IServerChunk[] chunks, int chunkX, int chunkZ)
+ 	{
+-		mapChunk = chunks[0].MapChunk;
+-		heightMap = mapChunk.WorldGenTerrainHeightMap;
+-		rdx = chunkX % regionChunkSize;
+-		rdz = chunkZ % regionChunkSize;
+-		map = GetOrLoadLerpedProvinceMap(chunks[0].MapChunk, chunkX, chunkZ);
+-		lerpMapInv = 1f / (float)TerraGenConfig.geoProvMapScale;
+-		chunkInRegionX = (float)(chunkX % regionChunkSize) * lerpMapInv * 32f;
+-		chunkInRegionZ = (float)(chunkZ % regionChunkSize) * lerpMapInv * 32f;
+-		provinces = NoiseGeoProvince.provinces;
++		OptimumRockStrataWorkspace workspace = GetOptimumWorkspace();
++		workspace.MapChunk = chunks[0].MapChunk;
++		workspace.HeightMap = workspace.MapChunk.WorldGenTerrainHeightMap;
++		workspace.Rdx = chunkX % regionChunkSize;
++		workspace.Rdz = chunkZ % regionChunkSize;
++		workspace.Map = GetOrLoadLerpedProvinceMap(chunks[0].MapChunk, chunkX, chunkZ);
++		workspace.LerpMapInv = 1f / (float)TerraGenConfig.geoProvMapScale;
++		workspace.ChunkInRegionX = (float)(chunkX % regionChunkSize) * workspace.LerpMapInv * 32f;
++		workspace.ChunkInRegionZ = (float)(chunkZ % regionChunkSize) * workspace.LerpMapInv * 32f;
++		workspace.Provinces = NoiseGeoProvince.provinces;
++		this.mapChunk = workspace.MapChunk;
++		this.heightMap = workspace.HeightMap;
++		this.rdx = workspace.Rdx;
++		this.rdz = workspace.Rdz;
++		this.map = workspace.Map;
++		this.lerpMapInv = workspace.LerpMapInv;
++		this.chunkInRegionX = workspace.ChunkInRegionX;
++		this.chunkInRegionZ = workspace.ChunkInRegionZ;
++		this.provinces = workspace.Provinces;
+ 	}
+ 
+ 	public void genBlockColumn(IServerChunk[] chunks, int chunkX, int chunkZ, int lx, int lz)
+ 	{
+-		ushort num = heightMap[lz * 32 + lx];
++		OptimumRockStrataWorkspace workspace = GetOptimumWorkspace();
++		IMapChunk localMapChunk = workspace.MapChunk ?? mapChunk;
++		ushort[] localHeightMap = workspace.HeightMap ?? heightMap;
++		int localRdx = workspace.MapChunk != null ? workspace.Rdx : rdx;
++		int localRdz = workspace.MapChunk != null ? workspace.Rdz : rdz;
++		LerpedWeightedIndex2DMap localMap = workspace.Map ?? map;
++		float localLerpMapInv = workspace.MapChunk != null ? workspace.LerpMapInv : lerpMapInv;
++		float localChunkInRegionX = workspace.MapChunk != null ? workspace.ChunkInRegionX : chunkInRegionX;
++		float localChunkInRegionZ = workspace.MapChunk != null ? workspace.ChunkInRegionZ : chunkInRegionZ;
++		GeologicProvinces localProvinces = workspace.Provinces ?? provinces;
++		float[] localRockGroupMaxThickness = workspace.RockGroupMaxThickness;
++		int[] localRockGroupCurrentThickness = workspace.RockGroupCurrentThickness;
++		ushort num = localHeightMap[lz * 32 + lx];
+ 		int num2 = 1;
+ 		int num3 = num;
+ 		int num4 = rockBlockId;
+-		rockGroupMaxThickness[0] = (rockGroupMaxThickness[1] = (rockGroupMaxThickness[2] = (rockGroupMaxThickness[3] = 0f)));
+-		rockGroupCurrentThickness[0] = (rockGroupCurrentThickness[1] = (rockGroupCurrentThickness[2] = (rockGroupCurrentThickness[3] = 0)));
+-		float[] array = new float[provinces.Variants.Length];
+-		map.WeightsAt(chunkInRegionX + (float)lx * lerpMapInv, chunkInRegionZ + (float)lz * lerpMapInv, array);
++		localRockGroupMaxThickness[0] = (localRockGroupMaxThickness[1] = (localRockGroupMaxThickness[2] = (localRockGroupMaxThickness[3] = 0f)));
++		localRockGroupCurrentThickness[0] = (localRockGroupCurrentThickness[1] = (localRockGroupCurrentThickness[2] = (localRockGroupCurrentThickness[3] = 0)));
++		int variantCount = localProvinces.Variants.Length;
++		float[] array = workspace.ProvinceWeights;
++		if (array == null || array.Length != variantCount)
++		{
++			array = (workspace.ProvinceWeights = new float[variantCount]);
++		}
++		localMap.WeightsAt(localChunkInRegionX + (float)lx * localLerpMapInv, localChunkInRegionZ + (float)lz * localLerpMapInv, array);
+ 		for (int i = 0; i < array.Length; i++)
+ 		{
+ 			float num5 = array[i];
+ 			if (num5 != 0f)
+ 			{
+-				GeologicProvinceRockStrata[] rockStrataIndexed = provinces.Variants[i].RockStrataIndexed;
+-				rockGroupMaxThickness[0] += rockStrataIndexed[0].ScaledMaxThickness * num5;
+-				rockGroupMaxThickness[1] += rockStrataIndexed[1].ScaledMaxThickness * num5;
+-				rockGroupMaxThickness[2] += rockStrataIndexed[2].ScaledMaxThickness * num5;
+-				rockGroupMaxThickness[3] += rockStrataIndexed[3].ScaledMaxThickness * num5;
++				GeologicProvinceRockStrata[] rockStrataIndexed = localProvinces.Variants[i].RockStrataIndexed;
++				localRockGroupMaxThickness[0] += rockStrataIndexed[0].ScaledMaxThickness * num5;
++				localRockGroupMaxThickness[1] += rockStrataIndexed[1].ScaledMaxThickness * num5;
++				localRockGroupMaxThickness[2] += rockStrataIndexed[2].ScaledMaxThickness * num5;
++				localRockGroupMaxThickness[3] += rockStrataIndexed[3].ScaledMaxThickness * num5;
+ 			}
+ 		}
+ 		float num6 = (float)distort2dx.Noise(chunkX * 32 + lx, chunkZ * 32 + lz);
+@@ -195,17 +272,17 @@
+ 			if (--num11 <= 0f)
+ 			{
+ 				num9++;
+-				if (num9 >= strata.Variants.Length || num9 >= mapChunk.MapRegion.RockStrata.Length)
++				if (num9 >= strata.Variants.Length || num9 >= localMapChunk.MapRegion.RockStrata.Length)
+ 				{
+ 					break;
+ 				}
+ 				rockStratum = strata.Variants[num9];
+-				IntDataMap2D intDataMap2D = mapChunk.MapRegion.RockStrata[num9];
++				IntDataMap2D intDataMap2D = localMapChunk.MapRegion.RockStrata[num9];
+ 				float num12 = (float)intDataMap2D.InnerSize / (float)regionChunkSize;
+ 				num10 = (int)rockStratum.RockGroup;
+-				float val = rockGroupMaxThickness[num10] * num8 - (float)rockGroupCurrentThickness[num10];
+-				float val2 = (float)rdx * num12 + num12 * ((float)lx + num6) / 32f;
+-				float val3 = (float)rdz * num12 + num12 * ((float)lz + num7) / 32f;
++				float val = localRockGroupMaxThickness[num10] * num8 - (float)localRockGroupCurrentThickness[num10];
++				float val2 = (float)localRdx * num12 + num12 * ((float)lx + num6) / 32f;
++				float val3 = (float)localRdz * num12 + num12 * ((float)lz + num7) / 32f;
+ 				val2 = Math.Max(val2, -1.499f);
+ 				val3 = Math.Max(val3, -1.499f);
+ 				num11 = Math.Min(val, intDataMap2D.GetIntLerpedCorrectly(val2, val3));
+@@ -221,7 +298,7 @@
+ 				if (rockStratum.BlockId == num4)
+ 				{
+ 					int num13 = (int)num11;
+-					rockGroupCurrentThickness[num10] += num13;
++					localRockGroupCurrentThickness[num10] += num13;
+ 					if (rockStratum.GenDir == EnumStratumGenDir.BottomUp)
+ 					{
+ 						num2 += num13;
+@@ -233,7 +310,7 @@
+ 					continue;
+ 				}
+ 			}
+-			rockGroupCurrentThickness[num10]++;
++			localRockGroupCurrentThickness[num10]++;
+ 			if (rockStratum.GenDir == EnumStratumGenDir.BottomUp)
+ 			{
+ 				int num14 = num2 / 32;
+@@ -264,12 +341,16 @@
+ 	private LerpedWeightedIndex2DMap GetOrLoadLerpedProvinceMap(IMapChunk mapchunk, int chunkX, int chunkZ)
+ 	{
+ 		int key = chunkZ / regionChunkSize * regionMapSize + chunkX / regionChunkSize;
+-		ProvinceMapByRegion.TryGetValue(key, out var value);
+-		if (value != null)
++		Lock lck = LazyInitializer.EnsureInitialized(ref optimumProvinceMapLock);
++		lock (lck)
+ 		{
+-			return value;
++			ProvinceMapByRegion.TryGetValue(key, out var value);
++			if (value != null)
++			{
++				return value;
++			}
++			return CreateLerpedProvinceMap(mapchunk.MapRegion.GeologicProvinceMap, chunkX / regionChunkSize, chunkZ / regionChunkSize);
+ 		}
+-		return CreateLerpedProvinceMap(mapchunk.MapRegion.GeologicProvinceMap, chunkX / regionChunkSize, chunkZ / regionChunkSize);
+ 	}
+ 
+ 	private LerpedWeightedIndex2DMap CreateLerpedProvinceMap(IntDataMap2D geoMap, int regionX, int regionZ)

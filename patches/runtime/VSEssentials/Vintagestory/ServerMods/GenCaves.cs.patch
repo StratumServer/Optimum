@@ -1,6 +1,103 @@
 --- a/VSEssentials/Vintagestory/ServerMods/GenCaves.cs
 +++ b/VSEssentials/Vintagestory/ServerMods/GenCaves.cs
-@@ -373,6 +373,8 @@
+@@ -1,5 +1,6 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+@@ -11,6 +12,8 @@ public class GenCaves : GenPartial
+ {
+ 	internal LCGRandom caveRand;
+ 
++	private ThreadLocal<LCGRandom> caveRandThreadLocal;
++
+ 	private IWorldGenBlockAccessor worldgenBlockAccessor;
+ 
+ 	private NormalizedSimplexNoise basaltNoise;
+@@ -46,7 +49,11 @@ public class GenCaves : GenPartial
+ 	public override void initWorldGen()
+ 	{
+ 		base.initWorldGen();
+-		caveRand = new LCGRandom(api.WorldManager.Seed + 123128);
++		optimumUseThreadLocalChunkRandOnly = true;
++		int seed = api.WorldManager.Seed + 123128;
++		caveRand = new LCGRandom(seed);
++		caveRandThreadLocal?.Dispose();
++		caveRandThreadLocal = new ThreadLocal<LCGRandom>(() => new LCGRandom(seed));
+ 		basaltNoise = NormalizedSimplexNoise.FromDefaultOctaves(2, 0.2857142984867096, 0.8999999761581421, api.World.Seed + 12);
+ 		heightvarNoise = NormalizedSimplexNoise.FromDefaultOctaves(3, 0.05000000074505806, 0.8999999761581421, api.World.Seed + 12);
+ 		regionsize = api.World.BlockAccessor.RegionSize;
+@@ -106,7 +113,7 @@ public class GenCaves : GenPartial
+ 				{
+ 					for (int num5 = -chunkRange; num5 <= chunkRange; num5++)
+ 					{
+-						chunkRand.InitPositionSeed(num3 + n, num4 + num5);
++						(chunkRandThreadLocal?.Value ?? chunkRand).InitPositionSeed(num3 + n, num4 + num5);
+ 						GeneratePartial(chunkColumn2, num3, num4, n, num5);
+ 					}
+ 				}
+@@ -164,7 +171,8 @@ public class GenCaves : GenPartial
+ 			return;
+ 		}
+ 		worldgenBlockAccessor.BeginColumn();
+-		LCGRandom lCGRandom = chunkRand;
++		LCGRandom lCGRandom = chunkRandThreadLocal?.Value ?? chunkRand;
++		LCGRandom localCaveRand = caveRandThreadLocal?.Value ?? caveRand;
+ 		int num = (((double)lCGRandom.NextInt(100) < TerraGenConfig.CavesPerChunkColumn * 100.0) ? 1 : 0);
+ 		int max = 1024 * (worldheight - 20);
+ 		while (num-- > 0)
+@@ -199,15 +207,15 @@ public class GenCaves : GenPartial
+ 			float curviness = ((num2 == 0) ? 0.035f : ((num6 < 30) ? 0.5f : 0.1f));
+ 			int num7 = chunkRange * 32 - 16;
+ 			num7 -= lCGRandom.NextInt(num7 / 4);
+-			caveRand.SetWorldSeed(lCGRandom.NextInt(10000000));
+-			caveRand.InitPositionSeed(chunkX + cdx, chunkZ + cdz);
++			localCaveRand.SetWorldSeed(lCGRandom.NextInt(10000000));
++			localCaveRand.InitPositionSeed(chunkX + cdx, chunkZ + cdz);
+ 			CarveTunnel(chunks, chunkX, chunkZ, num3, num5, num4, horAngle, vertAngle, horizontalSize, verticalSize, 0, num7, 0, extraBranchy, curviness, largeNearLavaLayer);
+ 		}
+ 	}
+ 
+ 	private void CarveTunnel(IServerChunk[] chunks, int chunkX, int chunkZ, double posX, double posY, double posZ, float horAngle, float vertAngle, float horizontalSize, float verticalSize, int currentIteration, int maxIterations, int branchLevel, bool extraBranchy = false, float curviness = 0.1f, bool largeNearLavaLayer = false)
+ 	{
+-		LCGRandom lCGRandom = caveRand;
++		LCGRandom lCGRandom = caveRandThreadLocal?.Value ?? caveRand;
+ 		ushort[] worldGenTerrainHeightMap = chunks[0].MapChunk.WorldGenTerrainHeightMap;
+ 		ushort[] rainHeightMap = chunks[0].MapChunk.RainHeightMap;
+ 		float num = 0f;
+@@ -334,6 +342,7 @@ public class GenCaves : GenPartial
+ 
+ 	private void CarveShaft(IServerChunk[] chunks, int chunkX, int chunkZ, double posX, double posY, double posZ, float horAngle, float vertAngle, float horizontalSize, float verticalSize, int caveCurrentIteration, int maxIterations, int branchLevel)
+ 	{
++		LCGRandom localCaveRand = caveRandThreadLocal?.Value ?? caveRand;
+ 		float num = 0f;
+ 		ushort[] worldGenTerrainHeightMap = chunks[0].MapChunk.WorldGenTerrainHeightMap;
+ 		ushort[] rainHeightMap = chunks[0].MapChunk.RainHeightMap;
+@@ -353,17 +362,17 @@ public class GenCaves : GenPartial
+ 			posY += (double)GameMath.Clamp(val, 0f - num5, num5);
+ 			posZ += (double)(GameMath.FastSin(horAngle) * num6);
+ 			vertAngle += 0.1f * num;
+-			num = 0.9f * num + (caveRand.NextFloat() - caveRand.NextFloat()) * caveRand.NextFloat() / 3f;
++			num = 0.9f * num + (localCaveRand.NextFloat() - localCaveRand.NextFloat()) * localCaveRand.NextFloat() / 3f;
+ 			if (maxIterations - num2 < 10)
+ 			{
+-				int num7 = 3 + caveRand.NextInt(4);
++				int num7 = 3 + localCaveRand.NextInt(4);
+ 				for (int i = 0; i < num7; i++)
+ 				{
+-					CarveTunnel(chunks, chunkX, chunkZ, posX, posY, posZ, caveRand.NextFloat() * ((float)Math.PI * 2f), (caveRand.NextFloat() - 0.5f) * 0.25f, horizontalSize + 1f, verticalSize, caveCurrentIteration, maxIterations, 1);
++					CarveTunnel(chunks, chunkX, chunkZ, posX, posY, posZ, localCaveRand.NextFloat() * ((float)Math.PI * 2f), (localCaveRand.NextFloat() - 0.5f) * 0.25f, horizontalSize + 1f, verticalSize, caveCurrentIteration, maxIterations, 1);
+ 				}
+ 				break;
+ 			}
+-			if ((caveRand.NextInt(5) != 0 || !(num4 >= 2f)) && !(posX <= (double)((0f - num4) * 2f)) && !(posX >= (double)(32f + num4 * 2f)) && !(posZ <= (double)((0f - num4) * 2f)) && !(posZ >= (double)(32f + num4 * 2f)))
++			if ((localCaveRand.NextInt(5) != 0 || !(num4 >= 2f)) && !(posX <= (double)((0f - num4) * 2f)) && !(posX >= (double)(32f + num4 * 2f)) && !(posZ <= (double)((0f - num4) * 2f)) && !(posZ >= (double)(32f + num4 * 2f)))
+ 			{
+ 				SetBlocks(chunks, num4, num5, posX, posY, posZ, worldGenTerrainHeightMap, rainHeightMap, chunkX, chunkZ, genHotSpring: false);
+ 			}
+@@ -373,6 +382,8 @@ public class GenCaves : GenPartial
  	private bool SetBlocks(IServerChunk[] chunks, float horRadius, float vertRadius, double centerX, double centerY, double centerZ, ushort[] terrainheightmap, ushort[] rainheightmap, int chunkX, int chunkZ, bool genHotSpring)
  	{
  		IMapChunk mapChunk = chunks[0].MapChunk;
@@ -9,7 +106,7 @@
  		horRadius++;
  		vertRadius += 2f;
  		int num = (int)GameMath.Clamp(centerX - (double)horRadius, 0.0, 31.0);
-@@ -384,22 +386,31 @@
+@@ -384,22 +395,31 @@ public class GenCaves : GenPartial
  		double num7 = horRadius * horRadius;
  		double num8 = vertRadius * vertRadius;
  		double num9 = GameMath.Clamp((double)vertRadius / 4.0, 0.0, 0.1);
@@ -48,7 +145,7 @@
  						{
  							return false;
  						}
-@@ -433,35 +444,49 @@
+@@ -433,35 +453,49 @@ public class GenCaves : GenPartial
  			mapChunk.SetModdata("hotspringlocations", dictionary);
  		}
  		int num18 = geologicActivity * 16 / 128;
@@ -111,7 +208,7 @@
  							}
  							else
  							{
-@@ -476,7 +501,9 @@
+@@ -476,7 +510,9 @@ public class GenCaves : GenPartial
  								}
  								if (num21 <= num18)
  								{

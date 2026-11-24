@@ -71,6 +71,10 @@ public static class ModPatcher
                 "Vintagestory.GameContent.OptimumStatusModSystem",
                 "Vintagestory.Essentials.OptimumColumnProbeResult",
                 "Vintagestory.GameContent.SelectionBoxRayBounds",
+                "Vintagestory.ServerMods.OptimumGenTerraTempData",
+                "Vintagestory.ServerMods.OptimumGenTerraWorkspace",
+                "Vintagestory.ServerMods.OptimumRockStrataWorkspace",
+                "Vintagestory.ServerMods.OptimumBlockLayerWorkspace",
             ],
             Members: new()
             {
@@ -208,6 +212,35 @@ public static class ModPatcher
                     "GetWeatherSimLock",
                     "OnMapRegionUnloaded",
                 ],
+                ["Vintagestory.ServerMods.GenTerra"] =
+                [
+                    "optimumWorkspaces",
+                    "optimumTempDataThreadLocal",
+                    "optimumLandformLock",
+                    "optimumLandformMapLock",
+                    "GetOptimumWorkspace",
+                    "GetOptimumTempDataThreadLocal",
+                ],
+                ["Vintagestory.ServerMods.GenRockStrataNew"] =
+                [
+                    "optimumWorkspaces",
+                    "optimumProvinceMapLock",
+                    "GetOptimumWorkspace",
+                ],
+                ["Vintagestory.ServerMods.GenPartial"] =
+                [
+                    "chunkRandThreadLocal",
+                    "optimumUseThreadLocalChunkRandOnly",
+                ],
+                ["Vintagestory.ServerMods.GenCaves"] =
+                [
+                    "caveRandThreadLocal",
+                ],
+                ["Vintagestory.ServerMods.GenBlockLayers"] =
+                [
+                    "optimumWorkspaces",
+                    "GetOptimumWorkspace",
+                ],
             },
             Interfaces: new()
             {
@@ -272,7 +305,27 @@ public static class ModPatcher
                 new("Vintagestory.ServerMods.ForestFloorSystem", "ClearOutline", 0),
                 new("Vintagestory.ServerMods.ForestFloorSystem", "CreateForestFloor", 5),
                 new("Vintagestory.ServerMods.ForestFloorSystem", "GenPatches", 5),
+                new("Vintagestory.ServerMods.GenTerra", "initWorldGen", 0),
+                new("Vintagestory.ServerMods.GenTerra", "OnChunkColumnGen", 1),
+                new("Vintagestory.ServerMods.GenTerra", "generate", 4),
+                new("Vintagestory.ServerMods.GenTerra", "GetOrLoadLerpedLandformMap", 3),
+                new("Vintagestory.ServerMods.GenRockStrataNew", "initWorldGen", 0),
+                new("Vintagestory.ServerMods.GenRockStrataNew", "preLoad", 3),
+                new("Vintagestory.ServerMods.GenRockStrataNew", "genBlockColumn", 5),
+                new("Vintagestory.ServerMods.GenRockStrataNew", "GetOrLoadLerpedProvinceMap", 3),
+                new("Vintagestory.ServerMods.GenPartial", "initWorldGen", 0),
+                new("Vintagestory.ServerMods.GenPartial", "GenChunkColumn", 1),
+                new("Vintagestory.ServerMods.GenCaves", "initWorldGen", 0),
+                new("Vintagestory.ServerMods.GenCaves", "CmdCaveGenTest", 1),
+                new("Vintagestory.ServerMods.GenCaves", "GeneratePartial", 5),
+                new("Vintagestory.ServerMods.GenCaves", "CarveTunnel", 16),
+                new("Vintagestory.ServerMods.GenCaves", "CarveShaft", 13),
                 new("Vintagestory.ServerMods.GenCaves", "SetBlocks", 11),
+                new("Vintagestory.ServerMods.GenBlockLayers", "InitWorldGen", 0),
+                new("Vintagestory.ServerMods.GenBlockLayers", "OnChunkColumnGeneration", 1),
+                new("Vintagestory.ServerMods.GenBlockLayers", "PutLayers", 11),
+                new("Vintagestory.ServerMods.GenBlockLayers", "PlaceTallGrass", 9),
+                new("Vintagestory.ServerMods.GenBlockLayers", "LoadBlockLayers", 9),
                 new("Vintagestory.ServerMods.NoObf.BlockPatch", "Generate", 7),
                 new("Vintagestory.ServerMods.LerpedWeightedIndex2DMap", "WeightsAt", 3),
                 new("Vintagestory.ServerMods.NoObf.RegistryObjectType", "solveByType", 3),

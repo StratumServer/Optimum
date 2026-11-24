@@ -1,0 +1,220 @@
+--- a/VSEssentials/Vintagestory/ServerMods/GenBlockLayers.cs
++++ b/VSEssentials/Vintagestory/ServerMods/GenBlockLayers.cs
+@@ -1,5 +1,6 @@
+ using System;
+ using System.Collections.Generic;
++using System.Threading;
+ using Vintagestory.API.Common;
+ using Vintagestory.API.Datastructures;
+ using Vintagestory.API.MathTools;
+@@ -7,6 +8,27 @@
+ 
+ namespace Vintagestory.ServerMods;
+ 
++internal sealed class OptimumBlockLayerWorkspace
++{
++	public readonly List<int> BlockLayersIds = new List<int>();
++
++	public readonly LCGRandom Rnd;
++
++	public readonly int[] LayersUnderWaterTmp = new int[1];
++
++	public int[] LayersUnderWater = Array.Empty<int>();
++
++	public OptimumBlockLayerWorkspace(long seed)
++	{
++		Rnd = new LCGRandom(seed);
++	}
++
++	public static ThreadLocal<OptimumBlockLayerWorkspace> CreateThreadLocal(long seed)
++	{
++		return new ThreadLocal<OptimumBlockLayerWorkspace>(() => new OptimumBlockLayerWorkspace(seed));
++	}
++}
++
+ public class GenBlockLayers : ModStdWorldGen
+ {
+ 	private ICoreServerAPI api;
+@@ -33,6 +55,24 @@
+ 
+ 	public SimplexNoise distort2dz;
+ 
++	private ThreadLocal<OptimumBlockLayerWorkspace> optimumWorkspaces;
++
++	private OptimumBlockLayerWorkspace GetOptimumWorkspace()
++	{
++		ThreadLocal<OptimumBlockLayerWorkspace> tls = Volatile.Read(ref optimumWorkspaces);
++		if (tls == null)
++		{
++			long seed = api?.WorldManager?.Seed ?? 0;
++			ThreadLocal<OptimumBlockLayerWorkspace> created = OptimumBlockLayerWorkspace.CreateThreadLocal(seed);
++			tls = Interlocked.CompareExchange(ref optimumWorkspaces, created, null) ?? created;
++			if (!ReferenceEquals(tls, created))
++			{
++				created.Dispose();
++			}
++		}
++		return tls.Value;
++	}
++
+ 	public override bool ShouldLoad(EnumAppSide side)
+ 	{
+ 		return side == EnumAppSide.Server;
+@@ -65,9 +105,13 @@
+ 		LoadGlobalConfig(api);
+ 		api.ObjectCache.Remove(BlockLayerConfig.cacheKey);
+ 		blockLayerConfig = BlockLayerConfig.GetInstance(api);
+-		rnd = new LCGRandom(api.WorldManager.Seed);
+-		grassDensity = new ClampedSimplexNoise(new double[1] { 4.0 }, new double[1] { 0.5 }, rnd.NextInt());
+-		grassHeight = new ClampedSimplexNoise(new double[1] { 1.5 }, new double[1] { 0.5 }, rnd.NextInt());
++		long seed = api.WorldManager.Seed;
++		rnd = new LCGRandom(seed);
++		LCGRandom initRandom = new LCGRandom(seed);
++		grassDensity = new ClampedSimplexNoise(new double[1] { 4.0 }, new double[1] { 0.5 }, initRandom.NextInt());
++		grassHeight = new ClampedSimplexNoise(new double[1] { 1.5 }, new double[1] { 0.5 }, initRandom.NextInt());
++		optimumWorkspaces?.Dispose();
++		optimumWorkspaces = OptimumBlockLayerWorkspace.CreateThreadLocal(seed);
+ 		mapheight = api.WorldManager.MapSizeY;
+ 		boilingWaterBlockId = gcfg.boilingWaterBlockId;
+ 	}
+@@ -77,7 +121,7 @@
+ 		IServerChunk[] chunks = request.Chunks;
+ 		int chunkX = request.ChunkX;
+ 		int chunkZ = request.ChunkZ;
+-		rnd.InitPositionSeed(chunkX, chunkZ);
++		GetOptimumWorkspace().Rnd.InitPositionSeed(chunkX, chunkZ);
+ 		IntDataMap2D forestMap = chunks[0].MapChunk.MapRegion.ForestMap;
+ 		IntDataMap2D climateMap = chunks[0].MapChunk.MapRegion.ClimateMap;
+ 		IntDataMap2D beachMap = chunks[0].MapChunk.MapRegion.BeachMap;
+@@ -192,6 +236,9 @@
+ 
+ 	private int PutLayers(double posRand, int lx, int lz, int posyoffs, BlockPos pos, IServerChunk[] chunks, float rainRel, float temp, int unscaledTemp, ushort[] heightMap, int biome)
+ 	{
++		OptimumBlockLayerWorkspace workspace = GetOptimumWorkspace();
++		List<int> blockLayersIds = workspace.BlockLayersIds;
++		int[] localLayersUnderWater = workspace.LayersUnderWater;
+ 		int num = 0;
+ 		int num2 = 0;
+ 		bool flag = false;
+@@ -236,18 +283,19 @@
+ 						break;
+ 					}
+ 					LoadBlockLayers(posRand, rainRel, temp, unscaledTemp, y + posyoffs, pos, num5, isOcean, biome);
++					localLayersUnderWater = workspace.LayersUnderWater;
+ 					flag3 = false;
+ 					if (!flag)
+ 					{
+ 						heightMap[lz * 32 + lx] = (ushort)(pos.Y + 1);
+ 					}
+ 				}
+-				if (num >= BlockLayersIds.Count || (flag && num2 >= layersUnderWater.Length))
++				if (num >= blockLayersIds.Count || (flag && num2 >= localLayersUnderWater.Length))
+ 				{
+ 					return pos.Y;
+ 				}
+ 				IChunkBlocks data = chunks[num3].Data;
+-				data.SetBlockUnsafe(index3d, flag ? layersUnderWater[num2++] : BlockLayersIds[num++]);
++				data.SetBlockUnsafe(index3d, flag ? localLayersUnderWater[num2++] : blockLayersIds[num++]);
+ 				data.SetFluid(index3d, 0);
+ 			}
+ 			else if ((num > 0 && temp > -18f) || num2 > 0)
+@@ -288,14 +336,15 @@
+ 
+ 	public void PlaceTallGrass(int x, int posY, int z, IServerChunk[] chunks, float rainRel, float tempRel, float temp, float forestRel, int biome)
+ 	{
+-		double num = (double)blockLayerConfig.Tallgrass.RndWeight * rnd.NextDouble() + (double)blockLayerConfig.Tallgrass.PerlinWeight * grassDensity.Noise(x, z, -0.5);
++		LCGRandom localRnd = GetOptimumWorkspace().Rnd;
++		double num = (double)blockLayerConfig.Tallgrass.RndWeight * localRnd.NextDouble() + (double)blockLayerConfig.Tallgrass.PerlinWeight * grassDensity.Noise(x, z, -0.5);
+ 		double num2 = Math.Max(0.0, (double)(rainRel * tempRel) - 0.25);
+ 		if (num <= GameMath.Clamp((double)forestRel - num2, 0.05, 0.99) || posY >= mapheight - 1 || posY < 1)
+ 		{
+ 			return;
+ 		}
+ 		int index = chunks[posY / 32].Data[(32 * (posY % 32) + z) * 32 + x];
+-		if (api.World.Blocks[index].Fertility <= rnd.NextInt(100))
++		if (api.World.Blocks[index].Fertility <= localRnd.NextInt(100))
+ 		{
+ 			return;
+ 		}
+@@ -303,7 +352,7 @@
+ 		{
+ 			TallGrassBlockCodeByBiome[] blockCodeByBiome = blockLayerConfig.Tallgrass.BlockCodeByBiome;
+ 			double num3 = Math.Max(0.0, grassHeight.Noise(x, z) * (double)blockCodeByBiome.Length - 1.0);
+-			for (int i = (int)num3 + ((rnd.NextDouble() < num3) ? 1 : 0); i < blockCodeByBiome.Length; i++)
++			for (int i = (int)num3 + ((localRnd.NextDouble() < num3) ? 1 : 0); i < blockCodeByBiome.Length; i++)
+ 			{
+ 				if (blockCodeByBiome[i].Biome == -1 || blockCodeByBiome[i].Biome == biome)
+ 				{
+@@ -317,7 +366,7 @@
+ 			return;
+ 		}
+ 		double num4 = Math.Max(0.0, grassHeight.Noise(x, z) * (double)blockLayerConfig.Tallgrass.BlockCodeByMin.Length - 1.0);
+-		for (int j = (int)num4 + ((rnd.NextDouble() < num4) ? 1 : 0); j < blockLayerConfig.Tallgrass.BlockCodeByMin.Length; j++)
++		for (int j = (int)num4 + ((localRnd.NextDouble() < num4) ? 1 : 0); j < blockLayerConfig.Tallgrass.BlockCodeByMin.Length; j++)
+ 		{
+ 			TallGrassBlockCodeByMin tallGrassBlockCodeByMin = blockLayerConfig.Tallgrass.BlockCodeByMin[j];
+ 			if (forestRel <= tallGrassBlockCodeByMin.MaxForest && rainRel >= tallGrassBlockCodeByMin.MinRain && temp >= (float)tallGrassBlockCodeByMin.MinTemp)
+@@ -330,11 +379,14 @@
+ 
+ 	private void LoadBlockLayers(double posRand, float rainRel, float temperature, int unscaledTemp, int posY, BlockPos pos, int firstBlockId, bool isOcean, int biome)
+ 	{
++		OptimumBlockLayerWorkspace workspace = GetOptimumWorkspace();
++		List<int> blockLayersIds = workspace.BlockLayersIds;
++		LCGRandom localRnd = workspace.Rnd;
+ 		float posYRel = ((float)posY - (float)TerraGenConfig.seaLevel) / ((float)mapheight - (float)TerraGenConfig.seaLevel);
+ 		float fertilityRel = (float)Climate.GetFertilityFromUnscaledTemp((int)(rainRel * 255f), unscaledTemp, posYRel) / 255f;
+ 		float num = TerraGenConfig.SoilThickness(rainRel, temperature, posY - TerraGenConfig.seaLevel, 1f);
+ 		int num2 = (int)num;
+-		if (num - (float)num2 > rnd.NextFloat())
++		if (num - (float)num2 > localRnd.NextFloat())
+ 		{
+ 			num2++;
+ 		}
+@@ -342,7 +394,7 @@
+ 		{
+ 			num2 += 10;
+ 		}
+-		BlockLayersIds.Clear();
++		blockLayersIds.Clear();
+ 		for (int i = 0; i < blockLayerConfig.Blocklayers.Length; i++)
+ 		{
+ 			BlockLayer blockLayer = blockLayerConfig.Blocklayers[i];
+@@ -361,12 +413,12 @@
+ 				int blockId = blockLayer.GetBlockId(posRand, temperature, rainRel, fertilityRel, firstBlockId, pos, mapheight, biome);
+ 				if (blockId != 0)
+ 				{
+-					BlockLayersIds.Add(blockId);
++					blockLayersIds.Add(blockId);
+ 					if (blockLayer.Thickness > 1)
+ 					{
+ 						for (int j = 1; (float)j < (float)blockLayer.Thickness * (1f - num4 * num3); j++)
+ 						{
+-							BlockLayersIds.Add(blockId);
++							blockLayersIds.Add(blockId);
+ 							num3 = Math.Abs((float)posY-- / (float)mapheight - GameMath.Min((float)posY-- / (float)mapheight, blockLayer.MaxY));
+ 						}
+ 					}
+@@ -376,18 +428,18 @@
+ 					fertilityRel = (float)Climate.GetFertilityFromUnscaledTemp((int)(rainRel * 255f), unscaledTemp, posYRel) / 255f;
+ 				}
+ 			}
+-			if (BlockLayersIds.Count >= num2)
++			if (blockLayersIds.Count >= num2)
+ 			{
+ 				break;
+ 			}
+ 		}
+-		int num5 = ((!isOcean) ? blockLayerConfig.LakeBedLayer.GetSuitable(temperature, rainRel, (float)pos.Y / (float)api.WorldManager.MapSizeY, rnd, firstBlockId) : blockLayerConfig.OceanBedLayer.GetSuitable(temperature, rainRel, (float)pos.Y / (float)api.WorldManager.MapSizeY, rnd, firstBlockId));
++		int num5 = ((!isOcean) ? blockLayerConfig.LakeBedLayer.GetSuitable(temperature, rainRel, (float)pos.Y / (float)api.WorldManager.MapSizeY, localRnd, firstBlockId) : blockLayerConfig.OceanBedLayer.GetSuitable(temperature, rainRel, (float)pos.Y / (float)api.WorldManager.MapSizeY, localRnd, firstBlockId));
+ 		if (num5 == 0)
+ 		{
+-			layersUnderWater = Array.Empty<int>();
++			workspace.LayersUnderWater = Array.Empty<int>();
+ 			return;
+ 		}
+-		layersUnderWaterTmp[0] = num5;
+-		layersUnderWater = layersUnderWaterTmp;
++		workspace.LayersUnderWaterTmp[0] = num5;
++		workspace.LayersUnderWater = workspace.LayersUnderWaterTmp;
+ 	}
+ }
