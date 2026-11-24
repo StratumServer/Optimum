@@ -44,14 +44,7 @@ public static class LibStaticInitializerAllowList
         "Vintagestory.Client.NoObf.ClientSettings::<OptimumRenderScale>k__BackingField",
         "Vintagestory.Client.NoObf.ClientSettings::<OptimumFsrSharpness>k__BackingField",
 
-        // Null-checked before use (_optimumSharedIndirectCommands), or sentinels that only decide
-        // when a uniform is uploaded again, so 0 instead of -1 re-uploads at most once or matches
-        // the shader default (the _optimumLastFsr* fields).
+        // Null-checked before use (_optimumSharedIndirectCommands).
         "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumSharedIndirectCommands",
-        "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumLastFsrInputWidth",
-        "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumLastFsrInputHeight",
-        "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumLastFsrOutputWidth",
-        "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumLastFsrOutputHeight",
-        "Vintagestory.Client.NoObf.ClientPlatformWindows::_optimumLastFsrSharpness",
     };
 }
