@@ -46,6 +46,10 @@ namespace Cairo
 				// Preserve fractional glyph origins when Cairo requests LCD edging.
 				Subpixel = options.Antialias == Antialias.Subpixel
 			};
+			if (fileSource == null && SkiaFontResolver.NeedsSyntheticStyle(typeface, out bool embolden, out bool oblique)) {
+				if (embolden) font.Embolden = true;
+				if (oblique) font.SkewX = -0.25f;
+			}
 			fileSource?.ApplyLoadOptions(font, options);
 			return font;
 		}
