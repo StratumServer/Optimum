@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-index 374f827..3f8cb48 100644
+index 374f827..3c3664e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderEntities.cs
-@@ -1,74 +1,302 @@
+@@ -1,74 +1,339 @@
  using System;
  using System.Collections.Generic;
 +using System.Diagnostics;
@@ -49,6 +49,10 @@ index 374f827..3f8cb48 100644
 +	private readonly List<EntityRenderer> renderedEntities = new List<EntityRenderer>();
 +
 +	private readonly List<EntityRenderer> shadowRenderedEntities = new List<EntityRenderer>();
++
++	private bool optimumRenderedEntitiesBuilt;
++
++	private bool optimumRenderedEntitiesFallbackLogged;
 +
  	public override string Name => "ree";
  
@@ -221,6 +225,37 @@ index 374f827..3f8cb48 100644
 +		OptimumDiagnostics.RecordEntityShaderSegment(useCount);
 +	}
 +
++	// Optimum: another mod can replace OnBeforeRender and skip this body. The draw passes read
++	// renderedEntities, which only this body fills, so rebuild it from the vanilla IsRendered
++	// flags (the replacing code still sets them) when the body did not run this frame. The body
++	// also refills the per-frame entity re-tesselation budget, which would otherwise stay empty.
++	private void EnsureOptimumRenderedEntities()
++	{
++		if (optimumRenderedEntitiesBuilt)
++		{
++			optimumRenderedEntitiesBuilt = false;
++			return;
++		}
++		OptimumDiagnostics.ResetEntityTesselationBudget();
++		renderedEntities.Clear();
++		foreach (KeyValuePair<long, EntityRenderer> entityRenderer in game.EntityRenderers)
++		{
++			if (entityRenderer.Value.entity.IsRendered)
++			{
++				renderedEntities.Add(entityRenderer.Value);
++				if (entityRenderer.Value is IOptimumEntityLightSampler sampler)
++				{
++					sampler.ActivateOptimumLightBatch(0);
++				}
++			}
++		}
++		if (!optimumRenderedEntitiesFallbackLogged)
++		{
++			optimumRenderedEntitiesFallbackLogged = true;
++			game.Logger.Warning("[Optimum] Entity pre-render was skipped by another mod. Rebuilding the entity draw list from IsRendered flags.");
++		}
++	}
++
  	private void OnBeforeRender(float dt)
  	{
 +		OptimumDiagnostics.ResetEntityTesselationBudget();
@@ -289,10 +324,12 @@ index 374f827..3f8cb48 100644
  			game.api.World.FrameProfiler.Mark("esr-afteranim");
  		}
 +		optimumEntityLightPreviousSampleCount = optimumLightSampleCount;
++		optimumRenderedEntitiesBuilt = true;
  	}
  
  	public void OnRenderOpaque3D(float deltaTime)
  	{
++		EnsureOptimumRenderedEntities();
  		RuntimeStats.renderedEntities = 0;
  		game.GlMatrixModeModelView();
  		game.Platform.GlDisableCullFace();
@@ -313,7 +350,7 @@ index 374f827..3f8cb48 100644
  		ShaderProgramEntityanimated entityanimated = ShaderPrograms.Entityanimated;
  		entityanimated.Use();
  		entityanimated.RgbaAmbientIn = game.api.renderapi.AmbientColor;
-@@ -82,15 +310,42 @@ public class SystemRenderEntities : ClientSystem
+@@ -82,15 +347,42 @@ public class SystemRenderEntities : ClientSystem
  		game.Platform.GlDisableCullFace();
  		game.GlMatrixModeModelView();
  		game.GlPushMatrix();
@@ -347,19 +384,19 @@ index 374f827..3f8cb48 100644
  		{
 -			if (entityRenderer2.Value.entity.IsRendered)
 +			if (shaderSegmentActive)
-+			{
+ 			{
+-				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
 +				EndOptimumEntityShaderSegment();
 +			}
 +			else
- 			{
--				entityRenderer2.Value.DoRender3DOpaqueBatched(deltaTime, isShadowPass: false);
++			{
 +				OptimumEntityShaderState.End();
  			}
  		}
  		game.GlPopMatrix();
  		entityanimated.Stop();
  		ScreenManager.FrameProfiler.Mark("ree-op-b");
-@@ -105,35 +360,56 @@ public class SystemRenderEntities : ClientSystem
+@@ -105,35 +397,56 @@ public class SystemRenderEntities : ClientSystem
  	{
  		game.GlMatrixModeModelView();
  		game.Platform.GlDisableCullFace();
@@ -422,7 +459,7 @@ index 374f827..3f8cb48 100644
  			else
  			{
  				entity.IsShadowRendered = false;
-@@ -144,38 +420,34 @@ public class SystemRenderEntities : ClientSystem
+@@ -144,38 +457,34 @@ public class SystemRenderEntities : ClientSystem
  		shadowmapentityanimated.Use();
  		shadowmapentityanimated.ProjectionMatrix = game.CurrentProjectionMatrix;
  		shadowmapentityanimated.EntityTex2D = game.EntityAtlasManager.AtlasTextures[0].TextureId;
