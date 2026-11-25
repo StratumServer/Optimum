@@ -83,7 +83,7 @@ public sealed class ModCompatibilityGuardTests : IDisposable
     }
 
     [Fact]
-    public void DetectOptiTime_SetsDetectedAndLogsRedundancyAdvisory()
+    public void DetectOptiTime_BeforeTheCoexistenceVersionWarnsToUpdate()
     {
         var logs = new List<string>();
         var loader = new MultiModLoader(("optitime", "OptiTime", "1.4.2"));
@@ -92,13 +92,52 @@ public sealed class ModCompatibilityGuardTests : IDisposable
 
         Assert.True(OptimumConfig.OptiTimeDetected);
         Assert.Equal("1.4.2", OptimumCompatibilityGuard.OptiTimeDetectedVersion);
+        Assert.False(OptimumCompatibilityGuard.OptiTimeCoexists);
         Assert.Single(logs);
         Assert.Contains("OptiTime mod detected", logs[0]);
-        Assert.Contains("redundant", logs[0]);
+        Assert.Contains("1.5.18", logs[0]);
+        Assert.Equal(logs[0], OptimumCompatibilityGuard.GetOptiTimeAdvisoryText());
 
         string status = OptimumCompatibilityGuard.GetOptiTimeStatusLine();
         Assert.Contains("OptiTime v1.4.2", status);
-        Assert.Contains("REDUNDANT", status);
+        Assert.Contains("OUTDATED", status);
+    }
+
+    [Theory]
+    [InlineData("1.5.17")]
+    [InlineData("unknown")]
+    [InlineData("1.5.17.0")]
+    public void DetectOptiTime_UnknownOrOlderVersionsStillWarn(string version)
+    {
+        var logs = new List<string>();
+        var loader = new MultiModLoader(("optitime", "OptiTime", version));
+
+        OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+
+        Assert.False(OptimumCompatibilityGuard.OptiTimeCoexists);
+        Assert.Single(logs);
+        Assert.Contains("OUTDATED", OptimumCompatibilityGuard.GetOptiTimeStatusLine());
+    }
+
+    [Theory]
+    [InlineData("1.5.18")]
+    [InlineData("1.5.18.0")]
+    [InlineData("1.6.0")]
+    public void DetectOptiTime_CoexistenceVersionsDoNotWarnAndAreReportedAsCompatible(string version)
+    {
+        var logs = new List<string>();
+        var loader = new MultiModLoader(("optitime", "OptiTime", version));
+
+        OptimumCompatibilityGuard.DetectFromModLoader(loader, msg => logs.Add(msg));
+
+        Assert.True(OptimumConfig.OptiTimeDetected);
+        Assert.True(OptimumCompatibilityGuard.OptiTimeCoexists);
+        Assert.Empty(logs);
+        Assert.Contains("keep only the optimizations Optimum does not provide", OptimumCompatibilityGuard.GetOptiTimeAdvisoryText());
+
+        string status = OptimumCompatibilityGuard.GetOptiTimeStatusLine();
+        Assert.Contains($"OptiTime v{version}", status);
+        Assert.Contains("COMPATIBLE", status);
     }
 
     [Fact]
@@ -160,7 +199,7 @@ public sealed class ModCompatibilityGuardTests : IDisposable
 
         string report = OptimumCompatibilityGuard.GetPerformanceModsReport();
         Assert.Contains("Komet:    Komet v2.0.0 (render paths guarded; adaptive-radius interop available; render-path overlap unresolved)", report);
-        Assert.Contains("OptiTime: OptiTime v1.4.0 (REDUNDANT - natively integrated in Optimum)", report);
+        Assert.Contains("OptiTime: OptiTime v1.4.0 (OUTDATED - update to 1.5.18 or remove it)", report);
         Assert.Contains("Tungsten: Tungsten v1.3.7 (COMPATIBLE - server-side optimizations active)", report);
         Assert.Contains("Synergy:  Synergy v1.1.25 (COMPATIBLE - client-server synchronization active)", report);
 
