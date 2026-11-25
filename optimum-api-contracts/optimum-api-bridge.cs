@@ -2239,6 +2239,58 @@ public static class OptimumApiBridge
         UnknownBlockModelDataByTesselator.Remove(tesselatorManager);
     }
 
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float SmoothMin(float a, float b, float smoothingFactor)
+    {
+        float diff = smoothingFactor - Math.Abs(a - b);
+        if (diff <= 0.0f && smoothingFactor > 0.0f)
+        {
+            return Math.Min(a, b);
+        }
+
+        float falloff = Math.Max(diff, 0.0f) / smoothingFactor;
+        return Math.Min(a, b) - falloff * falloff * smoothingFactor * 0.25f;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static float SmoothMax(float a, float b, float smoothingFactor)
+    {
+        float diff = smoothingFactor - Math.Abs(a - b);
+        if (diff <= 0.0f && smoothingFactor > 0.0f)
+        {
+            return Math.Max(a, b) + 0.0f;
+        }
+
+        float falloff = Math.Max(diff, 0.0f) / smoothingFactor;
+        return Math.Max(a, b) + falloff * falloff * smoothingFactor * 0.25f;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double SmoothMin(double a, double b, double smoothingFactor)
+    {
+        double diff = smoothingFactor - Math.Abs(a - b);
+        if (diff <= 0.0 && smoothingFactor > 0.0)
+        {
+            return Math.Min(a, b);
+        }
+
+        double falloff = Math.Max(diff, 0.0) / smoothingFactor;
+        return Math.Min(a, b) - falloff * falloff * smoothingFactor * 0.25;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static double SmoothMax(double a, double b, double smoothingFactor)
+    {
+        double diff = smoothingFactor - Math.Abs(a - b);
+        if (diff <= 0.0 && smoothingFactor > 0.0)
+        {
+            return Math.Max(a, b) + 0.0;
+        }
+
+        double falloff = Math.Max(diff, 0.0) / smoothingFactor;
+        return Math.Max(a, b) + falloff * falloff * smoothingFactor * 0.25;
+    }
+
     public static bool IsEligibleChiselLodBlock(Block? block)
     {
         if (block == null || block.IsMissing || block.Id <= 0 || block.BlockId <= 0)

@@ -1,0 +1,57 @@
+diff --git a/VintagestoryApi/Math/GameMath.cs b/VintagestoryApi/Math/GameMath.cs
+index 4bfd58a..5c441f7 100644
+--- a/VintagestoryApi/Math/GameMath.cs
++++ b/VintagestoryApi/Math/GameMath.cs
+@@ -3,10 +3,11 @@ using System.Collections.Generic;
+ using System.Numerics;
+ using System.Runtime.CompilerServices;
+ using System.Runtime.InteropServices;
+ using System.Security.Cryptography;
+ using System.Text;
++using Vintagestory.API.Config;
+ using Vintagestory.API.Datastructures;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.MathTools
+@@ -1102,32 +1103,32 @@ namespace Vintagestory.API.MathTools
+                 min = Math.Min(min, values[i]);
+             }
+             return min;
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float SmoothMin(float a, float b, float smoothingFactor)
+         {
+-            float falloff = Math.Max(smoothingFactor - Math.Abs(a - b), 0.0f) / smoothingFactor;
+-            return Math.Min(a, b) - falloff * falloff * smoothingFactor * 0.25f;
++            return OptimumApiBridge.SmoothMin(a, b, smoothingFactor);
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float SmoothMax(float a, float b, float smoothingFactor)
+         {
+-            float falloff = Math.Max(smoothingFactor - Math.Abs(a - b), 0.0f) / smoothingFactor;
+-            return Math.Max(a, b) + falloff * falloff * smoothingFactor * 0.25f;
++            return OptimumApiBridge.SmoothMax(a, b, smoothingFactor);
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static double SmoothMin(double a, double b, double smoothingFactor)
+         {
+-            double falloff = Math.Max(smoothingFactor - Math.Abs(a - b), 0.0) / smoothingFactor;
+-            return Math.Min(a, b) - falloff * falloff * smoothingFactor * 0.25;
++            return OptimumApiBridge.SmoothMin(a, b, smoothingFactor);
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static double SmoothMax(double a, double b, double smoothingFactor)
+         {
+-            double falloff = Math.Max(smoothingFactor - Math.Abs(a - b), 0.0) / smoothingFactor;
+-            return Math.Max(a, b) + falloff * falloff * smoothingFactor * 0.25;
++            return OptimumApiBridge.SmoothMax(a, b, smoothingFactor);
+         }
+ 
+         #endregion
+ 
+         #region Hashing

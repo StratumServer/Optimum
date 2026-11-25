@@ -288,6 +288,10 @@ public static class ApiPatcher
         if (treeAttributePatches != 5) throw new InvalidOperationException($"Expected 5 TreeAttribute serialization patches, applied {treeAttributePatches}.");
         int columnNoisePatches = PatchColumnNoiseTls(vanilla.MainModule, contracts.MainModule);
         if (columnNoisePatches != 3) throw new InvalidOperationException($"Expected 3 ColumnNoise TLS patches, applied {columnNoisePatches}.");
+        int gameMathSmoothPatches = PatchGameMathSmoothMinMax(vanilla.MainModule, contracts.MainModule);
+        if (gameMathSmoothPatches != 4) throw new InvalidOperationException($"Expected 4 GameMath SmoothMin/SmoothMax patches, applied {gameMathSmoothPatches}.");
+        int simplexNoiseLayerPatches = PatchNewSimplexNoiseLayer(vanilla.MainModule, contracts.MainModule);
+        if (simplexNoiseLayerPatches != 2) throw new InvalidOperationException($"Expected 2 NewSimplexNoiseLayer patches, applied {simplexNoiseLayerPatches}.");
         if (textLayoutMetrics != 2) throw new InvalidOperationException($"Expected 2 TextDrawUtil font-layout patches, applied {textLayoutMetrics}.");
         if (PatchSvgIconTarget(vanilla.MainModule) != 1) throw new InvalidOperationException("Expected 1 recorded SVG icon target hook.");
 
@@ -493,6 +497,8 @@ public static class ApiPatcher
                 $"{guiHoverTextPatches} hover text same-text skips, " +
                 $"{guiStatbarPatches} statbar on-demand edits, " +
                 $"{columnNoisePatches} ColumnNoise TLS methods, " +
+                $"{gameMathSmoothPatches} GameMath SmoothMin/Max methods, " +
+                $"{simplexNoiseLayerPatches} NewSimplexNoiseLayer methods, " +
                 $"{materializationObserver} Cairo materialization observer module initializer, " +
                 $"{typeForwards} type forwards.");
         return true;
@@ -5077,6 +5083,106 @@ public static class ApiPatcher
 
         Console.WriteLine(
             $"  API PATCHED: {fractalTypeName}.ColumnNoise TLS scratch + aliasing guard ({patched}/3) -> OptimumColumnNoiseBuffer");
+        return patched;
+    }
+
+    internal static int PatchGameMathSmoothMinMax(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string gameMathTypeName = "Vintagestory.API.MathTools.GameMath";
+        const string bridgeTypeName = "Vintagestory.API.Config.OptimumApiBridge";
+
+        var gameMathType = module.GetType(gameMathTypeName)
+            ?? throw new InvalidOperationException($"{gameMathTypeName} is missing from the vanilla API.");
+        var bridgeType = contractsModule.GetType(bridgeTypeName)
+            ?? throw new InvalidOperationException($"{bridgeTypeName} is missing from contracts.");
+
+        int patched = 0;
+        string[] names = ["SmoothMin", "SmoothMax"];
+        MetadataType[] scalarTypes = [MetadataType.Single, MetadataType.Double];
+
+        foreach (string name in names)
+        {
+            foreach (MetadataType scalarType in scalarTypes)
+            {
+                var target = gameMathType.Methods.SingleOrDefault(m =>
+                    m.IsStatic &&
+                    m.Name == name &&
+                    m.Parameters.Count == 3 &&
+                    m.Parameters[0].ParameterType.MetadataType == scalarType &&
+                    m.Parameters[1].ParameterType.MetadataType == scalarType &&
+                    m.Parameters[2].ParameterType.MetadataType == scalarType &&
+                    m.ReturnType.MetadataType == scalarType &&
+                    m.HasBody)
+                    ?? throw new InvalidOperationException($"{gameMathTypeName}.{name}({scalarType}, {scalarType}, {scalarType}) is missing.");
+
+                var bridge = bridgeType.Methods.SingleOrDefault(m =>
+                    m.IsStatic &&
+                    m.Name == name &&
+                    m.Parameters.Count == 3 &&
+                    m.Parameters[0].ParameterType.MetadataType == scalarType &&
+                    m.Parameters[1].ParameterType.MetadataType == scalarType &&
+                    m.Parameters[2].ParameterType.MetadataType == scalarType &&
+                    m.ReturnType.MetadataType == scalarType)
+                    ?? throw new InvalidOperationException($"{bridgeTypeName}.{name}({scalarType}, {scalarType}, {scalarType}) is missing from contracts.");
+
+                RewriteThreeArgForwarder(target, module.ImportReference(bridge));
+                target.ImplAttributes |= Mono.Cecil.MethodImplAttributes.AggressiveInlining;
+                patched++;
+            }
+        }
+
+        Console.WriteLine($"  API PATCHED: {gameMathTypeName}.SmoothMin/SmoothMax ({patched}/4) -> OptimumApiBridge");
+        return patched;
+    }
+
+    internal static int PatchNewSimplexNoiseLayer(ModuleDefinition module, ModuleDefinition contractsModule)
+    {
+        const string layerTypeName = "Vintagestory.API.MathTools.NewSimplexNoiseLayer";
+        const string simplexTypeName = "Vintagestory.API.Config.OptimumSimplexNoise";
+
+        var layerType = module.GetType(layerTypeName)
+            ?? throw new InvalidOperationException($"{layerTypeName} is missing from the vanilla API.");
+        var simplexType = contractsModule.GetType(simplexTypeName)
+            ?? throw new InvalidOperationException($"{simplexTypeName} is missing from contracts.");
+
+        (string VanillaName, string ContractName)[] targets =
+        [
+            ("Evaluate_ImprovedXZ", "EvaluateImprovedXZ"),
+            ("Evaluate_FallbackOrientation", "EvaluateFallbackOrientation"),
+        ];
+
+        int patched = 0;
+        foreach ((string vanillaName, string contractName) in targets)
+        {
+            var target = layerType.Methods.SingleOrDefault(m =>
+                m.IsStatic &&
+                m.Name == vanillaName &&
+                m.Parameters.Count == 4 &&
+                m.Parameters[0].ParameterType.MetadataType == MetadataType.Int64 &&
+                m.Parameters[1].ParameterType.MetadataType == MetadataType.Double &&
+                m.Parameters[2].ParameterType.MetadataType == MetadataType.Double &&
+                m.Parameters[3].ParameterType.MetadataType == MetadataType.Double &&
+                m.ReturnType.MetadataType == MetadataType.Single &&
+                m.HasBody)
+                ?? throw new InvalidOperationException($"{layerTypeName}.{vanillaName}(long, double, double, double) is missing.");
+
+            var contract = simplexType.Methods.SingleOrDefault(m =>
+                m.IsStatic &&
+                m.Name == contractName &&
+                m.Parameters.Count == 4 &&
+                m.Parameters[0].ParameterType.MetadataType == MetadataType.Int64 &&
+                m.Parameters[1].ParameterType.MetadataType == MetadataType.Double &&
+                m.Parameters[2].ParameterType.MetadataType == MetadataType.Double &&
+                m.Parameters[3].ParameterType.MetadataType == MetadataType.Double &&
+                m.ReturnType.MetadataType == MetadataType.Single)
+                ?? throw new InvalidOperationException($"{simplexTypeName}.{contractName}(long, double, double, double) is missing from contracts.");
+
+            RewriteFourArgForwarder(target, module.ImportReference(contract));
+            target.ImplAttributes |= Mono.Cecil.MethodImplAttributes.AggressiveInlining;
+            patched++;
+        }
+
+        Console.WriteLine($"  API PATCHED: {layerTypeName} ({patched}/2) -> OptimumSimplexNoise");
         return patched;
     }
 
