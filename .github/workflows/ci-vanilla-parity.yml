@@ -367,7 +367,7 @@ jobs:
           python3 - <<'PY'
           import re, sys
           trx = open("Optimum.Tests/TestResults/gui-mesher-results.trx", encoding="utf-8-sig").read()
-          for name, count in (("GuiSkiaCpuUploadGlStateTests", 1), ("GuiSkiaGpuUploadGlTests", 5)):
+          for name, count in (("GuiSkiaCpuUploadGlStateTests", 2), ("GuiSkiaGpuUploadGlTests", 6)):
               passed = len(re.findall(r'testName="[^"]*' + name + r'[^"]*"[^>]*outcome="Passed"', trx))
               if passed != count:
                   sys.exit(f"{name}: {passed} of {count} OpenGL tests ran and passed.")

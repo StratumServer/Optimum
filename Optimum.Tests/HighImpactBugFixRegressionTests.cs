@@ -340,6 +340,42 @@ public sealed class HighImpactBugFixRegressionTests : IDisposable
 #endif
 
     [Fact]
+    public void OptimumGuiGpuProbeBackend_AlwaysUsesLinearMinFilterWithoutThreadStaticOverride()
+    {
+        string configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        string libPath = PatchReader.FindRepositoryFile($"build/VintagestoryLib/bin/{configuration}/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(libPath)) return;
+
+        using var module = ModuleDefinition.ReadModule(libPath);
+        var type = module.GetType("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend");
+        Assert.NotNull(type);
+        Assert.DoesNotContain(type!.Fields, f => f.Name == "threadLinearMinOverride");
+        Assert.DoesNotContain(type.Properties, p => p.Name == "LinearMinOverride");
+
+        foreach (string methodName in new[] { "TryCreateCandidateTexture", "UploadCpuSkiaTexture" })
+        {
+            var method = Assert.Single(type.Methods, m => m.Name == methodName);
+            int linearMinSites = 0;
+            foreach (var instr in method.Body.Instructions)
+            {
+                if (instr.Operand is MethodReference mr &&
+                    mr.Name == "TexParameter" &&
+                    instr.Previous != null &&
+                    instr.Previous.Previous != null &&
+                    instr.Previous.Previous.OpCode.Code == Mono.Cecil.Cil.Code.Ldc_I4 &&
+                    instr.Previous.Previous.Operand is int paramName &&
+                    paramName == 10241) // GL_TEXTURE_MIN_FILTER
+                {
+                    Assert.Equal(Mono.Cecil.Cil.Code.Ldc_I4, instr.Previous.OpCode.Code);
+                    Assert.Equal(9729, Assert.IsType<int>(instr.Previous.Operand));
+                    linearMinSites++;
+                }
+            }
+            Assert.Equal(1, linearMinSites);
+        }
+    }
+
+    [Fact]
     public void CollisionTester_TranslatesEntityBoxUnconditionallyAndReusesWalkBlocksDelegate()
     {
         string patchSource = File.ReadAllText(

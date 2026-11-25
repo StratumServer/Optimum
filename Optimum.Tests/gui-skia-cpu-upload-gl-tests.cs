@@ -132,7 +132,64 @@ public sealed class GuiSkiaCpuUploadGlStateTests
         }
     }
 
-    private static int Upload(MethodInfo upload)
+    [GlContextFact]
+    public void CpuUpload_SetsLinearMinFilterAndHonorsLinearMagFlag()
+    {
+        string configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent!.Name;
+        string libPath = PatchReader.FindRepositoryFile($"build/VintagestoryLib/bin/{configuration}/net10.0/VintagestoryLib.dll");
+        Assembly lib = Assembly.LoadFrom(libPath);
+        Assert.Equal(System.IO.Path.GetFullPath(libPath), System.IO.Path.GetFullPath(lib.Location));
+        Type backend = lib.GetType("Vintagestory.Client.NoObf.OptimumGuiGpuProbeBackend", throwOnError: true)!;
+        MethodInfo upload = backend.GetMethod("TryCreateCandidateTexture")!;
+
+        bool originalGpuEnabled = OptimumConfig.GuiGpuRenderEnabled;
+        string originalBackend = OptimumConfig.GuiRenderBackend;
+        GLFWProvider.CheckForMainThread = false;
+        using var window = new NativeWindow(new NativeWindowSettings
+        {
+            StartVisible = false,
+            APIVersion = new Version(3, 3),
+            Profile = ContextProfile.Core,
+            Flags = ContextFlags.ForwardCompatible,
+            ClientSize = new OpenTK.Mathematics.Vector2i(64, 64),
+        });
+        window.MakeCurrent();
+        var textures = new List<int>();
+        try
+        {
+            OptimumConfig.GuiGpuRenderEnabled = false;
+            OptimumConfig.GuiRenderBackend = OptimumConfig.GuiRenderBackendSkiaCpu;
+            while (GL.GetError() != OpenTK.Graphics.OpenGL.ErrorCode.NoError) { }
+
+            int linearTexture = Upload(upload, linearMag: true);
+            textures.Add(linearTexture);
+            Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Linear), ReadFilters(linearTexture));
+
+            int nearestMagTexture = Upload(upload, linearMag: false);
+            textures.Add(nearestMagTexture);
+            Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Nearest), ReadFilters(nearestMagTexture));
+
+            Assert.Equal(OpenTK.Graphics.OpenGL.ErrorCode.NoError, GL.GetError());
+        }
+        finally
+        {
+            OptimumConfig.GuiGpuRenderEnabled = originalGpuEnabled;
+            OptimumConfig.GuiRenderBackend = originalBackend;
+            foreach (int texture in textures) GL.DeleteTexture(texture);
+        }
+    }
+
+    private static (int minFilter, int magFilter) ReadFilters(int texture)
+    {
+        GL.GetInteger(GetPName.TextureBinding2D, out int bound);
+        GL.BindTexture(TextureTarget.Texture2D, texture);
+        GL.GetTexParameter(TextureTarget.Texture2D, GetTextureParameter.TextureMinFilter, out int minFilter);
+        GL.GetTexParameter(TextureTarget.Texture2D, GetTextureParameter.TextureMagFilter, out int magFilter);
+        GL.BindTexture(TextureTarget.Texture2D, bound);
+        return (minFilter, magFilter);
+    }
+
+    private static int Upload(MethodInfo upload, bool linearMag = true)
     {
         using ImageSurface surface = ImageSurface.CreateForRecordedGui(Cairo.Format.Argb32, Width, Height);
         using (var context = new Context(surface))
@@ -142,7 +199,7 @@ public sealed class GuiSkiaCpuUploadGlStateTests
             context.Rectangle(1, 1, 5, 2);
             context.Fill();
         }
-        object?[] arguments = [surface, true, Environment.CurrentManagedThreadId, 0, null, 0];
+        object?[] arguments = [surface, linearMag, Environment.CurrentManagedThreadId, 0, null, 0];
         bool uploaded = (bool)upload.Invoke(null, arguments)!;
         string reason = (string?)arguments[4] ?? string.Empty;
         Assert.True(uploaded, "The Skia CPU upload did not publish a texture: " + reason);

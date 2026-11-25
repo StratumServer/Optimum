@@ -64,16 +64,7 @@ namespace Vintagestory.Client.NoObf
 						_ => { },
 						textureColorOrder: true);
 					if (!transferred) return false;
-					bool previousLinearMinOverride = OptimumGuiGpuProbeBackend.LinearMinOverride;
-					OptimumGuiGpuProbeBackend.LinearMinOverride = true;
-					bool rendered;
-					int candidate = 0;
-					string reason = null;
-					try {
-						rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture (surface, true, RuntimeEnv.MainThreadId, out candidate, out reason);
-					} finally {
-						OptimumGuiGpuProbeBackend.LinearMinOverride = previousLinearMinOverride;
-					}
+					bool rendered = OptimumGuiGpuProbeBackend.TryCreateCandidateTexture (surface, true, RuntimeEnv.MainThreadId, out int candidate, out string reason);
 					if (OptimumGuiMetrics.Enabled) OptimumGuiMetrics.RecordGpuCandidateTexture (rendered, reason);
 					if (!rendered || candidate <= 0) return false;
 					texture = new LoadedTexture (api, candidate, width, height);
