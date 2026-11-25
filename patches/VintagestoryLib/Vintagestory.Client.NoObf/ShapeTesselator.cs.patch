@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
-index 2448592..e2f00f5 100644
+index 2448592..c62627b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselator.cs
-@@ -85,55 +85,59 @@ public class ShapeTesselator : ITesselatorAPI
+@@ -85,64 +85,68 @@ public class ShapeTesselator : ITesselatorAPI
  			ApplyCompositeShapeModifiers(ref modeldata, compositeShape);
  			return;
  		case EnumShapeFormat.GltfEmbedded:
@@ -97,28 +97,40 @@ index 2448592..e2f00f5 100644
  				}
  			}
  			ApplyCompositeShapeModifiers(ref modeldata, compositeShape);
-@@ -151,27 +155,48 @@ public class ShapeTesselator : ITesselatorAPI
+ 			return;
+ 		}
+ 		}
+-		if (!shapes.TryGetValue(compositeShape.Base, out var value))
++		if (!TryResolveShapeForTesselation(compositeShape.Base, out var value, out bool isCached))
+ 		{
+ 			if (shapes.Count < 2)
+ 			{
+ 				throw new Exception("Something went wrong in the startup process, no " + type + " shapes have been loaded at all. Please try disabling all mods apart from Essentials, Survival, Creative. If that solves the issue, check which mod is causing this. If that does not solve the issue, please report.");
+ 			}
+@@ -151,31 +155,87 @@ public class ShapeTesselator : ITesselatorAPI
  			{
  				game.Logger.Notification(assetLocationAndSource.Source.ToString());
  			}
  			throw new FileNotFoundException(string.Concat(new string[9] { "Could not find shape file: ", compositeShape.Base, " in ", type, "type ", sourceName, ".  Possibly a broken mod (", sourceName.Domain, ") or different versions of that mod between server and client?" }));
  		}
 -		if (!value.Loaded)
-+		value.AcquirePin();
-+		try
++		if (isCached)
  		{
 -			value.Load(game, new AssetLocationAndSource(compositeShape.Base));
-+			if (!value.Loaded)
-+			{
-+				value.Load(game, new AssetLocationAndSource(compositeShape.Base));
-+			}
++			value.AcquirePinAndEnsureLoaded(game, new AssetLocationAndSource(compositeShape.Base));
++		}
++		try
++		{
 +			rotationVec.Set(compositeShape.rotateX, compositeShape.rotateY, compositeShape.rotateZ);
 +			offsetVec.Set(compositeShape.offsetX, compositeShape.offsetY, compositeShape.offsetZ);
 +			TesselateShape(value, out modeldata, rotationVec, offsetVec, compositeShape.Scale, meta);
 +		}
 +		finally
 +		{
-+			value.ReleasePin();
++			if (isCached)
++			{
++				value.ReleasePin();
++			}
  		}
 -		rotationVec.Set(compositeShape.rotateX, compositeShape.rotateY, compositeShape.rotateZ);
 -		offsetVec.Set(compositeShape.offsetX, compositeShape.offsetY, compositeShape.offsetZ);
@@ -133,14 +145,21 @@ index 2448592..e2f00f5 100644
 -				offsetVec.Set(compositeShape2.offsetX, compositeShape2.offsetY, compositeShape2.offsetZ);
 -				TesselateShape(shapes[compositeShape2.Base], out var modeldata2, rotationVec, offsetVec, compositeShape2.Scale, meta);
 -				modeldata.AddMeshData(modeldata2);
-+				UnloadableShape overlayShape = shapes[compositeShape2.Base];
-+				overlayShape.AcquirePin();
++				if (compositeShape2 == null || compositeShape2.Base == null)
++				{
++					continue;
++				}
++				if (!TryResolveShapeForTesselation(compositeShape2.Base, out UnloadableShape overlayShape, out bool overlayIsCached))
++				{
++					game.Logger.Error("Could not find overlay shape {0} for {1} {2}", compositeShape2.Base, type, sourceName);
++					throw new FileNotFoundException(string.Concat(new string[9] { "Could not find shape file: ", compositeShape2.Base, " in ", type, "type ", sourceName, ".  Possibly a broken mod (", sourceName.Domain, ") or different versions of that mod between server and client?" }));
++				}
++				if (overlayIsCached)
++				{
++					overlayShape.AcquirePinAndEnsureLoaded(game, new AssetLocationAndSource(compositeShape2.Base));
++				}
 +				try
 +				{
-+					if (!overlayShape.Loaded)
-+					{
-+						overlayShape.Load(game, new AssetLocationAndSource(compositeShape2.Base));
-+					}
 +					meta.QuantityElements = quantityElements;
 +					rotationVec.Set(compositeShape2.rotateX, compositeShape2.rotateY, compositeShape2.rotateZ);
 +					offsetVec.Set(compositeShape2.offsetX, compositeShape2.offsetY, compositeShape2.offsetZ);
@@ -149,10 +168,40 @@ index 2448592..e2f00f5 100644
 +				}
 +				finally
 +				{
-+					overlayShape.ReleasePin();
++					if (overlayIsCached)
++					{
++						overlayShape.ReleasePin();
++					}
 +				}
  			}
  		}
  	}
  
++	private bool TryResolveShapeForTesselation(AssetLocation shapeLoc, out UnloadableShape shape, out bool isCached)
++	{
++		if (ShapeTesselatorManager.TryFindShapeInDict(shapes, shapeLoc, out shape))
++		{
++			isCached = true;
++			return true;
++		}
++		isCached = false;
++		if (shapes == null || shapes.Count < 2 || shapeLoc == null || game == null || ScreenManager.Platform?.AssetManager == null)
++		{
++			shape = null;
++			return false;
++		}
++		UnloadableShape fallback = new UnloadableShape();
++		if (fallback.Load(game, new AssetLocationAndSource(shapeLoc)))
++		{
++			shape = fallback;
++			return true;
++		}
++		shape = null;
++		return false;
++	}
++
  	public void TesselateShape(CollectibleObject collObj, Shape shape, out MeshData modeldata, Vec3f rotation = null, int? quantityElements = null, string[] selectiveElements = null)
+ 	{
+ 		if (collObj.ItemClass == EnumItemClass.Item)
+ 		{
+ 			TextureSource texSource = new TextureSource(game, game.ItemAtlasManager.Size, collObj as Item);

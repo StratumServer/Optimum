@@ -279,6 +279,7 @@ var membersToInject = new Dictionary<string, List<string>>
     },
     ["Vintagestory.Client.NoObf.ShaderRegistry"] = new()
     {
+        "EnsureShaderCapacity",
         "RegisterOptimumShaderProgram",
         "VerifyOptimumSsaoDepthContracts",
         "HasOptimumSsaoDepthContract",
@@ -631,12 +632,14 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "lazyReloadedShapes",
         "EnsureUnknownItemModelRef",
+        "HasValidNonZeroTextureId",
         "EnsureUnknownBlockModelRef",
         "HasItemRenderVariant",
         "GetInventoryItemMeshRef",
         "EnsureBlockInventoryMeshRefOnMainThread",
         "EnsureItemInventoryMeshRefOnMainThread",
         "ResetLazyItemInventoryMeshes",
+        "TryFindShapeInDict",
         "EnsureCompositeShapeLoaded",
         "EnsureLoadedForLazy",
         "ReUnloadTemporaryShapes",
@@ -933,6 +936,12 @@ var membersToInject = new Dictionary<string, List<string>>
         "GetShapeLock",
         "AcquirePin",
         "ReleasePin",
+        "AcquirePinAndEnsureLoaded",
+        "LoadLocked",
+    },
+    ["Vintagestory.Client.NoObf.ShapeTesselator"] = new()
+    {
+        "TryResolveShapeForTesselation",
     },
     // Issue #649: TCP/UDP buffer reuse and [ThreadStatic] OggDecoder state reuse
     ["Vintagestory.Common.TCPNetworkConnection"] = new()
@@ -1305,10 +1314,12 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultItemMeshRef", 1),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetDefaultBlockMesh", 1),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "TesselateBlock", 2),
+    new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "GetCachedShape", 1),
     // Issue #651: shape-pinning LoadDone, cleanup Dispose, initial prefetch on asset/client join,
     // and skipping duplicate GuiDialogInventory re-filter
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "LoadDone", 0),
     new("Vintagestory.Client.NoObf.ShapeTesselatorManager", "Dispose", 0),
+    new("Vintagestory.Client.NoObf.ClientSystemStartup", "WaitForBlockTesselation", 0),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "OnAllAssetsLoadedAndClientJoined", 0),
     new("Vintagestory.Client.NoObf.GuiDialogInventory", "update", 0),
     new("Vintagestory.Client.NoObf.GuiDialogInventory", "OnTabClicked", 2),
@@ -1417,6 +1428,8 @@ var targets = new List<MethodTarget>
     // tile-decode compiles out entirely when the feature is off. Also sets
     // OptimumConfig.GreedyMeshShadersCompiledOn so the emitter never emits
     // sentinel bits a live shader can't decode.
+    new("Vintagestory.Client.NoObf.ShaderRegistry", "RegisterShaderProgram", 2,
+        new[] { "System.String", "Vintagestory.Client.NoObf.ShaderProgram" }),
     new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderCodePrefixes", 2),
     new("Vintagestory.Client.NoObf.ShaderRegistry", "registerDefaultShaderProgramsPre", 0),
     new("Vintagestory.Client.NoObf.ShaderRegistry", "loadRegisteredShaderPrograms", 0),

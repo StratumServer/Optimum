@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
-index d3edef9..f4085a8 100644
+index d3edef9..5379481 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShaderRegistry.cs
 @@ -1,8 +1,10 @@
@@ -13,7 +13,19 @@ index d3edef9..f4085a8 100644
  using Vintagestory.API.Config;
  using Vintagestory.Common;
  
-@@ -181,39 +183,224 @@ public class ShaderRegistry
+@@ -95,10 +97,11 @@ public class ShaderRegistry
+ 		}
+ 		else
+ 		{
+ 			nextPassId++;
+ 		}
++		EnsureShaderCapacity(num);
+ 		program.PassId = num;
+ 		program.PassName = name;
+ 		shaderNames[num] = name;
+ 		shaderPrograms[num] = program;
+ 		shaderIdsByName[name] = num;
+@@ -181,39 +184,244 @@ public class ShaderRegistry
  		registerDefaultShaderPrograms();
  		RegisterShaderProgram(EnumShaderProgram.Entityanimated_Oit, new ShaderProgramEntityanimated
  		{
@@ -23,6 +35,25 @@ index d3edef9..f4085a8 100644
 +		RegisterOptimumShaderProgram("fsr-rcas", ShaderPrograms.FsrRcas = new ShaderProgram());
 +	}
 +
++	private static void EnsureShaderCapacity(int passId)
++	{
++		if (passId < shaderPrograms.Length && passId < shaderNames.Length)
++		{
++			return;
++		}
++		int newSize = Math.Max(shaderPrograms.Length, shaderNames.Length);
++		if (newSize < 100)
++		{
++			newSize = 100;
++		}
++		while (newSize <= passId)
++		{
++			newSize *= 2;
++		}
++		Array.Resize(ref shaderNames, newSize);
++		Array.Resize(ref shaderPrograms, newSize);
++	}
++
 +	private static void RegisterOptimumShaderProgram(string name, ShaderProgram program)
 +	{
 +		if (!shaderIdsByName.TryGetValue(name, out int passId))
@@ -30,6 +61,7 @@ index d3edef9..f4085a8 100644
 +			passId = nextPassId++;
 +			shaderIdsByName[name] = passId;
 +		}
++		EnsureShaderCapacity(passId);
 +		program.PassId = passId;
 +		program.PassName = name;
 +		shaderNames[passId] = name;
@@ -248,7 +280,7 @@ index d3edef9..f4085a8 100644
  		if (program.LoadFromFile)
  		{
  			LoadShader(program, EnumShaderType.VertexShader);
-@@ -296,11 +483,11 @@ public class ShaderRegistry
+@@ -296,11 +504,11 @@ public class ShaderRegistry
  	}
  
  	private static void registerDefaultShaderCodePrefixes(ShaderProgram program, bool useSSBOs)
@@ -261,7 +293,7 @@ index d3edef9..f4085a8 100644
  		Shader fragmentShader3 = program.FragmentShader;
  		fragmentShader3.PrefixCode = fragmentShader3.PrefixCode + "#define NORMALVIEW " + (NormalView ? 1 : 0) + "\r\n";
  		Shader fragmentShader4 = program.FragmentShader;
-@@ -333,10 +520,28 @@ public class ShaderRegistry
+@@ -333,10 +541,28 @@ public class ShaderRegistry
  		vertexShader8.PrefixCode = vertexShader8.PrefixCode + "#define MINBRIGHT " + ClientSettings.Minbrightness + "\r\n";
  		fragmentShader8 = program.VertexShader;
  		fragmentShader8.PrefixCode = fragmentShader8.PrefixCode + "#define SHADOWQUALITY " + ClientSettings.ShadowMapQuality + "\r\n#define DYNLIGHTS " + ClientSettings.MaxDynamicLights + "\r\n";
