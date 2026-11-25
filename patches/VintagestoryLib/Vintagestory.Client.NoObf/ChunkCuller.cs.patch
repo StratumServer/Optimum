@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
-index 7befa7d..4879c46 100644
+index 7befa7d..e4ab316 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkCuller.cs
 @@ -1,8 +1,9 @@
@@ -61,7 +61,7 @@ index 7befa7d..4879c46 100644
  				return;
  			}
  			ClientChunk.bufIndex = 1;
-@@ -94,25 +119,55 @@ public class ChunkCuller
+@@ -94,25 +119,65 @@ public class ChunkCuller
  				}
  			}
  			nowOff = true;
@@ -71,7 +71,12 @@ index 7befa7d..4879c46 100644
  		nowOff = false;
  		Vec3d cameraPos = game.player.Entity.CameraPos;
 -		if (centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32) && Math.Abs(game.chunkPositionsForRegenTrav.Count - qCount) < 10)
-+		bool sameChunk = centerpos.Equals((int)cameraPos.X / 32, (int)cameraPos.Y / 32, (int)cameraPos.Z / 32);
++		int currentDim = Math.Max(0, game.player.Entity.Pos.Dimension);
++		int dimOffset = currentDim * OptimumChunkVisibilityGrid.ChunksPerDimension;
++		int camChunkX = (int)(cameraPos.X / 32.0);
++		int camChunkY = OptimumChunkVisibilityGrid.ResolveCameraChunkY(cameraPos.Y, currentDim);
++		int camChunkZ = (int)(cameraPos.Z / 32.0);
++		bool sameChunk = centerpos.Equals(camChunkX, camChunkY, camChunkZ);
 +		if (OptimumConfig.BfsChunkVisibilityEnabled)
 +		{
 +			// Optimum issue #72: while the camera stays in one chunk, recalculate only after a
@@ -90,9 +95,11 @@ index 7befa7d..4879c46 100644
  			return;
  		}
  		qCount = game.chunkPositionsForRegenTrav.Count;
+-		centerpos.Set((int)(cameraPos.X / 32.0), (int)(cameraPos.Y / 32.0), (int)(cameraPos.Z / 32.0));
+-		isAboveHeightLimit = centerpos.Y >= game.WorldMap.ChunkMapSizeY;
 +		long passStart = System.Diagnostics.Stopwatch.GetTimestamp();
- 		centerpos.Set((int)(cameraPos.X / 32.0), (int)(cameraPos.Y / 32.0), (int)(cameraPos.Z / 32.0));
- 		isAboveHeightLimit = centerpos.Y >= game.WorldMap.ChunkMapSizeY;
++		centerpos.Set(camChunkX, camChunkY, camChunkZ);
++		isAboveHeightLimit = centerpos.Y - dimOffset >= game.WorldMap.ChunkMapSizeY;
 +		// The toggle is read once per pass: every later branch uses this local, so a runtime
 +		// change cannot send a pass to the walk without its grid having been prepared.
 +		bool flatBfs = OptimumConfig.BfsChunkVisibilityEnabled;
@@ -107,12 +114,17 @@ index 7befa7d..4879c46 100644
 +			if (flatBfs)
  			{
 -				item.Value.SetVisible(visible: false);
-+				bfsResetAndFill(chunks);
++				bfsResetAndFill(chunks, currentDim);
 +			}
 +			else
 +			{
 +				foreach (KeyValuePair<long, ClientChunk> item in chunks)
 +				{
++					if (item.Key >= ExtraDimensionsStart)
++					{
++						item.Value.SetVisible(visible: true);
++						continue;
++					}
 +					item.Value.SetVisible(visible: false);
 +				}
  			}
@@ -120,7 +132,7 @@ index 7befa7d..4879c46 100644
  			{
  				for (int j = -1; j <= 2; j++)
  				{
-@@ -125,16 +180,50 @@ public class ChunkCuller
+@@ -125,16 +190,50 @@ public class ChunkCuller
  						}
  					}
  				}
@@ -128,18 +140,14 @@ index 7befa7d..4879c46 100644
  		}
 -		for (int l = 0; l < cubicShellPositions.Length; l++)
 +		if (flatBfs)
- 		{
--			Vec3i toPosRel = cubicShellPositions[l];
--			traverseRayAndMarkVisible(centerpos, toPosRel, 0.25);
--			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
--			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
++		{
 +			// Optimum issue #72: breadth-first walk over the per-chunk face-connectivity graph
 +			// instead of per-shell raycasts, on a flat grid outside the world chunk lock. Like the
 +			// vanilla raycast it only marks reachable chunks visible; the mesh pools frustum-cull
 +			// afterwards. The camera-neighbourhood seed above keeps the chunks around the camera
 +			// visible whatever the walk reaches.
 +			OptimumDiagnostics.BfsChunkVisibility.Hit();
-+			runFlatBfsVisibility(ClientSettings.Occlusionculling);
++			runFlatBfsVisibility(ClientSettings.Occlusionculling, dimOffset);
 +			long bfsTicks = System.Diagnostics.Stopwatch.GetTimestamp() - passStart;
 +			int bfsVisible = OptimumDiagnostics.CullWalkLogEnabled ? countVisibleMarked() : 0;
 +			bool logNow = OptimumDiagnostics.RecordChunkCullerWalk(bfs: true, bfsTicks, bfsVisible);
@@ -156,7 +164,11 @@ index 7befa7d..4879c46 100644
 +			}
 +		}
 +		else
-+		{
+ 		{
+-			Vec3i toPosRel = cubicShellPositions[l];
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.25);
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75);
+-			traverseRayAndMarkVisible(centerpos, toPosRel, 0.75, 0.0);
 +			OptimumDiagnostics.BfsChunkVisibility.Skip();
 +			for (int l = 0; l < cubicShellPositions.Length; l++)
 +			{
@@ -176,7 +188,7 @@ index 7befa7d..4879c46 100644
  	}
  
  	private void traverseRayAndMarkVisible(Vec3i fromPos, Vec3i toPosRel, double yoffset = 0.5, double xoffset = 0.5)
-@@ -192,6 +281,118 @@ public class ChunkCuller
+@@ -192,6 +291,123 @@ public class ChunkCuller
  				}
  			}
  		}
@@ -203,12 +215,12 @@ index 7befa7d..4879c46 100644
 +		}
 +	}
 +
-+	// Optimum issue #72 (after tehtelev's ChunkCuller): one pass over the loaded chunks
-+	// that resets visibility and copies each chunk inside the grid area into the flat
-+	// grid, with its traversability bits. Runs under chunksLock. The key is decoded as
-+	// ChunkIndex3D inverted: key = (y * mulZ + z) * mulX + x; keys of other dimensions
-+	// produce a y far outside the grid and are skipped.
-+	private void bfsResetAndFill(Dictionary<long, ClientChunk> chunks)
++	// Optimum issue #72 / #764: one pass over the loaded chunks that resets visibility for
++	// the player's current dimension and copies chunks inside the grid area into the flat
++	// grid with their traversability bits. Chunks in other dimensions (including mini-dimensions
++	// and extra dimensions when viewed from another dimension) stay visible because the grid
++	// only covers the active dimension. Runs under chunksLock.
++	private void bfsResetAndFill(Dictionary<long, ClientChunk> chunks, int currentDim)
 +	{
 +		OptimumChunkVisibilityGrid grid = bfsGrid;
 +		ClientChunk[] chunkGrid = bfsChunkGrid;
@@ -224,9 +236,14 @@ index 7befa7d..4879c46 100644
 +		foreach (KeyValuePair<long, ClientChunk> item in chunks)
 +		{
 +			ClientChunk chunk = item.Value;
-+			chunk.SetVisible(visible: false);
 +			long key = item.Key;
 +			long y = key / mulXZ;
++			if (y / OptimumChunkVisibilityGrid.ChunksPerDimension != currentDim)
++			{
++				chunk.SetVisible(visible: true);
++				continue;
++			}
++			chunk.SetVisible(visible: false);
 +			long ly = y - cy + ry;
 +			if ((ulong)ly >= (ulong)h)
 +			{
@@ -251,14 +268,14 @@ index 7befa7d..4879c46 100644
 +		}
 +	}
 +
-+	// Optimum issue #72: breadth-first visibility walk over the flat grid, run outside
++	// Optimum issue #72 / #764: breadth-first visibility walk over the flat grid, run outside
 +	// chunksLock on the snapshot taken by bfsResetAndFill, then the reached loaded chunks
-+	// are marked visible. Like the vanilla raycast it only marks reachable chunks; the
-+	// mesh pools frustum-cull afterwards.
-+	private void runFlatBfsVisibility(bool useOcclusion)
++	// are marked visible. The walk receives the dimension-local camera Y (centerpos.Y - dimOffset)
++	// so vertical world-height bounds apply accurately inside extra dimensions too.
++	private void runFlatBfsVisibility(bool useOcclusion, int dimOffset)
 +	{
 +		OptimumChunkVisibilityGrid grid = bfsGrid;
-+		grid.Run(centerpos.X, centerpos.Y, centerpos.Z, game.WorldMap.ChunkMapSizeX, game.WorldMap.ChunkMapSizeY, game.WorldMap.ChunkMapSizeZ, useOcclusion);
++		grid.Run(centerpos.X, centerpos.Y - dimOffset, centerpos.Z, game.WorldMap.ChunkMapSizeX, game.WorldMap.ChunkMapSizeY, game.WorldMap.ChunkMapSizeZ, useOcclusion);
 +		ClientChunk[] chunkGrid = bfsChunkGrid;
 +		int count = grid.QueueLength;
 +		for (int i = 0; i < count; i++)
