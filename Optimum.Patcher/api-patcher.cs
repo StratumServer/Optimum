@@ -4270,6 +4270,13 @@ public static class ApiPatcher
             ovIl.InsertBefore(loadArg0, instr);
         }
 
+        var firstRet = composeOverlays.Body.Instructions.FirstOrDefault(i => i.OpCode == OpCodes.Ret);
+        if (firstRet?.Previous == null || firstRet.Previous.OpCode != OpCodes.Ldc_I4_0)
+        {
+            throw new InvalidOperationException($"{gridTypeName}.ComposeSlotOverlays opening false return not found.");
+        }
+        var earlyFalse = firstRet.Previous;
+
         var ovFirst = composeOverlays.Body.Instructions[0];
         var boundsGuardInstrs = new[]
         {
@@ -4278,9 +4285,7 @@ public static class ApiPatcher
             Instruction.Create(OpCodes.Ldfld, slotQuantityTexturesField),
             Instruction.Create(OpCodes.Ldlen),
             Instruction.Create(OpCodes.Conv_I4),
-            Instruction.Create(OpCodes.Blt_Un, ovFirst),
-            Instruction.Create(OpCodes.Ldc_I4_0),
-            Instruction.Create(OpCodes.Ret),
+            Instruction.Create(OpCodes.Bge_Un, earlyFalse),
         };
         RetargetBranches(composeOverlays.Body.Instructions, ovFirst, boundsGuardInstrs[0]);
         foreach (var instr in boundsGuardInstrs)

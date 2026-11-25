@@ -1,5 +1,5 @@
 diff --git a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
-index 754d8c28..b498a34b 100644
+index 754d8c2..fa5df7a 100644
 --- a/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 +++ b/VintagestoryApi/Client/UI/Elements/Impl/Interactive/Inventory/GuiElementItemSlotGridBase.cs
 @@ -21,12 +21,12 @@ namespace Vintagestory.API.Client
@@ -59,15 +59,14 @@ index 754d8c28..b498a34b 100644
  
              this.rows = (int)Math.Ceiling(1f * availableSlots.Count / cols);
  
-@@ -314,21 +317,25 @@ namespace Vintagestory.API.Client
+@@ -314,21 +317,24 @@ namespace Vintagestory.API.Client
          }
  
  
          bool ComposeSlotOverlays(ItemSlot slot, int slotId, int slotIndex)
          {
 -            if (!availableSlots.ContainsKey(slotId)) return false;
-+            if ((uint)slotIndex >= (uint)slotQuantityTextures.Length) return false;
-+            if (!renderedSlots.ContainsKey(slotId)) return false;
++            if ((uint)slotIndex >= (uint)slotQuantityTextures.Length || !renderedSlots.ContainsKey(slotId)) return false;
              if (slot.Itemstack == null) return true;
  
              //int slotIndex = availableSlots.IndexOfKey(slotId);
@@ -88,7 +87,7 @@ index 754d8c28..b498a34b 100644
  
              // This is pretty slow to do this for every slot. Should be made with an atlas
              ImageSurface textSurface = new ImageSurface(Format.Argb32, (int)SlotBounds[slotIndex].InnerWidth, (int)SlotBounds[slotIndex].InnerHeight);
-@@ -404,11 +411,11 @@ namespace Vintagestory.API.Client
+@@ -404,11 +410,11 @@ namespace Vintagestory.API.Client
  
              foreach (int slotId in inventory.DirtySlots)
              {
@@ -101,7 +100,7 @@ index 754d8c28..b498a34b 100644
                  }
              }
  
-@@ -423,10 +430,11 @@ namespace Vintagestory.API.Client
+@@ -423,10 +429,11 @@ namespace Vintagestory.API.Client
  
  
  
@@ -113,7 +112,7 @@ index 754d8c28..b498a34b 100644
              double absItemstackSize = scaled(GuiElementPassiveItemSlot.unscaledItemSize);
              double absSlotHeight = scaled(GuiElementPassiveItemSlot.unscaledSlotSize);
  
-@@ -557,11 +565,11 @@ namespace Vintagestory.API.Client
+@@ -557,11 +564,11 @@ namespace Vintagestory.API.Client
          {
              searchText = text.ToSearchFriendly().ToLowerInvariant();
  
@@ -126,7 +125,7 @@ index 754d8c28..b498a34b 100644
              {
                  ItemSlot slot = inventory[val.Key];
  
-@@ -647,17 +655,31 @@ namespace Vintagestory.API.Client
+@@ -647,17 +654,31 @@ namespace Vintagestory.API.Client
                          renderedSlots.Add(val.Key, slot);
                      }
                  }
@@ -161,7 +160,7 @@ index 754d8c28..b498a34b 100644
  
  
          #endregion
-@@ -1076,10 +1098,17 @@ namespace Vintagestory.API.Client
+@@ -1076,10 +1097,17 @@ namespace Vintagestory.API.Client
  
          public override void Dispose()
          {
