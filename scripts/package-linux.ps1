@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
 Builds a ready-to-run Optimum package for Linux (x64). Downloads the official
 Vintage Story Linux client, overlays the optimized DLLs, renames the launcher
@@ -137,6 +137,15 @@ try {
     $assetDst = Join-Path $stageDir 'assets'
     if (Test-Path $compatAssetSrc) {
         Copy-Item -Recurse -Force (Join-Path $compatAssetSrc '*') $assetDst
+    }
+
+    # Ship bundled Optimum client-side content mod (UserFeedback integration).
+    $optimumModSrc = Join-Path $repoRoot 'sources/mods/optimum'
+    $optimumModDst = Join-Path $stageDir 'Mods/optimum'
+    if (Test-Path $optimumModSrc) {
+        if (Test-Path $optimumModDst) { Remove-Item -Recurse -Force $optimumModDst }
+        New-Item -ItemType Directory -Force -Path $optimumModDst | Out-Null
+        Copy-Item -Recurse -Force (Join-Path $optimumModSrc '*') $optimumModDst
     }
 
     # Merge translation strings (text-based; vanilla JSON has case-duplicate keys that break ConvertFrom-Json).

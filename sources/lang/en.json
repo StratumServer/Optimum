@@ -96,5 +96,7 @@
 	"optimum-compatibility-feature-name-EntityShaderStateCache": "Entity Shader State Cache",
 	"optimum-compatibility-feature-name-Oit": "Order-Independent Transparency",
 	"optimum-compatibility-feature-name-MapPageCache": "Map Page Cache",
-	"optimum-compatibility-feature-name-ShaderPreprocessParallel": "Parallel Shader Preprocessing"
+	"optimum-compatibility-feature-name-ShaderPreprocessParallel": "Parallel Shader Preprocessing",
+	"optimum-userfeedback-button": "Send Optimum Feedback",
+	"optimum-userfeedback-tooltip": "Open the UserFeedback panel pre-selected for Optimum bug reports and suggestions."
 }

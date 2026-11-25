@@ -596,6 +596,7 @@ public sealed class GamePatcher(
         RestoreFileAsset(gameDir, launcherName);
         RestoreDirectoryAssets(gameDir, Path.Combine("assets", "game", "lang"), restored);
         RestoreDirectoryAssets(gameDir, Path.Combine("assets", "darkvision", "config", "shaderpatches"));
+        RestoreDirectoryTreeAssets(gameDir, Path.Combine("Mods", "optimum"));
         TryDeleteFile(Path.Combine(gameDir, ".optimum", "version"));
         TryDeleteFile(Path.Combine(gameDir, PatchInstallManifest.RelativePath));
 
@@ -713,6 +714,13 @@ public sealed class GamePatcher(
             }
         }
 
+        // 5b. Bundled Optimum client-side content mod (UserFeedback integration)
+        string? optimumModSrc = FindDirectory(overlayDir, Path.Combine("Mods", "optimum"), Path.Combine("sources", "mods", "optimum"));
+        if (optimumModSrc is not null && probe.DirectoryExists(optimumModSrc))
+        {
+            DeployDirectoryTreeAsset(optimumModSrc, gameDir, Path.Combine("Mods", "optimum"), observer);
+        }
+
         // 6. Launcher wrapper
         string launcherName = probe.Os == OsKind.Windows ? "Optimum.exe" : "Optimum";
         string? launcherSrc = FindFile(overlayDir, launcherName);
@@ -795,6 +803,59 @@ public sealed class GamePatcher(
                 restored?.Add(Path.Combine(relativeDir, targetFileName).Replace('\\', '/'));
             }
         }
+    }
+
+    private void DeployDirectoryTreeAsset(string srcDir, string gameDir, string relativeDir, IBuildObserver? observer)
+    {
+        string dstDir = Path.Combine(gameDir, relativeDir);
+        if (!SymlinkComponentCheck.IsContainedWithinRoot(probe, dstDir, gameDir, out string? escaping))
+        {
+            observer?.Log(LogLevel.Warn,
+                $"Refusing to deploy {relativeDir} to {dstDir}: destination path escapes game root {gameDir} via symbolic link at {escaping}");
+            return;
+        }
+
+        EnsureDirectory(dstDir);
+        foreach (string file in probe.EnumerateFiles(srcDir, "*"))
+        {
+            string fileName = Path.GetFileName(file);
+            string relFile = Path.Combine(relativeDir, fileName);
+            BackupFileAsset(gameDir, relFile);
+            CopySafeFile(file, Path.Combine(dstDir, fileName), gameDir, observer);
+        }
+
+        foreach (string subDir in probe.EnumerateDirectories(srcDir, "*"))
+        {
+            string subName = Path.GetFileName(subDir);
+            DeployDirectoryTreeAsset(subDir, gameDir, Path.Combine(relativeDir, subName), observer);
+        }
+    }
+
+    private void RestoreDirectoryTreeAssets(string gameDir, string relativeDir)
+    {
+        string backupDir = Path.Combine(gameDir, ".optimum", "vanilla", relativeDir);
+        if (!probe.DirectoryExists(backupDir))
+            return;
+
+        RestoreDirectoryAssets(gameDir, relativeDir);
+        foreach (string subDir in probe.EnumerateDirectories(backupDir, "*"))
+        {
+            string subName = Path.GetFileName(subDir);
+            RestoreDirectoryTreeAssets(gameDir, Path.Combine(relativeDir, subName));
+        }
+
+        TryDeleteEmptyDirectory(Path.Combine(gameDir, relativeDir));
+        TryDeleteEmptyDirectory(backupDir);
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+                Directory.Delete(path, recursive: false);
+        }
+        catch { /* best effort */ }
     }
 
     private void BackupGameContentAsset(string gameDir, string gameContentPath)

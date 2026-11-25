@@ -16,10 +16,15 @@ public class InstallerReleaseCoverageTests
     {
         string version = Read("VERSION").Trim();
         string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
+        string modinfo = Read("sources/mods/optimum/modinfo.json");
         string readme = Read("README.md");
 
         Assert.False(string.IsNullOrWhiteSpace(version), "VERSION file is empty");
         Assert.Equal(version, Match(config, "public const string Version = \"([^\"]+)\""));
+        using (JsonDocument modDoc = JsonDocument.Parse(modinfo))
+        {
+            Assert.Equal(version, modDoc.RootElement.GetProperty("version").GetString());
+        }
 
         // VERSION is the development version and the README names the latest release, so the README
         // may lag behind it but must never be ahead of it.

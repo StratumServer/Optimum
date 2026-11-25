@@ -162,6 +162,17 @@ if (Test-Path $optimumDirectory) {
     }
 }
 
+$optimumModDirectory = Join-Path $InstallDir 'Mods\optimum'
+if (Test-Path $optimumModDirectory) {
+    try {
+        Remove-Item -Recurse -Force $optimumModDirectory -ErrorAction Stop
+        $removed++
+    } catch {
+        $failedPaths.Add($optimumModDirectory)
+        Write-UninstallLog "Could not remove ${optimumModDirectory}: $($_.Exception.Message)"
+    }
+}
+
 if ($failedPaths.Count -gt 0) {
     Write-Host "  Cleanup failed for $($failedPaths.Count) path(s). Close Optimum and retry." -ForegroundColor Red
     Write-Host "  Log: $uninstallLog" -ForegroundColor DarkGray

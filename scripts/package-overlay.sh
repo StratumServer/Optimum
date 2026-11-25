@@ -170,6 +170,12 @@ if [[ -d "$REPO_ROOT/sources/assets" ]]; then
     cp -a "$REPO_ROOT/sources/assets/." "$STAGE_DIR/assets/"
 fi
 
+# 5c. Bundled Optimum client-side content mod (UserFeedback integration).
+if [[ -d "$REPO_ROOT/sources/mods/optimum" ]]; then
+    mkdir -p "$STAGE_DIR/Mods/optimum"
+    cp -a "$REPO_ROOT/sources/mods/optimum/." "$STAGE_DIR/Mods/optimum/"
+fi
+
 # 6. Language strings
 if [[ -d "$REPO_ROOT/sources/lang" ]]; then
     find "$REPO_ROOT/sources/lang" -maxdepth 1 -name '*.json' -exec cp -f {} "$STAGE_DIR/assets/game/lang/" \;

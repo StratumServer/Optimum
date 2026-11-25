@@ -4,6 +4,7 @@ using System.Text;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
+using Vintagestory.API.Datastructures;
 using Vintagestory.API.MathTools;
 using Vintagestory.API.Server;
 
@@ -11,6 +12,8 @@ namespace Vintagestory.GameContent;
 
 public class OptimumStatusModSystem : ModSystem
 {
+    private const string UserFeedbackCollectEvent = "userfeedback:collect";
+    private const string UserFeedbackSentEvent = "userfeedback:sent";
     private ICoreClientAPI api;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
@@ -102,6 +105,9 @@ public class OptimumStatusModSystem : ModSystem
         // Log Optimum startup status
         api.Logger.Notification("[Optimum] Initializing Optimum v{0}", OptimumConfig.Version);
         LogFeatureStatus(api);
+
+        api.Event.RegisterEventBusListener(OnUserFeedbackCollect, 0.5, UserFeedbackCollectEvent);
+        api.Event.RegisterEventBusListener(OnUserFeedbackSent, 0.5, UserFeedbackSentEvent);
 
         CommandArgumentParsers parsers = api.ChatCommands.Parsers;
         api.ChatCommands.GetOrCreate("optimum")
@@ -581,5 +587,134 @@ public class OptimumStatusModSystem : ModSystem
         }
 
         return summary;
+    }
+
+    private void OnUserFeedbackCollect(string eventName, ref EnumHandling handling, IAttribute data)
+    {
+        if (data is not ITreeAttribute root)
+        {
+            return;
+        }
+
+        try
+        {
+            PopulateUserFeedbackContext(root);
+        }
+        catch (Exception ex)
+        {
+            api?.Logger?.Warning("[Optimum] Failed to populate UserFeedback context: {0}", ex.Message);
+        }
+    }
+
+    private void OnUserFeedbackSent(string eventName, ref EnumHandling handling, IAttribute data)
+    {
+        if (data is not ITreeAttribute sent)
+        {
+            return;
+        }
+
+        string modId = sent.GetString("modid");
+        if (!string.Equals(modId, "optimum", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string kind = sent.GetString("kind");
+        string target = sent.GetString("destination");
+        api?.Logger?.Notification("[Optimum] UserFeedback report submitted (kind={0}, destination={1})",
+            string.IsNullOrEmpty(kind) ? "unknown" : kind,
+            string.IsNullOrEmpty(target) ? "unknown" : target);
+    }
+
+    public static void PopulateUserFeedbackContext(ITreeAttribute root)
+    {
+        if (root == null)
+        {
+            return;
+        }
+
+        ITreeAttribute opt = root.GetOrAddTreeAttribute("optimum");
+        opt.SetString("version", OptimumConfig.Version);
+
+        string configuredBackend = OptimumConfig.GuiGpuRenderRequested
+            ? OptimumConfig.GuiRenderBackendSkiaGpu
+            : OptimumConfig.GuiSkiaCpuRequested
+                ? OptimumConfig.GuiRenderBackendSkiaCpu
+                : OptimumConfig.GuiRenderBackendCairo;
+        string effectiveBackend = OptimumConfig.EffectiveGuiGpuRender
+            ? OptimumConfig.GuiRenderBackendSkiaGpu
+            : OptimumConfig.GuiSkiaCpuRequested
+                ? OptimumConfig.GuiRenderBackendSkiaCpu
+                : OptimumConfig.GuiRenderBackendCairo;
+
+        opt.SetString("guiBackendConfigured", configuredBackend);
+        opt.SetString("guiBackendEffective", effectiveBackend);
+        opt.SetBool("guiGpuProbePassed", OptimumConfig.EffectiveGuiGpuRender);
+        opt.SetFloat("renderScale", OptimumConfig.EffectiveRenderScale);
+        opt.SetFloat("fsrSharpness", OptimumConfig.FsrSharpness);
+        opt.SetBool("dynamicRenderScale", OptimumConfig.EffectiveDynamicRenderScale);
+
+        ITreeAttribute togglesTree = opt.GetOrAddTreeAttribute("toggles");
+        foreach (var (name, value) in OptimumConfig.DescribeToggles())
+        {
+            togglesTree.SetString(name, SanitizeTreeString(value));
+        }
+
+        opt.SetString("ecosystemMods", SanitizeTreeString(OptimumCompatibilityGuard.GetPerformanceModsSummary()));
+        opt.SetString("interop", SanitizeTreeString(VsModInterop.DescribeInterop()));
+        opt.SetString("shaderCompat", SanitizeTreeString(GetShaderCompatibilityStatusSummary()));
+        opt.SetString("threadPool", SanitizeTreeString(GetThreadPoolMaxThreadsSummary()));
+        opt.SetString("adaptiveWorkers", SanitizeTreeString(GetAdaptiveWorkerSummary()));
+        opt.SetString("adaptiveRadius", SanitizeTreeString(GetAdaptiveRadiusSummary()));
+        opt.SetString("counters", SanitizeTreeString(OptimumDiagnostics.GetCountersSummary()));
+        opt.SetString("breakers", SanitizeTreeString(OptimumCircuitBreakerRegistry.GetBreakersSummary()));
+    }
+
+    // StringAttribute.ToJsonToken() wraps values verbatim without JSON escaping,
+    // so collapse line breaks and neutralize quotes/backslashes/control chars.
+    private static string SanitizeTreeString(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder(value.Length);
+        bool pendingSeparator = false;
+        for (int i = 0; i < value.Length; i++)
+        {
+            char ch = value[i];
+            if (ch == '\r' || ch == '\n')
+            {
+                pendingSeparator = sb.Length > 0;
+                continue;
+            }
+            if (char.IsControl(ch))
+            {
+                continue;
+            }
+            if (pendingSeparator)
+            {
+                if (ch == ' ' || ch == '\t')
+                {
+                    continue;
+                }
+                sb.Append("; ");
+                pendingSeparator = false;
+            }
+            if (ch == '"')
+            {
+                sb.Append('\'');
+            }
+            else if (ch == '\\')
+            {
+                sb.Append('/');
+            }
+            else
+            {
+                sb.Append(ch);
+            }
+        }
+        return sb.ToString().Trim();
     }
 }

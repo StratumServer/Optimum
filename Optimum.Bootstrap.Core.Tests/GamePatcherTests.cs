@@ -1007,6 +1007,36 @@ public sealed class GamePatcherTests
         }
     }
 
+    [Fact]
+    public async Task OverlayDeploymentAndRollbackIncludeBundledOptimumMod()
+    {
+        string root = Directory.CreateTempSubdirectory("optimum-mod-overlay-test").FullName;
+        try
+        {
+            (string gameDir, string overlayDir) = CreateTestGameAndOverlay(root, failOnApi: false);
+            string modSrcDir = Path.Combine(overlayDir, "Mods", "optimum", "assets", "optimum", "config");
+            Directory.CreateDirectory(modSrcDir);
+            File.WriteAllText(Path.Combine(overlayDir, "Mods", "optimum", "modinfo.json"), """{"modid":"optimum","type":"content"}""");
+            File.WriteAllText(Path.Combine(modSrcDir, "userfeedback.json"), """{"destinations":[]}""");
+
+            var patcher = new GamePatcher(SystemProbe.Default, new StubRuntimeValidator());
+            var patchResult = await patcher.PatchAsync(new PatchRequest(gameDir, OverlayDirectory: overlayDir));
+
+            Assert.True(patchResult.Ok, patchResult.Message);
+            Assert.True(File.Exists(Path.Combine(gameDir, "Mods", "optimum", "modinfo.json")));
+            Assert.True(File.Exists(Path.Combine(gameDir, "Mods", "optimum", "assets", "optimum", "config", "userfeedback.json")));
+
+            var rollbackResult = await patcher.PatchAsync(new PatchRequest(gameDir, Rollback: true));
+            Assert.True(rollbackResult.Ok, rollbackResult.Message);
+            Assert.False(File.Exists(Path.Combine(gameDir, "Mods", "optimum", "modinfo.json")));
+            Assert.False(File.Exists(Path.Combine(gameDir, "Mods", "optimum", "assets", "optimum", "config", "userfeedback.json")));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static void UpdateMax(ref int location, int value)
     {
         int current;

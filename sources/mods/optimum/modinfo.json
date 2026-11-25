@@ -1,0 +1,11 @@
+{
+  "type": "content",
+  "modid": "optimum",
+  "name": "Optimum",
+  "version": "0.4.4",
+  "description": "Optimum client metadata and UserFeedback integration.",
+  "authors": ["StratumServer"],
+  "side": "Client",
+  "requiredOnServer": false,
+  "requiredOnClient": false
+}

@@ -110,6 +110,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 	@cp $(MOD_OUT)/VSCreativeMod.dll $(VANILLA_DIR)/Mods/
 	@cp $(MOD_OUT)/cairo-sharp.dll $(VANILLA_DIR)/Lib/
 	@cp sources/shaders/*.fsh sources/shaders/*.vsh $(VANILLA_DIR)/assets/game/shaders/
+	@if [ -d "sources/mods/optimum" ]; then rm -rf "$(VANILLA_DIR)/Mods/optimum" && mkdir -p "$(VANILLA_DIR)/Mods/optimum" && cp -a sources/mods/optimum/. "$(VANILLA_DIR)/Mods/optimum/"; fi
 	@if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(VANILLA_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi
 	@if [ -d "$(INSTALL_DIR)" ]; then \
 		echo "Deploying to $(INSTALL_DIR)..."; \
@@ -124,6 +125,7 @@ deploy: patch-il check-shaders ## Deploy Cecil-patched DLLs into vanilla client 
 		cp $(MOD_OUT)/VSCreativeMod.dll $(INSTALL_DIR)/Mods/; \
 		cp $(MOD_OUT)/cairo-sharp.dll $(INSTALL_DIR)/Lib/; \
 		cp sources/shaders/*.fsh sources/shaders/*.vsh $(INSTALL_DIR)/assets/game/shaders/; \
+		if [ -d "sources/mods/optimum" ]; then rm -rf "$(INSTALL_DIR)/Mods/optimum" && mkdir -p "$(INSTALL_DIR)/Mods/optimum" && cp -a sources/mods/optimum/. "$(INSTALL_DIR)/Mods/optimum/"; fi; \
 		if [ -d "sources/lang" ]; then for f in sources/lang/*.json; do [ -f "$$f" ] || continue; dst="$(INSTALL_DIR)/assets/game/lang/$$(basename $$f)"; [ -f "$$dst" ] || continue; python3 -c "import json,sys; s=json.load(open(sys.argv[1],encoding='utf-8-sig')); d=json.load(open(sys.argv[2],encoding='utf-8-sig')); d.update(s); json.dump(d,open(sys.argv[2],'w',encoding='utf-8'),ensure_ascii=False,indent='\t')" "$$f" "$$dst"; done; fi; \
 	fi
 	@echo "Deploy complete."
