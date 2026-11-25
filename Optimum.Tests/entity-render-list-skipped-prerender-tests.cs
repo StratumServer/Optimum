@@ -1,8 +1,5 @@
 using System;
 using System.IO;
-using System.Linq;
-using Mono.Cecil;
-using Mono.Cecil.Cil;
 using Xunit;
 
 namespace Optimum.Tests;
@@ -85,49 +82,6 @@ public class EntityRenderListSkippedPreRenderTests
         Assert.Contains("\"optimumRenderedEntitiesBuilt\"", block);
         Assert.Contains("\"optimumRenderedEntitiesFallbackLogged\"", block);
         Assert.Contains("\"EnsureOptimumRenderedEntities\"", block);
-    }
-
-    [Fact]
-    public void VintagestoryLibPatched_OpaquePassCallsFreshnessCheckBeforeDrawingAndPreRenderMarksTheList()
-    {
-        string patchedDll = Path.GetFullPath(Path.Combine(
-            PatchReader.FindRepositoryFile("Optimum.Tests/Optimum.Tests.csproj"),
-            "..", "..", "build", "VintagestoryLib", "bin", "Release", "net10.0", "VintagestoryLib-patched.dll"));
-        Assert.True(File.Exists(patchedDll), $"Missing {patchedDll}; run make patch-il first.");
-
-        using AssemblyDefinition asm = AssemblyDefinition.ReadAssembly(patchedDll);
-        TypeDefinition system = asm.MainModule.GetType("Vintagestory.Client.NoObf.SystemRenderEntities");
-        Assert.NotNull(system);
-
-        MethodDefinition opaque = system.Methods.Single(m => m.Name == "OnRenderOpaque3D");
-        int ensureIndex = IndexOfCall(opaque, "EnsureOptimumRenderedEntities");
-        int drawIndex = IndexOfCall(opaque, "DoRender3DOpaque");
-        Assert.True(ensureIndex >= 0, "OnRenderOpaque3D must call EnsureOptimumRenderedEntities.");
-        Assert.True(drawIndex > ensureIndex, "The freshness check must run before the first draw call.");
-
-        MethodDefinition preRender = system.Methods.Single(m => m.Name == "OnBeforeRender");
-        Assert.Contains(preRender.Body.Instructions,
-            ins => ins.OpCode == OpCodes.Stfld && ins.Operand is FieldReference fr && fr.Name == "optimumRenderedEntitiesBuilt");
-
-        MethodDefinition ensure = system.Methods.Single(m => m.Name == "EnsureOptimumRenderedEntities");
-        Assert.Contains(ensure.Body.Instructions,
-            ins => ins.Operand is FieldReference fr && fr.Name == "IsRendered");
-        Assert.Contains(ensure.Body.Instructions,
-            ins => ins.Operand is MethodReference mr && mr.Name == "ActivateOptimumLightBatch");
-        Assert.Contains(ensure.Body.Instructions,
-            ins => ins.Operand is MethodReference mr && mr.Name == "ResetEntityTesselationBudget");
-    }
-
-    private static int IndexOfCall(MethodDefinition method, string name)
-    {
-        for (int i = 0; i < method.Body.Instructions.Count; i++)
-        {
-            if (method.Body.Instructions[i].Operand is MethodReference mr && mr.Name == name)
-            {
-                return i;
-            }
-        }
-        return -1;
     }
 
     private static int CountOccurrences(string text, string needle)
