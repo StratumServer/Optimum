@@ -232,15 +232,9 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-		[ThreadStatic] private static bool threadLinearMinOverride;
-
-		/// <summary>Opt-in per-thread linear-min filter for the next candidate texture candidate.</summary>
-		internal static bool LinearMinOverride { get => threadLinearMinOverride; set => threadLinearMinOverride = value; }
-
 		public static bool TryCreateCandidateTexture(Cairo.ImageSurface surface, bool linearMag, int expectedContextThreadId, out int candidateTexture, out string failureReason, int reusableTexture = 0)
 				{
 					const string DisplayListUnavailable = "candidate-display-list-unavailable";
-					bool linearMin = threadLinearMinOverride;
 					candidateTexture = 0;
 					failureReason = null;
 					if (!OptimumGuiGpuProbe.RenderingRequested)
@@ -282,7 +276,7 @@ namespace Vintagestory.Client.NoObf
 					}
 					if (Vintagestory.API.Config.OptimumConfig.GuiSkiaCpuRequested)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"skia-cpu-configured", out candidateTexture, out failureReason);
 					}
 					// A zero-area surface cannot be a complete framebuffer attachment (the vanilla scrollbar builds a
@@ -290,7 +284,7 @@ namespace Vintagestory.Client.NoObf
 					// through the CPU route without downgrading the configured backend for the whole install.
 					if (surface.Width <= 0 || surface.Height <= 0)
 					{
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"empty-surface", out candidateTexture, out failureReason);
 					}
 					// A managed recording surface that a worker thread already rasterized and
@@ -304,19 +298,19 @@ namespace Vintagestory.Client.NoObf
 					if (ForceSkiaCpuPreflightFallbackForTest)
 					{
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"test-forced-gpu-preflight-failure", out candidateTexture, out failureReason);
 					}
 					if (!MatchesCertifiedDevice())
 					{
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"current-device-or-context-mismatch", out candidateTexture, out failureReason);
 					}
 					if (!IsOpenGl3OrNewer(cachedDeviceIdentity?.Version ?? SafeGetString(StringName.Version)))
 					{
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"OpenGL 3.0 or newer is required for state capture", out candidateTexture, out failureReason);
 					}
 					// Once the one-shot probe ran, TryRunOnce only repeats the checks above (one more reset-status
@@ -326,7 +320,7 @@ namespace Vintagestory.Client.NoObf
 					{
 						ScreenManager.Platform?.Logger?.Warning("[Optimum] GUI GPU rendering not eligible. Downgrading to Skia CPU.");
 						Vintagestory.API.Config.OptimumConfig.OnGuiGpuBackendFailure();
-						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag, linearMin,
+						return TryCreateCpuCandidateTexture(surface, expectedContextThreadId, linearMag,
 							"gpu-probe-not-passed", out candidateTexture, out failureReason);
 					}
 					// Drain pre-existing engine errors before capturing state so post-render
@@ -366,14 +360,16 @@ namespace Vintagestory.Client.NoObf
 						if (reusableTexture != 0)
 						{
 							texture = reusableTexture;
-							GL.BindTexture(TextureTarget.Texture2D, texture);
 						}
 						else
 						{
 							GL.GenTextures(1, out texture);
-							GL.BindTexture(TextureTarget.Texture2D, texture);
-							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
-							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+						}
+						GL.BindTexture(TextureTarget.Texture2D, texture);
+						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
+						GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
+						if (reusableTexture == 0)
+						{
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, surface.Width, surface.Height, 0, PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
 						}
 						if (persistentScratchFramebuffer == 0)
@@ -571,7 +567,7 @@ namespace Vintagestory.Client.NoObf
 							// A failure after the render (a GL error, a restore failure) leaves the recorder sealed, and the CPU
 							// route replays a recording one. This is a no-op when the render failed before sealing.
 							surface.AbortGpuRender();
-							string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+							string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag);
 							rendered = true;
 							failureReason = "skia-cpu-fallback:ganesh=" + gpuFailure +
 								(uploadPreexistingErrors == null ? string.Empty : ";drained-gl-errors=" + uploadPreexistingErrors);
@@ -601,7 +597,7 @@ namespace Vintagestory.Client.NoObf
 					return false;
 				}
 
-				private static bool TryCreateCpuCandidateTexture(Cairo.ImageSurface surface, int expectedContextThreadId, bool linearMag, bool linearMin,
+				private static bool TryCreateCpuCandidateTexture(Cairo.ImageSurface surface, int expectedContextThreadId, bool linearMag,
 					string gpuFailure, out int candidateTexture, out string failureReason)
 				{
 					candidateTexture = 0;
@@ -613,7 +609,7 @@ namespace Vintagestory.Client.NoObf
 					try
 					{
 						GL.GenTextures(1, out texture);
-						string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag, linearMin);
+						string uploadPreexistingErrors = UploadCpuSkiaTexture(surface, texture, linearMag);
 						if (ContextWasReset(out string cpuResetReason))
 						{
 							try { GL.DeleteTextures(1, ref texture); } catch { }
@@ -637,7 +633,7 @@ namespace Vintagestory.Client.NoObf
 					}
 				}
 
-				private static string UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag, bool linearMin)
+				private static string UploadCpuSkiaTexture(Cairo.ImageSurface surface, int texture, bool linearMag)
 				{
 					int width = Math.Max(1, surface.Width);
 					int height = Math.Max(1, surface.Height);
@@ -678,7 +674,7 @@ namespace Vintagestory.Client.NoObf
 							if (callerUnpackSkipPixels != 0) GL.PixelStore((PixelStoreParameter)0x0CF4, 0);
 							if (checkEachStep) CheckCpuUploadGlError("prepare-unpack-state");
 							GL.BindTexture(TextureTarget.Texture2D, texture);
-							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)(linearMin ? TextureMinFilter.Linear : TextureMinFilter.Nearest));
+							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Linear);
 							GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, linearMag ? (int)TextureMagFilter.Linear : (int)TextureMagFilter.Nearest);
 							if (checkEachStep) CheckCpuUploadGlError("bind-texture-and-set-filters");
 							GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, width, height, 0,

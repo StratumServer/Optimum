@@ -81,9 +81,9 @@ public sealed class GuiSkiaGpuUploadGlTests
             OptimumConfig.GuiRenderBackend = OptimumConfig.GuiRenderBackendSkiaCpu;
         }
 
-        internal (bool ok, int texture, string reason) Run(ImageSurface surface)
+        internal (bool ok, int texture, string reason) Run(ImageSurface surface, bool linearMag = true, int reusableTexture = 0)
         {
-            object?[] arguments = [surface, true, Environment.CurrentManagedThreadId, 0, null, 0];
+            object?[] arguments = [surface, linearMag, Environment.CurrentManagedThreadId, 0, null, reusableTexture];
             bool ok = (bool)Upload.Invoke(null, arguments)!;
             return (ok, (int)arguments[3]!, (string?)arguments[4] ?? string.Empty);
         }
@@ -288,6 +288,79 @@ public sealed class GuiSkiaGpuUploadGlTests
             first.MakeCurrent();
             GL.DeleteTexture(firstTexture);
         }
+    }
+
+    [GlContextFact]
+    public void GpuAndFallbackRoutes_SetLinearMinFilterAndHonorLinearMagFlag()
+    {
+        using var route = new Route();
+        using var window = Route.OpenWindow();
+        route.Reset();
+        var textures = new List<int>();
+        try
+        {
+            route.UseGpu();
+            using (ImageSurface surface = Record())
+            {
+                var linearResult = route.Run(surface, linearMag: true);
+                Assert.True(linearResult.ok, linearResult.reason);
+                Assert.True(linearResult.reason.Length == 0, linearResult.reason);
+                textures.Add(linearResult.texture);
+                Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Linear), ReadFilters(linearResult.texture));
+            }
+
+            using (ImageSurface surface = Record())
+            {
+                var nearestMagResult = route.Run(surface, linearMag: false);
+                Assert.True(nearestMagResult.ok, nearestMagResult.reason);
+                Assert.True(nearestMagResult.reason.Length == 0, nearestMagResult.reason);
+                textures.Add(nearestMagResult.texture);
+                Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Nearest), ReadFilters(nearestMagResult.texture));
+            }
+
+            GL.GetInteger(GetPName.TextureBinding2D, out int bound);
+            int reusable = GL.GenTexture();
+            textures.Add(reusable);
+            GL.BindTexture(TextureTarget.Texture2D, reusable);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMinFilter, (int)TextureMinFilter.Nearest);
+            GL.TexParameter(TextureTarget.Texture2D, TextureParameterName.TextureMagFilter, (int)TextureMagFilter.Nearest);
+            GL.TexImage2D(TextureTarget.Texture2D, 0, PixelInternalFormat.Rgba8, Width, Height, 0, OpenTK.Graphics.OpenGL.PixelFormat.Rgba, PixelType.UnsignedByte, IntPtr.Zero);
+            GL.BindTexture(TextureTarget.Texture2D, bound);
+
+            using (ImageSurface surface = Record())
+            {
+                var reusedResult = route.Run(surface, linearMag: true, reusableTexture: reusable);
+                Assert.True(reusedResult.ok, reusedResult.reason);
+                Assert.True(reusedResult.reason.Length == 0, reusedResult.reason);
+                Assert.Equal(reusable, reusedResult.texture);
+                Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Linear), ReadFilters(reusedResult.texture));
+            }
+
+            route.Static("ForceGlErrorAfterCandidateForTest", true);
+            using (ImageSurface surface = Record())
+            {
+                var fallbackResult = route.Run(surface, linearMag: false);
+                Assert.True(fallbackResult.ok, fallbackResult.reason);
+                Assert.StartsWith("skia-cpu-fallback:ganesh=gl-error-after-candidate", fallbackResult.reason, StringComparison.Ordinal);
+                textures.Add(fallbackResult.texture);
+                Assert.Equal(((int)TextureMinFilter.Linear, (int)TextureMagFilter.Nearest), ReadFilters(fallbackResult.texture));
+            }
+            Assert.Equal(OpenTK.Graphics.OpenGL.ErrorCode.NoError, GL.GetError());
+        }
+        finally
+        {
+            foreach (int texture in textures) GL.DeleteTexture(texture);
+        }
+    }
+
+    private static (int minFilter, int magFilter) ReadFilters(int texture)
+    {
+        GL.GetInteger(GetPName.TextureBinding2D, out int bound);
+        GL.BindTexture(TextureTarget.Texture2D, texture);
+        GL.GetTexParameter(TextureTarget.Texture2D, GetTextureParameter.TextureMinFilter, out int minFilter);
+        GL.GetTexParameter(TextureTarget.Texture2D, GetTextureParameter.TextureMagFilter, out int magFilter);
+        GL.BindTexture(TextureTarget.Texture2D, bound);
+        return (minFilter, magFilter);
     }
 
     private static byte[] ReadPixels(int texture)
