@@ -1183,8 +1183,8 @@ var targets = new List<MethodTarget>
     // Issue #72: flat-grid BFS visibility walk + its helpers, transplanted alongside
     // CullInvisibleChunks (which calls them when the toggle is on).
     new("Vintagestory.Client.NoObf.ChunkCuller", "bfsPrepareGrid", 0),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsResetAndFill", 1),
-    new("Vintagestory.Client.NoObf.ChunkCuller", "runFlatBfsVisibility", 1),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "bfsResetAndFill", 2),
+    new("Vintagestory.Client.NoObf.ChunkCuller", "runFlatBfsVisibility", 2),
     new("Vintagestory.Client.NoObf.ChunkCuller", "countVisibleMarked", 0),
     // Issue #566: nearest-first time-budgeted traversability queue and atomic mask publish.
     new("Vintagestory.Client.NoObf.SystemChunkVisibilityCalc", "OnChunkLoaded", 1),

@@ -216,16 +216,20 @@ public class BfsChunkVisibilityTests
         Assert.Contains("grid.Run(", patch);
         Assert.Contains("ShouldRecalculate(", patch);                       // throttle decision lives in the core
         Assert.Contains("bfsPrepareGrid();", patch);                        // sized at the start of a pass
-        Assert.Contains("bfsResetAndFill(chunks);", patch);                 // snapshot under chunksLock
+        Assert.Contains("bfsResetAndFill(chunks, currentDim);", patch);     // snapshot under chunksLock, dimension-aware
+        Assert.Contains("OptimumChunkVisibilityGrid.ResolveCameraChunkY(", patch);
+        Assert.Contains("OptimumChunkVisibilityGrid.ChunksPerDimension", patch);
         Assert.Contains("OptimumChunkVisibilityGrid.EncodeCell(", patch);
         Assert.Contains("bool fresh = System.Threading.Volatile.Read(ref chunk.traversabilityFresh);", patch);  // fresh flag acquire-read before the bits
         Assert.Contains("Array.Clear(chunkGrid, 0, grid.CellCount);", patch); // chunk references dropped after the pass
-        Assert.Contains("runFlatBfsVisibility(ClientSettings.Occlusionculling);", patch);
+        Assert.Contains("runFlatBfsVisibility(ClientSettings.Occlusionculling, dimOffset);", patch);
+        Assert.Contains("centerpos.Y - dimOffset", patch);                  // local Y bounds inside extra dimensions
+        Assert.Contains("item.Key >= ExtraDimensionsStart", patch);         // raycast fallback preserves extra dimensions
 
         // The walk runs outside chunksLock: no lock between the reset and runFlatBfsVisibility.
         Assert.DoesNotContain("runBfsVisibility", patch);
         Assert.DoesNotContain("new Queue<long>()", patch);
-        int call = patch.IndexOf("runFlatBfsVisibility(ClientSettings.Occlusionculling);", StringComparison.Ordinal);
+        int call = patch.IndexOf("runFlatBfsVisibility(ClientSettings.Occlusionculling, dimOffset);", StringComparison.Ordinal);
         Assert.True(call > 0);
         string before = patch.Substring(Math.Max(0, call - 120), 120);
         Assert.DoesNotContain("lock (game.WorldMap.chunksLock)", before);

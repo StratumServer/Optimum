@@ -398,6 +398,60 @@ public class OptimumChunkVisibilityGridTests
         Assert.True(Throttle(true, 3_000, 2_500, ref pending, now: 2_100, lastMs: 1_000));
     }
 
+    // ---- extra dimensions (#764) ----
+
+    [Theory]
+    [InlineData(128.5, 0, 4)]                  // normal dim 0
+    [InlineData(-64.0, 0, -2)]                 // below world floor in dim 0
+    [InlineData(500.0, 0, 15)]                 // above world height in dim 0
+    [InlineData(2 * 32768 + 128.5, 2, 2052)]   // normal extra dim 2
+    [InlineData(2 * 32768 - 64.0, 2, 2046)]    // below floor in extra dim 2 (localY = -2)
+    [InlineData(2 * 32768 + 500.0, 2, 2063)]   // above world height in extra dim 2
+    [InlineData(128.5, 2, 2052)]               // torn CameraPos.Y (missing DimensionYAdjustment) in dim 2
+    [InlineData(-64.0, 2, 2046)]               // torn CameraPos.Y below floor in dim 2
+    [InlineData(2 * 32768 + 128.5, 0, 4)]      // stale dim 2 CameraPos.Y right after switching to dim 0
+    [InlineData(2 * 32768 + 128.5, 3, 3076)]   // stale dim 2 CameraPos.Y right after switching to dim 3
+    [InlineData(3 * 32768 + 128.5, 2, 2052)]   // stale dim 3 CameraPos.Y right after switching to dim 2
+    [InlineData(128.5, -1, 4)]                 // defensive clamp for negative dimension
+    public void ResolveCameraChunkY_ReconcilesDimensionOffsetAndTornReads(
+        double cameraY, int currentDim, int expectedInternalChunkY)
+    {
+        Assert.Equal(expectedInternalChunkY, OptimumChunkVisibilityGrid.ResolveCameraChunkY(cameraY, currentDim));
+    }
+
+    [Fact]
+    public void ExtraDimension_LocalCamYEnforcesFloorBounds_PreventingUnderWorldWallBypass()
+    {
+        // Issue #764: passing raw internal chunkY (e.g. 2052) into grid.Run made aboveWorld=true
+        // because 2052 >= mapSizeY (8), letting the walk leak below localY=0 through unloaded cells
+        // and bypass a full-height opaque wall. Passing dimension-local camY (2052 - 2048 = 4)
+        // keeps aboveWorld=false and enforces [0, mapSizeY).
+        var w = new World { MapX = 12, MapY = 8, MapZ = 12 };
+        for (int x = 0; x < w.MapX; x++)
+        {
+            for (int y = 0; y < w.MapY; y++)
+            {
+                for (int z = 0; z < w.MapZ; z++)
+                {
+                    bool wall = x == 6;
+                    w.Chunks[(x, y, z)] = OptimumChunkVisibilityGrid.EncodeCell(
+                        wall ? (ushort)0 : OptimumChunkVisibilityGrid.AllPass, fresh: true);
+                }
+            }
+        }
+
+        const int dim = 2;
+        int dimOffset = dim * OptimumChunkVisibilityGrid.ChunksPerDimension;
+        int camInternalY = OptimumChunkVisibilityGrid.ResolveCameraChunkY(dim * 32768 + 4 * 32 + 16, dim);
+        int localCamY = camInternalY - dimOffset;
+
+        var visible = RunGrid(w, (4, localCamY, 5), viewDistance: 256, occlusion: true);
+        Assert.Contains((4, 4, 5), visible);
+        Assert.Contains((2, 4, 5), visible);
+        Assert.Contains((6, 4, 5), visible);      // wall itself is visible
+        Assert.DoesNotContain((8, 4, 5), visible); // behind full-height wall stays occluded
+    }
+
     // ---- models ----
 
     /// <summary>Port of ChunkCuller.traverseRayAndMarkVisible / getExitingFace from the 1.22.7 decompile.</summary>

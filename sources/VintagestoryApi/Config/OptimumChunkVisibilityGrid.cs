@@ -25,6 +25,9 @@ namespace Vintagestory.API.Config;
 /// </summary>
 public sealed class OptimumChunkVisibilityGrid
 {
+    /// <summary>Chunk Y stride per Vintage Story dimension (32,768 blocks / 32 blocks per chunk).</summary>
+    public const int ChunksPerDimension = 1024;
+
     /// <summary>Cell flag: a chunk is loaded at this cell.</summary>
     public const ushort LoadedBit = 0x8000;
 
@@ -330,5 +333,32 @@ public sealed class OptimumChunkVisibilityGrid
 
         pending = false;
         return true;
+    }
+
+    /// <summary>
+    /// Converts <c>EntityPlayer.CameraPos.Y</c> to the internal chunk Y coordinate for
+    /// <paramref name="currentDimension"/>. <c>PlayerCamera</c> updates <c>CameraPos.Y</c> on the
+    /// main thread in two writes (local Y, then <c>+= DimensionYAdjustment</c>) while the culler
+    /// runs on its own thread; if the culler reads <c>CameraPos.Y</c> mid-update or right after a
+    /// dimension change, this reconciles the dimension offset against <paramref name="currentDimension"/>.
+    /// </summary>
+    public static int ResolveCameraChunkY(double cameraY, int currentDimension)
+    {
+        if (currentDimension < 0)
+        {
+            currentDimension = 0;
+        }
+        int dimOffset = currentDimension * ChunksPerDimension;
+        int camChunkY = (int)(cameraY / 32.0);
+        if (currentDimension > 0 && camChunkY < dimOffset - (ChunksPerDimension / 2))
+        {
+            int localY = camChunkY >= 0 ? camChunkY % ChunksPerDimension : camChunkY;
+            camChunkY = localY + dimOffset;
+        }
+        else if (camChunkY >= dimOffset + ChunksPerDimension)
+        {
+            camChunkY = (camChunkY % ChunksPerDimension) + dimOffset;
+        }
+        return camChunkY;
     }
 }
