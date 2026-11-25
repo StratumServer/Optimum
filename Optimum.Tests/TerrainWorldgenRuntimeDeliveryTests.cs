@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -102,6 +103,7 @@ public sealed class TerrainWorldgenRuntimeDeliveryTests
         Assert.Contains("OnChunkColumnGen", methodsByType["Vintagestory.ServerMods.GenTerra"]);
         Assert.Contains("generate", methodsByType["Vintagestory.ServerMods.GenTerra"]);
         Assert.Contains("GetOrLoadLerpedLandformMap", methodsByType["Vintagestory.ServerMods.GenTerra"]);
+        Assert.Contains("GetInterpolatedOctaves", methodsByType["Vintagestory.ServerMods.GenTerra"]);
 
         Assert.Contains("initWorldGen", methodsByType["Vintagestory.ServerMods.GenRockStrataNew"]);
         Assert.Contains("preLoad", methodsByType["Vintagestory.ServerMods.GenRockStrataNew"]);
@@ -605,6 +607,287 @@ public sealed class TerrainWorldgenRuntimeDeliveryTests
             alc?.Unload();
             TryDeleteFile(tempOutput);
             TryDeleteFile(Path.ChangeExtension(tempOutput, ".pdb"));
+        }
+    }
+
+    [Fact]
+    public void GenTerra_SourceAndRuntimePatches_EliminateRedundantTlsAndCornerAllocations()
+    {
+        string sourcePatch = PatchReader.ReadPatch(
+            "patches/VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs.patch");
+
+        // Issues #743 and #744: no per-column tempDataThreadLocal.Value reads remain in Parallel.For,
+        // corners reuse workspace buffers via InterpolateOctaves, layer merges synchronize via lock (workspace)
+        // + SIMD MergeLayerFlags, and the block-fill loop uses shift-OR indexing.
+        Assert.DoesNotContain("tempDataThreadLocal.Value.LerpedAmplitudes", sourcePatch);
+        Assert.DoesNotContain("tempDataThreadLocal.Value.LerpedThresholds", sourcePatch);
+        Assert.DoesNotContain("float[] columnLandformIndexedWeights = tempDataThreadLocal.Value.landformWeights", sourcePatch);
+        Assert.Contains("workspace.InterpolateOctaves(", sourcePatch);
+        Assert.Contains("lock (workspace)", sourcePatch);
+        Assert.Contains("GenerationWorkspace.MergeLayerFlags(", sourcePatch);
+        Assert.Contains("(lY << 10) | mapIndex", sourcePatch);
+
+        if (!TryLocateRuntimeDonor(out string root, out string vanillaPath, out string compiledPath))
+        {
+            return;
+        }
+
+        string tempOutput = Path.Combine(Path.GetTempPath(), $"optimum_genterra_oct_{Guid.NewGuid():N}.dll");
+        IsolatedEssentialsContext? alc = null;
+        try
+        {
+            Assert.True(ModPatcher.Patch("vsessentials", vanillaPath, compiledPath, tempOutput));
+            alc = new IsolatedEssentialsContext(root, tempOutput, harmonyDllPath: null, isCollectible: true);
+            Assembly patchedAsm = alc.LoadFromAssemblyPath(tempOutput);
+
+            Type wsType = patchedAsm.GetType("Vintagestory.ServerMods.OptimumGenTerraWorkspace", throwOnError: true)!;
+            Type variantType = patchedAsm.GetType("Vintagestory.ServerMods.NoObf.LandformVariant", throwOnError: true)!;
+            Type variantArrayType = variantType.MakeArrayType();
+            FieldInfo octavesField = variantType.GetField("TerrainOctaves")!;
+            FieldInfo thresholdsField = variantType.GetField("TerrainOctaveThresholds")!;
+            MethodInfo ensureCap = wsType.GetMethod("EnsureCapacity", BindingFlags.Public | BindingFlags.Instance)!;
+            MethodInfo interp = wsType.GetMethod("InterpolateOctaves", BindingFlags.Public | BindingFlags.Instance)!;
+
+            var wsParam = Expression.Parameter(typeof(object), "ws");
+            var wParam = Expression.Parameter(typeof(float[]), "w");
+            var vParam = Expression.Parameter(typeof(Array), "v");
+            var oParam = Expression.Parameter(typeof(int), "o");
+            var aParam = Expression.Parameter(typeof(double[]), "a");
+            var tParam = Expression.Parameter(typeof(double[]), "t");
+            var typedInterp = Expression.Lambda<Action<object, float[], Array, int, double[], double[]>>(
+                Expression.Call(
+                    Expression.Convert(wsParam, wsType),
+                    interp,
+                    wParam,
+                    Expression.Convert(vParam, variantArrayType),
+                    oParam,
+                    aParam,
+                    tParam),
+                wsParam, wParam, vParam, oParam, aParam, tParam).Compile();
+
+            var rng = new Random(744743);
+            const int landformCount = 24;
+            foreach (int octaves in new[] { 8, 9, 10, 11, 19 })
+            {
+                Array variants = Array.CreateInstance(variantType, landformCount);
+                var expectedVariants = new (double[] amp, double[] th)[landformCount];
+                for (int v = 0; v < landformCount; v++)
+                {
+                    var amp = new double[octaves];
+                    var th = new double[octaves];
+                    for (int o = 0; o < octaves; o++)
+                    {
+                        amp[o] = rng.NextDouble() * 2.0 - 1.0;
+                        th[o] = rng.NextDouble() * 2.0 - 1.0;
+                    }
+                    object variant = Activator.CreateInstance(variantType)!;
+                    octavesField.SetValue(variant, amp);
+                    thresholdsField.SetValue(variant, th);
+                    variants.SetValue(variant, v);
+                    expectedVariants[v] = (amp, th);
+                }
+
+                float[] weights = new float[landformCount];
+                weights[1] = 0.45f;
+                weights[7] = 0.35f;
+                weights[19] = 0.20f;
+
+                double[] expectedAmps = new double[octaves];
+                double[] expectedTh = new double[octaves];
+                for (int o = 0; o < octaves; o++)
+                {
+                    double a = 0.0;
+                    double t = 0.0;
+                    for (int i = 0; i < weights.Length; i++)
+                    {
+                        float w = weights[i];
+                        if (w == 0f) continue;
+                        a += expectedVariants[i].amp[o] * w;
+                        t += expectedVariants[i].th[o] * w;
+                    }
+                    expectedAmps[o] = a;
+                    expectedTh[o] = t;
+                }
+
+                object workspace = Activator.CreateInstance(wsType, 256)!;
+                ensureCap.Invoke(workspace, new object[] { octaves, landformCount, 256 });
+                double[] actualAmps = (double[])wsType.GetField("OctNoiseX0")!.GetValue(workspace)!;
+                double[] actualTh = (double[])wsType.GetField("OctThX0")!.GetValue(workspace)!;
+
+                typedInterp(workspace, weights, variants, octaves, actualAmps, actualTh);
+                for (int o = 0; o < octaves; o++)
+                {
+                    Assert.Equal(BitConverter.DoubleToInt64Bits(expectedAmps[o]), BitConverter.DoubleToInt64Bits(actualAmps[o]));
+                    Assert.Equal(BitConverter.DoubleToInt64Bits(expectedTh[o]), BitConverter.DoubleToInt64Bits(actualTh[o]));
+                }
+
+                long allocBefore = GC.GetAllocatedBytesForCurrentThread();
+                for (int iter = 0; iter < 128; iter++)
+                {
+                    typedInterp(workspace, weights, variants, octaves, actualAmps, actualTh);
+                }
+                Assert.Equal(allocBefore, GC.GetAllocatedBytesForCurrentThread());
+            }
+        }
+        finally
+        {
+            alc?.Unload();
+            TryDeleteFile(tempOutput);
+            TryDeleteFile(Path.ChangeExtension(tempOutput, ".pdb"));
+        }
+    }
+
+    [Fact]
+    public void GenTerra_EnsureCapacity_HandlesDynamicWorldHeightAndLandformExpansion()
+    {
+        if (!TryLocateRuntimeDonor(out string root, out string vanillaPath, out string compiledPath))
+        {
+            return;
+        }
+
+        string tempOutput = Path.Combine(Path.GetTempPath(), $"optimum_genterra_cap_{Guid.NewGuid():N}.dll");
+        IsolatedEssentialsContext? alc = null;
+        try
+        {
+            Assert.True(ModPatcher.Patch("vsessentials", vanillaPath, compiledPath, tempOutput));
+            alc = new IsolatedEssentialsContext(root, tempOutput, harmonyDllPath: null, isCollectible: true);
+            Assembly patchedAsm = alc.LoadFromAssemblyPath(tempOutput);
+
+            Type tdType = patchedAsm.GetType("Vintagestory.ServerMods.OptimumGenTerraTempData", throwOnError: true)!;
+            Type wsType = patchedAsm.GetType("Vintagestory.ServerMods.OptimumGenTerraWorkspace", throwOnError: true)!;
+
+            object td = Activator.CreateInstance(tdType, 8, 10, 128)!;
+            MethodInfo tdEnsure = tdType.GetMethod("EnsureCapacity", BindingFlags.Public | BindingFlags.Instance)!;
+            tdEnsure.Invoke(td, new object[] { 19, 32, 1536 });
+            Assert.Equal(19, ((double[])tdType.GetField("LerpedAmplitudes")!.GetValue(td)!).Length);
+            Assert.Equal(19, ((double[])tdType.GetField("LerpedThresholds")!.GetValue(td)!).Length);
+            Assert.Equal(32, ((float[])tdType.GetField("LandformWeights")!.GetValue(td)!).Length);
+            Assert.Equal(32, ((float[])tdType.GetField("CompactWeights")!.GetValue(td)!).Length);
+            Assert.Equal(1536, ((bool[])tdType.GetField("LocalLayerFullySolid")!.GetValue(td)!).Length);
+            Assert.Equal(1536, ((bool[])tdType.GetField("LocalLayerFullyEmpty")!.GetValue(td)!).Length);
+
+            tdEnsure.Invoke(td, new object[] { 9, 24, 256 });
+            Assert.Equal(9, ((double[])tdType.GetField("LerpedAmplitudes")!.GetValue(td)!).Length);
+            Assert.Equal(256, ((bool[])tdType.GetField("LocalLayerFullySolid")!.GetValue(td)!).Length);
+
+            object ws = Activator.CreateInstance(wsType, 128)!;
+            MethodInfo wsEnsure = wsType.GetMethod("EnsureCapacity", BindingFlags.Public | BindingFlags.Instance)!;
+            wsEnsure.Invoke(ws, new object[] { 19, 32, 1536 });
+            Assert.Equal(19, ((double[])wsType.GetField("OctNoiseX0")!.GetValue(ws)!).Length);
+            Assert.Equal(19, ((double[])wsType.GetField("OctThX3")!.GetValue(ws)!).Length);
+            Assert.Equal(32, ((float[])wsType.GetField("CornerLandformWeights")!.GetValue(ws)!).Length);
+            Assert.Equal(32, ((int[])wsType.GetField("CornerNonZeroIndices")!.GetValue(ws)!).Length);
+            Assert.Equal(1536, ((bool[])wsType.GetField("LayerFullySolid")!.GetValue(ws)!).Length);
+            Assert.Equal(24, ((ulong[][])wsType.GetField("ColumnBlockSolidities")!.GetValue(ws)!)[0].Length);
+        }
+        finally
+        {
+            alc?.Unload();
+            TryDeleteFile(tempOutput);
+            TryDeleteFile(Path.ChangeExtension(tempOutput, ".pdb"));
+        }
+    }
+
+    [Fact]
+    public void GenTerra_SimdMergeLayerFlags_MatchesScalarAndIsThreadSafeAcrossHeights()
+    {
+        if (!TryLocateRuntimeDonor(out string root, out string vanillaPath, out string compiledPath))
+        {
+            return;
+        }
+
+        string tempOutput = Path.Combine(Path.GetTempPath(), $"optimum_genterra_merge_{Guid.NewGuid():N}.dll");
+        IsolatedEssentialsContext? alc = null;
+        try
+        {
+            Assert.True(ModPatcher.Patch("vsessentials", vanillaPath, compiledPath, tempOutput));
+            alc = new IsolatedEssentialsContext(root, tempOutput, harmonyDllPath: null, isCollectible: true);
+            Assembly patchedAsm = alc.LoadFromAssemblyPath(tempOutput);
+
+            Type wsType = patchedAsm.GetType("Vintagestory.ServerMods.OptimumGenTerraWorkspace", throwOnError: true)!;
+            MethodInfo mergeMethod = wsType.GetMethod("MergeLayerFlags", BindingFlags.Public | BindingFlags.Static)!;
+            var merge = (Action<bool[], bool[], bool[], bool[]>)Delegate.CreateDelegate(typeof(Action<bool[], bool[], bool[], bool[]>), mergeMethod);
+
+            var rng = new Random(9911);
+            foreach (int len in new[] { 0, 15, 16, 31, 32, 128, 256, 260, 384, 512, 1536 })
+            {
+                bool[] solid = new bool[len];
+                bool[] empty = new bool[len];
+                bool[] refSolid = new bool[len];
+                bool[] refEmpty = new bool[len];
+                bool[] localSolid = new bool[len];
+                bool[] localEmpty = new bool[len];
+
+                for (int i = 0; i < len; i++)
+                {
+                    solid[i] = refSolid[i] = rng.Next(2) == 1;
+                    empty[i] = refEmpty[i] = rng.Next(2) == 1;
+                    localSolid[i] = rng.Next(2) == 1;
+                    localEmpty[i] = rng.Next(2) == 1;
+                    if (!localSolid[i]) refSolid[i] = false;
+                    if (!localEmpty[i]) refEmpty[i] = false;
+                }
+
+                merge(solid, empty, localSolid, localEmpty);
+                Assert.Equal(refSolid, solid);
+                Assert.Equal(refEmpty, empty);
+            }
+
+            // Concurrent thread-safety check with lock (workspace).
+            object gate = new object();
+            bool[] sharedSolid = new bool[384];
+            bool[] sharedEmpty = new bool[384];
+            Array.Fill(sharedSolid, true);
+            Array.Fill(sharedEmpty, true);
+            Parallel.For(0, 64, new ParallelOptions { MaxDegreeOfParallelism = 4 }, idx =>
+            {
+                bool[] ls = new bool[384];
+                bool[] le = new bool[384];
+                Array.Fill(ls, true);
+                Array.Fill(le, true);
+                ls[(idx * 5) % 384] = false;
+                le[(idx * 7) % 384] = false;
+                lock (gate)
+                {
+                    merge(sharedSolid, sharedEmpty, ls, le);
+                }
+            });
+            for (int idx = 0; idx < 64; idx++)
+            {
+                Assert.False(sharedSolid[(idx * 5) % 384]);
+                Assert.False(sharedEmpty[(idx * 7) % 384]);
+            }
+        }
+        finally
+        {
+            alc?.Unload();
+            TryDeleteFile(tempOutput);
+            TryDeleteFile(Path.ChangeExtension(tempOutput, ".pdb"));
+        }
+    }
+
+    [Fact]
+    public void GenTerra_BitShiftChunkIndex3d_MatchesVanillaForAll32x32x32Coords()
+    {
+        for (int posY = 0; posY < 1536; posY++)
+        {
+            int yBaseChunk = posY / 32;
+            int lY = posY & 31;
+            Assert.Equal(yBaseChunk, posY >> 5);
+            Assert.Equal(posY % 32, lY);
+            if (posY == 0 || posY == 31 || posY == 255 || posY == 1023 || posY == 1535)
+            {
+                for (int lZ = 0; lZ < 32; lZ++)
+                {
+                    int mapIndex = lZ * 32;
+                    for (int lX = 0; lX < 32; lX++, mapIndex++)
+                    {
+                        int expected = (lY * 32 + lZ) * 32 + lX;
+                        int actual = (lY << 10) | mapIndex;
+                        Assert.Equal(expected, actual);
+                    }
+                }
+            }
         }
     }
 

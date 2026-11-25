@@ -309,6 +309,7 @@ public static class ModPatcher
                 new("Vintagestory.ServerMods.GenTerra", "OnChunkColumnGen", 1),
                 new("Vintagestory.ServerMods.GenTerra", "generate", 4),
                 new("Vintagestory.ServerMods.GenTerra", "GetOrLoadLerpedLandformMap", 3),
+                new("Vintagestory.ServerMods.GenTerra", "GetInterpolatedOctaves", 3),
                 new("Vintagestory.ServerMods.GenRockStrataNew", "initWorldGen", 0),
                 new("Vintagestory.ServerMods.GenRockStrataNew", "preLoad", 3),
                 new("Vintagestory.ServerMods.GenRockStrataNew", "genBlockColumn", 5),

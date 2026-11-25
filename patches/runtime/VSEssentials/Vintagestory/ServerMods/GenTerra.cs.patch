@@ -8,25 +8,25 @@
  using System.Threading;
  using System.Threading.Tasks;
  using Vintagestory.API.Common;
-@@ -12,6 +13,96 @@ using Vintagestory.ServerMods.NoObf;
+@@ -12,6 +13,242 @@ using Vintagestory.ServerMods.NoObf;
  
  namespace Vintagestory.ServerMods;
  
 +internal sealed class OptimumGenTerraTempData
 +{
-+	public readonly double[] LerpedAmplitudes;
++	public double[] LerpedAmplitudes;
 +
-+	public readonly double[] LerpedThresholds;
++	public double[] LerpedThresholds;
 +
-+	public readonly float[] LandformWeights;
++	public float[] LandformWeights;
 +
-+	public readonly bool[] LocalLayerFullySolid;
++	public bool[] LocalLayerFullySolid;
 +
-+	public readonly bool[] LocalLayerFullyEmpty;
++	public bool[] LocalLayerFullyEmpty;
 +
-+	public readonly float[] CompactWeights;
++	public float[] CompactWeights;
 +
-+	public readonly float[][] CompactThresholds;
++	public float[][] CompactThresholds;
 +
 +	public OptimumGenTerraTempData(int terrainGenOctaves, int landformCount, int mapHeight)
 +	{
@@ -41,7 +41,27 @@
 +
 +	public static ThreadLocal<OptimumGenTerraTempData> CreateThreadLocal(int terrainGenOctaves, int mapHeight)
 +	{
-+		return new ThreadLocal<OptimumGenTerraTempData>(() => new OptimumGenTerraTempData(terrainGenOctaves, NoiseLandforms.landforms.LandFormsByIndex.Length, mapHeight));
++		return new ThreadLocal<OptimumGenTerraTempData>(() => new OptimumGenTerraTempData(terrainGenOctaves, NoiseLandforms.landforms?.LandFormsByIndex?.Length ?? 0, mapHeight));
++	}
++
++	public void EnsureCapacity(int terrainGenOctaves, int landformCount, int mapHeight)
++	{
++		if (LerpedAmplitudes.Length != terrainGenOctaves)
++		{
++			LerpedAmplitudes = new double[terrainGenOctaves];
++			LerpedThresholds = new double[terrainGenOctaves];
++		}
++		if (LandformWeights.Length < landformCount)
++		{
++			LandformWeights = new float[landformCount];
++			CompactWeights = new float[landformCount];
++			CompactThresholds = new float[landformCount][];
++		}
++		if (LocalLayerFullySolid.Length != mapHeight)
++		{
++			LocalLayerFullySolid = new bool[mapHeight];
++			LocalLayerFullyEmpty = new bool[mapHeight];
++		}
 +	}
 +}
 +
@@ -55,11 +75,33 @@
 +
 +	public readonly int[] WaterBlockIds = new int[1024];
 +
-+	public readonly bool[] LayerFullySolid;
++	public bool[] LayerFullySolid;
 +
-+	public readonly bool[] LayerFullyEmpty;
++	public bool[] LayerFullyEmpty;
 +
 +	public readonly int[] BorderIndicesByCardinal = new int[8];
++
++	public double[] OctNoiseX0 = Array.Empty<double>();
++
++	public double[] OctNoiseX1 = Array.Empty<double>();
++
++	public double[] OctNoiseX2 = Array.Empty<double>();
++
++	public double[] OctNoiseX3 = Array.Empty<double>();
++
++	public double[] OctThX0 = Array.Empty<double>();
++
++	public double[] OctThX1 = Array.Empty<double>();
++
++	public double[] OctThX2 = Array.Empty<double>();
++
++	public double[] OctThX3 = Array.Empty<double>();
++
++	public float[] CornerLandformWeights = Array.Empty<float>();
++
++	public int[] CornerNonZeroIndices = Array.Empty<int>();
++
++	public float[] CornerNonZeroWeights = Array.Empty<float>();
 +
 +	public OptimumGenTerraWorkspace(int mapHeight)
 +	{
@@ -80,6 +122,110 @@
 +	public static ThreadLocal<OptimumGenTerraWorkspace> CreateThreadLocal(int mapHeight)
 +	{
 +		return new ThreadLocal<OptimumGenTerraWorkspace>(() => new OptimumGenTerraWorkspace(mapHeight));
++	}
++
++	public void EnsureCapacity(int terrainGenOctaves, int landformCount, int mapHeight)
++	{
++		int words = (mapHeight + 63) / 64;
++		if (ColumnBlockSolidities[0].Length != words)
++		{
++			for (int i = 0; i < 1024; i++)
++			{
++				ColumnBlockSolidities[i] = new ulong[words];
++			}
++		}
++		if (LayerFullySolid.Length != mapHeight)
++		{
++			LayerFullySolid = new bool[mapHeight];
++			LayerFullyEmpty = new bool[mapHeight];
++		}
++		if (OctNoiseX0.Length != terrainGenOctaves)
++		{
++			OctNoiseX0 = new double[terrainGenOctaves];
++			OctNoiseX1 = new double[terrainGenOctaves];
++			OctNoiseX2 = new double[terrainGenOctaves];
++			OctNoiseX3 = new double[terrainGenOctaves];
++			OctThX0 = new double[terrainGenOctaves];
++			OctThX1 = new double[terrainGenOctaves];
++			OctThX2 = new double[terrainGenOctaves];
++			OctThX3 = new double[terrainGenOctaves];
++		}
++		if (CornerLandformWeights.Length < landformCount)
++		{
++			CornerLandformWeights = new float[landformCount];
++			CornerNonZeroIndices = new int[landformCount];
++			CornerNonZeroWeights = new float[landformCount];
++		}
++	}
++
++	public void InterpolateOctaves(
++		float[] indices,
++		LandformVariant[] landFormsByIndex,
++		int octaves,
++		double[] amps,
++		double[] thresholds)
++	{
++		int nzCount = 0;
++		for (int i = 0; i < indices.Length; i++)
++		{
++			float weight = indices[i];
++			if (weight != 0f)
++			{
++				CornerNonZeroIndices[nzCount] = i;
++				CornerNonZeroWeights[nzCount] = weight;
++				nzCount++;
++			}
++		}
++
++		for (int octave = 0; octave < octaves; octave++)
++		{
++			double amplitude = 0.0;
++			double threshold = 0.0;
++			for (int k = 0; k < nzCount; k++)
++			{
++				float weight = CornerNonZeroWeights[k];
++				LandformVariant variant = landFormsByIndex[CornerNonZeroIndices[k]];
++				amplitude += variant.TerrainOctaves[octave] * (double)weight;
++				threshold += variant.TerrainOctaveThresholds[octave] * (double)weight;
++			}
++			amps[octave] = amplitude;
++			thresholds[octave] = threshold;
++		}
++	}
++
++	public static void MergeLayerFlags(bool[] solid, bool[] empty, bool[] localSolid, bool[] localEmpty)
++	{
++		int len = Math.Min(Math.Min(solid.Length, empty.Length), Math.Min(localSolid.Length, localEmpty.Length));
++		if (len == 0)
++		{
++			return;
++		}
++		ref byte sBase = ref Unsafe.As<bool, byte>(ref solid[0]);
++		ref byte eBase = ref Unsafe.As<bool, byte>(ref empty[0]);
++		ref byte lsBase = ref Unsafe.As<bool, byte>(ref localSolid[0]);
++		ref byte leBase = ref Unsafe.As<bool, byte>(ref localEmpty[0]);
++		int i = 0;
++		if (Vector256.IsHardwareAccelerated)
++		{
++			for (; i <= len - 32; i += 32)
++			{
++				(Vector256.LoadUnsafe(ref sBase, (nuint)i) & Vector256.LoadUnsafe(ref lsBase, (nuint)i)).StoreUnsafe(ref sBase, (nuint)i);
++				(Vector256.LoadUnsafe(ref eBase, (nuint)i) & Vector256.LoadUnsafe(ref leBase, (nuint)i)).StoreUnsafe(ref eBase, (nuint)i);
++			}
++		}
++		if (Vector128.IsHardwareAccelerated)
++		{
++			for (; i <= len - 16; i += 16)
++			{
++				(Vector128.LoadUnsafe(ref sBase, (nuint)i) & Vector128.LoadUnsafe(ref lsBase, (nuint)i)).StoreUnsafe(ref sBase, (nuint)i);
++				(Vector128.LoadUnsafe(ref eBase, (nuint)i) & Vector128.LoadUnsafe(ref leBase, (nuint)i)).StoreUnsafe(ref eBase, (nuint)i);
++			}
++		}
++		for (; i < len; i++)
++		{
++			solid[i] &= localSolid[i];
++			empty[i] &= localEmpty[i];
++		}
 +	}
 +
 +	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -105,7 +251,7 @@
  public class GenTerra : ModStdWorldGen
  {
  	private struct ThreadLocalTempData
-@@ -99,6 +190,47 @@ public class GenTerra : ModStdWorldGen
+@@ -99,6 +336,47 @@ public class GenTerra : ModStdWorldGen
  
  	private int[] borderIndicesByCardinal;
  
@@ -153,7 +299,7 @@
  	public override bool ShouldLoad(EnumAppSide side)
  	{
  		return side == EnumAppSide.Server;
-@@ -129,7 +261,12 @@ public class GenTerra : ModStdWorldGen
+@@ -129,7 +407,12 @@ public class GenTerra : ModStdWorldGen
  	public void initWorldGen()
  	{
  		LoadGlobalConfig(api);
@@ -167,7 +313,7 @@
  		maxThreads = Math.Clamp(Environment.ProcessorCount - (api.Server.IsDedicated ? 4 : 6), 1, api.Server.Config.HostedMode ? 4 : 10);
  		if (api.Server.ReducedServerThreads && maxThreads > 1)
  		{
-@@ -169,7 +306,14 @@ public class GenTerra : ModStdWorldGen
+@@ -169,7 +452,14 @@ public class GenTerra : ModStdWorldGen
  		borderIndicesByCardinal[(int)Cardinal.SouthEast] = 0;
  		borderIndicesByCardinal[(int)Cardinal.SouthWest] = 31;
  		borderIndicesByCardinal[(int)Cardinal.NorthWest] = 1023;
@@ -183,7 +329,7 @@
  	}
  
  	private double[] scaleAdjustedFreqs(double[] vs, float horizontalScale)
-@@ -183,6 +327,10 @@ public class GenTerra : ModStdWorldGen
+@@ -183,6 +473,10 @@ public class GenTerra : ModStdWorldGen
  
  	private void OnChunkColumnGen(IChunkColumnGenerateRequest request)
  	{
@@ -194,7 +340,7 @@
  		if (request.RequiresChunkBorderSmoothing && !PreventSmoothing(request.ChunkX, request.ChunkZ))
  		{
  			ushort[][] neighbourTerrainHeight = request.NeighbourTerrainHeight;
-@@ -208,15 +356,15 @@ public class GenTerra : ModStdWorldGen
+@@ -208,15 +502,15 @@ public class GenTerra : ModStdWorldGen
  			}
  			for (int i = 0; i < 32; i++)
  			{
@@ -214,7 +360,7 @@
  					for (int k = 0; k < Cardinal.ALL.Length; k++)
  					{
  						ushort[] array = neighbourTerrainHeight[k];
-@@ -252,27 +400,34 @@ public class GenTerra : ModStdWorldGen
+@@ -252,27 +546,34 @@ public class GenTerra : ModStdWorldGen
  							}
  							float num5 = Math.Max(0f, 1f - num4);
  							float num6 = num5 * num5;
@@ -260,11 +406,16 @@
  			}
  		}
  		generate(request.Chunks, request.ChunkX, request.ChunkZ, request.RequiresChunkBorderSmoothing);
-@@ -287,6 +442,13 @@ public class GenTerra : ModStdWorldGen
+@@ -287,6 +588,18 @@ public class GenTerra : ModStdWorldGen
  
  	private void generate(IServerChunk[] chunks, int chunkX, int chunkZ, bool requiresChunkBorderSmoothing)
  	{
++		int mapsizeY = api.WorldManager.MapSizeY;
++		LandformVariant[] landFormsByIndex = landforms.LandFormsByIndex;
++		int landformCount = landFormsByIndex.Length;
++		int octaves = terrainGenOctaves;
 +		OptimumGenTerraWorkspace workspace = GetOptimumWorkspace();
++		workspace.EnsureCapacity(octaves, landformCount, mapsizeY);
 +		ThreadLocal<OptimumGenTerraTempData> localTempData = GetOptimumTempDataThreadLocal();
 +		bool[] localLayerFullySolid = workspace.LayerFullySolid;
 +		bool[] localLayerFullyEmpty = workspace.LayerFullyEmpty;
@@ -274,16 +425,35 @@
  		IMapChunk mapChunk = chunks[0].MapChunk;
  		int upheavalMapUpLeft = 0;
  		int upheavalMapUpRight = 0;
-@@ -329,7 +491,7 @@ public class GenTerra : ModStdWorldGen
+@@ -329,127 +642,178 @@ public class GenTerra : ModStdWorldGen
  		float baseX = (float)(chunkX % num) * num7;
  		float baseZ = (float)(chunkZ % num) * num7;
  		LerpedWeightedIndex2DMap landLerpMap = GetOrLoadLerpedLandformMap(mapChunk, chunkX / num, chunkZ / num);
 -		float[] landformWeights = tempDataThreadLocal.Value.landformWeights;
-+		float[] landformWeights = localTempData.Value.LandformWeights;
- 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ, landformWeights), out var octNoiseX0, out var octThX0);
- 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ, landformWeights), out var octNoiseX1, out var octThX1);
- 		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ + num7, landformWeights), out var octNoiseX2, out var octThX2);
-@@ -343,102 +505,154 @@ public class GenTerra : ModStdWorldGen
+-		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ, landformWeights), out var octNoiseX0, out var octThX0);
+-		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ, landformWeights), out var octNoiseX1, out var octThX1);
+-		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX, baseZ + num7, landformWeights), out var octNoiseX2, out var octThX2);
+-		GetInterpolatedOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ + num7, landformWeights), out var octNoiseX3, out var octThX3);
++		float[] cornerWeights = workspace.CornerLandformWeights;
++		double[] octNoiseX0 = workspace.OctNoiseX0;
++		double[] octNoiseX1 = workspace.OctNoiseX1;
++		double[] octNoiseX2 = workspace.OctNoiseX2;
++		double[] octNoiseX3 = workspace.OctNoiseX3;
++		double[] octThX0 = workspace.OctThX0;
++		double[] octThX1 = workspace.OctThX1;
++		double[] octThX2 = workspace.OctThX2;
++		double[] octThX3 = workspace.OctThX3;
++		workspace.InterpolateOctaves(landLerpMap.WeightsAt(baseX, baseZ, cornerWeights), landFormsByIndex, octaves, octNoiseX0, octThX0);
++		workspace.InterpolateOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ, cornerWeights), landFormsByIndex, octaves, octNoiseX1, octThX1);
++		workspace.InterpolateOctaves(landLerpMap.WeightsAt(baseX, baseZ + num7, cornerWeights), landFormsByIndex, octaves, octNoiseX2, octThX2);
++		workspace.InterpolateOctaves(landLerpMap.WeightsAt(baseX + num7, baseZ + num7, cornerWeights), landFormsByIndex, octaves, octNoiseX3, octThX3);
+ 		float[][] terrainYThresholds = this.terrainYThresholds;
+ 		ushort[] rainHeightMap = chunks[0].MapChunk.RainHeightMap;
+ 		ushort[] worldGenTerrainHeightMap = chunks[0].MapChunk.WorldGenTerrainHeightMap;
+-		int mapsizeY = api.WorldManager.MapSizeY;
+-		int mapsizeYm2 = api.WorldManager.MapSizeY - 2;
++		int mapsizeYm2 = mapsizeY - 2;
+ 		int taperThreshold = (int)((float)mapsizeY * 0.9f);
  		double geoUpheavalAmplitude = 255.0;
  		float chunkPixelBlockStep = num7 * (1f / 32f);
  		double verticalNoiseRelativeFrequency = 0.5 / TerraGenConfig.terrainNoiseVerticalScale;
@@ -306,6 +476,7 @@
 +		}, () =>
 +		{
 +			OptimumGenTerraTempData value = localTempData.Value;
++			value.EnsureCapacity(octaves, landformCount, mapsizeY);
 +			Array.Fill(value.LocalLayerFullySolid, true);
 +			Array.Fill(value.LocalLayerFullyEmpty, true);
 +			return value;
@@ -328,7 +499,7 @@
 -			for (int k = 0; k < lerpedAmplitudes.Length; k++)
 +			float lxFrac = (float)num20 * (1f / 32f);
 +			float lzFrac = (float)num21 * (1f / 32f);
-+			int octCount = lerpedAmplitudes.Length;
++			int octCount = octaves;
 +			int k = 0;
 +			if (Vector256.IsHardwareAccelerated)
 +			{
@@ -462,18 +633,9 @@
 +			return threadData;
 +		}, delegate(OptimumGenTerraTempData threadData)
 +		{
-+			bool[] localSolid = threadData.LocalLayerFullySolid;
-+			bool[] localEmpty = threadData.LocalLayerFullyEmpty;
-+			for (int n = 0; n < localLayerFullySolid.Length; n++)
++			lock (workspace)
 +			{
-+				if (!localSolid[n])
-+				{
-+					localLayerFullySolid[n] = false;
-+				}
-+				if (!localEmpty[n])
-+				{
-+					localLayerFullyEmpty[n] = false;
-+				}
++				OptimumGenTerraWorkspace.MergeLayerFlags(localLayerFullySolid, localLayerFullyEmpty, threadData.LocalLayerFullySolid, threadData.LocalLayerFullyEmpty);
 +			}
  		});
  		IChunkBlocks data = chunks[0].Data;
@@ -482,9 +644,15 @@
 -		for (num8 = 1; num8 < mapsizeY - 1 && layerFullySolid[num8]; num8++)
 +		for (num8 = 1; num8 < mapsizeY - 1 && localLayerFullySolid[num8]; num8++)
  		{
- 			if (num8 % 32 == 0)
+-			if (num8 % 32 == 0)
++			if ((num8 & 31) == 0)
  			{
-@@ -449,7 +663,7 @@ public class GenTerra : ModStdWorldGen
+-				data = chunks[num8 / 32].Data;
++				data = chunks[num8 >> 5].Data;
+ 			}
+-			data.SetBlockBulk(num8 % 32 * 32 * 32, 32, 32, defaultRockId);
++			data.SetBlockBulk((num8 & 31) * 32 * 32, 32, 32, defaultRockId);
+ 		}
  		int seaLevel = TerraGenConfig.seaLevel;
  		int num9 = 0;
  		int num10 = mapsizeY - 2;
@@ -493,7 +661,11 @@
  		{
  			num10--;
  		}
-@@ -464,10 +678,9 @@ public class GenTerra : ModStdWorldGen
+@@ -461,15 +825,15 @@ public class GenTerra : ModStdWorldGen
+ 		for (int num11 = 0; num11 < 32; num11++)
+ 		{
+ 			int num12 = chunkZ * 32 + num11;
++			float lzFrac = (float)num11 * (1f / 32f);
  			int num13 = ChunkIndex2d(0, num11);
  			for (int num14 = 0; num14 < 32; num14++)
  			{
@@ -504,18 +676,47 @@
 -				if (num8 < seaLevel && waterBlockID != gcfg.saltWaterBlockId && !columnResult.ColumnBlockSolidities[seaLevel - 1])
 +				if (num8 < seaLevel && waterBlockID != gcfg.saltWaterBlockId && !workspace.IsSolid(num13, seaLevel - 1))
  				{
- 					int unscaledTemp = (GameMath.BiLerpRgbColor((float)num14 * (1f / 32f), (float)num11 * (1f / 32f), unpaddedInt, unpaddedInt2, unpaddedInt3, unpaddedInt4) >> 16) & 0xFF;
+-					int unscaledTemp = (GameMath.BiLerpRgbColor((float)num14 * (1f / 32f), (float)num11 * (1f / 32f), unpaddedInt, unpaddedInt2, unpaddedInt3, unpaddedInt4) >> 16) & 0xFF;
++					int unscaledTemp = (GameMath.BiLerpRgbColor((float)num14 * (1f / 32f), lzFrac, unpaddedInt, unpaddedInt2, unpaddedInt3, unpaddedInt4) >> 16) & 0xFF;
  					float num15 = (float)distort2dx.Noise(chunkX * 32 + num14, num12) / 20f;
-@@ -482,7 +695,7 @@ public class GenTerra : ModStdWorldGen
+ 					if (Climate.GetScaledAdjustedTemperatureFloat(unscaledTemp, 0) + num15 < (float)TerraGenConfig.WaterFreezingTempOnGen)
+ 					{
+@@ -478,15 +842,16 @@ public class GenTerra : ModStdWorldGen
+ 				}
+ 				worldGenTerrainHeightMap[num13] = (ushort)(num8 - 1);
+ 				rainHeightMap[num13] = (ushort)(num8 - 1);
+-				data = chunks[num8 / 32].Data;
++				data = chunks[num8 >> 5].Data;
  				for (int num16 = num8; num16 < num10; num16++)
  				{
- 					int num17 = num16 % 32;
+-					int num17 = num16 % 32;
 -					if (columnResult.ColumnBlockSolidities[num16])
++					int num17 = num16 & 31;
++					int chunkIndex3d = (num17 << 10) | num13;
 +					if (workspace.IsSolid(num13, num16))
  					{
  						worldGenTerrainHeightMap[num13] = (ushort)num16;
  						rainHeightMap[num13] = (ushort)num16;
-@@ -520,13 +733,17 @@ public class GenTerra : ModStdWorldGen
+-						data[ChunkIndex3d(num14, num17, num11)] = defaultRockId;
++						data[chunkIndex3d] = defaultRockId;
+ 					}
+ 					else if (num16 < seaLevel)
+ 					{
+@@ -500,11 +865,11 @@ public class GenTerra : ModStdWorldGen
+ 						{
+ 							value = waterBlockID;
+ 						}
+-						data.SetFluid(ChunkIndex3d(num14, num17, num11), value);
++						data.SetFluid(chunkIndex3d, value);
+ 					}
+ 					if (num17 == 31)
+ 					{
+-						data = chunks[(num16 + 1) / 32].Data;
++						data = chunks[(num16 + 1) >> 5].Data;
+ 					}
+ 				}
+ 				num13++;
+@@ -520,32 +885,48 @@ public class GenTerra : ModStdWorldGen
  
  	private LerpedWeightedIndex2DMap GetOrLoadLerpedLandformMap(IMapChunk mapchunk, int regionX, int regionZ)
  	{
@@ -538,3 +739,45 @@
  	}
  
  	private void GetInterpolatedOctaves(float[] indices, out double[] amps, out double[] thresholds)
+ 	{
+-		amps = new double[terrainGenOctaves];
+-		thresholds = new double[terrainGenOctaves];
+-		for (int i = 0; i < terrainGenOctaves; i++)
++		int octaves = terrainGenOctaves;
++		amps = new double[octaves];
++		thresholds = new double[octaves];
++		Span<int> nzIndices = indices.Length <= 256 ? stackalloc int[indices.Length] : new int[indices.Length];
++		Span<float> nzWeights = indices.Length <= 256 ? stackalloc float[indices.Length] : new float[indices.Length];
++		int nzCount = 0;
++		for (int j = 0; j < indices.Length; j++)
++		{
++			float weight = indices[j];
++			if (weight != 0f)
++			{
++				nzIndices[nzCount] = j;
++				nzWeights[nzCount] = weight;
++				nzCount++;
++			}
++		}
++		LandformVariant[] landFormsByIndex = landforms.LandFormsByIndex;
++		for (int i = 0; i < octaves; i++)
+ 		{
+ 			double num = 0.0;
+ 			double num2 = 0.0;
+-			for (int j = 0; j < indices.Length; j++)
++			for (int k = 0; k < nzCount; k++)
+ 			{
+-				float num3 = indices[j];
+-				if (num3 != 0f)
+-				{
+-					LandformVariant landformVariant = landforms.LandFormsByIndex[j];
+-					num += landformVariant.TerrainOctaves[i] * (double)num3;
+-					num2 += landformVariant.TerrainOctaveThresholds[i] * (double)num3;
+-				}
++				LandformVariant landformVariant = landFormsByIndex[nzIndices[k]];
++				float weight = nzWeights[k];
++				num += landformVariant.TerrainOctaves[i] * (double)weight;
++				num2 += landformVariant.TerrainOctaveThresholds[i] * (double)weight;
+ 			}
+ 			amps[i] = num;
+ 			thresholds[i] = num2;
