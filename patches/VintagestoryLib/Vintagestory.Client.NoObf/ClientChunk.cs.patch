@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
-index 7be6b24..7c0c5c6 100644
+index 7be6b24..7acaf44 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs
 @@ -1,9 +1,10 @@
@@ -191,7 +191,7 @@ index 7be6b24..7c0c5c6 100644
  				{
  					blockEntity.CreateBehaviors(localBlockAtBlockPos, game);
  					blockEntity.FromTreeAttributes(treeAttribute, game);
-@@ -278,14 +409,25 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+@@ -278,14 +409,21 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
  					BlockPos blockPos = new BlockPos(packet_BlockEntity.PosX, packet_BlockEntity.PosY, packet_BlockEntity.PosZ);
  					game.Logger.Error("At position " + blockPos?.ToString() + " with block " + localBlockAtBlockPos.Code.ToShortString() + ", {0} threw an error when being created:", packet_BlockEntity.Classname);
  					game.Logger.Error(e);
@@ -205,11 +205,7 @@ index 7be6b24..7c0c5c6 100644
 +		{
 +			if (blockEntities != null && blockEntitiesCount > 0)
 +			{
-+				blockEntities[0]?.optimumSlab?.Release();
-+				for (int i = 0; i < blockEntitiesCount && i < blockEntities.Length; i++)
-+				{
-+					blockEntities[i]?.ClearOptimumSlice();
-+				}
++				Packet_BlockEntity.ReleaseAndClearOptimumSlices(blockEntities, blockEntitiesCount);
  			}
 -			BlockEntities[blockEntity.Pos] = blockEntity;
  		}
@@ -219,7 +215,7 @@ index 7be6b24..7c0c5c6 100644
  	internal void InitBlockEntitiesFromPacket(ClientMain game)
  	{
  		foreach (BlockEntity value in BlockEntities.Values)
-@@ -322,23 +464,35 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
+@@ -322,23 +460,35 @@ public class ClientChunk : WorldChunk, IClientChunk, IWorldChunk
  	}
  
  	internal void AddOrUpdateBlockEntityFromPacket(Packet_BlockEntity p, ClientMain game)

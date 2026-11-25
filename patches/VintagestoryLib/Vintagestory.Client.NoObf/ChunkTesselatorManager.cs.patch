@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
-index 5714490..7c0b773 100644
+index 5714490..37e75c8 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs
 @@ -1,239 +1,855 @@
@@ -896,9 +896,24 @@ index 5714490..7c0b773 100644
  				lock (game.dirtyChunksLastLock)
  				{
  					game.dirtyChunksLast.Enqueue(num);
-@@ -244,94 +860,178 @@ public class ChunkTesselatorManager : ClientSystem
+@@ -241,97 +857,197 @@ public class ChunkTesselatorManager : ClientSystem
+ 			}
+ 		}
+ 		recycler?.DoRecycling();
  	}
  
++	private static bool ContainsRetryTesselationException(Exception exception)
++	{
++		for (Exception current = exception; current != null; current = current.InnerException)
++		{
++			if (current is RetryTesselationException)
++			{
++				return true;
++			}
++		}
++		return false;
++	}
++
  	public int TesselateChunk(int chunkX, int chunkY, int chunkZ, bool priority, bool skipChunkCenter, out bool requeue)
  	{
  		requeue = false;
@@ -989,8 +1004,12 @@ index 5714490..7c0b773 100644
 +			{
 +				num = terrainChunkTesselator.NowProcessChunk(chunkX, chunkY, chunkZ, tesselatedChunk, skipChunkCenter);
 +			}
-+			catch (RetryTesselationException)
++			catch (Exception exception)
 +			{
++				if (!ContainsRetryTesselationException(exception))
++				{
++					throw;
++				}
 +				wantRetry = true;
 +				clientChunk.lastTesselationMs = 0L;
 +				int retryCnt = Interlocked.Increment(ref clientChunk.optimumTessRetryCount);
@@ -1067,7 +1086,8 @@ index 5714490..7c0b773 100644
 -		{
 -			lock (tessChunksQueuePriorityLock)
 +			if (priority)
-+			{
+ 			{
+-				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
 +				lock (tessChunksQueuePriorityLock)
 +				{
 +					if (tessChunksQueuePriority != null)
@@ -1080,10 +1100,10 @@ index 5714490..7c0b773 100644
 +					}
 +				}
 +				processPrioQueue = true;
-+			}
+ 			}
+-			processPrioQueue = true;
 +			else
- 			{
--				tessChunksQueuePriority?.Enqueue(tesselatedChunk);
++			{
 +				lock (tessChunksQueueLock)
 +				{
 +					if (tessChunksQueue != null)
@@ -1096,8 +1116,7 @@ index 5714490..7c0b773 100644
 +						tesselatedChunk.UnusedDispose();
 +					}
 +				}
- 			}
--			processPrioQueue = true;
++			}
 +			clientChunk.lastTesselationMs = 0L;
 +			return num;
  		}

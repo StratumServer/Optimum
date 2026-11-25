@@ -116,6 +116,8 @@ public class BlockEntitySpanSerializationTests
         string clientChunkPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientChunk.cs.patch");
         string clientEntitiesPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemEntities.cs.patch");
         string packetBePatch = PatchReader.ReadPatch("patches/VintagestoryLib/Packet_BlockEntity.cs.patch");
+        string chunkTesselatorPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs.patch");
+        string chunkTesselatorManagerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselatorManager.cs.patch");
         string packetSerPatch = PatchReader.ReadPatch("patches/VintagestoryLib/Packet_BlockEntitySerializer.cs.patch");
         string apiPatcherSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/api-patcher.cs"));
         string programSource = File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
@@ -132,11 +134,16 @@ public class BlockEntitySpanSerializationTests
         Assert.Contains("ReleaseAndClearOptimumSlice", clientEntitiesPatch);
         Assert.Contains("SetOptimumSlice", packetBePatch);
         Assert.Contains("ReleaseAndClearOptimumSlice", packetBePatch);
+        Assert.Contains("ReleaseAndClearOptimumSlices", packetBePatch);
         Assert.Contains("TryGetOptimumDataSpan", packetSerPatch);
+        Assert.Contains("ContainsRetryTesselationException", chunkTesselatorManagerPatch);
+        Assert.Contains("new object[] { chunkX, chunkY, chunkZ, ex2 }), ex2);", chunkTesselatorPatch);
 
         Assert.Contains("PatchTreeAttributeSerialization(", apiPatcherSource);
         Assert.Contains("\"Packet_BlockEntity\"", programSource);
         Assert.Contains("\"ReleaseAndClearOptimumSlice\"", programSource);
+        Assert.Contains("\"ReleaseAndClearOptimumSlices\"", programSource);
+        Assert.Contains("\"ContainsRetryTesselationException\", 1", programSource);
         Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"SendPacketFast\", 2)", programSource);
         Assert.Contains("new(\"Vintagestory.Server.ServerMain\", \"Serialize_\", 1)", programSource);
         Assert.Contains("new(\"Packet_BlockEntitySerializer\", \"Deserialize\", 2)", programSource);
@@ -510,6 +517,47 @@ public class BlockEntitySpanSerializationTests
             releaseAndClear.Invoke(directHandoffPacket, null);
             Assert.False((bool)hasData.Invoke(directHandoffPacket, null)!);
             Assert.Null(slabType.GetProperty("Buffer")!.GetValue(directHandoffSlab));
+
+            // Repeated chunk handoffs retain the shared slices until the final consumer releases the slab.
+            object repeatedHandoffSlab = slabType.GetMethod("Rent", new[] { typeof(int) })!.Invoke(null, new object[] { payload.Length * 3 })!;
+            byte[] repeatedHandoffBuffer = (byte[])slabType.GetProperty("Buffer")!.GetValue(repeatedHandoffSlab)!;
+            Array repeatedHandoffPackets = Array.CreateInstance(packetType, 3);
+            for (int i = 0; i < repeatedHandoffPackets.Length; i++)
+            {
+                int offset = i * payload.Length;
+                Buffer.BlockCopy(payload, 0, repeatedHandoffBuffer, offset, payload.Length);
+                object repeatedPacket = CreatePacket(null);
+                repeatedHandoffPackets.SetValue(repeatedPacket, i);
+                setSlice.Invoke(repeatedPacket, new object[] { repeatedHandoffBuffer, offset, payload.Length });
+            }
+            packetType.GetField("optimumSlab", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(repeatedHandoffPackets.GetValue(0), repeatedHandoffSlab);
+            slabType.GetMethod("Retain", Type.EmptyTypes)!.Invoke(repeatedHandoffSlab, null);
+            MethodInfo releaseAndClearMany = packetType.GetMethod("ReleaseAndClearOptimumSlices", BindingFlags.Static | BindingFlags.NonPublic)!;
+            releaseAndClearMany.Invoke(null, new object[] { repeatedHandoffPackets, repeatedHandoffPackets.Length });
+            Assert.NotNull(slabType.GetProperty("Buffer")!.GetValue(repeatedHandoffSlab));
+            Assert.All(Enumerable.Range(0, repeatedHandoffPackets.Length), i =>
+                Assert.True((bool)hasData.Invoke(repeatedHandoffPackets.GetValue(i), null)!));
+
+            releaseAndClearMany.Invoke(null, new object[] { repeatedHandoffPackets, repeatedHandoffPackets.Length });
+            Assert.Null(slabType.GetProperty("Buffer")!.GetValue(repeatedHandoffSlab));
+            Assert.All(Enumerable.Range(0, repeatedHandoffPackets.Length), i =>
+                Assert.False((bool)hasData.Invoke(repeatedHandoffPackets.GetValue(i), null)!));
+
+            Type? retryExceptionType = new[] { libAsm, apiAsm }
+                .SelectMany(assembly => assembly.GetTypes())
+                .FirstOrDefault(type => type.Name == "RetryTesselationException");
+            Assert.NotNull(retryExceptionType);
+            object retryException = Activator.CreateInstance(
+                retryExceptionType!,
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+                binder: null,
+                args: new object[] { "retry" },
+                culture: null)!;
+            Type managerType = libAsm.GetType("Vintagestory.Client.NoObf.ChunkTesselatorManager", throwOnError: true)!;
+            MethodInfo containsRetry = managerType.GetMethod("ContainsRetryTesselationException", BindingFlags.Static | BindingFlags.NonPublic)!;
+            Assert.True((bool)containsRetry.Invoke(null, new object[] { new Exception("outer", new Exception("inner", (Exception)retryException)) })!);
+            Assert.False((bool)containsRetry.Invoke(null, new object[] { new Exception("outer", new Exception("inner")) })!);
 
             // Verify ServerMain.SendPacketFast and Serialize_ manage Retain/Release slab lifecycle
             // while leaving ServerMain.SendPacket(int, Packet_Server) at its vanilla IL body for Komet's fingerprint check.

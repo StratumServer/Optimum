@@ -835,6 +835,7 @@ var membersToInject = new Dictionary<string, List<string>>
         "SetOptimumSlice",
         "ClearOptimumSlice",
         "ReleaseAndClearOptimumSlice",
+        "ReleaseAndClearOptimumSlices",
         "TryGetOptimumDataSpan",
     },
     ["Vintagestory.Server.ServerSystemSendChunks"] = new()
@@ -1286,6 +1287,7 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnBeforeFrame", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "OnSeperateThreadGameTick", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "TesselateChunk", 6),
+    new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "ContainsRetryTesselationException", 1),
     new("Vintagestory.Client.NoObf.ChunkTesselatorManager", "Dispose", 1),
     new("Vintagestory.Client.NoObf.ClientMain", "DestroyGameSession", 2),
     new("Vintagestory.Client.NoObf.ClientSystemStartup", "HandleWorldMetaData", 1),

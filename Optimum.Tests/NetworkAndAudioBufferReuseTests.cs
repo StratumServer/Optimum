@@ -7,6 +7,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using System.Threading;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -43,7 +44,8 @@ public class NetworkAndAudioBufferReuseTests
     private static Assembly LoadPatchedVintagestoryLibAssembly()
     {
         Assembly loaded = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => string.Equals(a.GetName().Name, "VintagestoryLib", StringComparison.Ordinal));
+            .FirstOrDefault(a => AssemblyLoadContext.GetLoadContext(a) == AssemblyLoadContext.Default &&
+                string.Equals(a.GetName().Name, "VintagestoryLib", StringComparison.Ordinal));
         if (loaded != null)
         {
             return loaded;
