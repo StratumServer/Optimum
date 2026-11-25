@@ -55,8 +55,10 @@ public sealed class VintagestoryApiPatchDeliveryTests
             ["Math/Ascii85.cs.patch"] = ["PatchAscii85"],
             ["Math/ColorUtil.cs.patch"] = ["PatchColorUtil"],
             ["Math/EvolvingNatFloat.cs.patch"] = ["PatchEvolvingNatFloat"],
+            ["Math/GameMath.cs.patch"] = ["PatchGameMathSmoothMinMax"],
             ["Math/Matrix/Mat4f.cs.patch"] = ["PatchMat4fInlining"],
             ["Math/Noise/NewNormalizedSimplexFractalNoise.cs.patch"] = ["PatchColumnNoiseTls"],
+            ["Math/Noise/NewSimplexNoiseLayer.cs.patch"] = ["PatchNewSimplexNoiseLayer"],
             ["Util/ObjectCacheUtil.cs.patch"] = ["PatchObjectCacheUtil"],
             ["Util/WildcardUtil.cs.patch"] = ["PatchWildcardUtil"],
         };

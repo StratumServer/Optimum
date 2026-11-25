@@ -19,9 +19,10 @@ public sealed class OptimumColumnNoiseBuffer
     private struct OctaveEntry
     {
         public long Seed;
-        public double X;
+        public double XrBase;
+        public double YrBase;
+        public double ZrBase;
         public double FrequencyY;
-        public double Z;
         public double Amplitude;
         public double Threshold;
         public double SmoothingFactor;
@@ -133,11 +134,16 @@ public sealed class OptimumColumnNoiseBuffer
             int i = order[j];
             uncertaintySum += maxValues[i];
             double thisOctaveFrequency = terrainNoise.frequencies[i];
+            double x = noiseX * thisOctaveFrequency;
+            double z = noiseZ * thisOctaveFrequency;
+            double xz = x + z;
+            double s2 = xz * OptimumSimplexNoise.Rotate3Orthogonalizer;
             octaves[j] = new OctaveEntry
             {
                 Seed = terrainNoise.octaveSeeds[i],
-                X = noiseX * thisOctaveFrequency,
-                Z = noiseZ * thisOctaveFrequency,
+                XrBase = x + s2,
+                YrBase = xz * -OptimumSimplexNoise.Root3Over3,
+                ZrBase = z + s2,
                 FrequencyY = thisOctaveFrequency * relativeYFrequency,
                 Amplitude = amplitudes[i] * ValueMultiplier,
                 Threshold = thresholds[i] * (ValueMultiplier * ThresholdRescaleOldToNew),
@@ -196,14 +202,24 @@ public sealed class OptimumColumnNoiseBuffer
                 return valueTempMax;
             }
 
+            ref PastEvaluation pastEval = ref pastEvaluations[j];
+            double pastY = pastEval.Y;
+            if (double.IsNaN(pastY))
+            {
+                // Vanilla computes NaN into valueTempMin/valueTempMax here and breaks on the next iteration.
+                break;
+            }
+
             double evalY = y * octaveEntry.FrequencyY;
-            double deltaY = Math.Abs(pastEvaluations[j].Y - evalY);
+            double deltaY = Math.Abs(pastY - evalY);
+            double slopeDelta = deltaY * maxYSlope;
+            double pastValue = pastEval.Value;
             valueTempMin += ApplyThresholding(
-                Math.Max(-1, pastEvaluations[j].Value - deltaY * maxYSlope) * octaveEntry.Amplitude,
+                Math.Max(-1, pastValue - slopeDelta) * octaveEntry.Amplitude,
                 octaveEntry.Threshold,
                 octaveEntry.SmoothingFactor);
             valueTempMax += ApplyThresholding(
-                Math.Min(1, pastEvaluations[j].Value + deltaY * maxYSlope) * octaveEntry.Amplitude,
+                Math.Min(1, pastValue + slopeDelta) * octaveEntry.Amplitude,
                 octaveEntry.Threshold,
                 octaveEntry.SmoothingFactor);
         }
@@ -218,13 +234,15 @@ public sealed class OptimumColumnNoiseBuffer
             }
 
             double evalY = y * octaveEntry.FrequencyY;
-            double noiseValue = NewSimplexNoiseLayer.Evaluate_ImprovedXZ(
+            double noiseValue = OptimumSimplexNoise.EvaluatePreRotated(
                 octaveEntry.Seed,
-                octaveEntry.X,
-                evalY,
-                octaveEntry.Z);
-            pastEvaluations[j].Value = noiseValue;
-            pastEvaluations[j].Y = evalY;
+                octaveEntry.XrBase,
+                octaveEntry.YrBase,
+                octaveEntry.ZrBase,
+                evalY);
+            ref PastEvaluation pastEval = ref pastEvaluations[j];
+            pastEval.Value = noiseValue;
+            pastEval.Y = evalY;
             value += ApplyThresholding(
                 noiseValue * octaveEntry.Amplitude,
                 octaveEntry.Threshold,
@@ -256,11 +274,12 @@ public sealed class OptimumColumnNoiseBuffer
         {
             ref readonly OctaveEntry octaveEntry = ref orderedOctaveEntries[j];
 
-            double noiseValue = NewSimplexNoiseLayer.Evaluate_ImprovedXZ(
+            double noiseValue = OptimumSimplexNoise.EvaluatePreRotated(
                 octaveEntry.Seed,
-                octaveEntry.X,
-                y * octaveEntry.FrequencyY,
-                octaveEntry.Z) * octaveEntry.Amplitude;
+                octaveEntry.XrBase,
+                octaveEntry.YrBase,
+                octaveEntry.ZrBase,
+                y * octaveEntry.FrequencyY) * octaveEntry.Amplitude;
             value += ApplyThresholding(noiseValue, octaveEntry.Threshold, octaveEntry.SmoothingFactor);
         }
 
@@ -270,8 +289,34 @@ public sealed class OptimumColumnNoiseBuffer
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static double ApplyThresholding(double value, double threshold, double smoothingFactor)
     {
-        return GameMath.SmoothMax(0, value - threshold, smoothingFactor)
-            + GameMath.SmoothMin(0, value + threshold, smoothingFactor);
+        return SmoothMaxZero(value - threshold, smoothingFactor)
+            + SmoothMinZero(value + threshold, smoothingFactor);
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double SmoothMaxZero(double value, double smoothingFactor)
+    {
+        double diff = smoothingFactor - Math.Abs(value);
+        if (diff <= 0.0 && smoothingFactor > 0.0)
+        {
+            return Math.Max(0.0, value);
+        }
+
+        double falloff = Math.Max(diff, 0.0) / smoothingFactor;
+        return Math.Max(0.0, value) + falloff * falloff * smoothingFactor * 0.25;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static double SmoothMinZero(double value, double smoothingFactor)
+    {
+        double diff = smoothingFactor - Math.Abs(value);
+        if (diff <= 0.0 && smoothingFactor > 0.0)
+        {
+            return Math.Min(0.0, value);
+        }
+
+        double falloff = Math.Max(diff, 0.0) / smoothingFactor;
+        return Math.Min(0.0, value) - falloff * falloff * smoothingFactor * 0.25;
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]

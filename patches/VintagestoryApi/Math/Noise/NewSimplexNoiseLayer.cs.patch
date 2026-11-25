@@ -1,0 +1,51 @@
+diff --git a/VintagestoryApi/Math/Noise/NewSimplexNoiseLayer.cs b/VintagestoryApi/Math/Noise/NewSimplexNoiseLayer.cs
+index 88690ae..a2f0aa5 100644
+--- a/VintagestoryApi/Math/Noise/NewSimplexNoiseLayer.cs
++++ b/VintagestoryApi/Math/Noise/NewSimplexNoiseLayer.cs
+@@ -1,7 +1,8 @@
+ using System;
+ using System.Runtime.CompilerServices;
++using Vintagestory.API.Config;
+ 
+ #nullable disable
+ 
+ namespace Vintagestory.API.MathTools
+ {
+@@ -23,33 +24,20 @@ namespace Vintagestory.API.MathTools
+         private const int NGrads3DExponent = 8;
+         private const int NGrads3D = 1 << NGrads3DExponent;
+ 
+         private const double Normalizer3D = 0.2781926117527186;
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float Evaluate_ImprovedXZ(long seed, double x, double y, double z)
+         {
+-            // Re-orient the BCC lattice without skewing, so Y points up the main lattice diagonal,
+-            // and the planes formed by XZ are moved far out of alignment with the cube faces.
+-            // Orthonormal rotation. Not a skew transform.
+-            double xz = x + z;
+-            double s2 = xz * Rotate3Orthogonalizer;
+-            double yy = y * Root3Over3;
+-            double xr = x + s2 + yy;
+-            double zr = z + s2 + yy;
+-            double yr = xz * -Root3Over3 + yy;
+-
+-            return Noise3_UnrotatedBase(seed, xr, yr, zr);
++            return OptimumSimplexNoise.EvaluateImprovedXZ(seed, x, y, z);
+         }
+ 
++        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         public static float Evaluate_FallbackOrientation(long seed, double x, double y, double z)
+         {
+-            // Re-orient the BCC lattice via rotation to produce a familiar look.
+-            // Orthonormal rotation. Not a skew transform.
+-            double r = FallbackRotate3 * (x + y + z);
+-            double xr = x - r, yr = y - r, zr = z - r;
+-
+-            return Noise3_UnrotatedBase(seed, xr, yr, zr);
++            return OptimumSimplexNoise.EvaluateFallbackOrientation(seed, x, y, z);
+         }
+ 
+         [MethodImpl(MethodImplOptions.AggressiveInlining)]
+         private static float Noise3_UnrotatedBase(long seed, double xr, double yr, double zr)
+         {
