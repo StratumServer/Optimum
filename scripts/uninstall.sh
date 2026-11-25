@@ -189,6 +189,9 @@ done
 if [[ -d "$INSTALL_DIR/.optimum" ]]; then
     if rm -rf -- "$INSTALL_DIR/.optimum"; then removed=$((removed + 1)); else failed=1; fi
 fi
+if [[ -d "$INSTALL_DIR/Mods/optimum" ]]; then
+    if rm -rf -- "$INSTALL_DIR/Mods/optimum"; then removed=$((removed + 1)); else failed=1; fi
+fi
 rm -f -- "${XDG_DATA_HOME:-$HOME/.local/share}/applications/optimum.desktop" "$HOME/Desktop/Optimum.desktop" 2>/dev/null || true
 cleanup_linux_uri_associations ""
 

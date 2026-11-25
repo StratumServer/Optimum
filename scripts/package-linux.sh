@@ -365,6 +365,14 @@ if [[ -d "$COMPAT_ASSET_SRC" ]]; then
     cp -a "$COMPAT_ASSET_SRC/." "$STAGE_DIR/assets/"
 fi
 
+# 5c-2. Ship bundled Optimum client-side content mod (UserFeedback integration).
+OPTIMUM_MOD_SRC="$REPO_ROOT/sources/mods/optimum"
+if [[ -d "$OPTIMUM_MOD_SRC" ]]; then
+    rm -rf "$STAGE_DIR/Mods/optimum"
+    mkdir -p "$STAGE_DIR/Mods/optimum"
+    cp -a "$OPTIMUM_MOD_SRC/." "$STAGE_DIR/Mods/optimum/"
+fi
+
 # 5d. Merge translation strings.
 LANG_SRC="$REPO_ROOT/sources/lang"
 LANG_DST="$STAGE_DIR/assets/game/lang"

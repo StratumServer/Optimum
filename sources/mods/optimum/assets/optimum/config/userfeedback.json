@@ -1,0 +1,31 @@
+{
+  "destinations": [
+    {
+      "type": "github",
+      "repo": "StratumServer/Optimum",
+      "labels": ["bug"],
+      "for": ["bug"]
+    },
+    {
+      "type": "github",
+      "repo": "StratumServer/Optimum",
+      "labels": ["enhancement"],
+      "for": ["feedback"]
+    },
+    {
+      "type": "webpage",
+      "url": "https://mods.vintagestory.at/optimum"
+    }
+  ],
+  "files": [
+    "ModConfig/optimum.json",
+    "Logs/optimum-launcher.log"
+  ],
+  "logMatch": [
+    "Optimum",
+    "VsModInterop",
+    "SurfaceRecorder",
+    "RecordedGpuBlur",
+    "RecordedSvgGeometry"
+  ]
+}
