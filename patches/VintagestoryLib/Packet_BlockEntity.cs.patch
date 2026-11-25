@@ -1,8 +1,8 @@
 diff --git a/VintagestoryLib/Packet_BlockEntity.cs b/VintagestoryLib/Packet_BlockEntity.cs
-index 75a7ffa..2532a53 100644
+index 75a7ffa..17af630 100644
 --- a/VintagestoryLib/Packet_BlockEntity.cs
 +++ b/VintagestoryLib/Packet_BlockEntity.cs
-@@ -20,10 +20,69 @@ public class Packet_BlockEntity
+@@ -20,10 +20,92 @@ public class Packet_BlockEntity
  
  	public const int DataFieldID = 5;
  
@@ -43,6 +43,29 @@ index 75a7ffa..2532a53 100644
 +		optimumSharedBuffer = null;
 +		optimumSharedOffset = 0;
 +		optimumSharedLength = 0;
++	}
++
++	internal static void ReleaseAndClearOptimumSlices(Packet_BlockEntity[] packets, int count)
++	{
++		if (packets == null || count <= 0)
++		{
++			return;
++		}
++		int limit = count < packets.Length ? count : packets.Length;
++		Vintagestory.API.Config.OptimumPooledSlab slab = packets[0]?.optimumSlab;
++		if (slab != null)
++		{
++			slab.Release();
++			if (slab.Buffer != null)
++			{
++				return;
++			}
++			packets[0].optimumSlab = null;
++		}
++		for (int i = 0; i < limit; i++)
++		{
++			packets[i]?.ClearOptimumSlice();
++		}
 +	}
 +
 +	internal bool TryGetOptimumDataSpan(out byte[] buffer, out int offset, out int length)

@@ -60,9 +60,17 @@ public sealed class ApiPatcherTextLayoutTests
         var loadContext = new AssemblyLoadContext("PatchedTextLayoutFixture", isCollectible: true);
         loadContext.Resolving += (_, name) => AppDomain.CurrentDomain.GetAssemblies()
             .FirstOrDefault(assembly => AssemblyName.ReferenceMatchesDefinition(assembly.GetName(), name));
+        FieldInfo? patchedGuiScale = null;
+        float previousPatchedGuiScale = 0;
+        float previousSourceGuiScale = RuntimeEnv.GUIScale;
         try
         {
             Assembly api = loadContext.LoadFromStream(stream);
+            Type patchedRuntimeEnv = api.GetType("Vintagestory.API.Config.RuntimeEnv", throwOnError: true)!;
+            patchedGuiScale = patchedRuntimeEnv.GetField("GUIScale", BindingFlags.Public | BindingFlags.Static)!;
+            previousPatchedGuiScale = (float)patchedGuiScale.GetValue(null)!;
+            RuntimeEnv.GUIScale = 1;
+            patchedGuiScale.SetValue(null, 1f);
             ComparePatchedAndSourceLayout(api, "Inventory items and café\nSecond line", EnumLinebreakBehavior.AfterWord, 44, 0, 0, false);
             ComparePatchedAndSourceLayout(api, "Inventory items and café\nSecond line", EnumLinebreakBehavior.AfterCharacter, 32, 3, 1.5, true);
             ComparePatchedAndSourceLayout(api, "A\r\nB\tC", EnumLinebreakBehavior.None, 80, 0, 0, false);
@@ -71,6 +79,8 @@ public sealed class ApiPatcherTextLayoutTests
         }
         finally
         {
+            RuntimeEnv.GUIScale = previousSourceGuiScale;
+            patchedGuiScale?.SetValue(null, previousPatchedGuiScale);
             loadContext.Unload();
         }
     }

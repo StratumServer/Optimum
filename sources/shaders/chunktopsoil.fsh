@@ -25,8 +25,8 @@ in vec4 gnormal;
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outGlow;
 #if SSAOLEVEL > 0
-#if !defined(SSAO_DEPTH_RECONSTRUCT) || SSAO_DEPTH_RECONSTRUCT == 0
 in vec4 fragPosition;
+#if !defined(SSAO_DEPTH_RECONSTRUCT) || SSAO_DEPTH_RECONSTRUCT == 0
 layout(location = 3) out vec4 outGPosition;
 #endif
 layout(location = 2) out vec4 outGNormal;

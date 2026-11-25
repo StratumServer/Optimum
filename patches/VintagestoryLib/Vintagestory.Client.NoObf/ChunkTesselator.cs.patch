@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
-index 42fad1f..a93104f 100644
+index 42fad1f..728e2bd 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ChunkTesselator.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -252,7 +252,7 @@ index 42fad1f..a93104f 100644
 -			buffer[2] = chunkZ;
 -			buffer[3] = ex2;
 -			throw new Exception(string.Format("Exception thrown when trying to tesselate chunk {0}/{1}/{2}. Exception: {3}", (ReadOnlySpan<object?>)buffer));
-+			throw new Exception(string.Format("Exception thrown when trying to tesselate chunk {0}/{1}/{2}. Exception: {3}", new object[] { chunkX, chunkY, chunkZ, ex2 }));
++			throw new Exception(string.Format("Exception thrown when trying to tesselate chunk {0}/{1}/{2}. Exception: {3}", new object[] { chunkX, chunkY, chunkZ, ex2 }), ex2);
  		}
  		bool num = CalculateVisibleFaces_Fluids(skipChunkCenter, chunkX * 32, chunkY * 32, chunkZ * 32) | CalculateVisibleFaces(skipChunkCenter, chunkX * 32, chunkY * 32, chunkZ * 32);
  		if (num)

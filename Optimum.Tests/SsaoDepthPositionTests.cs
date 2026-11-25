@@ -188,7 +188,16 @@ public sealed class SsaoDepthPositionTests
                 string prefix = BuildPrefix(depthMode, useOit, allowDepthOffset);
                 bool ssboChunk = shaderName.StartsWith("chunk", StringComparison.Ordinal);
                 string vsSrc = PreprocessShader(rawVsh, prefix, includes, upgradeVersion430: ssboChunk);
-                string fsSrc = PreprocessShader(rawFsh, prefix, includes, upgradeVersion430: false);
+                string fragmentSource = rawFsh;
+                if (shaderName == "chunktopsoil" && depthMode == 1)
+                {
+                    // Komet's lean-varying rewrite references fragPosition in the reconstruct variant.
+                    fragmentSource = fragmentSource.Replace(
+                        "void main() \n{",
+                        "void main() \n{\n\tfloat optimumKometFragPositionProbe = fragPosition.x;",
+                        StringComparison.Ordinal);
+                }
+                string fsSrc = PreprocessShader(fragmentSource, prefix, includes, upgradeVersion430: false);
 
                 int prog = CompileAndLinkProgram(vsSrc, fsSrc, $"{shaderName} (depth={depthMode}, oit={useOit}, depthOff={allowDepthOffset})");
                 GL.DeleteProgram(prog);
