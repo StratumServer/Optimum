@@ -42,8 +42,8 @@ public sealed class LerpedWeightedIndexMapAuditTests
         Assert.Contains("public float[] WeightsAt(float x, float z, float[] output)", map);
         Assert.Contains("return side == EnumAppSide.Server;", terra);
         Assert.Contains("return side == EnumAppSide.Server;", rock);
-        Assert.Contains("float[] landformWeights = tempDataThreadLocal.Value.landformWeights;", terra);
-        Assert.Contains("float[] columnLandformIndexedWeights = tempDataThreadLocal.Value.landformWeights;", terra);
+        Assert.Contains("float[] cornerWeights = workspace.CornerLandformWeights;", terra);
+        Assert.Contains("float[] columnLandformIndexedWeights = data.landformWeights;", terra);
         Assert.Contains("float[] indices = new float[provinces.Variants.Length];", rock);
         Assert.Contains("foreach (var index in map[posXInRegion, posZInRegion])", dungeons);
     }
@@ -68,11 +68,10 @@ public sealed class LerpedWeightedIndexMapAuditTests
         string terra = Read("VSEssentials/Systems/WorldGen/Standard/ChunkGen/1.GenTerra/GenTerra.cs");
 
         Assert.Contains("return side == EnumAppSide.Server;", terra);
-        Assert.Contains("float[] landformWeights = tempDataThreadLocal.Value.landformWeights;", terra);
-        Assert.Contains("double[] lerpedAmps = tempDataThreadLocal.Value.LerpedAmplitudes;", terra);
-        Assert.Contains("double[] lerpedTh = tempDataThreadLocal.Value.LerpedThresholds;", terra);
-        Assert.Contains("amps = new double[terrainGenOctaves];", terra);
-        Assert.Contains("thresholds = new double[terrainGenOctaves];", terra);
+        Assert.Contains("float[] cornerWeights = workspace.CornerLandformWeights;", terra);
+        Assert.Contains("double[] lerpedAmps = data.LerpedAmplitudes;", terra);
+        Assert.Contains("double[] lerpedTh = data.LerpedThresholds;", terra);
+        Assert.Contains("workspace.InterpolateOctaves(", terra);
         Assert.Contains("new ParallelOptions() { MaxDegreeOfParallelism = maxThreads }", terra);
     }
 
