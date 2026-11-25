@@ -557,7 +557,7 @@ public class OptimumStatusModSystem : ModSystem
             api.Logger.Debug("[Optimum] Firepit idle server tick pause: ON");
 
         if (OptimumConfig.OptiTimeDetected)
-            api.Logger.Notification(OptimumCompatibilityGuard.OptiTimeAdvisoryWarning);
+            api.Logger.Notification(OptimumCompatibilityGuard.GetOptiTimeAdvisoryText());
         if (OptimumConfig.TungstenDetected)
             api.Logger.Notification("[Optimum] Tungsten mod detected: server-side optimizations active.");
         if (OptimumConfig.SynergyDetected)

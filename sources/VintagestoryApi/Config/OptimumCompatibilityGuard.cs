@@ -34,9 +34,16 @@ public static class OptimumCompatibilityGuard
         "[Optimum] Advisory: Adaptive-radius coordination does not resolve Komet render-path overlap. MDI/SIMD compatibility is unverified. " +
         "Type '.optimum status' for details.";
 
+    /// <summary>First OptiTime release that checks every patch target against the vanilla body and yields to Optimum.</summary>
+    public const string OptiTimeCoexistenceMinimumVersion = "1.5.18";
+
     public const string OptiTimeAdvisoryWarning =
-        "[Optimum] Advisory: OptiTime mod detected. Optimum natively integrates all OptiTime optimizations into the host client engine. " +
-        "Running the standalone OptiTime mod on Optimum is redundant.";
+        "[Optimum] Advisory: OptiTime mod detected. OptiTime versions before " + OptiTimeCoexistenceMinimumVersion + " can replace Optimum code and switch Optimum features off. " +
+        "Update OptiTime to " + OptiTimeCoexistenceMinimumVersion + " or remove it.";
+
+    public const string OptiTimeCoexistenceNotice =
+        "[Optimum] OptiTime mod detected. OptiTime " + OptiTimeCoexistenceMinimumVersion + " and newer keep only the optimizations Optimum does not provide, " +
+        "so both mods can stay installed.";
 
     public static string? KometDetectedVersion { get; private set; }
     public static string? KometDetectionSource { get; private set; }
@@ -497,11 +504,25 @@ public static class OptimumCompatibilityGuard
         return $"Komet{ver} ({state}; {coordination}; render-path overlap unresolved)";
     }
 
+    /// <summary>
+    /// True when the detected OptiTime is 1.5.18 or newer, the first version that yields to Optimum.
+    /// An unknown or unparsable version counts as older, so the player gets the update advice.
+    /// </summary>
+    public static bool OptiTimeCoexists
+        => OptimumConfig.OptiTimeDetected
+           && Version.TryParse(OptiTimeDetectedVersion, out Version? detected)
+           && detected >= Version.Parse(OptiTimeCoexistenceMinimumVersion);
+
+    public static string GetOptiTimeAdvisoryText()
+        => OptiTimeCoexists ? OptiTimeCoexistenceNotice : OptiTimeAdvisoryWarning;
+
     public static string GetOptiTimeStatusLine()
     {
         if (!OptimumConfig.OptiTimeDetected) return "none detected";
         string ver = !string.IsNullOrEmpty(OptiTimeDetectedVersion) ? $" v{OptiTimeDetectedVersion}" : "";
-        return $"OptiTime{ver} (REDUNDANT - natively integrated in Optimum)";
+        return OptiTimeCoexists
+            ? $"OptiTime{ver} (COMPATIBLE - keeps only what Optimum does not provide)"
+            : $"OptiTime{ver} (OUTDATED - update to {OptiTimeCoexistenceMinimumVersion} or remove it)";
     }
 
     public static string GetTungstenStatusLine()
@@ -572,7 +593,8 @@ public static class OptimumCompatibilityGuard
 
     private static void LogOptiTimeAdvisoryOnce(Action<string>? logger)
     {
-        if (logger != null && !OptiTimeAdvisoryLogged)
+        // Only an OptiTime that can still replace Optimum code is worth a warning.
+        if (logger != null && !OptiTimeAdvisoryLogged && !OptiTimeCoexists)
         {
             logger(OptiTimeAdvisoryWarning);
             OptiTimeAdvisoryLogged = true;
