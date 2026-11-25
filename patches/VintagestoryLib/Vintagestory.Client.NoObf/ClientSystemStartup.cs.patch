@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f4374589..35432a03 100644
+index f437458..1006c8b 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 @@ -226,23 +226,27 @@ public class ClientSystemStartup : ClientSystem
@@ -115,7 +115,37 @@ index f4374589..35432a03 100644
  	}
  
  	internal void BeginItemTesselation()
-@@ -1037,10 +1048,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -1019,17 +1030,26 @@ public class ClientSystemStartup : ClientSystem
+ 		game.EnqueueGameLaunchTask(WaitForBlockTesselation, "blockTesselation");
+ 	}
+ 
+ 	private void WaitForBlockTesselation()
+ 	{
+-		if (game.TesselatorManager.finishedAsyncBlockTesselation < 2)
++		if (game.disposed || game.KillNextFrame)
++		{
++			return;
++		}
++		bool waitingForItems = collectionThreadItemAtlas != null
++			&& (Volatile.Read(ref game.ItemAtlasManager.UnknownTexturePos) == null
++				|| Volatile.Read(ref game.TesselatorManager.itemModelRefsInventory) == null);
++		bool waitingForEntities = collectionThreadEntityAtlas != null
++			&& Volatile.Read(ref game.EntityAtlasManager.UnknownTexturePos) == null;
++		if (game.TesselatorManager.finishedAsyncBlockTesselation < 2 || waitingForItems || waitingForEntities)
+ 		{
+-			game.EnqueueGameLaunchTask(WaitForBlockTesselation, "BlockTesselation");
++			game.EnqueueGameLaunchTask(new Action(WaitForBlockTesselation), "BlockTesselation");
+ 		}
+ 		else
+ 		{
+-			game.EnqueueGameLaunchTask(OnAllAssetsLoadedAndClientJoined, "OnAllAssetsLoaded");
++			game.EnqueueGameLaunchTask(new Action(OnAllAssetsLoadedAndClientJoined), "OnAllAssetsLoaded");
+ 		}
+ 	}
+ 
+ 	internal void OnAllAssetsLoadedAndClientJoined()
+ 	{
+@@ -1037,10 +1057,11 @@ public class ClientSystemStartup : ClientSystem
  		game.BlocksReceivedAndLoaded = true;
  		CompositeTexture.basicTexturesCache = null;
  		CompositeTexture.wildcardsCache = null;

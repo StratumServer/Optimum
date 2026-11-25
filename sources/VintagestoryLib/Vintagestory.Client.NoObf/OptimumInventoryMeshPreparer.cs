@@ -430,19 +430,20 @@ internal sealed class OptimumInventoryMeshPreparer
 		{
 			return;
 		}
-		if (!shapes.TryGetValue(shapeLoc, out UnloadableShape? shape) || shape == null)
+		if (!ShapeTesselatorManager.TryFindShapeInDict(shapes, shapeLoc, out UnloadableShape? shape) || shape == null)
 		{
 			return;
 		}
-		if (!shape.Loaded)
-		{
-			shape.Load(game, new AssetLocationAndSource(shapeLoc));
-		}
+		shape.AcquirePinAndEnsureLoaded(game, new AssetLocationAndSource(shapeLoc));
 		if (!shape.keepLoaded && IsTemporaryShapePinningEnabled())
 		{
 			pinnedShapes.TryGetValue(shape, out int count);
 			pinnedShapes[shape] = count + 1;
 			pinnedOut.Add(shape);
+		}
+		else
+		{
+			shape.ReleasePin();
 		}
 	}
 
@@ -457,6 +458,7 @@ internal sealed class OptimumInventoryMeshPreparer
 			for (int i = 0; i < pinned.Count; i++)
 			{
 				UnloadableShape shape = pinned[i];
+				shape.ReleasePin();
 				if (pinnedShapes.TryGetValue(shape, out int count))
 				{
 					if (count <= 1)
@@ -903,8 +905,9 @@ internal sealed class OptimumInventoryMeshPreparer
 			try
 			{
 				PreloadVoxelizeTextureAssetsIfNeeded(target);
-				manager.Tesselator.TesselateItem(item, item.Shape, out MeshData modeldata);
-				if (modeldata == null || modeldata == manager.unknownItemModelData)
+				ShapeTesselator tesselator = manager.Tesselator;
+				tesselator.TesselateItem(item, item.Shape, out MeshData modeldata);
+				if (modeldata == null || modeldata == manager.unknownItemModelData || modeldata == tesselator.unknownItemModelData)
 				{
 					return OptimumPreparedInventoryMesh.CreateUnknown(batchGeneration);
 				}
@@ -927,8 +930,9 @@ internal sealed class OptimumInventoryMeshPreparer
 		try
 		{
 			PreloadVoxelizeTextureAssetsIfNeeded(target);
-			manager.Tesselator.TesselateItem(item, alternates[altIdx], out MeshData altModeldata);
-			if (altModeldata == null || altModeldata == manager.unknownItemModelData)
+			ShapeTesselator tesselator = manager.Tesselator;
+			tesselator.TesselateItem(item, alternates[altIdx], out MeshData altModeldata);
+			if (altModeldata == null || altModeldata == manager.unknownItemModelData || altModeldata == tesselator.unknownItemModelData)
 			{
 				return OptimumPreparedInventoryMesh.CreateUnknown(batchGeneration);
 			}

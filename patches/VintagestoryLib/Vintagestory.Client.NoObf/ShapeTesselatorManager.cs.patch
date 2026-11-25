@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
-index dae3e90..5b7709f 100644
+index dae3e90..1541f7e 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ShapeTesselatorManager.cs
 @@ -3,10 +3,11 @@ using System.Collections.Generic;
@@ -80,12 +80,12 @@ index dae3e90..5b7709f 100644
 +		int blockId = block.BlockId;
 +		MeshData cached = Volatile.Read(ref blockModelDatas[blockId]);
 +		if (cached != null)
- 		{
--			TesselateBlock(block, lazyLoad: false);
++		{
 +			return cached;
 +		}
 +		lock (GetDefaultBlockMeshLock())
-+		{
+ 		{
+-			TesselateBlock(block, lazyLoad: false);
 +			cached = Volatile.Read(ref blockModelDatas[blockId]);
 +			if (cached == null)
 +			{
@@ -151,11 +151,13 @@ index dae3e90..5b7709f 100644
  			if (!shape.Value.keepLoaded)
  			{
  				shape.Value.Unload();
-@@ -132,10 +215,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -131,11 +214,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+ 		}
  	}
  
  	public void PrepareToLoadShapes()
  	{
++		EnsureInventoryMeshPreparer()?.InvalidateAndClear();
  		ResetThreading();
 +		OptimumApiBridge.ClearShapeStringPool();
 +		OptimumApiBridge.RegisterUnknownBlockModelData(this, unknownBlockModelData);
@@ -164,7 +166,7 @@ index dae3e90..5b7709f 100644
  		shapes3 = new Dictionary<AssetLocation, UnloadableShape>();
  		shapes4 = new Dictionary<AssetLocation, UnloadableShape>();
  		itemshapes = new Dictionary<AssetLocation, UnloadableShape>();
-@@ -224,18 +309,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -224,18 +310,19 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		blockModelDatas = new MeshData[count + 1];
  		altblockModelDatasLod0 = new MeshData[count + 1][];
  		altblockModelDatasLod1 = new MeshData[count + 1][];
@@ -185,7 +187,7 @@ index dae3e90..5b7709f 100644
  		{
  			TargetSet set = new TargetSet();
  			array[i] = set;
-@@ -723,10 +809,16 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -723,10 +810,16 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		return i;
  	}
  
@@ -202,23 +204,30 @@ index dae3e90..5b7709f 100644
  			throw new Exception("A previous threadpool thread did not call ThreadDispose() when finished with the TesselatorManager");
  		}
  		MeshData[] meshes = new MeshData[blocks.Count];
-@@ -856,31 +948,55 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
- 			}
+@@ -857,30 +950,77 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
  	public void TesselateItems_Pre(IList<Item> itemtypes)
-+	{
+ 	{
+-		if (unknownItemModelRef == null)
+-		{
+-			CompositeTexture compositeTexture = new CompositeTexture(new AssetLocation("unknown"));
+-			compositeTexture.Bake(game.Platform.AssetManager);
+-			BakedBitmap bakedBitmap = TextureAtlasManager.LoadCompositeBitmap(game, new AssetLocationAndSource(compositeTexture.Baked.BakedName));
+-			unknownItemModelData = ShapeTesselator.VoxelizeTextureStatic(bakedBitmap.TexturePixels, bakedBitmap.Width, bakedBitmap.Height, game.BlockAtlasManager.UnknownTexturePos);
+-			unknownItemModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownItemModelData);
+-		}
 +		EnsureUnknownItemModelRef();
 +		bool allocated = false;
-+		if (itemModelRefsInventory == null)
-+		{
-+			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
+ 		if (itemModelRefsInventory == null)
+ 		{
+ 			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
 +			allocated = true;
-+		}
-+		if (altItemModelRefsInventory == null)
-+		{
-+			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
+ 		}
+ 		if (altItemModelRefsInventory == null)
+ 		{
+ 			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
 +			allocated = true;
 +		}
 +		if (allocated)
@@ -227,28 +236,45 @@ index dae3e90..5b7709f 100644
 +		}
 +	}
 +
++	private static bool HasValidNonZeroTextureId(MultiTextureMeshRef meshRef)
++	{
++		int[] texIds = meshRef?.textureids;
++		if (texIds == null || texIds.Length == 0)
++		{
++			return false;
++		}
++		for (int i = 0; i < texIds.Length; i++)
++		{
++			if (texIds[i] <= 0)
++			{
++				return false;
++			}
++		}
++		return true;
++	}
++
 +	internal void EnsureUnknownItemModelRef()
- 	{
- 		if (unknownItemModelRef == null)
- 		{
- 			CompositeTexture compositeTexture = new CompositeTexture(new AssetLocation("unknown"));
- 			compositeTexture.Bake(game.Platform.AssetManager);
- 			BakedBitmap bakedBitmap = TextureAtlasManager.LoadCompositeBitmap(game, new AssetLocationAndSource(compositeTexture.Baked.BakedName));
- 			unknownItemModelData = ShapeTesselator.VoxelizeTextureStatic(bakedBitmap.TexturePixels, bakedBitmap.Width, bakedBitmap.Height, game.BlockAtlasManager.UnknownTexturePos);
- 			unknownItemModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownItemModelData);
- 		}
--		if (itemModelRefsInventory == null)
--		{
--			itemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count];
--		}
--		if (altItemModelRefsInventory == null)
++	{
++		if (unknownItemModelRef != null && HasValidNonZeroTextureId(unknownItemModelRef))
++		{
++			return;
++		}
++		TextureAtlasPosition unknownPos = game.ItemAtlasManager?.UnknownTexturePos ?? game.BlockAtlasManager?.UnknownTexturePos;
++		if (unknownItemModelRef != null && (unknownPos == null || unknownPos.atlasTextureId <= 0))
++		{
++			return;
++		}
++		CompositeTexture compositeTexture = new CompositeTexture(new AssetLocation("unknown"));
++		compositeTexture.Bake(game.Platform.AssetManager);
++		BakedBitmap bakedBitmap = TextureAtlasManager.LoadCompositeBitmap(game, new AssetLocationAndSource(compositeTexture.Baked.BakedName));
++		unknownItemModelData = ShapeTesselator.VoxelizeTextureStatic(bakedBitmap.TexturePixels, bakedBitmap.Width, bakedBitmap.Height, unknownPos);
++		unknownItemModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownItemModelData);
 +	}
 +
 +	internal void EnsureUnknownBlockModelRef()
 +	{
 +		if (unknownBlockModelRef == null)
- 		{
--			altItemModelRefsInventory = new MultiTextureMeshRef[itemtypes.Count][];
++		{
 +			unknownBlockModelRef = game.api.renderapi.UploadMultiTextureMesh(unknownBlockModelData);
  		}
  	}
@@ -264,7 +290,7 @@ index dae3e90..5b7709f 100644
  		int num = 0;
  		int i;
  		for (i = offset; i < maxCount; i++)
-@@ -928,11 +1044,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -928,11 +1068,12 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  
  	private void TesselateBlock(Block block, bool lazyLoad)
  	{
@@ -278,7 +304,7 @@ index dae3e90..5b7709f 100644
  		int num = Tesselator.AltTexturesCount(block);
  		int val = ((block.Shape.BakedAlternates != null) ? block.Shape.BakedAlternates.Length : 0);
  		int num2 = Tesselator.TileTexturesCount(block);
-@@ -953,17 +1070,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -953,17 +1094,20 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  			{
  				setLod0Flag(array[num3]);
  				num3++;
@@ -300,7 +326,7 @@ index dae3e90..5b7709f 100644
  		if (block.IsMissing)
  		{
  			return unknownBlockModelData;
-@@ -1081,10 +1201,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1081,10 +1225,14 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -315,7 +341,7 @@ index dae3e90..5b7709f 100644
  		refs = itemModelRefsInventory;
  		DisposeArray(refs);
  		int num = 0;
-@@ -1110,16 +1234,550 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+@@ -1110,41 +1258,623 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
  		}
  	}
  
@@ -552,8 +578,9 @@ index dae3e90..5b7709f 100644
 +						EnsureCompositeShapeLoaded(item.Shape, reloaded);
 +					}
 +				}
-+				Tesselator.TesselateItem(item, item.Shape, out var modeldata);
-+				MultiTextureMeshRef uploaded = (modeldata == null || modeldata == unknownItemModelData)
++				ShapeTesselator tesselator = Tesselator;
++				tesselator.TesselateItem(item, item.Shape, out var modeldata);
++				MultiTextureMeshRef uploaded = (modeldata == null || modeldata == unknownItemModelData || modeldata == tesselator.unknownItemModelData)
 +					? unknownItemModelRef
 +					: game.api.renderapi.UploadMultiTextureMesh(modeldata);
 +				Volatile.Write(ref itemModelRefsInventory[itemId], uploaded);
@@ -625,8 +652,9 @@ index dae3e90..5b7709f 100644
 +					EnsureCompositeShapeLoaded(altShape, reloadedAlt);
 +				}
 +			}
-+			Tesselator.TesselateItem(item, altShape, out var altModeldata);
-+			MultiTextureMeshRef uploadedAlt = (altModeldata == null || altModeldata == unknownItemModelData)
++			ShapeTesselator tesselator = Tesselator;
++			tesselator.TesselateItem(item, altShape, out var altModeldata);
++			MultiTextureMeshRef uploadedAlt = (altModeldata == null || altModeldata == unknownItemModelData || altModeldata == tesselator.unknownItemModelData)
 +				? unknownItemModelRef
 +				: game.api.renderapi.UploadMultiTextureMesh(altModeldata);
 +			Volatile.Write(ref altRefs[altIdx], uploadedAlt);
@@ -691,13 +719,49 @@ index dae3e90..5b7709f 100644
 +		}
 +	}
 +
++	internal static bool TryFindShapeInDict(
++		Vintagestory.API.Datastructures.OrderedDictionary<AssetLocation, UnloadableShape> shapesDict,
++		AssetLocation shapeLoc,
++		out UnloadableShape shape)
++	{
++		if (shapesDict == null || shapeLoc == null)
++		{
++			shape = null;
++			return false;
++		}
++		if (shapesDict.TryGetValue(shapeLoc, out shape))
++		{
++			return shape != null;
++		}
++		string path = shapeLoc.Path;
++		if (path != null && (path.StartsWith("shapes/", StringComparison.Ordinal) || path.EndsWith(".json", StringComparison.Ordinal)))
++		{
++			int start = path.StartsWith("shapes/", StringComparison.Ordinal) ? 7 : 0;
++			int len = path.Length - start;
++			if (len >= 5 && path.EndsWith(".json", StringComparison.Ordinal))
++			{
++				len -= 5;
++			}
++			if (len > 0)
++			{
++				AssetLocation normalized = new AssetLocation(shapeLoc.Domain, path.Substring(start, len));
++				if (shapesDict.TryGetValue(normalized, out shape))
++				{
++					return shape != null;
++				}
++			}
++		}
++		shape = null;
++		return false;
++	}
++
 +	private void EnsureLoadedForLazy(AssetLocation shapeLoc, List<UnloadableShape> reloaded)
 +	{
 +		if (shapes == null || shapeLoc == null)
 +		{
 +			return;
 +		}
-+		if (shapes.TryGetValue(shapeLoc, out UnloadableShape shape) && shape != null && !shape.Loaded)
++		if (TryFindShapeInDict(shapes, shapeLoc, out UnloadableShape shape) && !shape.Loaded)
 +		{
 +			shape.Load(game, new AssetLocationAndSource(shapeLoc));
 +			if (!shape.keepLoaded && ClientSettings.OptimizeRamMode == 2)
@@ -820,15 +884,18 @@ index dae3e90..5b7709f 100644
 +			return cached;
 +		}
 +		bool usesColormap = false;
-+		if (shapes.TryGetValue(shapeLoc, out UnloadableShape shape) && shape != null)
++		if (TryFindShapeInDict(shapes, shapeLoc, out UnloadableShape shape))
 +		{
-+			shape.AcquirePin();
++			if (game != null)
++			{
++				shape.AcquirePinAndEnsureLoaded(game, new AssetLocationAndSource(shapeLoc));
++			}
++			else
++			{
++				shape.AcquirePin();
++			}
 +			try
 +			{
-+				if (!shape.Loaded && game != null)
-+				{
-+					shape.Load(game, new AssetLocationAndSource(shapeLoc));
-+				}
 +				usesColormap = ShapeElementsUseColormap(shape.Elements);
 +			}
 +			finally
@@ -867,12 +934,37 @@ index dae3e90..5b7709f 100644
  
  	public Shape GetCachedShape(AssetLocation location)
  	{
- 		shapes.TryGetValue(location, out var value);
-@@ -1140,11 +1798,11 @@ public class ShapeTesselatorManager : AsyncHelper.Multithreaded, ITesselatorMana
+-		shapes.TryGetValue(location, out var value);
+-		if (value != null && !value.Loaded)
++		if (!TryFindShapeInDict(shapes, location, out UnloadableShape value))
++		{
++			return null;
++		}
++		if (ClientSettings.OptimizeRamMode == 2)
++		{
++			value.KeepLoaded();
++		}
++		if (!Volatile.Read(ref value.Loaded) || Volatile.Read(ref value.Elements) == null)
+ 		{
+ 			value.Load(game, new AssetLocationAndSource(location));
+ 		}
+ 		return value;
+ 	}
+ 
+ 	public MeshData CreateMesh(string typeForLogging, CompositeShape cshape, TextureSourceBuilder texgen, ITexPositionSource texSource = null)
+ 	{
+-		cshape.Base.WithPathPrefixOnce("shapes/").WithPathAppendixOnce(".json");
+-		Shape shape = game.api.Assets.TryGet(cshape.Base)?.ToObject<Shape>();
++		AssetLocation shapeLoc = cshape.Base.CopyWithPathPrefixAndAppendixOnce("shapes/", ".json");
++		Shape shape = game.api.Assets.TryGet(shapeLoc)?.ToObject<Shape>();
+ 		if (shape == null)
+ 		{
+ 			return new MeshData(4, 3);
  		}
  		if (texSource == null)
  		{
- 			texSource = texgen(shape, cshape.Base.ToShortString());
+-			texSource = texgen(shape, cshape.Base.ToShortString());
++			texSource = texgen(shape, shapeLoc.ToShortString());
  		}
 -		Tesselator.TesselateShape(typeForLogging, shape, out var modeldata, texSource, (cshape.rotateX == 0f && cshape.rotateY == 0f && cshape.rotateZ == 0f) ? null : new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ), 0, 0, 0);
 +		Tesselator.TesselateShape(typeForLogging, shape, out var modeldata, texSource, (cshape.rotateX == 0f && cshape.rotateY == 0f && cshape.rotateZ == 0f) ? null : new Vec3f(cshape.rotateX, cshape.rotateY, cshape.rotateZ), 0, 0, 0, cshape.QuantityElements, cshape.SelectiveElements);

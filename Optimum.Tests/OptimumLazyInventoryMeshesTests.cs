@@ -676,4 +676,191 @@ public class OptimumLazyInventoryMeshesTests
         Assert.False(voxBlock.ShapeUsesColormap);
         Assert.False(missingBlock.ShapeUsesColormap);
     }
+
+    [Fact]
+    public void TryFindShapeInDict_MatchesDirectAndMutatedShapePaths()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type stmType = donorAsm.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager", throwOnError: true)!;
+        Type unloadableShapeType = donorAsm.GetType("Vintagestory.Client.NoObf.UnloadableShape", throwOnError: true)!;
+        Type orderedDictType = typeof(Vintagestory.API.Datastructures.OrderedDictionary<,>).MakeGenericType(typeof(AssetLocation), unloadableShapeType);
+
+        object shapesDict = Activator.CreateInstance(orderedDictType)!;
+        MethodInfo addShape = orderedDictType.GetMethod("Add", new[] { typeof(AssetLocation), unloadableShapeType })!;
+        object collarShape = Activator.CreateInstance(unloadableShapeType)!;
+        object hammerShape = Activator.CreateInstance(unloadableShapeType)!;
+
+        addShape.Invoke(shapesDict, new[] { new AssetLocation("game:entity/humanoid/seraph/clothing/upperbody/collar-shortsleeve-fancy"), collarShape });
+        addShape.Invoke(shapesDict, new[] { new AssetLocation("toolsmith:item/parts/hammer/heads/simple"), hammerShape });
+
+        MethodInfo tryFind = stmType.GetMethod("TryFindShapeInDict", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.Public)!;
+        Assert.NotNull(tryFind);
+
+        object?[] directArgs = { shapesDict, new AssetLocation("game:entity/humanoid/seraph/clothing/upperbody/collar-shortsleeve-fancy"), null };
+        Assert.True((bool)tryFind.Invoke(null, directArgs)!);
+        Assert.Same(collarShape, directArgs[2]);
+
+        object?[] mutatedArgs = { shapesDict, new AssetLocation("game:shapes/entity/humanoid/seraph/clothing/upperbody/collar-shortsleeve-fancy.json"), null };
+        Assert.True((bool)tryFind.Invoke(null, mutatedArgs)!);
+        Assert.Same(collarShape, mutatedArgs[2]);
+
+        object?[] moddedMutatedArgs = { shapesDict, new AssetLocation("toolsmith:shapes/item/parts/hammer/heads/simple.json"), null };
+        Assert.True((bool)tryFind.Invoke(null, moddedMutatedArgs)!);
+        Assert.Same(hammerShape, moddedMutatedArgs[2]);
+
+        object?[] missingArgs = { shapesDict, new AssetLocation("game:shapes/nonexistent/shape.json"), null };
+        Assert.False((bool)tryFind.Invoke(null, missingArgs)!);
+        Assert.Null(missingArgs[2]);
+    }
+
+    [Fact]
+    public void HasValidNonZeroTextureId_RejectsZeroOrEmptyTextureIds()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type stmType = donorAsm.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager", throwOnError: true)!;
+        MethodInfo helper = stmType.GetMethod("HasValidNonZeroTextureId", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.NotNull(helper);
+
+        Assert.False((bool)helper.Invoke(null, new object?[] { null })!);
+        Assert.False((bool)helper.Invoke(null, new object[] { new MultiTextureMeshRef(Array.Empty<MeshRef>(), Array.Empty<int>()) })!);
+        Assert.False((bool)helper.Invoke(null, new object[] { new MultiTextureMeshRef(Array.Empty<MeshRef>(), new[] { 0 }) })!);
+        Assert.False((bool)helper.Invoke(null, new object[] { new MultiTextureMeshRef(Array.Empty<MeshRef>(), new[] { 248, 0 }) })!);
+        Assert.True((bool)helper.Invoke(null, new object[] { new MultiTextureMeshRef(Array.Empty<MeshRef>(), new[] { 248 }) })!);
+        Assert.True((bool)helper.Invoke(null, new object[] { new MultiTextureMeshRef(Array.Empty<MeshRef>(), new[] { 248, 249 }) })!);
+    }
+
+    [Fact]
+    public void UnloadableShape_AcquirePinAndEnsureLoaded_PreventsUnloadWhilePinned()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type unloadableShapeType = donorAsm.GetType("Vintagestory.Client.NoObf.UnloadableShape", throwOnError: true)!;
+        object shape = Activator.CreateInstance(unloadableShapeType)!;
+        FieldInfo loadedField = unloadableShapeType.GetField("Loaded", BindingFlags.Instance | BindingFlags.Public)!;
+        FieldInfo elementsField = unloadableShapeType.GetField("Elements", BindingFlags.Instance | BindingFlags.Public)!;
+        MethodInfo acquirePinAndLoad = unloadableShapeType.GetMethod("AcquirePinAndEnsureLoaded", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        MethodInfo releasePin = unloadableShapeType.GetMethod("ReleasePin", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        MethodInfo unload = unloadableShapeType.GetMethod("Unload", BindingFlags.Instance | BindingFlags.Public)!;
+
+        loadedField.SetValue(shape, true);
+        elementsField.SetValue(shape, Array.Empty<ShapeElement>());
+
+        bool ok = (bool)acquirePinAndLoad.Invoke(shape, new object?[] { null, new AssetLocationAndSource("game:block/basic/cube") })!;
+        Assert.True(ok);
+
+        // Unload must be a no-op while pinned.
+        unload.Invoke(shape, null);
+        Assert.True((bool)loadedField.GetValue(shape)!);
+        Assert.NotNull(elementsField.GetValue(shape));
+
+        releasePin.Invoke(shape, null);
+        unload.Invoke(shape, null);
+        Assert.False((bool)loadedField.GetValue(shape)!);
+        Assert.Null(elementsField.GetValue(shape));
+    }
+
+    [Fact]
+    public void ShaderRegistry_EnsureShaderCapacity_GrowsPastVanilla100Limit()
+    {
+        string donorPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        if (!File.Exists(donorPath))
+        {
+            return;
+        }
+
+        Assembly donorAsm = Assembly.LoadFrom(donorPath);
+        Type regType = donorAsm.GetType("Vintagestory.Client.NoObf.ShaderRegistry", throwOnError: true)!;
+        MethodInfo ensureCap = regType.GetMethod("EnsureShaderCapacity", BindingFlags.Static | BindingFlags.NonPublic)!;
+        FieldInfo namesField = regType.GetField("shaderNames", BindingFlags.Static | BindingFlags.NonPublic)!;
+        FieldInfo progsField = regType.GetField("shaderPrograms", BindingFlags.Static | BindingFlags.NonPublic)!;
+        Assert.NotNull(ensureCap);
+
+        string[]? origNames = (string[]?)namesField.GetValue(null);
+        Array? origProgs = (Array?)progsField.GetValue(null);
+        try
+        {
+            var testNames = new string[100];
+            testNames[0] = "sentinel";
+            var testProgs = Array.CreateInstance(donorAsm.GetType("Vintagestory.Client.NoObf.ShaderProgram", throwOnError: true)!, 100);
+            namesField.SetValue(null, testNames);
+            progsField.SetValue(null, testProgs);
+
+            ensureCap.Invoke(null, new object[] { 105 });
+
+            string[] resizedNames = (string[])namesField.GetValue(null)!;
+            Array resizedProgs = (Array)progsField.GetValue(null)!;
+            Assert.True(resizedNames.Length > 105);
+            Assert.True(resizedProgs.Length > 105);
+            Assert.Equal("sentinel", resizedNames[0]);
+        }
+        finally
+        {
+            namesField.SetValue(null, origNames);
+            progsField.SetValue(null, origProgs);
+        }
+    }
+
+    [Fact]
+    public void PatchedVintagestoryLib_WiresIssue723Fixes_WhenBuilt()
+    {
+        string patchedPath = Path.Combine(RepoRoot(), "build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib-patched.dll");
+        if (!File.Exists(patchedPath))
+        {
+            return;
+        }
+
+        using var asm = AssemblyDefinition.ReadAssembly(patchedPath);
+        var module = asm.MainModule;
+
+        var startupType = module.GetType("Vintagestory.Client.NoObf.ClientSystemStartup")!;
+        var waitMethod = startupType.Methods.Single(m => m.Name == "WaitForBlockTesselation");
+        var waitFields = waitMethod.Body.Instructions
+            .Where(i => i.Operand is FieldReference)
+            .Select(i => ((FieldReference)i.Operand).Name)
+            .ToHashSet();
+        Assert.Contains("UnknownTexturePos", waitFields);
+        Assert.Contains("itemModelRefsInventory", waitFields);
+
+        var stmType = module.GetType("Vintagestory.Client.NoObf.ShapeTesselatorManager")!;
+        var ensureUnk = stmType.Methods.Single(m => m.Name == "EnsureUnknownItemModelRef");
+        Assert.Contains(ensureUnk.Body.Instructions, i => i.Operand is FieldReference fr && fr.Name == "ItemAtlasManager");
+        Assert.Contains(ensureUnk.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "HasValidNonZeroTextureId");
+
+        var getCached = stmType.Methods.Single(m => m.Name == "GetCachedShape");
+        Assert.Contains(getCached.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "TryFindShapeInDict");
+        Assert.Contains(getCached.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "KeepLoaded");
+
+        var createMesh = stmType.Methods.Single(m => m.Name == "CreateMesh" && m.Parameters.Count == 4);
+        Assert.Contains(createMesh.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "CopyWithPathPrefixAndAppendixOnce");
+
+        var tessType = module.GetType("Vintagestory.Client.NoObf.ShapeTesselator")!;
+        var tessShape = tessType.Methods.Single(m => m.Name == "TesselateShape" && m.Parameters.Count == 10 && m.Parameters[2].ParameterType.Name == "CompositeShape");
+        Assert.Contains(tessShape.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "TryResolveShapeForTesselation");
+        Assert.Contains(tessShape.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "AcquirePinAndEnsureLoaded");
+
+        var shapeType = module.GetType("Vintagestory.Client.NoObf.UnloadableShape")!;
+        Assert.Contains(shapeType.Methods, m => m.Name == "AcquirePinAndEnsureLoaded");
+        Assert.Contains(shapeType.Methods, m => m.Name == "LoadLocked");
+
+        var shaderRegType = module.GetType("Vintagestory.Client.NoObf.ShaderRegistry")!;
+        var regStr = shaderRegType.Methods.Single(m => m.Name == "RegisterShaderProgram" && m.Parameters.Count == 2 && m.Parameters[0].ParameterType.FullName == "System.String");
+        Assert.Contains(regStr.Body.Instructions, i => i.Operand is MethodReference mr && mr.Name == "EnsureShaderCapacity");
+    }
 }
