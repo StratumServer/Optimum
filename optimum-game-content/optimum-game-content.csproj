@@ -22,6 +22,15 @@
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapPageRenderer.cs" Link="OptimumMapPageRenderer.cs" />
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumMapTextureArray.cs" Link="OptimumMapTextureArray.cs" />
     <Compile Include="..\sources\VSEssentials\Systems\WorldMap\ChunkLayer\OptimumTerrainSampler.cs" Link="OptimumTerrainSampler.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumProfilerModels.cs" Link="Profiler\OptimumProfilerModels.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumGpuTimerRing.cs" Link="Profiler\OptimumGpuTimerRing.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumRuntimeEventListener.cs" Link="Profiler\OptimumRuntimeEventListener.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumWorldCensus.cs" Link="Profiler\OptimumWorldCensus.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumPerfettoExporter.cs" Link="Profiler\OptimumPerfettoExporter.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumProfilerSession.cs" Link="Profiler\OptimumProfilerSession.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\HudOptimumProfilerOverlay.cs" Link="Profiler\HudOptimumProfilerOverlay.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\GuiDialogOptimumProfiler.cs" Link="Profiler\GuiDialogOptimumProfiler.cs" />
+    <Compile Include="..\sources\VSEssentials\Systems\Profiler\OptimumProfilerService.cs" Link="Profiler\OptimumProfilerService.cs" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\optimum-api-contracts\optimum-api-contracts.csproj" />
@@ -31,6 +40,10 @@
     </Reference>
     <Reference Include="OpenTK.Graphics">
       <HintPath>..\.vanilla\win-x64\vintagestory\Lib\OpenTK.Graphics.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="cairo-sharp">
+      <HintPath>..\.vanilla\win-x64\vintagestory\Lib\cairo-sharp.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

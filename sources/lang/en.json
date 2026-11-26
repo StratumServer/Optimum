@@ -98,5 +98,8 @@
 	"optimum-compatibility-feature-name-MapPageCache": "Map Page Cache",
 	"optimum-compatibility-feature-name-ShaderPreprocessParallel": "Parallel Shader Preprocessing",
 	"optimum-userfeedback-button": "Send Optimum Feedback",
-	"optimum-userfeedback-tooltip": "Open the UserFeedback panel pre-selected for Optimum bug reports and suggestions."
+	"optimum-userfeedback-tooltip": "Open the UserFeedback panel pre-selected for Optimum bug reports and suggestions.",
+	"optimum-profiler-button": "Open Profiler",
+	"optimum-profiler-tooltip": "Open the opt-in Optimum GPU/CPU/GC profiler window (zero overhead while closed).",
+	"optimum-cmd-profiler": "Open or control the opt-in Optimum in-game profiler (ui, hud, record, snapshot, glcounters, off)"
 }

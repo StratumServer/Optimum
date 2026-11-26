@@ -52,6 +52,7 @@
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapPageRenderer.cs" />
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumMapTextureArray.cs" />
     <Compile Remove="Systems\WorldMap\ChunkLayer\OptimumTerrainSampler.cs" />
+    <Compile Remove="Systems\Profiler\*.cs" />
   </ItemGroup>
 
   <ItemGroup>
