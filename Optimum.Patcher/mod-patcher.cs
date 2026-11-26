@@ -151,7 +151,8 @@ public static class ModPatcher
                     "pageRenderer",
                     "loadQueue",
                     "renderedPages",
-                    "UploadChunkToPageArray",
+                    "renderViewPos",
+                    "renderWorldPos",
                     "RenderWithPageArray",
                 ],
                 ["Vintagestory.ServerMods.TreeGen"] =

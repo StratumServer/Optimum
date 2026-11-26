@@ -2,6 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using Vintagestory.API.Config;
 using Vintagestory.GameContent;
 using Xunit;
@@ -432,5 +435,436 @@ public class MapPageCacheFunctionalTests
             }
         }
         return value;
+    }
+
+    // --- Priority queue negative coordinates, overflow, deduplication, thread safety ---
+
+    [Fact]
+    public void PriorityQueue_NegativeCoordsAndMinusOneSentinel_DoNotCollide()
+    {
+        var pq = new OptimumMapPagePriorityQueue();
+        long negOneKey = OptimumMapPageCache.PackPageCoord(-1, -1);
+        long negXKey = OptimumMapPageCache.PackPageCoord(-5, 3);
+        Assert.Equal(-1L, negOneKey);
+        Assert.True(negXKey < 0);
+
+        Assert.True(pq.TryEnqueue(negXKey, -5, 3, 0, 0));
+        Assert.True(pq.TryEnqueue(negOneKey, -1, -1, 0, 0));
+        Assert.False(pq.TryEnqueue(negOneKey, -1, -1, 0, 0)); // duplicate suppressed
+
+        Assert.True(pq.TryDequeue(out long first));
+        Assert.Equal(negOneKey, first);
+
+        Assert.True(pq.TryDequeue(out long second));
+        Assert.Equal(negXKey, second);
+
+        Assert.False(pq.TryDequeue(out _));
+        Assert.Equal(-1L, pq.Dequeue());
+    }
+
+    [Fact]
+    public void PriorityQueue_LargeCoordinates_DoNotOverflowDistance()
+    {
+        var pq = new OptimumMapPagePriorityQueue();
+        long nearKey = OptimumMapPageCache.PackPageCoord(10, 0);
+        long farKey = OptimumMapPageCache.PackPageCoord(100_000, 0); // 100_000^2 overflows int32
+
+        Assert.True(pq.TryEnqueue(farKey, 100_000, 0, 0, 0));
+        Assert.True(pq.TryEnqueue(nearKey, 10, 0, 0, 0));
+
+        Assert.True(pq.TryDequeue(out long first));
+        Assert.Equal(nearKey, first);
+        Assert.True(pq.TryDequeue(out long second));
+        Assert.Equal(farKey, second);
+    }
+
+    [Fact]
+    public async Task PriorityQueue_ConcurrentEnqueueDequeue_IsThreadSafe()
+    {
+        var pq = new OptimumMapPagePriorityQueue();
+        const int pageCount = 400;
+        var dequeued = new System.Collections.Concurrent.ConcurrentBag<long>();
+
+        var producer1 = Task.Run(() =>
+        {
+            for (int x = -10; x < 10; x++)
+                for (int z = -10; z < 10; z++)
+                    pq.TryEnqueue(OptimumMapPageCache.PackPageCoord(x, z), x, z, 0, 0);
+        });
+        var producer2 = Task.Run(() =>
+        {
+            for (int x = -10; x < 10; x++)
+                for (int z = -10; z < 10; z++)
+                    pq.TryEnqueue(OptimumMapPageCache.PackPageCoord(x, z), x, z, 0, 0);
+        });
+        var consumer = Task.Run(() =>
+        {
+            while (!producer1.IsCompleted || !producer2.IsCompleted || pq.Count > 0)
+            {
+                if (pq.TryDequeue(out long key))
+                {
+                    dequeued.Add(key);
+                }
+                else
+                {
+                    Thread.Yield();
+                }
+            }
+        });
+
+        await Task.WhenAll(producer1, producer2, consumer);
+        Assert.True(dequeued.Count >= pageCount);
+    }
+
+    // --- Coalesced GPU uploads, sub-chunk vs full-page snapshot, lost-wakeup prevention ---
+
+    [Fact]
+    public void PageCache_CoalescesMultipleWrites_AndSelectsSubChunkVsFullPage()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "optimum-map-test-" + Guid.NewGuid().ToString("N"));
+        bool origEnabled = OptimumConfig.MapPageCacheEnabled;
+        OptimumConfig.MapPageCacheEnabled = true;
+
+        try
+        {
+            using var cache = new OptimumMapPageCache(tempDir, logger: null, maxInMemoryPages: 32);
+            int[] chunkA = MakeFilledChunk(unchecked((int)0xFF112233));
+            int[] chunkB = MakeFilledChunk(unchecked((int)0xFF445566));
+            int[] chunkC = MakeFilledChunk(unchecked((int)0xFF778899));
+
+            cache.WriteChunk(0, 0, chunkA);
+            cache.WriteChunk(1, 0, chunkB);
+            cache.WriteChunk(2, 1, chunkC);
+
+            long pageKey = OptimumMapPageCache.PackPageCoord(0, 0);
+            Assert.True(cache.TryDequeueDirtyGpuPage(out long dequeuedKey));
+            Assert.Equal(pageKey, dequeuedKey);
+            // All 3 writes coalesced into a single dirty-page queue entry
+            Assert.False(cache.TryDequeueDirtyGpuPage(out _));
+
+            int[] fullScratch = new int[OptimumMapPageCache.PagePixelCount];
+            int[][] slices = CreateChunkSlices();
+
+            // Resident layer with 3 dirty chunks -> sub-chunk upload path
+            Assert.True(cache.TrySnapshotDirtyPage(
+                pageKey, hasLayer: true, fullScratch, slices,
+                out bool isFullPage, out ulong dirtyMask, out int sliceCount));
+            Assert.False(isFullPage);
+            Assert.Equal(3, sliceCount);
+            Assert.Equal(
+                (1UL << OptimumMapPageCache.ChunkIndexInPage(0, 0)) |
+                (1UL << OptimumMapPageCache.ChunkIndexInPage(1, 0)) |
+                (1UL << OptimumMapPageCache.ChunkIndexInPage(2, 1)),
+                dirtyMask);
+            Assert.Equal(chunkA, slices[0]);
+            Assert.Equal(chunkB, slices[1]);
+            Assert.Equal(chunkC, slices[2]);
+
+            // Writing again re-enqueues (no lost wakeup), and non-resident layer forces full-page upload
+            int[] chunkD = MakeFilledChunk(unchecked((int)0xFFAABBCC));
+            cache.WriteChunk(3, 3, chunkD);
+            Assert.True(cache.TryDequeueDirtyGpuPage(out long requeuedKey));
+            Assert.Equal(pageKey, requeuedKey);
+
+            Assert.True(cache.TrySnapshotDirtyPage(
+                pageKey, hasLayer: false, fullScratch, slices,
+                out isFullPage, out _, out _));
+            Assert.True(isFullPage);
+            Assert.Equal(unchecked((int)0xFF112233), fullScratch[0]);
+            Assert.Equal(unchecked((int)0xFFAABBCC), fullScratch[(3 * 32) * 256 + (3 * 32)]);
+
+            // Partial resident page with >16 dirty chunks batches 16 sub-chunks and re-enqueues remainder
+            for (int i = 0; i < 20; i++)
+            {
+                cache.WriteChunk(i % 8, i / 8, MakeFilledChunk(unchecked((int)(0xFF000000 + i + 1))));
+            }
+            Assert.True(cache.TryDequeueDirtyGpuPage(out _));
+            Assert.True(cache.TrySnapshotDirtyPage(
+                pageKey, hasLayer: true, fullScratch, slices,
+                out isFullPage, out ulong batch1Mask, out int batch1Count));
+            Assert.False(isFullPage);
+            Assert.Equal(OptimumMapPageCache.MaxSubChunkUploadsPerPage, batch1Count);
+            Assert.Equal(16, BitOperations.PopCount(batch1Mask));
+
+            Assert.True(cache.TryDequeueDirtyGpuPage(out long remainderKey));
+            Assert.Equal(pageKey, remainderKey);
+            Assert.True(cache.TrySnapshotDirtyPage(
+                pageKey, hasLayer: true, fullScratch, slices,
+                out isFullPage, out ulong batch2Mask, out int batch2Count));
+            Assert.False(isFullPage);
+            Assert.Equal(4, batch2Count);
+            Assert.Equal(0UL, batch1Mask & batch2Mask);
+            Assert.False(cache.TryDequeueDirtyGpuPage(out _));
+        }
+        finally
+        {
+            OptimumConfig.MapPageCacheEnabled = origEnabled;
+            TryDeleteDir(tempDir);
+        }
+    }
+
+    // --- Real disk round-trip, merge-without-clobber, reopen, gzip-bomb protection ---
+
+    [Fact]
+    public void PageCache_DiskRoundTrip_PreservesLiveAndInvalidatedChunks_AndRejectsGzipBomb()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "optimum-map-disk-" + Guid.NewGuid().ToString("N"));
+        bool origEnabled = OptimumConfig.MapPageCacheEnabled;
+        OptimumConfig.MapPageCacheEnabled = true;
+
+        try
+        {
+            int diskColor0 = unchecked((int)0xFF102030);
+            int diskColor1 = unchecked((int)0xFF203040);
+            int diskColor2 = unchecked((int)0xFF304050);
+            int liveColor0 = unchecked((int)0xFFDDCCBB);
+
+            using (var writerCache = new OptimumMapPageCache(tempDir, logger: null, maxInMemoryPages: 32))
+            {
+                writerCache.WriteChunk(0, 0, MakeFilledChunk(diskColor0));
+                writerCache.WriteChunk(1, 0, MakeFilledChunk(diskColor1));
+                writerCache.WriteChunk(2, 0, MakeFilledChunk(diskColor2));
+                writerCache.Flush();
+            }
+
+            using (var readerCache = new OptimumMapPageCache(tempDir, logger: null, maxInMemoryPages: 32))
+            {
+                // Live write to (0,0) and invalidation of (1,0) BEFORE disk read.
+                // Whether WriterLoop merges first or TryReadPage runs first, live (0,0) must survive,
+                // invalidated (1,0) must stay uncached, and persisted (2,0) must be preserved.
+                readerCache.WriteChunk(0, 0, MakeFilledChunk(liveColor0));
+                readerCache.WriteChunk(1, 0, MakeFilledChunk(diskColor1));
+                readerCache.InvalidateChunk(1, 0);
+
+                readerCache.TryReadPage(0, 0);
+
+                // Live chunk (0,0) must survive, invalidated (1,0) must stay uncached, (2,0) must load from disk
+                int[]? got0 = readerCache.GetCachedChunkPixels(0, 0);
+                int[]? got1 = readerCache.GetCachedChunkPixels(1, 0);
+                int[]? got2 = readerCache.GetCachedChunkPixels(2, 0);
+                Assert.NotNull(got0);
+                Assert.Equal(liveColor0, got0[0]);
+                Assert.Null(got1);
+                Assert.False(readerCache.IsChunkCached(1, 0));
+                Assert.NotNull(got2);
+                Assert.Equal(diskColor2, got2[0]);
+
+                // Flushing back to disk must also preserve chunk (2,0) across sessions
+                readerCache.Flush();
+
+                // Second TryReadPage on same page is a no-op
+                Assert.False(readerCache.TryReadPage(0, 0));
+
+                // Closing map clears pending GPU uploads; reopening via RequestGpuUpload schedules full upload without disk re-read
+                readerCache.ClearPendingGpuUploads();
+                Assert.False(readerCache.TryDequeueDirtyGpuPage(out _));
+
+                long pageKey = OptimumMapPageCache.PackPageCoord(0, 0);
+                Assert.True(readerCache.RequestGpuUpload(pageKey));
+                Assert.True(readerCache.TryDequeueDirtyGpuPage(out long reopenKey));
+                Assert.Equal(pageKey, reopenKey);
+
+                int[] fullScratch = new int[OptimumMapPageCache.PagePixelCount];
+                int[][] slices = CreateChunkSlices();
+                Assert.True(readerCache.TrySnapshotDirtyPage(
+                    pageKey, hasLayer: true, fullScratch, slices,
+                    out bool isFullPage, out _, out _));
+                Assert.True(isFullPage);
+
+                // Write a gzip-bomb .omp file for page (5, 5): decompresses to > 256 KB
+                string bombPath = Path.Combine(tempDir, "5_5.omp");
+                byte[] oversizedRaw = new byte[OptimumMapPageCache.PagePixelCount * 4 + 4096];
+                using (var ms = new MemoryStream())
+                {
+                    ms.Write("OMP\x01"u8);
+                    ms.WriteByte(1);
+                    ms.Write(BitConverter.GetBytes(5));
+                    ms.Write(BitConverter.GetBytes(5));
+                    ms.Write(BitConverter.GetBytes(ulong.MaxValue));
+                    using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
+                    {
+                        gz.Write(oversizedRaw, 0, oversizedRaw.Length);
+                    }
+                    File.WriteAllBytes(bombPath, ms.ToArray());
+                }
+
+                Assert.False(readerCache.TryReadPage(5, 5));
+                Assert.False(readerCache.IsChunkCached(5 * 8, 5 * 8));
+            }
+        }
+        finally
+        {
+            OptimumConfig.MapPageCacheEnabled = origEnabled;
+            TryDeleteDir(tempDir);
+        }
+    }
+
+    // --- Bounded in-memory eviction ---
+
+    [Fact]
+    public void PageCache_EnforcesMaxInMemoryPages_WithoutEvictingPinnedPages()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "optimum-map-evict-" + Guid.NewGuid().ToString("N"));
+        bool origEnabled = OptimumConfig.MapPageCacheEnabled;
+        OptimumConfig.MapPageCacheEnabled = true;
+
+        try
+        {
+            using var cache = new OptimumMapPageCache(tempDir, logger: null, maxInMemoryPages: 4);
+            int[] chunk = MakeFilledChunk(unchecked((int)0xFF123456));
+
+            // Write 10 pages, flushing disk & clearing GPU dirty flags so they are evictable
+            for (int px = 0; px < 10; px++)
+            {
+                cache.WriteChunk(px * 8, 0, chunk);
+                cache.Flush();
+                cache.ClearPendingGpuUploads();
+            }
+
+            Assert.True(cache.CachedPageCount <= 4, $"Expected <= 4 cached pages, got {cache.CachedPageCount}");
+
+            // Now pin page (20, 0) (dirty GPU upload pending) and insert 6 more flushed pages
+            cache.WriteChunk(20 * 8, 0, MakeFilledChunk(unchecked((int)0xFFABCDEF)));
+            for (int px = 21; px < 27; px++)
+            {
+                cache.WriteChunk(px * 8, 0, chunk);
+                cache.Flush();
+                // Drain only non-pinned pages so page 20 stays queued for GPU upload
+                while (cache.TryDequeueDirtyGpuPage(out long key))
+                {
+                    if (key == OptimumMapPageCache.PackPageCoord(20, 0))
+                    {
+                        cache.RequestGpuUpload(key);
+                        break;
+                    }
+                    int[] fullScratch = new int[OptimumMapPageCache.PagePixelCount];
+                    cache.TrySnapshotDirtyPage(key, hasLayer: false, fullScratch, CreateChunkSlices(), out _, out _, out _);
+                }
+            }
+
+            Assert.True(cache.IsChunkCached(20 * 8, 0));
+        }
+        finally
+        {
+            OptimumConfig.MapPageCacheEnabled = origEnabled;
+            TryDeleteDir(tempDir);
+        }
+    }
+
+    // --- Concurrent stress test: zero torn chunk reads ---
+
+    [Fact]
+    public async Task PageCache_ConcurrentWritersReadersAndSnapshots_NeverObserveTornChunks()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "optimum-map-race-" + Guid.NewGuid().ToString("N"));
+        bool origEnabled = OptimumConfig.MapPageCacheEnabled;
+        OptimumConfig.MapPageCacheEnabled = true;
+
+        try
+        {
+            using var cache = new OptimumMapPageCache(tempDir, logger: null, maxInMemoryPages: 32);
+            var cts = new CancellationTokenSource();
+
+            var writerTask = Task.Run(() =>
+            {
+                for (int iter = 1; iter <= 120; iter++)
+                {
+                    int stamp = unchecked((int)(0xFF000000 | (uint)iter));
+                    int[] pixels = MakeFilledChunk(stamp);
+                    cache.WriteChunk(iter % 8, (iter / 8) % 8, pixels);
+                    if (iter % 17 == 0)
+                    {
+                        cache.InvalidateChunk((iter + 3) % 8, 0);
+                    }
+                }
+                cts.Cancel();
+            });
+
+            int[] fullScratch = new int[OptimumMapPageCache.PagePixelCount];
+            int[][] slices = CreateChunkSlices();
+            while (!cts.IsCancellationRequested)
+            {
+                while (cache.TryDequeueDirtyGpuPage(out long key))
+                {
+                    if (cache.TrySnapshotDirtyPage(key, hasLayer: true, fullScratch, slices, out bool isFull, out _, out int count) && !isFull)
+                    {
+                        for (int s = 0; s < count; s++)
+                        {
+                            int expected = slices[s][0];
+                            for (int p = 1; p < slices[s].Length; p++)
+                            {
+                                Assert.Equal(expected, slices[s][p]);
+                            }
+                        }
+                    }
+                }
+
+                int[]? chunk = cache.GetCachedChunkPixels(0, 0);
+                if (chunk != null)
+                {
+                    int expected = chunk[0];
+                    for (int p = 1; p < chunk.Length; p++)
+                    {
+                        Assert.Equal(expected, chunk[p]);
+                    }
+                }
+            }
+
+            await writerTask;
+        }
+        finally
+        {
+            OptimumConfig.MapPageCacheEnabled = origEnabled;
+            TryDeleteDir(tempDir);
+        }
+    }
+
+    // --- Source/patch contract check ---
+
+    [Fact]
+    public void ChunkMapLayerPatch_UsesCoalescedFlushAndBackgroundDiskReads()
+    {
+        string patch = PatchReader.ReadPatch("patches/runtime/VSEssentials/Vintagestory/GameContent/ChunkMapLayer.cs.patch");
+        string texArray = File.ReadAllText(PatchReader.FindRepositoryFile(
+            "sources/VSEssentials/Systems/WorldMap/ChunkLayer/OptimumMapTextureArray.cs"));
+
+        Assert.Contains("pageCache.FlushDirtyPagesToGpu(pageTextureArray, 16);", patch);
+        Assert.DoesNotContain("UploadChunkToPageArray", patch);
+        Assert.Contains("loadQueue.TryDequeue(out long pageKey)", patch);
+        Assert.Contains("pageCache?.ClearPendingGpuUploads();", patch);
+        Assert.Contains("pageCache.RequestGpuUpload(pageKey)", patch);
+        Assert.Contains("GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, 0);", texArray);
+        Assert.Contains("public bool UploadChunk(", texArray);
+    }
+
+    private static int[] MakeFilledChunk(int color)
+    {
+        int[] pixels = new int[32 * 32];
+        Array.Fill(pixels, color);
+        return pixels;
+    }
+
+    private static int[][] CreateChunkSlices()
+    {
+        var slices = new int[OptimumMapPageCache.MaxSubChunkUploadsPerPage][];
+        for (int i = 0; i < slices.Length; i++)
+        {
+            slices[i] = new int[32 * 32];
+        }
+        return slices;
+    }
+
+    private static void TryDeleteDir(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+        }
     }
 }

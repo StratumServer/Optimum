@@ -95,53 +95,111 @@ public static class OptimumMapLodGenerator
 }
 
 /// <summary>
-/// Priority queue for page loading: pages near the viewport center load
-/// before distant pages. Uses squared distance from the viewport center
-/// in page coordinates as the priority key.
+/// Thread-safe priority queue for page loading: pages near the viewport center
+/// load before distant pages. Uses 64-bit squared distance from the viewport
+/// center in page coordinates as the priority key and suppresses duplicate
+/// in-flight page keys.
 /// </summary>
 public sealed class OptimumMapPagePriorityQueue
 {
-    private readonly List<(long pageKey, int priority)> _heap = new();
+    private readonly object syncLock = new();
+    private readonly List<(long pageKey, long priority)> heap = new();
+    private readonly HashSet<long> queuedKeys = new();
 
-    public int Count => _heap.Count;
+    public int Count
+    {
+        get
+        {
+            lock (syncLock)
+            {
+                return heap.Count;
+            }
+        }
+    }
 
     /// <summary>
     /// Enqueue a page with a distance-based priority (lower = higher priority).
+    /// Duplicate page keys already present in the queue are ignored.
     /// </summary>
     public void Enqueue(long pageKey, int pageX, int pageZ, int centerPageX, int centerPageZ)
     {
-        int dx = pageX - centerPageX;
-        int dz = pageZ - centerPageZ;
-        int priority = dx * dx + dz * dz;
-        _heap.Add((pageKey, priority));
-        BubbleUp(_heap.Count - 1);
+        TryEnqueue(pageKey, pageX, pageZ, centerPageX, centerPageZ);
     }
 
     /// <summary>
-    /// Dequeue the highest-priority (nearest) page.
+    /// Enqueue a page if it is not already queued. Returns true if inserted.
+    /// </summary>
+    public bool TryEnqueue(long pageKey, int pageX, int pageZ, int centerPageX, int centerPageZ)
+    {
+        long dx = (long)pageX - centerPageX;
+        long dz = (long)pageZ - centerPageZ;
+        long priority = dx * dx + dz * dz;
+
+        lock (syncLock)
+        {
+            if (!queuedKeys.Add(pageKey))
+            {
+                return false;
+            }
+
+            heap.Add((pageKey, priority));
+            BubbleUp(heap.Count - 1);
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Dequeue the highest-priority (nearest) page. Returns -1 when empty.
+    /// Prefer <see cref="TryDequeue"/> because packed page (-1, -1) also equals -1L.
     /// </summary>
     public long Dequeue()
     {
-        if (_heap.Count == 0) return -1;
-
-        long result = _heap[0].pageKey;
-        int lastIdx = _heap.Count - 1;
-        _heap[0] = _heap[lastIdx];
-        _heap.RemoveAt(lastIdx);
-        if (_heap.Count > 0) BubbleDown(0);
-        return result;
+        return TryDequeue(out long pageKey) ? pageKey : -1L;
     }
 
-    public void Clear() => _heap.Clear();
+    /// <summary>
+    /// Dequeue the highest-priority (nearest) page without sentinel collisions.
+    /// </summary>
+    public bool TryDequeue(out long pageKey)
+    {
+        lock (syncLock)
+        {
+            if (heap.Count == 0)
+            {
+                pageKey = 0;
+                return false;
+            }
+
+            pageKey = heap[0].pageKey;
+            queuedKeys.Remove(pageKey);
+            int lastIdx = heap.Count - 1;
+            heap[0] = heap[lastIdx];
+            heap.RemoveAt(lastIdx);
+            if (heap.Count > 0)
+            {
+                BubbleDown(0);
+            }
+            return true;
+        }
+    }
+
+    public void Clear()
+    {
+        lock (syncLock)
+        {
+            heap.Clear();
+            queuedKeys.Clear();
+        }
+    }
 
     private void BubbleUp(int idx)
     {
         while (idx > 0)
         {
             int parent = (idx - 1) / 2;
-            if (_heap[idx].priority < _heap[parent].priority)
+            if (heap[idx].priority < heap[parent].priority)
             {
-                (_heap[idx], _heap[parent]) = (_heap[parent], _heap[idx]);
+                (heap[idx], heap[parent]) = (heap[parent], heap[idx]);
                 idx = parent;
             }
             else break;
@@ -150,21 +208,21 @@ public sealed class OptimumMapPagePriorityQueue
 
     private void BubbleDown(int idx)
     {
-        int count = _heap.Count;
+        int count = heap.Count;
         while (true)
         {
             int left = 2 * idx + 1;
             int right = 2 * idx + 2;
             int smallest = idx;
 
-            if (left < count && _heap[left].priority < _heap[smallest].priority)
+            if (left < count && heap[left].priority < heap[smallest].priority)
                 smallest = left;
-            if (right < count && _heap[right].priority < _heap[smallest].priority)
+            if (right < count && heap[right].priority < heap[smallest].priority)
                 smallest = right;
 
             if (smallest != idx)
             {
-                (_heap[idx], _heap[smallest]) = (_heap[smallest], _heap[idx]);
+                (heap[idx], heap[smallest]) = (heap[smallest], heap[idx]);
                 idx = smallest;
             }
             else break;
