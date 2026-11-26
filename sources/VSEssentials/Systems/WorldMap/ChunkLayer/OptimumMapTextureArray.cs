@@ -72,6 +72,7 @@ public sealed class OptimumMapTextureArray : IDisposable
     private readonly LinkedList<long> _lruOrder; // front = most recently used
     private readonly Dictionary<long, LinkedListNode<long>> _lruNodes;
     private bool _disposed;
+    private bool inUploadBatch;
 
     public OptimumMapTextureArray(int maxLayers)
     {
@@ -107,6 +108,51 @@ public sealed class OptimumMapTextureArray : IDisposable
         GL.TexParameter((TextureTarget)GL_TEXTURE_2D_ARRAY, (TextureParameterName)GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         GL.TexParameter((TextureTarget)GL_TEXTURE_2D_ARRAY, (TextureParameterName)GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, 0);
+    }
+
+    /// <summary>
+    /// Bind the texture array once before submitting multiple uploads in a tick.
+    /// Pair with <see cref="EndUploadBatch"/> in a try/finally block.
+    /// </summary>
+    public void BeginUploadBatch()
+    {
+        if (_disposed || inUploadBatch) return;
+        inUploadBatch = true;
+        GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, TextureId);
+    }
+
+    /// <summary>
+    /// Unbind the texture array after a batch of uploads completes.
+    /// </summary>
+    public void EndUploadBatch()
+    {
+        if (!inUploadBatch) return;
+        inUploadBatch = false;
+        GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, 0);
+    }
+
+    /// <summary>
+    /// Upload a single 32x32 chunk sub-region into an already-resident page layer.
+    /// Returns false if the page does not currently have a resident layer (caller
+    /// must initialize the layer via <see cref="UploadPage"/> first).
+    /// </summary>
+    public bool UploadChunk(long pageKey, int localX, int localZ, int[] chunkPixels)
+    {
+        const int chunkPixelSize = GlobalConstants.ChunkSize;
+        if (_disposed) return false;
+        if (chunkPixels == null || chunkPixels.Length != chunkPixelSize * chunkPixelSize) return false;
+        if ((uint)localX >= OptimumMapPageCache.PageLen || (uint)localZ >= OptimumMapPageCache.PageLen) return false;
+        if (!_pageToLayer.TryGetValue(pageKey, out int existingLayer)) return false;
+
+        TouchLru(pageKey);
+        UploadSubRegionToLayer(
+            existingLayer,
+            localX * chunkPixelSize,
+            localZ * chunkPixelSize,
+            chunkPixelSize,
+            chunkPixelSize,
+            chunkPixels);
+        return true;
     }
 
     /// <summary>
@@ -197,19 +243,33 @@ public sealed class OptimumMapTextureArray : IDisposable
 
     private void UploadToLayer(int layer, int[] pixels)
     {
-        GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, TextureId);
+        UploadSubRegionToLayer(layer, 0, 0, PageSize, PageSize, pixels);
+    }
+
+    private void UploadSubRegionToLayer(int layer, int xOffset, int yOffset, int width, int height, int[] pixels)
+    {
+        if (!inUploadBatch)
+        {
+            GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, TextureId);
+        }
+
         GL.TexSubImage3D(
             (TextureTarget)GL_TEXTURE_2D_ARRAY,
             0,        // mip level
-            0, 0,     // x, y offset within the layer
+            xOffset, yOffset,
             layer,    // z offset = layer index
-            PageSize,
-            PageSize,
+            width,
+            height,
             1,        // depth = 1 layer
             (PixelFormat)GL_RGBA,
             (PixelType)GL_UNSIGNED_BYTE,
             pixels
         );
+
+        if (!inUploadBatch)
+        {
+            GL.BindTexture((TextureTarget)GL_TEXTURE_2D_ARRAY, 0);
+        }
     }
 
     private void AddToLru(long key)
@@ -220,7 +280,7 @@ public sealed class OptimumMapTextureArray : IDisposable
 
     private void TouchLru(long key)
     {
-        if (_lruNodes.TryGetValue(key, out var node))
+        if (_lruNodes.TryGetValue(key, out var node) && node != _lruOrder.First)
         {
             _lruOrder.Remove(node);
             _lruOrder.AddFirst(node);

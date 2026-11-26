@@ -4,19 +4,19 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
+using System.Numerics;
 using System.Threading;
 using Vintagestory.API.Client;
 using Vintagestory.API.Common;
 using Vintagestory.API.Config;
-using Vintagestory.API.MathTools;
 
 namespace Vintagestory.GameContent;
 
 /// <summary>
-/// Page-based disk cache for the world map terrain layer. Groups map chunks
-/// into 8x8 pages (256x256 pixels) and persists them as zstd-compressed
-/// RGBA on disk. Background threads handle I/O so map opens return cached
-/// pages in sub-100ms instead of re-generating from MapDB.
+/// Page-based disk and memory cache for the world map terrain layer. Groups map
+/// chunks into 8x8 pages (256x256 pixels) and persists them as gzip-compressed
+/// RGBA on disk. Background threads handle I/O and coalesced dirty tracking lets
+/// the main thread flush updates to GL_TEXTURE_2D_ARRAY in a single batched pass.
 ///
 /// The cache directory lives at {DataPath}/ModData/optimum-map/{world-id}/.
 /// Each page file: {pageX}_{pageZ}.omp (Optimum Map Page).
@@ -34,64 +34,88 @@ public sealed class OptimumMapPageCache : IDisposable
     /// <summary>Total pixel count per page (256*256 = 65536).</summary>
     public const int PagePixelCount = PagePixelSize * PagePixelSize;
 
+    /// <summary>Total uncompressed RGBA byte count per page (256*256*4 = 262144).</summary>
+    private const int PageByteSize = PagePixelCount * 4;
+
+    /// <summary>Maximum accepted compressed .omp file size (1 MB).</summary>
+    private const int MaxPageFileBytes = 1024 * 1024;
+
+    /// <summary>
+    /// Maximum incremental 32x32 chunk sub-uploads per page before promoting
+    /// a fully cached page to a single 256x256 upload.
+    /// </summary>
+    internal const int MaxSubChunkUploadsPerPage = 16;
+
     /// <summary>
     /// File header: magic (4 bytes) + version (1) + pageX (4) + pageZ (4) + bitmask (8) = 21 bytes.
     /// </summary>
     private const int HeaderSize = 21;
     private static readonly byte[] Magic = "OMP\x01"u8.ToArray();
 
-    private readonly string _cacheDir;
-    private readonly ICoreClientAPI _capi;
-    private readonly ConcurrentQueue<PageWriteRequest> _writeQueue = new();
-    private readonly ConcurrentQueue<PageReadResult> _readResults = new();
-    private readonly Thread _writerThread;
-    private volatile bool _disposed;
+    private sealed class PageEntry
+    {
+        public readonly object SyncRoot = new();
+        public readonly int[] Pixels = new int[PagePixelCount];
+        public ulong Bitmask;
+        public ulong InvalidatedMask;
+        public ulong DirtyGpuMask;
+        public bool HasPregen;
+        public bool FullGpuUploadNeeded;
+        public bool QueuedForGpuUpload;
+        public bool QueuedForDiskWrite;
+        public bool DiskReadAttempted;
+        public long LastAccessTick;
+    }
 
-    /// <summary>
-    /// In-memory tracking of which chunks within each page have valid cached pixels.
-    /// Key = page coordinate (pageX, pageZ). Value = 64-bit bitmask (bit i = chunk at row*PageLen+col).
-    /// </summary>
-    private readonly ConcurrentDictionary<long, ulong> _pageBitmasks = new();
+    private readonly string cacheDir;
+    private readonly ILogger? logger;
+    private readonly int maxInMemoryPages;
+    private readonly ConcurrentDictionary<long, PageEntry> pages = new();
+    private readonly ConcurrentQueue<PageWriteRequest> writeQueue = new();
+    private readonly ConcurrentQueue<long> dirtyGpuPages = new();
+    private readonly object writerSync = new();
+    private readonly AutoResetEvent writeSignal = new(false);
+    private readonly Thread writerThread;
+    private int evicting;
+    private volatile bool disposed;
 
-    /// <summary>
-    /// Per-page pixel buffer. Written on background thread, read on main thread for upload.
-    /// Key = packed page coord. Value = RGBA int[65536].
-    /// </summary>
-    private readonly ConcurrentDictionary<long, int[]> _pagePixels = new();
-
-    /// <summary>
-    /// Per-page lock objects. Protects pixel buffer writes from concurrent
-    /// compositing when two chunks in the same page generate at the same time.
-    /// </summary>
-    private readonly ConcurrentDictionary<long, object> _pageLocks = new();
+    // Main-thread-only scratch buffers reused across FlushDirtyPagesToGpu calls (zero per-tick allocs).
+    private int[]? gpuFullPageScratch;
+    private int[][]? gpuChunkSlices;
 
     public OptimumMapPageCache(ICoreClientAPI capi, string worldId)
+        : this(
+            Path.Combine(GamePaths.DataPath, "ModData", "optimum-map", SanitizePathComponent(worldId)),
+            capi?.Logger,
+            maxInMemoryPages: 0)
     {
-        _capi = capi;
+    }
 
-        // Sanitize worldId: strip path separators and special characters
-        // to prevent directory traversal (worldId comes from the savegame).
-        string safeId = SanitizePathComponent(worldId);
-        _cacheDir = Path.Combine(GamePaths.DataPath, "ModData", "optimum-map", safeId);
-        Directory.CreateDirectory(_cacheDir);
+    internal OptimumMapPageCache(string cacheDir, ILogger? logger = null, int maxInMemoryPages = 0)
+    {
+        this.cacheDir = cacheDir;
+        this.logger = logger;
+        this.maxInMemoryPages = maxInMemoryPages > 0
+            ? maxInMemoryPages
+            : Math.Max(OptimumConfig.MapPageCacheMaxLayers * 2, 256);
 
-        // Validate cache version: if the game version changed since the cache
-        // was written, terrain generation parameters might differ (Anego changes
-        // noise config between major updates). Purge stale pages on mismatch.
+        Directory.CreateDirectory(this.cacheDir);
         ValidateCacheVersion();
 
-        _writerThread = new Thread(WriterLoop)
+        writerThread = new Thread(WriterLoop)
         {
             Name = "Optimum-MapPageWriter",
             IsBackground = true,
             Priority = ThreadPriority.BelowNormal
         };
-        _writerThread.Start();
+        writerThread.Start();
     }
+
+    internal int CachedPageCount => pages.Count;
 
     private void ValidateCacheVersion()
     {
-        string versionFile = Path.Combine(_cacheDir, ".version");
+        string versionFile = Path.Combine(cacheDir, ".version");
         string currentVersion = GameVersion.ShortGameVersion;
 
         try
@@ -103,8 +127,8 @@ public sealed class OptimumMapPageCache : IDisposable
 
                 // Version mismatch: purge all .omp files (terrain noise params
                 // can change between VS major versions, producing wrong heights)
-                _capi.Logger.Notification("[Optimum] Map cache version mismatch ({0} vs {1}), purging stale pages.", cached, currentVersion);
-                foreach (string file in Directory.EnumerateFiles(_cacheDir, "*.omp"))
+                logger?.Notification("[Optimum] Map cache version mismatch ({0} vs {1}), purging stale pages.", cached, currentVersion);
+                foreach (string file in Directory.EnumerateFiles(cacheDir, "*.omp"))
                 {
                     try { File.Delete(file); } catch { }
                 }
@@ -153,119 +177,388 @@ public sealed class OptimumMapPageCache : IDisposable
     /// </summary>
     public void WriteChunk(int chunkX, int chunkZ, int[] chunkPixels)
     {
-        if (!OptimumConfig.EffectiveMapPageCache || _disposed) return;
+        if (!OptimumConfig.EffectiveMapPageCache || disposed) return;
         if (chunkPixels == null || chunkPixels.Length != GlobalConstants.ChunkSize * GlobalConstants.ChunkSize) return;
 
         var (pageX, pageZ) = ChunkToPage(chunkX, chunkZ);
         long key = PackPageCoord(pageX, pageZ);
         int idx = ChunkIndexInPage(chunkX, chunkZ);
+        ulong bit = 1UL << idx;
 
-        // Get or create the page pixel buffer
-        int[] pageBuffer = _pagePixels.GetOrAdd(key, _ => new int[PagePixelCount]);
-        object pageLock = _pageLocks.GetOrAdd(key, _ => new object());
+        PageEntry entry = GetOrAddPage(key);
 
-        // Composite the 32x32 chunk into the correct position within the 256x256 page.
-        // Lock per-page: two chunks in the same page can generate concurrently and
-        // their Array.Copy calls would interleave without this.
-        int localX = ((chunkX % PageLen) + PageLen) % PageLen;
-        int localZ = ((chunkZ % PageLen) + PageLen) % PageLen;
+        int localX = idx % PageLen;
+        int localZ = idx / PageLen;
         int basePixelX = localX * GlobalConstants.ChunkSize;
         int basePixelZ = localZ * GlobalConstants.ChunkSize;
 
-        lock (pageLock)
+        bool enqueueGpu = false;
+        bool enqueueDisk = false;
+
+        lock (entry.SyncRoot)
         {
             for (int row = 0; row < GlobalConstants.ChunkSize; row++)
             {
                 int srcOffset = row * GlobalConstants.ChunkSize;
                 int dstOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
-                Array.Copy(chunkPixels, srcOffset, pageBuffer, dstOffset, GlobalConstants.ChunkSize);
+                Array.Copy(chunkPixels, srcOffset, entry.Pixels, dstOffset, GlobalConstants.ChunkSize);
+            }
+
+            entry.Bitmask |= bit;
+            entry.InvalidatedMask &= ~bit;
+            entry.DirtyGpuMask |= bit;
+            entry.LastAccessTick = Environment.TickCount64;
+
+            if (!entry.QueuedForGpuUpload)
+            {
+                entry.QueuedForGpuUpload = true;
+                enqueueGpu = true;
+            }
+
+            if (!entry.QueuedForDiskWrite)
+            {
+                entry.QueuedForDiskWrite = true;
+                enqueueDisk = true;
             }
         }
 
-        // Update bitmask
-        ulong oldMask, newMask;
-        do
+        if (enqueueGpu)
         {
-            oldMask = _pageBitmasks.GetOrAdd(key, 0UL);
-            newMask = oldMask | (1UL << idx);
-        } while (!_pageBitmasks.TryUpdate(key, newMask, oldMask) &&
-                 _pageBitmasks.GetOrAdd(key, 0UL) != newMask);
+            dirtyGpuPages.Enqueue(key);
+        }
 
-        // Enqueue disk write
-        _writeQueue.Enqueue(new PageWriteRequest(pageX, pageZ, key));
+        if (enqueueDisk)
+        {
+            writeQueue.Enqueue(new PageWriteRequest(pageX, pageZ, key));
+            SignalWriter();
+        }
     }
 
     /// <summary>
-    /// Try to read a full page from disk cache. Returns true if the page exists
-    /// and the read was enqueued; the result arrives via TryGetReadResult.
-    /// Call from the generation thread to skip regeneration for cached chunks.
+    /// Try to read a full page from disk cache on the background generation thread.
+    /// Merges disk chunks into memory without overwriting fresher live or invalidated
+    /// chunks, and schedules a coalesced GPU upload on the main thread.
     /// </summary>
     public bool TryReadPage(int pageX, int pageZ)
     {
-        if (!OptimumConfig.EffectiveMapPageCache || _disposed) return false;
+        if (!OptimumConfig.EffectiveMapPageCache || disposed) return false;
+
+        long key = PackPageCoord(pageX, pageZ);
+        if (pages.TryGetValue(key, out PageEntry? existing))
+        {
+            lock (existing.SyncRoot)
+            {
+                if (existing.DiskReadAttempted)
+                {
+                    return false;
+                }
+            }
+        }
 
         string path = GetPagePath(pageX, pageZ);
-        if (!File.Exists(path)) return false;
+        if (!File.Exists(path))
+        {
+            if (existing != null)
+            {
+                lock (existing.SyncRoot)
+                {
+                    existing.DiskReadAttempted = true;
+                }
+            }
+            return false;
+        }
 
-        // Read synchronously on the generation thread (background already)
+        byte[]? rentedRaw = null;
         try
         {
-            // Sanity check: a valid page file is header + gzip(256KB RGBA).
-            // GZip at Fastest compresses 256KB of pixel data to ~60-100KB typical.
-            // Cap at 1MB to reject corrupted files that claim excessive size.
-            var fileInfo = new FileInfo(path);
-            if (fileInfo.Length > 1024 * 1024) return false;
-
-            byte[] fileBytes = File.ReadAllBytes(path);
-            if (fileBytes.Length < HeaderSize) return false;
-
-            // Validate magic
-            if (fileBytes[0] != Magic[0] || fileBytes[1] != Magic[1] ||
-                fileBytes[2] != Magic[2] || fileBytes[3] != Magic[3])
+            rentedRaw = ArrayPool<byte>.Shared.Rent(PageByteSize);
+            if (!TryReadPagePayloadFromDisk(path, pageX, pageZ, rentedRaw, out ulong diskBitmask))
             {
                 return false;
             }
 
-            byte version = fileBytes[4];
-            if (version != 1) return false;
+            PageEntry entry = GetOrAddPage(key);
+            bool enqueueGpu = false;
 
-            int storedPageX = BitConverter.ToInt32(fileBytes, 5);
-            int storedPageZ = BitConverter.ToInt32(fileBytes, 9);
-            ulong bitmask = BitConverter.ToUInt64(fileBytes, 13);
+            lock (entry.SyncRoot)
+            {
+                if (entry.DiskReadAttempted)
+                {
+                    return false;
+                }
 
-            if (storedPageX != pageX || storedPageZ != pageZ) return false;
+                entry.DiskReadAttempted = true;
+                entry.LastAccessTick = Environment.TickCount64;
+                MergeDiskPixelsLocked(entry, rentedRaw, diskBitmask);
 
-            // Decompress the RGBA payload
-            int compressedLen = fileBytes.Length - HeaderSize;
-            byte[] compressed = new byte[compressedLen];
-            Array.Copy(fileBytes, HeaderSize, compressed, 0, compressedLen);
+                if (entry.Bitmask != 0UL || entry.HasPregen)
+                {
+                    entry.FullGpuUploadNeeded = true;
+                    if (!entry.QueuedForGpuUpload)
+                    {
+                        entry.QueuedForGpuUpload = true;
+                        enqueueGpu = true;
+                    }
+                }
+            }
 
-            byte[] decompressed = DecompressGzip(compressed);
-            if (decompressed == null || decompressed.Length != PagePixelCount * 4) return false;
+            if (enqueueGpu)
+            {
+                dirtyGpuPages.Enqueue(key);
+            }
 
-            // Convert byte[] RGBA to int[] ARGB (VS uses ARGB internally)
-            int[] pixels = new int[PagePixelCount];
-            Buffer.BlockCopy(decompressed, 0, pixels, 0, decompressed.Length);
-
-            long key = PackPageCoord(pageX, pageZ);
-            _pagePixels[key] = pixels;
-            _pageBitmasks[key] = bitmask;
-
-            _readResults.Enqueue(new PageReadResult(pageX, pageZ, pixels, bitmask));
             return true;
         }
         catch (Exception)
         {
             return false;
         }
+        finally
+        {
+            if (rentedRaw != null)
+            {
+                ArrayPool<byte>.Shared.Return(rentedRaw);
+            }
+        }
     }
 
     /// <summary>
-    /// Dequeue a completed page read. Called from the main thread during OnTick.
+    /// Request that an in-memory page be uploaded to the GPU texture array (for example
+    /// after closing and reopening the map). Returns true if the page has already checked
+    /// disk so the caller can skip queuing another disk read.
+    /// </summary>
+    public bool RequestGpuUpload(long pageKey)
+    {
+        if (!OptimumConfig.EffectiveMapPageCache || disposed) return false;
+        if (!pages.TryGetValue(pageKey, out PageEntry? entry)) return false;
+
+        bool enqueueGpu = false;
+        bool diskChecked;
+
+        lock (entry.SyncRoot)
+        {
+            entry.LastAccessTick = Environment.TickCount64;
+            diskChecked = entry.DiskReadAttempted;
+            if (entry.Bitmask != 0UL || entry.HasPregen)
+            {
+                entry.FullGpuUploadNeeded = true;
+                if (!entry.QueuedForGpuUpload)
+                {
+                    entry.QueuedForGpuUpload = true;
+                    enqueueGpu = true;
+                }
+            }
+        }
+
+        if (enqueueGpu)
+        {
+            dirtyGpuPages.Enqueue(pageKey);
+        }
+
+        return diskChecked;
+    }
+
+    /// <summary>
+    /// Clear pending GPU uploads when the map closes and disposes its texture array.
+    /// </summary>
+    public void ClearPendingGpuUploads()
+    {
+        while (dirtyGpuPages.TryDequeue(out long pageKey))
+        {
+            if (pages.TryGetValue(pageKey, out PageEntry? entry))
+            {
+                lock (entry.SyncRoot)
+                {
+                    entry.QueuedForGpuUpload = false;
+                    entry.FullGpuUploadNeeded = false;
+                    entry.DirtyGpuMask = 0UL;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Flush up to <paramref name="maxPagesPerTick"/> dirty pages to the GPU texture array
+    /// on the main render thread in a single GL bind batch. Resident pages with incremental
+    /// chunk updates upload only their 32x32 dirty sub-regions instead of full 256x256 pages.
+    /// </summary>
+    public int FlushDirtyPagesToGpu(OptimumMapTextureArray textureArray, int maxPagesPerTick = 16)
+    {
+        if (textureArray == null || disposed || maxPagesPerTick <= 0 || dirtyGpuPages.IsEmpty)
+        {
+            return 0;
+        }
+
+        int[] fullScratch = gpuFullPageScratch ??= new int[PagePixelCount];
+        int[][] chunkSlices = EnsureChunkSlices();
+
+        int processed = 0;
+        bool batchStarted = false;
+
+        try
+        {
+            while (processed < maxPagesPerTick && dirtyGpuPages.TryDequeue(out long pageKey))
+            {
+                bool hasLayer = textureArray.HasPage(pageKey);
+                if (!TrySnapshotDirtyPage(
+                    pageKey,
+                    hasLayer,
+                    fullScratch,
+                    chunkSlices,
+                    out bool isFullPage,
+                    out ulong dirtyChunkMask,
+                    out int _))
+                {
+                    continue;
+                }
+
+                if (!batchStarted)
+                {
+                    textureArray.BeginUploadBatch();
+                    batchStarted = true;
+                }
+
+                if (isFullPage)
+                {
+                    textureArray.UploadPage(pageKey, fullScratch);
+                }
+                else
+                {
+                    int sliceIndex = 0;
+                    ulong remaining = dirtyChunkMask;
+                    bool fallbackToFull = false;
+
+                    while (remaining != 0UL)
+                    {
+                        int idx = BitOperations.TrailingZeroCount(remaining);
+                        remaining &= remaining - 1;
+                        int localX = idx % PageLen;
+                        int localZ = idx / PageLen;
+
+                        if (!textureArray.UploadChunk(pageKey, localX, localZ, chunkSlices[sliceIndex++]))
+                        {
+                            fallbackToFull = true;
+                            break;
+                        }
+                    }
+
+                    if (fallbackToFull)
+                    {
+                        RequestGpuUpload(pageKey);
+                    }
+                }
+
+                processed++;
+            }
+        }
+        finally
+        {
+            if (batchStarted)
+            {
+                textureArray.EndUploadBatch();
+            }
+        }
+
+        return processed;
+    }
+
+    internal bool TryDequeueDirtyGpuPage(out long pageKey)
+    {
+        return dirtyGpuPages.TryDequeue(out pageKey);
+    }
+
+    internal bool TrySnapshotDirtyPage(
+        long pageKey,
+        bool hasLayer,
+        int[] fullScratch,
+        int[][] chunkSlices,
+        out bool isFullPage,
+        out ulong dirtyChunkMask,
+        out int chunkSliceCount)
+    {
+        isFullPage = false;
+        dirtyChunkMask = 0UL;
+        chunkSliceCount = 0;
+
+        if (!pages.TryGetValue(pageKey, out PageEntry? entry))
+        {
+            return false;
+        }
+
+        bool requeueRemaining = false;
+
+        lock (entry.SyncRoot)
+        {
+            entry.QueuedForGpuUpload = false;
+            bool needFull = entry.FullGpuUploadNeeded || !hasLayer;
+            ulong dirtyMask = entry.DirtyGpuMask;
+            entry.FullGpuUploadNeeded = false;
+            entry.DirtyGpuMask = 0UL;
+            entry.LastAccessTick = Environment.TickCount64;
+
+            if (!needFull && dirtyMask == 0UL)
+            {
+                return false;
+            }
+
+            int dirtyCount = BitOperations.PopCount(dirtyMask);
+            if (needFull || (dirtyCount > chunkSlices.Length && entry.Bitmask == ulong.MaxValue))
+            {
+                Array.Copy(entry.Pixels, 0, fullScratch, 0, PagePixelCount);
+                isFullPage = true;
+                return true;
+            }
+
+            ulong uploadedMask = 0UL;
+            ulong remaining = dirtyMask;
+            int sliceIndex = 0;
+            while (remaining != 0UL && sliceIndex < chunkSlices.Length)
+            {
+                int idx = BitOperations.TrailingZeroCount(remaining);
+                remaining &= remaining - 1;
+                uploadedMask |= 1UL << idx;
+
+                int localX = idx % PageLen;
+                int localZ = idx / PageLen;
+                int basePixelX = localX * GlobalConstants.ChunkSize;
+                int basePixelZ = localZ * GlobalConstants.ChunkSize;
+                int[] slice = chunkSlices[sliceIndex++];
+
+                for (int row = 0; row < GlobalConstants.ChunkSize; row++)
+                {
+                    int srcOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
+                    int dstOffset = row * GlobalConstants.ChunkSize;
+                    Array.Copy(entry.Pixels, srcOffset, slice, dstOffset, GlobalConstants.ChunkSize);
+                }
+            }
+
+            if (remaining != 0UL)
+            {
+                entry.DirtyGpuMask |= remaining;
+                entry.QueuedForGpuUpload = true;
+                requeueRemaining = true;
+            }
+
+            dirtyChunkMask = uploadedMask;
+            chunkSliceCount = sliceIndex;
+        }
+
+        if (requeueRemaining)
+        {
+            dirtyGpuPages.Enqueue(pageKey);
+        }
+
+        return chunkSliceCount > 0;
+    }
+
+    /// <summary>
+    /// Retained for API compatibility; completed reads are now flushed directly via
+    /// <see cref="FlushDirtyPagesToGpu"/> without per-chunk main-thread re-enqueueing.
     /// </summary>
     public bool TryGetReadResult(out PageReadResult result)
     {
-        return _readResults.TryDequeue(out result);
+        result = default!;
+        return false;
     }
 
     /// <summary>
@@ -274,7 +567,14 @@ public sealed class OptimumMapPageCache : IDisposable
     /// </summary>
     public bool TryGetPagePixels(long pageKey, out int[] pixels)
     {
-        return _pagePixels.TryGetValue(pageKey, out pixels);
+        if (pages.TryGetValue(pageKey, out PageEntry? entry))
+        {
+            pixels = entry.Pixels;
+            return true;
+        }
+
+        pixels = default!;
+        return false;
     }
 
     /// <summary>
@@ -286,77 +586,86 @@ public sealed class OptimumMapPageCache : IDisposable
         long key = PackPageCoord(pageX, pageZ);
         int idx = ChunkIndexInPage(chunkX, chunkZ);
 
-        if (_pageBitmasks.TryGetValue(key, out ulong mask))
+        if (pages.TryGetValue(key, out PageEntry? entry))
         {
-            return (mask & (1UL << idx)) != 0;
+            lock (entry.SyncRoot)
+            {
+                return (entry.Bitmask & (1UL << idx)) != 0UL;
+            }
         }
         return false;
     }
 
     /// <summary>
-    /// Get the cached pixels for a single chunk from the in-memory page buffer.
-    /// Returns null if not cached. The returned array is a COPY (caller-owned).
-    /// For the hot path (OnViewChangedClient serves from cache), callers should
-    /// prefer TryGetPagePixels + manual sub-region copy with a reusable buffer.
+    /// Get a thread-safe copy of the cached pixels for a single chunk from the
+    /// in-memory page buffer. Returns null if not cached.
     /// </summary>
     public int[]? GetCachedChunkPixels(int chunkX, int chunkZ)
     {
-        if (!IsChunkCached(chunkX, chunkZ)) return null;
-
         var (pageX, pageZ) = ChunkToPage(chunkX, chunkZ);
         long key = PackPageCoord(pageX, pageZ);
+        int idx = ChunkIndexInPage(chunkX, chunkZ);
 
-        if (!_pagePixels.TryGetValue(key, out int[]? pageBuffer)) return null;
+        if (!pages.TryGetValue(key, out PageEntry? entry))
+        {
+            return null;
+        }
 
-        int localX = ((chunkX % PageLen) + PageLen) % PageLen;
-        int localZ = ((chunkZ % PageLen) + PageLen) % PageLen;
+        int localX = idx % PageLen;
+        int localZ = idx / PageLen;
         int basePixelX = localX * GlobalConstants.ChunkSize;
         int basePixelZ = localZ * GlobalConstants.ChunkSize;
 
-        int[] chunkPixels = _chunkPixelBuffer ??= new int[GlobalConstants.ChunkSize * GlobalConstants.ChunkSize];
-        for (int row = 0; row < GlobalConstants.ChunkSize; row++)
+        int[] result = new int[GlobalConstants.ChunkSize * GlobalConstants.ChunkSize];
+        lock (entry.SyncRoot)
         {
-            int srcOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
-            int dstOffset = row * GlobalConstants.ChunkSize;
-            Array.Copy(pageBuffer, srcOffset, chunkPixels, dstOffset, GlobalConstants.ChunkSize);
+            if ((entry.Bitmask & (1UL << idx)) == 0UL)
+            {
+                return null;
+            }
+
+            entry.LastAccessTick = Environment.TickCount64;
+            for (int row = 0; row < GlobalConstants.ChunkSize; row++)
+            {
+                int srcOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
+                int dstOffset = row * GlobalConstants.ChunkSize;
+                Array.Copy(entry.Pixels, srcOffset, result, dstOffset, GlobalConstants.ChunkSize);
+            }
         }
 
-        // Return a copy since the caller (loadFromChunkPixels) stores the reference
-        int[] result = new int[chunkPixels.Length];
-        Array.Copy(chunkPixels, result, chunkPixels.Length);
         return result;
     }
-
-    [ThreadStatic]
-    private static int[]? _chunkPixelBuffer;
 
     /// <summary>
     /// Fill uncached chunks in the given page with pregen (biome-estimated)
     /// pixels from the terrain sampler. Only writes chunks whose bitmask bit
-    /// is unset. Marks filled chunks with a separate pregen bitmask so
-    /// real explored data can overwrite them later without triggering a
-    /// redundant disk write.
+    /// is unset and avoids allocating a page buffer until at least one chunk
+    /// samples successfully.
     ///
-    /// Call from the generation thread or any background thread. Thread-safe:
-    /// uses the same per-page lock as WriteChunk.
+    /// Call from the generation thread or any background thread.
     /// </summary>
     public int FillPregenChunks(int pageX, int pageZ, OptimumTerrainSampler sampler)
     {
-        if (!OptimumConfig.MapPageCachePregen || _disposed || sampler == null) return 0;
+        if (!OptimumConfig.MapPageCachePregen || disposed || sampler == null) return 0;
 
         long key = PackPageCoord(pageX, pageZ);
-        ulong exploredMask = _pageBitmasks.GetOrAdd(key, 0UL);
+        ulong exploredMask = 0UL;
+        if (pages.TryGetValue(key, out PageEntry? existing))
+        {
+            lock (existing.SyncRoot)
+            {
+                exploredMask = existing.Bitmask;
+            }
+            if (exploredMask == ulong.MaxValue) return 0;
+        }
 
-        // Skip pages that are fully explored.
-        if (exploredMask == ulong.MaxValue) return 0;
-
-        int[] pageBuffer = _pagePixels.GetOrAdd(key, _ => new int[PagePixelCount]);
-        object pageLock = _pageLocks.GetOrAdd(key, _ => new object());
+        PageEntry? entry = existing;
         int filled = 0;
 
         for (int idx = 0; idx < PageLen * PageLen; idx++)
         {
-            if ((exploredMask & (1UL << idx)) != 0) continue; // explored: skip
+            ulong bit = 1UL << idx;
+            if ((exploredMask & bit) != 0UL) continue;
 
             int localZ = idx / PageLen;
             int localX = idx % PageLen;
@@ -364,42 +673,70 @@ public sealed class OptimumMapPageCache : IDisposable
             int chunkZ = pageZ * PageLen + localZ;
 
             int[]? pregen = sampler.SampleChunk(chunkX, chunkZ);
-            if (pregen == null) continue; // region not loaded: skip
+            if (pregen == null) continue;
+
+            entry ??= GetOrAddPage(key);
 
             int basePixelX = localX * GlobalConstants.ChunkSize;
             int basePixelZ = localZ * GlobalConstants.ChunkSize;
 
-            lock (pageLock)
+            lock (entry.SyncRoot)
             {
+                if ((entry.Bitmask & bit) != 0UL) continue;
+
                 for (int row = 0; row < GlobalConstants.ChunkSize; row++)
                 {
                     int srcOffset = row * GlobalConstants.ChunkSize;
                     int dstOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
-                    Array.Copy(pregen, srcOffset, pageBuffer, dstOffset, GlobalConstants.ChunkSize);
+                    Array.Copy(pregen, srcOffset, entry.Pixels, dstOffset, GlobalConstants.ChunkSize);
                 }
+                entry.HasPregen = true;
+                entry.LastAccessTick = Environment.TickCount64;
             }
             filled++;
+        }
+
+        if (filled > 0 && entry != null)
+        {
+            bool enqueueGpu = false;
+            lock (entry.SyncRoot)
+            {
+                entry.FullGpuUploadNeeded = true;
+                if (!entry.QueuedForGpuUpload)
+                {
+                    entry.QueuedForGpuUpload = true;
+                    enqueueGpu = true;
+                }
+            }
+
+            if (enqueueGpu)
+            {
+                dirtyGpuPages.Enqueue(key);
+            }
         }
 
         return filled;
     }
 
     /// <summary>
-    /// Mark a chunk as dirty: clears its bit from the page bitmask so the
-    /// next generation pass re-writes it.
+    /// Mark a chunk as dirty: clears its bit from the page bitmask and records it
+    /// as invalidated so concurrent disk reads cannot resurrect stale pixels.
     /// </summary>
     public void InvalidateChunk(int chunkX, int chunkZ)
     {
         var (pageX, pageZ) = ChunkToPage(chunkX, chunkZ);
         long key = PackPageCoord(pageX, pageZ);
-        int idx = ChunkIndexInPage(chunkX, chunkZ);
+        if (!pages.TryGetValue(key, out PageEntry? entry)) return;
 
-        ulong oldMask, newMask;
-        do
+        int idx = ChunkIndexInPage(chunkX, chunkZ);
+        ulong bit = 1UL << idx;
+
+        lock (entry.SyncRoot)
         {
-            if (!_pageBitmasks.TryGetValue(key, out oldMask)) return;
-            newMask = oldMask & ~(1UL << idx);
-        } while (!_pageBitmasks.TryUpdate(key, newMask, oldMask));
+            entry.Bitmask &= ~bit;
+            entry.InvalidatedMask |= bit;
+            entry.DirtyGpuMask &= ~bit;
+        }
     }
 
     /// <summary>
@@ -407,34 +744,140 @@ public sealed class OptimumMapPageCache : IDisposable
     /// </summary>
     public void Flush()
     {
-        byte[]? flushBuffer = null;
-        while (_writeQueue.TryDequeue(out PageWriteRequest req))
+        lock (writerSync)
         {
-            flushBuffer ??= new byte[PagePixelCount * 4];
-            WritePage(req, flushBuffer);
+            byte[]? flushBuffer = null;
+            MemoryStream? compressBuffer = null;
+            while (writeQueue.TryDequeue(out PageWriteRequest req))
+            {
+                flushBuffer ??= new byte[PageByteSize];
+                compressBuffer ??= new MemoryStream(128 * 1024);
+                WritePageLocked(req, flushBuffer, compressBuffer);
+            }
+            compressBuffer?.Dispose();
         }
     }
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (disposed) return;
+        disposed = true;
 
-        // Signal the writer thread to exit and wait for it to finish its
-        // current page write before draining anything ourselves. This prevents
-        // the main thread and writer thread from racing on the same .omp file.
-        if (_writerThread.IsAlive)
+        SignalWriter();
+        if (writerThread.IsAlive)
         {
-            _writerThread.Join(timeout: TimeSpan.FromSeconds(5));
+            writerThread.Join(timeout: TimeSpan.FromSeconds(5));
         }
 
-        // Drain anything left after the writer exited
         Flush();
+        ClearPendingGpuUploads();
+        pages.Clear();
+        writeSignal.Dispose();
+    }
+
+    private PageEntry GetOrAddPage(long key)
+    {
+        if (pages.TryGetValue(key, out PageEntry? existing))
+        {
+            return existing;
+        }
+
+        var created = new PageEntry { LastAccessTick = Environment.TickCount64 };
+        PageEntry actual = pages.GetOrAdd(key, created);
+        if (ReferenceEquals(actual, created) && pages.Count > maxInMemoryPages)
+        {
+            EvictIfOverCapacity();
+        }
+        return actual;
+    }
+
+    private void EvictIfOverCapacity()
+    {
+        if (Interlocked.CompareExchange(ref evicting, 1, 0) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            int count = pages.Count;
+            if (count <= maxInMemoryPages)
+            {
+                return;
+            }
+
+            int target = Math.Max(1, maxInMemoryPages * 7 / 8);
+            var candidates = new List<(long Key, PageEntry Entry, long Tick)>(count);
+            foreach (var kv in pages)
+            {
+                PageEntry entry = kv.Value;
+                long tick;
+                bool pinned;
+                lock (entry.SyncRoot)
+                {
+                    tick = entry.LastAccessTick;
+                    pinned = entry.QueuedForDiskWrite || entry.QueuedForGpuUpload;
+                }
+                if (!pinned)
+                {
+                    candidates.Add((kv.Key, entry, tick));
+                }
+            }
+
+            candidates.Sort(static (a, b) => a.Tick.CompareTo(b.Tick));
+            int toEvict = count - target;
+            for (int i = 0; i < candidates.Count && toEvict > 0; i++)
+            {
+                var (key, entry, _) = candidates[i];
+                bool canEvict;
+                lock (entry.SyncRoot)
+                {
+                    canEvict = !entry.QueuedForDiskWrite && !entry.QueuedForGpuUpload;
+                }
+
+                if (canEvict && pages.TryRemove(new KeyValuePair<long, PageEntry>(key, entry)))
+                {
+                    toEvict--;
+                }
+            }
+        }
+        finally
+        {
+            Volatile.Write(ref evicting, 0);
+        }
+    }
+
+    private int[][] EnsureChunkSlices()
+    {
+        if (gpuChunkSlices != null)
+        {
+            return gpuChunkSlices;
+        }
+
+        int chunkPixels = GlobalConstants.ChunkSize * GlobalConstants.ChunkSize;
+        var slices = new int[MaxSubChunkUploadsPerPage][];
+        for (int i = 0; i < slices.Length; i++)
+        {
+            slices[i] = new int[chunkPixels];
+        }
+        gpuChunkSlices = slices;
+        return slices;
+    }
+
+    private void SignalWriter()
+    {
+        try
+        {
+            writeSignal.Set();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private string GetPagePath(int pageX, int pageZ)
     {
-        return Path.Combine(_cacheDir, $"{pageX}_{pageZ}.omp");
+        return Path.Combine(cacheDir, $"{pageX}_{pageZ}.omp");
     }
 
     /// <summary>
@@ -457,69 +900,107 @@ public sealed class OptimumMapPageCache : IDisposable
 
     private void WriterLoop()
     {
-        // Coalesce writes: multiple chunks hitting the same page produce multiple
-        // write requests, but we only need to flush once per page per batch.
-        HashSet<long> written = new();
-        // Reusable buffer for pixel->byte conversion (writer thread is single-threaded)
-        byte[] writerRawBytes = new byte[PagePixelCount * 4];
+        byte[] writerRawBytes = new byte[PageByteSize];
+        using var compressBuffer = new MemoryStream(128 * 1024);
 
-        while (!_disposed)
+        while (!disposed)
         {
-            if (_writeQueue.IsEmpty)
+            if (writeQueue.IsEmpty)
             {
-                Thread.Sleep(50);
+                writeSignal.WaitOne(250);
                 continue;
             }
 
-            written.Clear();
-            while (_writeQueue.TryDequeue(out PageWriteRequest req))
+            lock (writerSync)
             {
-                long key = req.Key;
-                if (written.Contains(key)) continue;
-                written.Add(key);
-                WritePage(req, writerRawBytes);
+                while (writeQueue.TryDequeue(out PageWriteRequest req))
+                {
+                    WritePageLocked(req, writerRawBytes, compressBuffer);
+                }
             }
         }
 
-        // Drain remaining on shutdown
-        while (_writeQueue.TryDequeue(out PageWriteRequest req))
+        lock (writerSync)
         {
-            WritePage(req, writerRawBytes);
+            while (writeQueue.TryDequeue(out PageWriteRequest req))
+            {
+                WritePageLocked(req, writerRawBytes, compressBuffer);
+            }
         }
     }
 
-    private void WritePage(PageWriteRequest req, byte[]? reusableBuffer = null)
+    private void WritePageLocked(PageWriteRequest req, byte[] rawBytes, MemoryStream compressBuffer)
     {
-        long key = req.Key;
-        if (!_pagePixels.TryGetValue(key, out int[]? pageBuffer)) return;
-        if (!_pageBitmasks.TryGetValue(key, out ulong bitmask)) return;
+        if (!pages.TryGetValue(req.Key, out PageEntry? entry)) return;
+
+        string path = GetPagePath(req.PageX, req.PageZ);
+        bool needsDiskMerge;
+        lock (entry.SyncRoot)
+        {
+            needsDiskMerge = !entry.DiskReadAttempted;
+        }
+
+        // Preserve any previously persisted chunks on disk before overwriting the .omp file
+        // if a live chunk write happened before TryReadPage loaded this page.
+        if (needsDiskMerge && File.Exists(path) && TryReadPagePayloadFromDisk(path, req.PageX, req.PageZ, rawBytes, out ulong diskBitmask))
+        {
+            bool enqueueGpu = false;
+            lock (entry.SyncRoot)
+            {
+                if (!entry.DiskReadAttempted)
+                {
+                    entry.DiskReadAttempted = true;
+                    ulong mergedMask = MergeDiskPixelsLocked(entry, rawBytes, diskBitmask);
+                    if (mergedMask != 0UL)
+                    {
+                        entry.FullGpuUploadNeeded = true;
+                        if (!entry.QueuedForGpuUpload)
+                        {
+                            entry.QueuedForGpuUpload = true;
+                            enqueueGpu = true;
+                        }
+                    }
+                }
+            }
+
+            if (enqueueGpu)
+            {
+                dirtyGpuPages.Enqueue(req.Key);
+            }
+        }
+
+        ulong bitmask;
+        lock (entry.SyncRoot)
+        {
+            entry.QueuedForDiskWrite = false;
+            entry.DiskReadAttempted = true;
+            bitmask = entry.Bitmask;
+            Buffer.BlockCopy(entry.Pixels, 0, rawBytes, 0, PageByteSize);
+        }
 
         try
         {
-            // Snapshot the pixel buffer under the page lock to avoid reading
-            // a partially-written buffer from a concurrent WriteChunk call.
-            byte[] rawBytes = reusableBuffer ?? new byte[PagePixelCount * 4];
-            object pageLock = _pageLocks.GetOrAdd(key, _ => new object());
-            lock (pageLock)
+            compressBuffer.SetLength(0);
+            compressBuffer.Position = 0;
+
+            Span<byte> header = stackalloc byte[HeaderSize];
+            Magic.CopyTo(header);
+            header[4] = 1; // version
+            BitConverter.TryWriteBytes(header.Slice(5, 4), req.PageX);
+            BitConverter.TryWriteBytes(header.Slice(9, 4), req.PageZ);
+            BitConverter.TryWriteBytes(header.Slice(13, 8), bitmask);
+            compressBuffer.Write(header);
+
+            using (var gzip = new GZipStream(compressBuffer, CompressionLevel.Fastest, leaveOpen: true))
             {
-                Buffer.BlockCopy(pageBuffer, 0, rawBytes, 0, PagePixelCount * 4);
+                gzip.Write(rawBytes, 0, PageByteSize);
             }
 
-            byte[] compressed = CompressGzip(rawBytes);
-            if (compressed == null) return;
-
-            // Build file: header + compressed payload
-            byte[] file = new byte[HeaderSize + compressed.Length];
-            Array.Copy(Magic, 0, file, 0, 4);
-            file[4] = 1; // version
-            BitConverter.TryWriteBytes(file.AsSpan(5), req.PageX);
-            BitConverter.TryWriteBytes(file.AsSpan(9), req.PageZ);
-            BitConverter.TryWriteBytes(file.AsSpan(13), bitmask);
-            Array.Copy(compressed, 0, file, HeaderSize, compressed.Length);
-
-            string path = GetPagePath(req.PageX, req.PageZ);
             string tmpPath = path + ".tmp";
-            File.WriteAllBytes(tmpPath, file);
+            using (var outStream = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                outStream.Write(compressBuffer.GetBuffer(), 0, (int)compressBuffer.Length);
+            }
             File.Move(tmpPath, path, overwrite: true);
         }
         catch (Exception)
@@ -528,38 +1009,125 @@ public sealed class OptimumMapPageCache : IDisposable
         }
     }
 
-    /// <summary>
-    /// Compress raw bytes with GZip (available in System.IO.Compression).
-    /// Map pixel data (int[] RGBA, repetitive color patterns) compresses
-    /// well with any dictionary-based codec. GZip gives 3-5x reduction on
-    /// typical map pages without adding a native dependency.
-    /// </summary>
-    private static byte[] CompressGzip(byte[] raw)
+    private static bool TryReadPagePayloadFromDisk(string path, int expectedPageX, int expectedPageZ, byte[] destinationRaw, out ulong diskBitmask)
     {
-        using var output = new MemoryStream();
-        using (var gzip = new GZipStream(output, CompressionLevel.Fastest, leaveOpen: true))
-        {
-            gzip.Write(raw, 0, raw.Length);
-        }
-        return output.ToArray();
-    }
-
-    /// <summary>
-    /// Decompress GZip-compressed bytes.
-    /// </summary>
-    private static byte[]? DecompressGzip(byte[] compressed)
-    {
+        diskBitmask = 0UL;
         try
         {
-            using var input = new MemoryStream(compressed);
-            using var gzip = new GZipStream(input, CompressionMode.Decompress);
-            using var output = new MemoryStream();
-            gzip.CopyTo(output);
-            return output.ToArray();
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+            if (stream.Length < HeaderSize || stream.Length > MaxPageFileBytes)
+            {
+                return false;
+            }
+
+            Span<byte> header = stackalloc byte[HeaderSize];
+            if (!ReadExact(stream, header))
+            {
+                return false;
+            }
+
+            if (header[0] != Magic[0] || header[1] != Magic[1] ||
+                header[2] != Magic[2] || header[3] != Magic[3])
+            {
+                return false;
+            }
+
+            if (header[4] != 1)
+            {
+                return false;
+            }
+
+            int storedPageX = BitConverter.ToInt32(header.Slice(5, 4));
+            int storedPageZ = BitConverter.ToInt32(header.Slice(9, 4));
+            ulong bitmask = BitConverter.ToUInt64(header.Slice(13, 8));
+
+            if (storedPageX != expectedPageX || storedPageZ != expectedPageZ)
+            {
+                return false;
+            }
+
+            if (!DecompressGzipExact(stream, destinationRaw, PageByteSize))
+            {
+                return false;
+            }
+
+            diskBitmask = bitmask;
+            return true;
         }
         catch (Exception)
         {
-            return null;
+            return false;
+        }
+    }
+
+    private static ulong MergeDiskPixelsLocked(PageEntry entry, byte[] rawBytes, ulong diskBitmask)
+    {
+        if (entry.Bitmask == 0UL && entry.InvalidatedMask == 0UL && !entry.HasPregen)
+        {
+            Buffer.BlockCopy(rawBytes, 0, entry.Pixels, 0, PageByteSize);
+            entry.Bitmask = diskBitmask;
+            return diskBitmask;
+        }
+
+        ulong copyMask = diskBitmask & ~(entry.Bitmask | entry.InvalidatedMask);
+        ulong remaining = copyMask;
+        while (remaining != 0UL)
+        {
+            int idx = BitOperations.TrailingZeroCount(remaining);
+            remaining &= remaining - 1;
+            int localX = idx % PageLen;
+            int localZ = idx / PageLen;
+            int basePixelX = localX * GlobalConstants.ChunkSize;
+            int basePixelZ = localZ * GlobalConstants.ChunkSize;
+
+            for (int row = 0; row < GlobalConstants.ChunkSize; row++)
+            {
+                int pixelOffset = (basePixelZ + row) * PagePixelSize + basePixelX;
+                Buffer.BlockCopy(rawBytes, pixelOffset * 4, entry.Pixels, pixelOffset * 4, GlobalConstants.ChunkSize * 4);
+            }
+        }
+
+        entry.Bitmask |= copyMask;
+        return copyMask;
+    }
+
+    private static bool ReadExact(Stream stream, Span<byte> destination)
+    {
+        int total = 0;
+        while (total < destination.Length)
+        {
+            int read = stream.Read(destination.Slice(total));
+            if (read <= 0)
+            {
+                return false;
+            }
+            total += read;
+        }
+        return true;
+    }
+
+    private static bool DecompressGzipExact(Stream compressedStream, byte[] destination, int expectedLength)
+    {
+        try
+        {
+            using var gzip = new GZipStream(compressedStream, CompressionMode.Decompress, leaveOpen: true);
+            int total = 0;
+            while (total < expectedLength)
+            {
+                int read = gzip.Read(destination, total, expectedLength - total);
+                if (read <= 0)
+                {
+                    return false;
+                }
+                total += read;
+            }
+
+            // Reject streams with trailing uncompressed bytes (blocks gzip bombs).
+            return gzip.ReadByte() == -1;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 
