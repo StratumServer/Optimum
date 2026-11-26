@@ -312,11 +312,14 @@ public class OptimumStatusModSystem : ModSystem
                 bool hudNow = svc.ToggleHud();
                 return TextCommandResult.Success("Optimum profiler HUD " + (hudNow ? "shown." : "hidden."));
             case "record":
-                svc.StartRecording(seconds);
-                return TextCommandResult.Success($"Optimum profiler recording started ({Math.Clamp(seconds, 1, 120)}s).");
+                return svc.StartRecording(seconds)
+                    ? TextCommandResult.Success($"Optimum profiler recording started ({Math.Clamp(seconds, 1, 120)}s).")
+                    : TextCommandResult.Error("A profiler recording is already running.");
             case "snapshot":
                 string path = svc.ExportSnapshot();
-                return TextCommandResult.Success("Optimum profiler snapshot saved: " + path);
+                return path.Length > 0
+                    ? TextCommandResult.Success("Optimum profiler snapshot writing to: " + path)
+                    : TextCommandResult.Error("Optimum profiler is not running; open the ui or hud first.");
             case "glcounters":
                 bool glNow = svc.ToggleGlCounters();
                 return TextCommandResult.Success("Optimum profiler GL counters " + (glNow ? "enabled." : "disabled."));

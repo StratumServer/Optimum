@@ -61,7 +61,13 @@ public sealed class OptimumProfilerService : IDisposable
 
     public void OnDialogClosed()
     {
+        session?.SetDetailsWanted(false);
         session?.SetUiOpen(false);
+    }
+
+    public void OnHudClosed()
+    {
+        session?.SetHudOpen(false);
     }
 
     public bool ToggleHud()
@@ -72,7 +78,7 @@ public sealed class OptimumProfilerService : IDisposable
         s.SetHudOpen(next);
         if (next)
         {
-            hudOverlay ??= new HudOptimumProfilerOverlay(capi, s);
+            hudOverlay ??= new HudOptimumProfilerOverlay(capi, this, s);
             if (!hudOverlay.IsOpened())
             {
                 hudOverlay.TryOpen();
@@ -85,28 +91,35 @@ public sealed class OptimumProfilerService : IDisposable
         return next;
     }
 
-    public void StartRecording(int seconds, string? outDirOverride = null)
+    public bool StartRecording(int seconds, string? outDirOverride = null)
     {
-        if (disposed) return;
+        if (disposed) return false;
         int clamped = Math.Clamp(seconds, 1, 120);
-        OptimumProfilerSession s = EnsureSession();
-        capi.ShowChatMessage($"[Optimum] Recording profiler session for {clamped}s...");
-        capi.Logger.Notification("[Optimum] Starting profiler recording ({0}s)", clamped);
-        s.StartRecording(clamped, outDirOverride, exportedDir =>
+        if (!EnsureSession().StartRecording(clamped, outDirOverride, OnBundleSaved))
         {
-            capi.Logger.Notification("[Optimum] Profiler bundle exported to {0}", exportedDir);
-            capi.ShowChatMessage($"[Optimum] Profiler bundle saved: {exportedDir}");
-        });
+            return false;
+        }
+        capi.Logger.Notification("[Optimum] Starting profiler recording ({0}s)", clamped);
+        return true;
     }
 
+    /// <summary>Exports the live rolling window; returns the bundle directory, or "" when the profiler is not running.</summary>
     public string ExportSnapshot(string? outDirOverride = null)
     {
         if (disposed) return "";
-        OptimumProfilerSession s = EnsureSession();
-        string path = s.ExportSnapshotNow(outDirOverride);
-        capi.Logger.Notification("[Optimum] Profiler snapshot exported to {0}", path);
-        capi.ShowChatMessage($"[Optimum] Profiler snapshot saved: {path}");
+        string? path = session?.ExportSnapshotNow(outDirOverride, OnBundleSaved);
+        if (path == null)
+        {
+            capi.ShowChatMessage("[Optimum] Open the profiler UI or HUD first; a snapshot exports their live frames.");
+            return "";
+        }
         return path;
+    }
+
+    private void OnBundleSaved(string dir)
+    {
+        capi.Logger.Notification("[Optimum] Profiler bundle exported to {0}", dir);
+        capi.ShowChatMessage($"[Optimum] Profiler bundle saved: {dir}");
     }
 
     public bool ToggleGlCounters()

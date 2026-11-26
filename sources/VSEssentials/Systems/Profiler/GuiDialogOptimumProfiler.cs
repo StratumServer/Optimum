@@ -41,6 +41,7 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
     {
         base.OnGuiOpened();
         Compose();
+        session.SetDetailsWanted(TabShowsCensusDetails(activeTab));
         accumSec = RedrawIntervalSec;
     }
 
@@ -52,6 +53,8 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
 
     private void Compose()
     {
+        // Assigning SingleComposer does not dispose the previous composer or its textures.
+        ClearComposers();
         ElementBounds bgBounds = ElementBounds.Fill.WithFixedPadding(GuiStyle.ElementToDialogPadding);
         bgBounds.BothSizing = ElementSizing.FitToChildren;
 
@@ -97,22 +100,35 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
     private void OnTabChanged(int tabIdx)
     {
         activeTab = Math.Clamp(tabIdx, 0, 4);
+        session.SetDetailsWanted(TabShowsCensusDetails(activeTab));
         SingleComposer?.GetCustomDraw("tabCanvas")?.Redraw();
     }
+
+    /// <summary>The Optimum and World tabs show the detailed census; the others do not need it.</summary>
+    private static bool TabShowsCensusDetails(int tab) => tab is 1 or 3;
 
     private bool OnToggleHudClicked()
     {
         service.ToggleHud();
-        Compose();
+        RecomposeAfterClick();
         return true;
     }
 
     private bool OnToggleGlCountersClicked()
     {
         service.ToggleGlCounters();
-        Compose();
+        RecomposeAfterClick();
         return true;
     }
+
+    /// <summary>
+    /// The click is dispatched while the composer iterates its elements, so disposing it here
+    /// would modify that collection; rebuild the button labels on the next main-thread task.
+    /// </summary>
+    private void RecomposeAfterClick() => capi.Event.EnqueueMainThreadTask(() =>
+    {
+        if (IsOpened()) Compose();
+    }, "optimum-profiler-dialog");
 
     private bool OnRecord10Clicked()
     {
@@ -196,7 +212,7 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
 
     private void DrawPipelineTab(Context ctx, OptimumProfilerSnapshot s, double x, double y, double w)
     {
-        DrawText(ctx, bodyFont, "Stage Breakdown (GPU ms green / CPU ms blue)", x, y, 0.78, 0.86, 0.96, 1.0);
+        DrawText(ctx, bodyFont, $"Stage Breakdown (GPU ms green / CPU ms blue), CPU render {s.CpuRenderMeanMs:F1}ms of {s.FrameDist.Mean:F1}ms", x, y, 0.78, 0.86, 0.96, 1.0);
         y += GuiElement.scaled(18);
 
         double maxMs = 1.0;
@@ -230,15 +246,14 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
             y += rowStep;
         }
 
-        if (s.GlCountersEnabled && s.GlPrimitivesMean.Length == 4)
+        if (s.GlPrimitivesMean.Length == ProfilerGlCounters.Count)
         {
             y += GuiElement.scaled(10);
             DrawText(ctx, bodyFont, "GL Hardware Primitives / SamplesPassed (Overdraw)", x, y, 0.98, 0.82, 0.35, 1.0);
             y += GuiElement.scaled(16);
-            string[] cNames = { "ShadowNear", "Opaque", "OIT", "Ortho" };
-            for (int i = 0; i < 4; i++)
+            for (int i = 0; i < ProfilerGlCounters.Count; i++)
             {
-                DrawText(ctx, smallFont, $"{cNames[i],-12}  Prims: {s.GlPrimitivesMean[i],9:N0}   Samples: {s.GlSamplesPassedMean[i],11:N0}", x, y, 0.88, 0.90, 0.94, 1.0);
+                DrawText(ctx, smallFont, $"{ProfilerGlCounters.Labels[i],-12}  Prims: {s.GlPrimitivesMean[i],9:N0}   Samples: {s.GlSamplesPassedMean[i],11:N0}", x, y, 0.88, 0.90, 0.94, 1.0);
                 y += GuiElement.scaled(16);
             }
         }
@@ -276,7 +291,7 @@ public sealed class GuiDialogOptimumProfiler : GuiDialog
     private void DrawGcLocksTab(Context ctx, OptimumProfilerSnapshot s, double x, double y, double w)
     {
         ProfilerRuntimeSnapshot rt = s.Runtime;
-        DrawText(ctx, bodyFont, $"EventListener (SOH {rt.SohBytes / 1048576.0:F1} MB | LOH {rt.LohBytes / 1048576.0:F1} MB | GC Pause {rt.GcPauseTotalMs:F1}ms | Locks {rt.ContentionCount} ({rt.ContentionTotalMs:F1}ms))", x, y, 0.78, 0.86, 0.96, 1.0);
+        DrawText(ctx, bodyFont, $"Sampled allocs SOH {rt.SohBytes / 1048576.0:F1} MB | LOH {rt.LohBytes / 1048576.0:F1} MB | GC pause {s.GcPausePct:F2}% | Locks {rt.ContentionCount} ({rt.ContentionTotalMs:F1}ms, all threads)", x, y, 0.78, 0.86, 0.96, 1.0);
         y += GuiElement.scaled(18);
 
         int topN = Math.Min(10, rt.TopTypes.Count);
