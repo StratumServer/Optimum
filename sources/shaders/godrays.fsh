@@ -34,8 +34,8 @@ vec4 applyGodRays(in vec2 uv, in vec2 nSunPos) {
 	// Sample weight. Decays as we radiate outwards.
 	float weight = intensity / 23.0 / 1.5;
 	
-	int vanillaSamples = int(180 * min(1, intensity * 1.2));
-	int samples = min(maxGodRaySamples, vanillaSamples);
+	int samples = int(180 * min(1, intensity * 1.2));
+	samples = min(maxGodRaySamples, samples);
 	
 	// Short deltas near the sun
 	vec2 sdTuv = clampDeltas((nSunPos - uv) * intensity / 200 * direction);

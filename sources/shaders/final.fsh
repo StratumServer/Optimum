@@ -84,12 +84,13 @@ vec4 ColorGrade(vec4 color) {
 // ============================================================
 // Main
 // ============================================================
-void main(void)
-{
+vec4 optimumReadPrimary(vec2 uv) { return texture(primaryScene, uv); }
+
+void main(void) {
 	#if FXAA == 1
 		vec4 color = (optimumDisableFxaa == 0)
 			? fxaaTexturePixel(primaryScene, texCoord, invFrameSize)
-			: texture(primaryScene, texCoord);
+			: optimumReadPrimary(texCoord);
 	#else
 		vec4 color = texture(primaryScene, texCoord);
 	#endif

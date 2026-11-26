@@ -57,8 +57,8 @@ public class GodRaysSampleCapTests
         string shader = Read("sources/shaders/godrays.fsh");
 
         Assert.Contains("uniform int maxGodRaySamples;", shader);
-        Assert.Contains("int vanillaSamples = int(180 * min(1, intensity * 1.2));", shader);
-        Assert.Contains("int samples = min(maxGodRaySamples, vanillaSamples);", shader);
+        Assert.Contains("int samples = int(180 * min(1, intensity * 1.2));", shader);
+        Assert.Contains("samples = min(maxGodRaySamples, samples);", shader);
         Assert.DoesNotContain("int samples = int(90", shader);
     }
 

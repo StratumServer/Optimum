@@ -1,10 +1,18 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-index bba43f6..3f5420c 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/SystemRenderOITLayers.cs
-@@ -18,64 +18,115 @@ public class SystemRenderOITLayers : ClientSystem
- 		public int RenderRange => 1;
+@@ -13,6 +13,10 @@
  
+ 		private FrameBufferRef transparentfb;
+ 
++		private IShaderProgram optimumSavedShader;
++
++		private bool optimumNeedsRebuild;
++
+ 		public double RenderOrder => 0.0;
+ 
+ 		public int RenderRange => 1;
+@@ -20,60 +24,130 @@
  		public BeforeOIT(ICoreClientAPI capi)
  		{
  			this.capi = capi;
@@ -20,54 +28,14 @@ index bba43f6..3f5420c 100644
  		{
 -			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
 -			currentActiveShader?.Stop();
--			IShaderProgram program = capi.Shader.GetProgram(9);
--			program.Use();
--			program.Uniform("OITreveal", 6);
--			GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
--			program.Stop();
--			IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
--			programByName.Use();
--			programByName.Uniform("liquidDepth", 4);
--			programByName.Stop();
--			currentActiveShader?.Use();
--			if (revealTextureId == 0 || transparentfb.Disposed)
 +			if (SystemRenderOITLayers.optimumOitDisabled) return;
-+			IShaderProgram currentActiveShader = null;
 +			try
- 			{
--				rebuild();
-+				if (capi == null || capi.Render == null || capi.Shader == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
++			{
++				// Keep DrawBuffersEnum[] as local 0 (first stloc.0) to match vanilla IL for Harmony transpilers.
++				if (!OptimumPrepareOitFrame()) return;
++				if (optimumNeedsRebuild)
 +				{
-+					SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
-+					return;
-+				}
-+				FrameBufferRef currentTransparentfb = capi.Render.FrameBuffers[1];
-+				if (currentTransparentfb == null || currentTransparentfb.Disposed)
-+				{
-+					SystemRenderOITLayers.DisableOptimumOit(capi, "transparent framebuffer is disposed");
-+					return;
-+				}
-+				IShaderProgram program = capi.Shader.GetProgram(9);
-+				IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
-+				if (program == null || program.Disposed || programByName == null || programByName.Disposed)
-+				{
-+					SystemRenderOITLayers.DisableOptimumOit(capi, "OIT shader is unavailable or disposed");
-+					return;
-+				}
-+				currentActiveShader = capi.Render.CurrentActiveShader;
-+				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Stop();
-+				program.Use();
-+				program.Uniform("OITreveal", 6);
-+				GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
-+				program.Stop();
-+				programByName.Use();
-+				programByName.Uniform("liquidDepth", 4);
-+				programByName.Stop();
-+				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
-+				if (revealTextureId == 0 || transparentfb == null || transparentfb.Disposed || transparentfb != currentTransparentfb)
-+				{
-+					transparentfb = currentTransparentfb;
-+					if (!SystemRenderOITLayers.OptimumTryActivateCachedOit(currentTransparentfb))
++					if (!SystemRenderOITLayers.OptimumTryActivateCachedOit(transparentfb))
 +					{
 +						rebuild();
 +					}
@@ -94,21 +62,69 @@ index bba43f6..3f5420c 100644
 +			}
 +			catch (Exception e)
 +			{
-+				SystemRenderOITLayers.DisableOptimumOit(capi, "OIT render callback failed", e);
-+				try { freeResources(); } catch { }
-+				try
-+				{
-+					IShaderProgram activeShader = capi?.Render?.CurrentActiveShader;
-+					if (activeShader != null && activeShader != currentActiveShader && !activeShader.Disposed) activeShader.Stop();
-+				}
-+				catch { }
-+				try
-+				{
-+					if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
-+				}
-+				catch { }
-+				try { SystemRenderOITLayers.RestoreVanillaTransparentState(); } catch { }
-+				try { GL.ActiveTexture((TextureUnit)33984); } catch { }
++				OptimumRecoverOitFailure(e);
++			}
++		}
++
++		private bool OptimumPrepareOitFrame()
++		{
++			optimumSavedShader = null;
++			optimumNeedsRebuild = false;
++			if (capi == null || capi.Render == null || capi.Shader == null || capi.Render.FrameBuffers == null || capi.Render.FrameBuffers.Count <= 1)
++			{
++				SystemRenderOITLayers.DisableOptimumOit(capi, "render resources are unavailable");
++				return false;
++			}
++			FrameBufferRef currentTransparentfb = capi.Render.FrameBuffers[1];
++			if (currentTransparentfb == null || currentTransparentfb.Disposed)
++			{
++				SystemRenderOITLayers.DisableOptimumOit(capi, "transparent framebuffer is disposed");
++				return false;
++			}
+ 			IShaderProgram program = capi.Shader.GetProgram(9);
++			IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
++			if (program == null || program.Disposed || programByName == null || programByName.Disposed)
++			{
++				SystemRenderOITLayers.DisableOptimumOit(capi, "OIT shader is unavailable or disposed");
++				return false;
++			}
++			IShaderProgram currentActiveShader = capi.Render.CurrentActiveShader;
++			optimumSavedShader = currentActiveShader;
++			if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Stop();
+ 			program.Use();
+ 			program.Uniform("OITreveal", 6);
+ 			GL.Uniform1(GL.GetUniformLocation(program.ProgramId, "OITaccumulation"), 7);
+ 			program.Stop();
+-			IShaderProgram programByName = capi.Shader.GetProgramByName("cloudvolumetric");
+ 			programByName.Use();
+ 			programByName.Uniform("liquidDepth", 4);
+ 			programByName.Stop();
+-			currentActiveShader?.Use();
+-			if (revealTextureId == 0 || transparentfb.Disposed)
++			if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
++			if (revealTextureId == 0 || transparentfb == null || transparentfb.Disposed || transparentfb != currentTransparentfb)
++			{
++				transparentfb = currentTransparentfb;
++				optimumNeedsRebuild = true;
++			}
++			return true;
++		}
++
++		private void OptimumRecoverOitFailure(Exception e)
++		{
++			IShaderProgram currentActiveShader = optimumSavedShader;
++			SystemRenderOITLayers.DisableOptimumOit(capi, "OIT render callback failed", e);
++			try { freeResources(); } catch { }
++			try
++			{
++				IShaderProgram activeShader = capi?.Render?.CurrentActiveShader;
++				if (activeShader != null && activeShader != currentActiveShader && !activeShader.Disposed) activeShader.Stop();
++			}
++			catch { }
++			try
+ 			{
+-				rebuild();
++				if (currentActiveShader != null && !currentActiveShader.Disposed) currentActiveShader.Use();
  			}
 -			DrawBuffersEnum[] array2 = new DrawBuffersEnum[6] { DrawBuffersEnum.ColorAttachment0, DrawBuffersEnum.ColorAttachment1, DrawBuffersEnum.ColorAttachment2, DrawBuffersEnum.ColorAttachment3, DrawBuffersEnum.ColorAttachment4, DrawBuffersEnum.ColorAttachment5 };
 -			GL.DrawBuffers(array2.Length, array2);
@@ -124,6 +140,9 @@ index bba43f6..3f5420c 100644
 -			GL.ClearBuffer((ClearBuffer)6144, 3, array3);
 -			GL.ClearBuffer((ClearBuffer)6144, 4, array3);
 -			GL.ClearBuffer((ClearBuffer)6144, 5, array3);
++			catch { }
++			try { SystemRenderOITLayers.RestoreVanillaTransparentState(); } catch { }
++			try { GL.ActiveTexture((TextureUnit)33984); } catch { }
  		}
  
  		private void freeResources()
@@ -150,11 +169,7 @@ index bba43f6..3f5420c 100644
  			int width = transparentfb.Width;
  			int height = transparentfb.Height;
  			GL.BindFramebuffer((FramebufferTarget)36160, transparentfb.FboId);
- 			revealTextureId = GL.GenTexture();
- 			GL.BindTexture((TextureTarget)3553, revealTextureId);
-@@ -93,10 +144,11 @@ public class SystemRenderOITLayers : ClientSystem
- 			GL.TexParameter((TextureTarget)35866, (TextureParameterName)10243, 33071);
- 			GL.FramebufferTexture2D((FramebufferTarget)36160, (FramebufferAttachment)36064, (TextureTarget)3553, revealTextureId, 0);
+@@ -95,6 +169,7 @@
  			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36067, accumTextureId, 0, 0);
  			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36068, accumTextureId, 0, 1);
  			GL.FramebufferTextureLayer((FramebufferTarget)36160, (FramebufferAttachment)36069, accumTextureId, 0, 2);
@@ -162,11 +177,7 @@ index bba43f6..3f5420c 100644
  		}
  	}
  
- 	public class AfterOIT : IRenderer, IDisposable
- 	{
-@@ -104,15 +156,24 @@ public class SystemRenderOITLayers : ClientSystem
- 
- 		public int RenderRange => 1;
+@@ -106,11 +181,20 @@
  
  		public void OnRenderFrame(float deltaTime, EnumRenderStage stage)
  		{
@@ -192,11 +203,7 @@ index bba43f6..3f5420c 100644
  		}
  
  		public void Dispose()
- 		{
- 		}
-@@ -122,19 +183,182 @@ public class SystemRenderOITLayers : ClientSystem
- 
- 	private static int accumTextureId;
+@@ -124,6 +208,164 @@
  
  	private static int revealTextureId;
  
@@ -361,10 +368,7 @@ index bba43f6..3f5420c 100644
  	public override string Name => "oitlayers";
  
  	public override EnumClientSystemType GetSystemType()
- 	{
- 		return EnumClientSystemType.Render;
- 	}
- 
+@@ -134,6 +376,11 @@
  	public SystemRenderOITLayers(ClientMain game)
  		: base(game)
  	{
@@ -376,4 +380,3 @@ index bba43f6..3f5420c 100644
  		game.api.Event.RegisterRenderer(new BeforeOIT(game.api), EnumRenderStage.OIT, "beforeoit");
  		game.api.Event.RegisterRenderer(new AfterOIT(), EnumRenderStage.OIT, "afteroit");
  	}
- }
