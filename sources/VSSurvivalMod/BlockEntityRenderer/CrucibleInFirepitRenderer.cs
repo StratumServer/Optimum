@@ -17,13 +17,22 @@ namespace Vintagestory.GameContent
         MultiTextureMeshRef meshRef;
         BlockPos pos;
         float temp;
+        readonly int tempGlowMode;
         Matrixf ModelMat = new Matrixf();
         Vec4f glowRgb = new Vec4f();
+        Vec4f avgColorVec = new Vec4f(1f, 1f, 1f, 1f);
 
         public CrucibleInFirepitRenderer(ICoreClientAPI capi, Block crucibleBlock, BlockPos pos)
         {
             this.capi = capi;
             this.pos = pos;
+            tempGlowMode = crucibleBlock?.Attributes?["tempGlowMode"].AsInt(0) ?? 0;
+
+            BakedCompositeTexture baked = crucibleBlock?.FirstTextureInventory?.Baked;
+            if (baked != null && capi.BlockTextureAtlas != null)
+            {
+                ColorUtil.ToRGBAVec4f(capi.BlockTextureAtlas.GetAverageColor(baked.TextureSubId), ref avgColorVec);
+            }
 
             capi.Tesselator.TesselateBlock(crucibleBlock, out MeshData mesh);
             meshRef = capi.Render.UploadMultiTextureMesh(mesh);
@@ -39,13 +48,13 @@ namespace Vintagestory.GameContent
             rpi.GlDisableCullFace();
             rpi.GlToggleBlend(true);
 
-            int itemp = (int)temp;
+            int itemp = temp > 500f ? (int)GameMath.Min(temp, 10000f) : 0;
             Vec4f lightrgbs = capi.World.BlockAccessor.GetLightRGBs(pos.X, pos.Y, pos.Z);
             ColorUtil.GetIncandescenceColorFloats(itemp, out float gr, out float gg, out float gb);
             glowRgb.R = gr;
             glowRgb.G = gg;
             glowRgb.B = gb;
-            int extraGlow = GameMath.Clamp((itemp - 550) / 2, 0, 255);
+            int extraGlow = GameMath.Clamp((itemp - 500) / 3, 0, 255);
             glowRgb.A = extraGlow / 255f;
 
             IStandardShaderProgram prog = rpi.PreparedStandardShader(pos.X, pos.Y, pos.Z);
@@ -63,6 +72,8 @@ namespace Vintagestory.GameContent
             prog.AlphaTest = 0.05f;
             prog.OverlayOpacity = 0;
 
+            prog.TempGlowMode = extraGlow > 0 ? tempGlowMode : 0;
+            prog.AverageColor = avgColorVec;
             prog.RgbaLightIn = lightrgbs;
             prog.RgbaGlowIn = glowRgb;
             prog.ExtraGlow = extraGlow;
@@ -78,6 +89,8 @@ namespace Vintagestory.GameContent
 
             rpi.RenderMultiTextureMesh(meshRef, "tex");
 
+            prog.TempGlowMode = 0;
+            prog.ExtraGlow = 0;
             prog.Stop();
         }
 
