@@ -761,6 +761,7 @@ var membersToInject = new Dictionary<string, List<string>>
     {
         "optimumRayTraceEntityFilter",
         "optimumRayTraceEntityMatcher",
+        "optimumRayTraceHitPosTmp",
         "MatchesOptimumRayTraceEntity",
         "FindNearestRayIntersectingEntity",
     },
