@@ -129,57 +129,6 @@ void main()
 	if (!leavesHack) {
 		fragPos += normal * clamp(-fragPos.z / 150 - 0.05, 0, 10);
 	}
-
-    const float ditherSize = pow(64.0, 2.0);
-    float dither = bayer128(texcoord * screenSize);
-	vec3 randomVec = sphereMap(goldenSpiralN(ditherSize + dither, ditherSize));
-
-	vec3 tangentDiff = randomVec - normal * dot(randomVec, normal);
-    vec3 tangent = dot(tangentDiff, tangentDiff) > 1e-10
-		? normalize(tangentDiff)
-		: normalize(abs(normal.z) < 0.99 ? vec3(-normal.y, normal.x, 0.0) : vec3(1.0, 0.0, -normal.x));
-    vec3 bitangent = cross(normal, tangent);
-    mat3 TBN = mat3(tangent, bitangent, normal);
-
-    float occlusion = 0.0;
-
-    for( int i = 0; i < kernelSize; ++i)
-    {
-        vec3 samplePos = TBN * samples[i];
-        samplePos = fragPos + samplePos * radius;
-
-        vec4 offset = vec4(samplePos, 1.0);
-        offset = projection * offset;
-        offset.xyz /= offset.w;
-        offset.xyz = offset.xyz * 0.5 + 0.5;
-
-		offset.x = clamp(offset.x, texcoord.x - 0.04, texcoord.x + 0.04);
-		offset.y = clamp(offset.y, texcoord.y - 0.04, texcoord.y + 0.04);
-
-		if (offset.x <= 0.0 || offset.x >= 1.0 || offset.y <= 0.0 || offset.y >= 1.0) {
-			continue;
-		}
-
-        float sampleDepth = optimumReconstructViewZ(texture(gDepth, offset.xy).r);
-		float depthDiff = sampleDepth - (samplePos.z + bias);
-		float rangeCheck = 0;
-
-		if (leavesHack) {
-
-			if (depthDiff >= 0.02 && depthDiff < 0.2 && abs(dot(optimumOctDecodeNormal(texture(gNormal, offset.xy).xy), normal) - 1) > 0.25) {
-				rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));
-			}
-
-		} else {
-
-			if (depthDiff > 0 && depthDiff < 0.2) {
-				rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));
-			}
-
-		}
-
-		occlusion += rangeCheck;
-    }
 #else
 	float wboitatn = max(0.0, 1 - texture(revealage, texcoord).r) * 0.75;
 	
@@ -209,15 +158,22 @@ void main()
 		outOcclusion = vec4(1);
 		return;
 	}
-	
+#endif
+
 	//vec3 randomVec = texture(texNoise, texcoord * noiseScale).xyz;
 	
     const float ditherSize = pow(64.0, 2.0);
     float dither = bayer128(texcoord * screenSize);
 	vec3 randomVec = sphereMap(goldenSpiralN(ditherSize + dither, ditherSize));
 
-
+#if defined(SSAO_DEPTH_RECONSTRUCT) && SSAO_DEPTH_RECONSTRUCT > 0
+	vec3 tangentDiff = randomVec - normal * dot(randomVec, normal);
+    vec3 tangent = dot(tangentDiff, tangentDiff) > 1e-10
+		? normalize(tangentDiff)
+		: normalize(abs(normal.z) < 0.99 ? vec3(-normal.y, normal.x, 0.0) : vec3(1.0, 0.0, -normal.x));
+#else
     vec3 tangent = normalize(randomVec - normal * dot(randomVec, normal));
+#endif
     vec3 bitangent = cross(normal, tangent);
     mat3 TBN = mat3(tangent, bitangent, normal);
 	
@@ -236,13 +192,24 @@ void main()
 		offset.x = clamp(offset.x, texcoord.x - 0.04,  texcoord.x + 0.04);
 		offset.y = clamp(offset.y, texcoord.y - 0.04,  texcoord.y + 0.04);
 
+#if defined(SSAO_DEPTH_RECONSTRUCT) && SSAO_DEPTH_RECONSTRUCT > 0
+		if (offset.x <= 0.0 || offset.x >= 1.0 || offset.y <= 0.0 || offset.y >= 1.0) {
+			continue;
+		}
+        float sampleDepth = optimumReconstructViewZ(texture(gDepth, offset.xy).r);
+#else
         float sampleDepth = texture(gPosition, offset.xy).z;
+#endif
 		float depthDiff = sampleDepth - (sample.z + bias);
 		float rangeCheck = 0;
 		
 		if (leavesHack) {
 
+#if defined(SSAO_DEPTH_RECONSTRUCT) && SSAO_DEPTH_RECONSTRUCT > 0
+			if (depthDiff >= 0.02 && depthDiff < 0.2 && abs(dot(optimumOctDecodeNormal(texture(gNormal, offset.xy).xy), normal) - 1) > 0.25) {
+#else
 			if (depthDiff >= 0.02 && depthDiff < 0.2 && abs(dot(texture(gNormal, offset.xy).rgb, normal) - 1) > 0.25) {
+#endif
 				rangeCheck = smoothstep(0.0, 1.0, radius / abs(fragPos.z - sampleDepth));		
 			}
 
@@ -256,7 +223,6 @@ void main()
 		
 		occlusion += rangeCheck;
     }
-#endif
 
 	float occ = clamp(1.0 - min(1, occlusion / kernelSize * distanceFade) * (1-attenuate), 0, 1);
 	

@@ -305,6 +305,13 @@ var membersToInject = new Dictionary<string, List<string>>
         "OptimumStoreCachedOit",
         "OptimumFreeAllOitResources",
     },
+    ["Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT"] = new()
+    {
+        "optimumSavedShader",
+        "optimumNeedsRebuild",
+        "OptimumPrepareOitFrame",
+        "OptimumRecoverOitFailure",
+    },
     // Settings tab: inject the field, callbacks, and hook helper
     ["Vintagestory.Client.NoObf.GuiCompositeSettings"] = new()
     {
