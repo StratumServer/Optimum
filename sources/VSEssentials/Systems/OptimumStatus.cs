@@ -14,7 +14,9 @@ public class OptimumStatusModSystem : ModSystem
 {
     private const string UserFeedbackCollectEvent = "userfeedback:collect";
     private const string UserFeedbackSentEvent = "userfeedback:sent";
+    private const string ProfilerOpenEvent = "optimum:profiler:open";
     private ICoreClientAPI api;
+    private OptimumProfilerService? profilerService;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Client;
 
@@ -108,6 +110,8 @@ public class OptimumStatusModSystem : ModSystem
 
         api.Event.RegisterEventBusListener(OnUserFeedbackCollect, 0.5, UserFeedbackCollectEvent);
         api.Event.RegisterEventBusListener(OnUserFeedbackSent, 0.5, UserFeedbackSentEvent);
+        api.Event.RegisterEventBusListener(OnProfilerOpenEvent, 0.5, ProfilerOpenEvent);
+        api.Event.LeaveWorld += OnProfilerLeaveWorld;
 
         CommandArgumentParsers parsers = api.ChatCommands.Parsers;
         api.ChatCommands.GetOrCreate("optimum")
@@ -255,12 +259,80 @@ public class OptimumStatusModSystem : ModSystem
                         return TextCommandResult.Success("Greedy mesh diagnostics reset.");
                     })
                 .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("profiler")
+                .WithDescription(Lang.Get("optimum-cmd-profiler"))
+                .WithArgs(parsers.OptionalWord("action"), parsers.OptionalInt("seconds", 10))
+                .HandleWith(HandleProfilerCommand)
             .EndSubCommand();
+    }
+
+    private OptimumProfilerService GetOrCreateProfilerService() => profilerService ??= new OptimumProfilerService(api);
+
+    private void OnProfilerOpenEvent(string eventName, ref EnumHandling handling, IAttribute data)
+    {
+        if (api == null) return;
+        GetOrCreateProfilerService().OpenUi();
+    }
+
+    private void OnProfilerLeaveWorld()
+    {
+        profilerService?.Dispose();
+        profilerService = null;
+    }
+
+    public override void Dispose()
+    {
+        profilerService?.Dispose();
+        profilerService = null;
+        base.Dispose();
+    }
+
+    private TextCommandResult HandleProfilerCommand(TextCommandCallingArgs args)
+    {
+        string action = (args[0] as string)?.Trim().ToLowerInvariant() ?? "ui";
+        int seconds = args[1] is int sec ? sec : 10;
+
+        if (action == "off" || action == "stop")
+        {
+            profilerService?.StopAll();
+            profilerService?.Dispose();
+            profilerService = null;
+            return TextCommandResult.Success("Optimum profiler stopped and released.");
+        }
+
+        OptimumProfilerService svc = GetOrCreateProfilerService();
+        switch (action)
+        {
+            case "":
+            case "ui":
+                bool uiNow = svc.ToggleUi();
+                return TextCommandResult.Success("Optimum profiler UI " + (uiNow ? "opened." : "closed."));
+            case "hud":
+                bool hudNow = svc.ToggleHud();
+                return TextCommandResult.Success("Optimum profiler HUD " + (hudNow ? "shown." : "hidden."));
+            case "record":
+                svc.StartRecording(seconds);
+                return TextCommandResult.Success($"Optimum profiler recording started ({Math.Clamp(seconds, 1, 120)}s).");
+            case "snapshot":
+                string path = svc.ExportSnapshot();
+                return TextCommandResult.Success("Optimum profiler snapshot saved: " + path);
+            case "glcounters":
+                bool glNow = svc.ToggleGlCounters();
+                return TextCommandResult.Success("Optimum profiler GL counters " + (glNow ? "enabled." : "disabled."));
+            default:
+                return TextCommandResult.Error("Usage: .optimum profiler [ui|hud|record [seconds]|snapshot|glcounters|off]");
+        }
     }
 
     private void LogGameLaunchTaskSummary()
     {
         api.Logger.Notification("[Optimum] " + OptimumDiagnostics.GetGameLaunchTaskSummary());
+        string? smokeSpec = Environment.GetEnvironmentVariable("OPTIMUM_PROFILER_SMOKE");
+        if (!string.IsNullOrWhiteSpace(smokeSpec))
+        {
+            api.Event.RegisterCallback(_ => GetOrCreateProfilerService().RunEnvSmokeSpec(smokeSpec), 1200);
+        }
     }
 
     private TextCommandResult DumpChunkBlocks()

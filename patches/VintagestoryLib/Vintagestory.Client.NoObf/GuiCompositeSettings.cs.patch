@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
-index 4d08f84..893f67f 100644
+index 4d08f84..6e9f7ff 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/GuiCompositeSettings.cs
 @@ -46,10 +46,14 @@ public class GuiCompositeSettings : GuiComposite
@@ -101,7 +101,7 @@ index 4d08f84..893f67f 100644
  	internal bool OpenSettingsMenu()
  	{
  		OnGraphicsOptions(on: true);
-@@ -1740,10 +1752,340 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1740,10 +1752,359 @@ public class GuiCompositeSettings : GuiComposite
  		composer.GetSwitch("debugVaoDisposeSwitch").SetValue(RuntimeEnv.DebugVAODispose);
  		composer.GetSwitch("debugSoundDisposeSwitch").SetValue(RuntimeEnv.DebugSoundDispose);
  		composer.GetSwitch("fasterStartupSwitch").SetValue(ClientSettings.OffThreadMipMapCreation);
@@ -155,6 +155,16 @@ index 4d08f84..893f67f 100644
 +			ElementBounds buttonBounds = ElementBounds.Fixed(0.0, optimumRowY, buttonWidth, 32.0).WithFixedPadding(10.0, 2.0);
 +			composer.AddSmallButton(buttonText, onOptimumUserFeedbackClicked, buttonBounds, EnumButtonStyle.Small, "optUserFeedback");
 +			composer.AddHoverText(Lang.Get("optimum-userfeedback-tooltip"), CairoFont.WhiteSmallText(), 320, buttonBounds.FlatCopy());
++			optimumRowY += 40.0;
++		}
++		if (handler.IsIngame)
++		{
++			optimumRowY += 8.0;
++			string profText = Lang.Get("optimum-profiler-button");
++			double profWidth = Math.Max(220.0, CairoFont.ButtonText().GetTextExtents(profText).Width / (double)ClientSettings.GUIScale + 28.0);
++			ElementBounds profBounds = ElementBounds.Fixed(0.0, optimumRowY, profWidth, 32.0).WithFixedPadding(10.0, 2.0);
++			composer.AddSmallButton(profText, onOptimumProfilerClicked, profBounds, EnumButtonStyle.Small, "optProfiler");
++			composer.AddHoverText(Lang.Get("optimum-profiler-tooltip"), CairoFont.WhiteSmallText(), 320, profBounds.FlatCopy());
 +			optimumRowY += 40.0;
 +		}
 +
@@ -412,6 +422,15 @@ index 4d08f84..893f67f 100644
 +		handler.Api.Event.PushEvent("userfeedback:open", payload);
 +		return true;
 +	}
++	private bool onOptimumProfilerClicked()
++	{
++		if (!handler.IsIngame)
++		{
++			return false;
++		}
++		handler.Api?.Event?.PushEvent("optimum:profiler:open", null);
++		return true;
++	}
 +	private void onOptimumEntityLightBatchChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityLightBatch")) return; Vintagestory.API.Config.OptimumConfig.EntityLightBatchEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +	private void onOptimumEntityShaderCacheChanged(bool on) { if (Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled("EntityShaderStateCache")) return; Vintagestory.API.Config.OptimumConfig.EntityShaderStateCacheEnabled = on; Vintagestory.API.Config.OptimumConfig.Save(); }
 +#if OPTIMUM_GREEDY_MESH
@@ -442,7 +461,7 @@ index 4d08f84..893f67f 100644
  		ClientSettings.StartupErrorDialog = on;
  	}
  
-@@ -1818,6 +2160,74 @@ public class GuiCompositeSettings : GuiComposite
+@@ -1818,6 +2179,74 @@ public class GuiCompositeSettings : GuiComposite
  	{
  		ClientSettings.DeveloperMode = true;
  		OnDeveloperOptions(on: true);

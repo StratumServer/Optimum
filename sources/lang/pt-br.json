@@ -57,5 +57,8 @@
 	"optimum-cmd-reset": "Zera todos os contadores de diagnóstico do Optimum",
 	"optimum-cmd-reset-done": "Contadores de diagnóstico do Optimum zerados.",
 	"optimum-godrayscap": "Limitar amostras de god-rays",
-	"optimum-godrayscap-tooltip": "Limita o pós-processamento de god-rays a 100 amostras de textura. Desligado mantém o caminho vanilla de 180 amostras."
+	"optimum-godrayscap-tooltip": "Limita o pós-processamento de god-rays a 100 amostras de textura. Desligado mantém o caminho vanilla de 180 amostras.",
+	"optimum-profiler-button": "Abrir Profiler",
+	"optimum-profiler-tooltip": "Abre o painel de diagnóstico GPU/CPU/GC sob demanda do Optimum (overhead zero quando fechado).",
+	"optimum-cmd-profiler": "Abre ou controla o profiler integrado sob demanda do Optimum (ui, hud, record, snapshot, glcounters, off)"
 }
