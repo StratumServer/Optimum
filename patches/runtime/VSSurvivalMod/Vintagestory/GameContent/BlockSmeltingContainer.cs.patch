@@ -18,7 +18,7 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs b/
  	{
  		if (!byPlayer.Entity.Controls.ShiftKey)
  		{
-@@ -245,6 +246,20 @@ public class BlockSmeltingContainer : Block
+@@ -245,6 +246,22 @@ public class BlockSmeltingContainer : Block
  		{
  			array[i] = cookingSlotsProvider.Slots[i].Itemstack;
  		}
@@ -31,7 +31,9 @@ diff --git a/VSSurvivalMod/Vintagestory/GameContent/BlockSmeltingContainer.cs b/
 +		{
 +			return null;
 +		}
-+		return new CrucibleInFirepitRenderer(capi, this, firepit.Pos);
++		CrucibleInFirepitRenderer renderer = new CrucibleInFirepitRenderer(capi, this, firepit.Pos);
++		renderer.OnUpdate(firepit.InputStackTemp);
++		return renderer;
 +	}
 +
 +	public EnumFirepitModel GetDesiredFirepitModel(ItemStack stack, BlockEntityFirepit firepit, bool forOutputSlot)
