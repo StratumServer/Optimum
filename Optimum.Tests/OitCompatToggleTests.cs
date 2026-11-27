@@ -1,4 +1,3 @@
-using System.IO;
 using System.Linq;
 using Mono.Cecil;
 using Mono.Cecil.Cil;
@@ -12,16 +11,13 @@ namespace Optimum.Tests;
 // rebuild frees the previous texture pair the way vanilla does.
 public sealed class OitCompatToggleTests
 {
-    private static TypeDefinition ShippedOitLayers(AssemblyDefinition lib) =>
+    private static TypeDefinition OitLayers(AssemblyDefinition lib) =>
         lib.MainModule.GetType("Vintagestory.Client.NoObf.SystemRenderOITLayers");
 
-    private static AssemblyDefinition ReadShippedLib()
+    private static AssemblyDefinition ReadLib()
     {
-        string patchedDll = Path.GetFullPath(Path.Combine(
-            PatchReader.FindRepositoryFile("Optimum.Tests/Optimum.Tests.csproj"),
-            "..", "..", "build", "VintagestoryLib", "bin", "Release", "net10.0", "VintagestoryLib-patched.dll"));
-        Assert.True(File.Exists(patchedDll), $"Missing {patchedDll}; run make patch-il first.");
-        return AssemblyDefinition.ReadAssembly(patchedDll);
+        string path = PatchReader.FindRepositoryFile("build/VintagestoryLib/bin/Release/net10.0/VintagestoryLib.dll");
+        return AssemblyDefinition.ReadAssembly(path);
     }
 
     private static int CallIndex(MethodDefinition method, string name) =>
@@ -33,8 +29,8 @@ public sealed class OitCompatToggleTests
     [InlineData("OptimumStoreCachedOit")]
     public void CacheHelpersCheckTheToggleFirst(string helper)
     {
-        using AssemblyDefinition lib = ReadShippedLib();
-        MethodDefinition method = ShippedOitLayers(lib).Methods.Single(m => m.Name == helper);
+        using AssemblyDefinition lib = ReadLib();
+        MethodDefinition method = OitLayers(lib).Methods.Single(m => m.Name == helper);
 
         Assert.Equal(0, CallIndex(method, "get_EffectiveOit"));
     }
@@ -42,8 +38,8 @@ public sealed class OitCompatToggleTests
     [Fact]
     public void RebuildFreesThePreviousPairWhenTheCacheIsOff()
     {
-        using AssemblyDefinition lib = ReadShippedLib();
-        MethodDefinition rebuild = ShippedOitLayers(lib).NestedTypes.Single(t => t.Name == "BeforeOIT")
+        using AssemblyDefinition lib = ReadLib();
+        MethodDefinition rebuild = OitLayers(lib).NestedTypes.Single(t => t.Name == "BeforeOIT")
             .Methods.Single(m => m.Name == "rebuild");
 
         int toggle = CallIndex(rebuild, "get_EffectiveOit");
@@ -54,10 +50,20 @@ public sealed class OitCompatToggleTests
     }
 
     [Fact]
-    public void ShippedConstructorStillRegistersBothRenderers()
+    public void CheckedMethodsShipInTheLib()
     {
-        using AssemblyDefinition lib = ReadShippedLib();
-        MethodDefinition ctor = ShippedOitLayers(lib).Methods.Single(m => m.IsConstructor && !m.IsStatic);
+        string patcher = System.IO.File.ReadAllText(PatchReader.FindRepositoryFile("Optimum.Patcher/Program.cs"));
+
+        Assert.Contains("new(\"Vintagestory.Client.NoObf.SystemRenderOITLayers/BeforeOIT\", \"rebuild\", 0)", patcher);
+        Assert.Contains("\"OptimumTryActivateCachedOit\",", patcher);
+        Assert.Contains("\"OptimumStoreCachedOit\",", patcher);
+    }
+
+    [Fact]
+    public void ConstructorRegistersBothRenderersWithoutTheDeadGate()
+    {
+        using AssemblyDefinition lib = ReadLib();
+        MethodDefinition ctor = OitLayers(lib).Methods.Single(m => m.IsConstructor && !m.IsStatic);
 
         Assert.Equal(-1, CallIndex(ctor, "get_EffectiveOit"));
         Assert.Equal(2, ctor.Body.Instructions.Count(i => i.Operand is MethodReference m && m.Name == "RegisterRenderer"));
