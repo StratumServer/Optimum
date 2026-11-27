@@ -496,7 +496,7 @@ index cb81034..8241c8e 100644
 +			int num3 = bufferEpoch;
 +			if (num != 0)
 +			{
-+				if (num3 == Volatile.Read(ref AudioOpenAl.ContextGeneration) && ScreenManager.Platform?.IsShuttingDown != true)
++				if (num3 == Volatile.Read(ref AudioOpenAl.ContextGeneration))
 +				{
 +					AL.GetSource(num, (ALSourcef)4132, out playbackPosition);
 +					AL.SourceStop(num);
