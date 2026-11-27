@@ -548,7 +548,7 @@ index da1f735..6d18ed6 100644
 +				int num = Volatile.Read(ref AudioOpenAl.ContextGeneration);
 +				if (AutoUnload && allowDeleteAutoUnload)
 +				{
-+					if (sharedBufferId != 0 && sharedBufferEpoch == num && ScreenManager.Platform?.IsShuttingDown != true)
++					if (sharedBufferId != 0 && sharedBufferEpoch == num)
 +					{
 +						AL.DeleteBuffer(sharedBufferId);
 +					}
@@ -593,7 +593,7 @@ index da1f735..6d18ed6 100644
 +					(audioMetaData.AutoUnload || audioMetaData.sharedBufferBytes >= minBytesToEvict) &&
 +					(maxIdleMs <= 0 || tickCount - Volatile.Read(ref audioMetaData.lastUnreferencedMs) >= maxIdleMs))
 +				{
-+					if (audioMetaData.sharedBufferEpoch == num && ScreenManager.Platform?.IsShuttingDown != true)
++					if (audioMetaData.sharedBufferEpoch == num)
 +					{
 +						AL.DeleteBuffer(audioMetaData.sharedBufferId);
 +					}
