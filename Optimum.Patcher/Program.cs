@@ -1172,6 +1172,8 @@ var targets = new List<MethodTarget>
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "Compose", 0),
     // The Optimum update links are handled before the vanilla link handling (no lambdas, no closures).
     new("Vintagestory.Client.GuiCompositeMainMenuLeft", "didClickLink", 1),
+    // A GUI scale change drops the cached GUI patterns so they are rebuilt at the new scale.
+    new("Vintagestory.Client.GuiCompositeMainMenuLeft", "OnGuiScaleChanged", 1),
     // E3: particle spawn distance gate, before the per-particle revive loop
     new("Vintagestory.Client.NoObf.ParticlePoolQuads", "SpawnParticles", 1),
     // Issue #386: vectorize off-thread buffer interpolation and pad velocities

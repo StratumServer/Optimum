@@ -2083,7 +2083,7 @@ public sealed class CairoNativeFreeRecordedGuiTests
         Assert.Equal(radial ? PatternType.Radial : PatternType.Linear, gradient.PatternType);
         Assert.Equal(2, ((Gradient)gradient).ColorStopCount);
         Assert.True(gradient.Matrix.IsIdentity());
-        Assert.Equal(!CairoNativeGuard.NativeAllowed, !gradient.HandleValid);
+        Assert.True(gradient.HandleValid);
 
         using (var context = new Context(surface))
         {

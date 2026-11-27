@@ -23,7 +23,17 @@ index 5f68dc1..1535238 100644
  		screenManager.mainMenuComposer?.Dispose();
  		screenManager.mainMenuComposer = ScreenManager.GuiComposers.Create("compositemainmenu", ElementBounds.Fill).AddShadedDialogBG(sidebarBounds, withTitleBar: false).BeginChildElements()
  			.AddStaticCustomDraw(bounds, OnDrawTree)
-@@ -262,6 +270,10 @@ public class GuiCompositeMainMenuLeft : GuiComposite
+@@ -188,6 +196,9 @@
+ 
+ 	private void OnGuiScaleChanged(float newValue)
+ 	{
++		// Cached GUI patterns keep the matrix of the scale they were built at. Drop them so the next
++		// compose builds them at the new scale; recordings may still hold the old ones, so do not dispose.
++		GuiElement.cachedPatterns.Clear();
+ 		screenManager.versionNumberTexture?.Dispose();
+ 		screenManager.versionNumberTexture = screenManager.api.Gui.TextTexture.GenUnscaledTextTexture(GameVersion.LongGameVersion, CairoFont.WhiteDetailText());
+ 	}
+@@ -262,6 +273,10 @@ public class GuiCompositeMainMenuLeft : GuiComposite
  	private void didClickLink(LinkTextComponent comp)
  	{
  		string href = comp.Href;

@@ -2,7 +2,7 @@ diff --git a/Cairo/wrapper/Pattern.cs b/Cairo/wrapper/Pattern.cs
 index fc26cf1..c3c80fe 100644
 --- a/Cairo/wrapper/Pattern.cs
 +++ b/Cairo/wrapper/Pattern.cs
-@@ -34,17 +34,28 @@ using System;
+@@ -34,17 +34,30 @@ using System;
  namespace Cairo
  {
  
@@ -18,7 +18,9 @@ index fc26cf1..c3c80fe 100644
 +		internal Color ManagedSolidColor;
 +		internal Extend ManagedSolidExtend;
 +		internal Matrix ManagedSolidMatrix;
-+        public bool HandleValid { get { return NativeHandleForRecorder != IntPtr.Zero; } }
++        // Same meaning as the native wrapper: true until disposed. A managed pattern has no native handle,
++        // so checking the handle alone made GUI pattern caches miss every time.
++        public bool HandleValid { get { return !disposed && (NativeHandleForRecorder != IntPtr.Zero || ManagedGradient != null || IsManagedSurfacePattern || IsManagedSolidPattern); } }
  
          [Obsolete]
  		protected IntPtr pattern = IntPtr.Zero;
@@ -32,7 +34,7 @@ index fc26cf1..c3c80fe 100644
  			
  			PatternType pt = NativeMethods.cairo_pattern_get_type (pattern);
  			switch (pt) {
-@@ -62,18 +73,26 @@ namespace Cairo
+@@ -62,18 +75,26 @@ namespace Cairo
  		}
  
  		[Obsolete]
@@ -60,7 +62,7 @@ index fc26cf1..c3c80fe 100644
  			if (CairoDebug.Enabled)
  				CairoDebug.OnAllocated (handle);
  		}
-@@ -91,23 +110,30 @@ namespace Cairo
+@@ -91,23 +112,30 @@ namespace Cairo
  		}
  
  		protected virtual void Dispose (bool disposing)
@@ -98,7 +100,7 @@ index fc26cf1..c3c80fe 100644
  		[Obsolete ("Use Dispose()")]
  		public void Destroy ()
  		{
-@@ -116,56 +142,104 @@ namespace Cairo
+@@ -116,56 +144,104 @@ namespace Cairo
  
  		public Status Status
  		{
