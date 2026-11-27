@@ -13,14 +13,16 @@ namespace Vintagestory.GameContent;
 public sealed class HudOptimumProfilerOverlay : HudElement
 {
     private const double RedrawIntervalSec = 1.0 / 6.0;
+    private readonly OptimumProfilerService service;
     private readonly OptimumProfilerSession session;
     private readonly CairoFont labelFont;
     private readonly CairoFont smallFont;
     private double accumSec;
     private OptimumProfilerSnapshot? latestSnapshot;
 
-    public HudOptimumProfilerOverlay(ICoreClientAPI capi, OptimumProfilerSession session) : base(capi)
+    public HudOptimumProfilerOverlay(ICoreClientAPI capi, OptimumProfilerService service, OptimumProfilerSession session) : base(capi)
     {
+        this.service = service;
         this.session = session;
         this.labelFont = CairoFont.WhiteDetailText().WithFontSize(12f);
         this.smallFont = CairoFont.WhiteDetailText().WithFontSize(10.5f);
@@ -36,8 +38,16 @@ public sealed class HudOptimumProfilerOverlay : HudElement
         accumSec = RedrawIntervalSec;
     }
 
+    public override void OnGuiClosed()
+    {
+        base.OnGuiClosed();
+        service.OnHudClosed();
+    }
+
     private void Compose()
     {
+        // Assigning SingleComposer does not dispose the previous composer or its textures.
+        ClearComposers();
         ElementBounds drawBounds = ElementBounds.Fixed(0, 0, 344, 176);
         ElementBounds bgBounds = ElementBounds.Fill.WithFixedPadding(8);
         bgBounds.BothSizing = ElementSizing.FitToChildren;
@@ -92,13 +102,15 @@ public sealed class HudOptimumProfilerOverlay : HudElement
         {
             "GPU-BOUND" => (0.95, 0.45, 0.35),
             "CPU-BOUND" => (0.35, 0.78, 0.98),
-            "GC/LOCK STALL" => (0.98, 0.76, 0.25),
+            "GC STALL" => (0.98, 0.76, 0.25),
+            "FPS LIMIT" => (0.75, 0.75, 0.80),
+            "PRESENT-BOUND" => (0.85, 0.55, 0.95),
             _ => (0.45, 0.92, 0.52),
         };
         DrawText(ctx, smallFont, s.Verdict.Category, w - GuiElement.scaled(96), y, br, bg, bb, 1.0);
 
         y += GuiElement.scaled(17);
-        string sub = $"Frame {s.FrameDist.Mean:F1}ms (P95 {s.FrameDist.P95:F1}) | GPU {s.GpuSpanDist.Mean:F1}ms";
+        string sub = $"Frame {s.FrameDist.Mean:F1}ms (P95 {s.FrameDist.P95:F1}) | CPU {s.CpuRenderMeanMs:F1} | GPU {s.GpuSpanDist.Mean:F1}ms";
         DrawText(ctx, smallFont, sub, pad, y, 0.85, 0.88, 0.92, 1.0);
 
         y += GuiElement.scaled(15);
