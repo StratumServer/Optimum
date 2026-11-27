@@ -68,11 +68,11 @@ namespace Vintagestory.GameContent
             var humanoidOutfits = capi.ModLoader.GetModSystem<HumanoidOutfits>();
             if (humanoidOutfits == null) return;
 
-            var processedConfigs = new HashSet<string>();
-            var processedShapes = new HashSet<string>();
-            int texturesInserted = 0;
-            int configsProcessed = 0;
-
+            // Prewarm only the variants an entity can be given: every slot's variant list, plus
+            // the codes an entity type picks through its partialRandomOutfits attribute. Configs
+            // also list variants no slot references (vanilla's "branches" points at a texture
+            // that does not exist); those stay lazy, exactly as with the prewarm off.
+            var reachableByConfig = new Dictionary<string, HashSet<string>>();
             foreach (EntityProperties entityType in capi.World.EntityTypes)
             {
                 // Optimum: traders/villagers register under subclass names ("EntityTrader",
@@ -89,7 +89,49 @@ namespace Vintagestory.GameContent
                     entityType.Code.Domain);
 
                 string configKey = configFilename.ToString();
-                if (!processedConfigs.Add(configKey)) continue;
+                if (!reachableByConfig.TryGetValue(configKey, out HashSet<string> reachable))
+                {
+                    reachable = new HashSet<string>();
+                    reachableByConfig[configKey] = reachable;
+                    try
+                    {
+                        HumanoidWearableProperties props = humanoidOutfits.GetConfig(configKey);
+                        if (props?.BySlot != null)
+                        {
+                            foreach (SlotAlloc slot in props.BySlot)
+                            {
+                                if (slot?.Variants != null) reachable.UnionWith(slot.Variants);
+                            }
+                        }
+                    }
+                    catch (System.Exception e)
+                    {
+                        capi.Logger.Warning("[Optimum] Outfit texture prewarm failed for config {0}, skipping (outfit textures for this config will insert lazily at runtime instead): {1}", configKey, e.Message);
+                        reachableByConfig[configKey] = null;
+                        continue;
+                    }
+                }
+                if (reachable == null) continue;
+
+                var partialOutfits = entityType.Attributes?["partialRandomOutfits"].AsObject<Dictionary<string, WeightedCode[]>>();
+                if (partialOutfits == null) continue;
+                foreach (WeightedCode[] codes in partialOutfits.Values)
+                {
+                    if (codes == null) continue;
+                    foreach (WeightedCode code in codes)
+                    {
+                        if (code?.Code != null) reachable.Add(code.Code);
+                    }
+                }
+            }
+
+            var processedShapes = new HashSet<string>();
+            int texturesInserted = 0;
+            int configsProcessed = 0;
+
+            foreach (var (configKey, reachable) in reachableByConfig)
+            {
+                if (reachable == null) continue;
 
                 try
                 {
@@ -98,9 +140,9 @@ namespace Vintagestory.GameContent
 
                     configsProcessed++;
 
-                    foreach (TexturedWeightedCompositeShape variant in props.Variants.Values)
+                    foreach (string code in reachable)
                     {
-                        if (variant == null) continue;
+                        if (!props.Variants.TryGetValue(code, out TexturedWeightedCompositeShape variant) || variant == null) continue;
 
                         texturesInserted += PrewarmTextureDict(capi, variant.Textures);
                         texturesInserted += PrewarmTextureDict(capi, variant.OverrideTextures);

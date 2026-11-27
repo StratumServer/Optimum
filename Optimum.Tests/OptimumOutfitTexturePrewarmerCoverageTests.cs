@@ -66,6 +66,18 @@ public class OptimumOutfitTexturePrewarmerCoverageTests
     }
 
     [Fact]
+    public void PrewarmLoadsOnlyVariantsAnEntityCanBeGiven()
+    {
+        // Outfit configs also list variants no slot or entity picks (vanilla's "branches" points at a
+        // texture that does not exist). Prewarming those logged a missing-texture warning for nothing.
+        string source = Read("sources/VSSurvivalMod/Lore/Village/OptimumOutfitTexturePrewarmer.cs");
+
+        Assert.Contains("props.BySlot", source);
+        Assert.Contains("\"partialRandomOutfits\"", source);
+        Assert.DoesNotContain("props.Variants.Values", source);
+    }
+
+    [Fact]
     public void PrewarmConfigDefaultsOff()
     {
         string config = Read("sources/VintagestoryApi/Config/OptimumConfig.cs");
