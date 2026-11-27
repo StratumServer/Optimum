@@ -454,7 +454,7 @@ public sealed class OptimumDynamicRenderScale
         {
             return clientSsaa;
         }
-        if (dynamicEnabled)
+        if (dynamicEnabled && (clientSsaa >= 1.0f || staticEffectiveRenderScale < 1.0f))
         {
             return Math.Clamp(currentOptimumRenderScale, 0.5f, 1.0f);
         }

@@ -35,6 +35,12 @@ public sealed class DynamicRenderScaleTests
         Assert.Equal(0.85f, OptimumDynamicRenderScale.ResolveActiveViewportScale(1.0f, 0.85f, 0.85f, dynamicEnabled: false));
         // Manual vanilla SSAA < 1.0 when both Optimum static and dynamic scales are off
         Assert.Equal(0.75f, OptimumDynamicRenderScale.ResolveActiveViewportScale(0.75f, 1.0f, 1.0f, dynamicEnabled: false));
+        Assert.Equal(0.5f, OptimumDynamicRenderScale.ResolveActiveViewportScale(0.5f, 1.0f, 1.0f, dynamicEnabled: false));
+        // Vanilla SSAA < 1.0 stays on vanilla scale when Optimum RenderScale is Native (1.0), even if DynamicRenderScale is enabled
+        Assert.Equal(0.5f, OptimumDynamicRenderScale.ResolveActiveViewportScale(0.5f, 1.0f, 1.0f, dynamicEnabled: true));
+        Assert.Equal(0.75f, OptimumDynamicRenderScale.ResolveActiveViewportScale(0.75f, 1.0f, 1.0f, dynamicEnabled: true));
+        // Dynamic scale still overrides when Optimum RenderScale is configured below 1.0
+        Assert.Equal(0.77f, OptimumDynamicRenderScale.ResolveActiveViewportScale(0.85f, 0.85f, 0.77f, dynamicEnabled: true));
     }
 
     [Fact]
