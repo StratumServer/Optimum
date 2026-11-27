@@ -82,10 +82,47 @@ public class FsrPipelineCoverageTests
 
         Assert.Contains("DisableOptimumFsr(Exception error)", platform);
         Assert.Contains("ClientSettings.SSAA = 1f;", platform);
+        Assert.Contains("ClientSettings.OptimumRenderScale = 1f;", platform);
         Assert.Contains("RebuildFrameBuffers();", platform);
         Assert.Contains("optimumFsrDisabled = true;", platform);
         Assert.Contains("logger.Warning(", platform);
         Assert.Contains("!optimumFsrDisabled && ClientSettings.OptimumRenderScale < 1.0f", platform);
+    }
+
+    [Fact]
+    public void VanillaSubNativeSsaaWithNativeRenderScaleDoesNotTriggerFsrOrBypassCompatGuard()
+    {
+        string platform = ReadPatchedOrSource(
+            "patches/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs.patch",
+            "build/VintagestoryLib/Vintagestory.Client.NoObf/ClientPlatformWindows.cs");
+
+        Assert.Contains("ClientSettings.OptimumRenderScale = useStaticOptimumScale ? staticEffectiveScale : 1.0f;", platform);
+        Assert.DoesNotContain("ClientSettings.OptimumRenderScale = baselineScale;", platform);
+        Assert.Contains("!Vintagestory.API.Config.OptimumConfig.IsShaderFeatureDisabled(\"RenderScale\")", platform);
+
+        string? tempPatchedPath = null;
+        try
+        {
+            string patchedPath = ResolveOrBuildPatchedVintagestoryLibPath(out tempPatchedPath);
+            using var asm = AssemblyDefinition.ReadAssembly(patchedPath);
+            var platformType = asm.MainModule.GetType("Vintagestory.Client.NoObf.ClientPlatformWindows")!;
+
+            foreach (string methodName in new[] { "BlitPrimaryToDefault", "OptimumEnsureFsrFramebuffer", "OptimumActivateScaleTier" })
+            {
+                var method = platformType.Methods.Single(m => m.Name == methodName);
+                Assert.Contains(method.Body.Instructions, i =>
+                    (i.OpCode == OpCodes.Call || i.OpCode == OpCodes.Callvirt) &&
+                    i.Operand is MethodReference mr &&
+                    mr.Name == "IsShaderFeatureDisabled");
+            }
+        }
+        finally
+        {
+            if (tempPatchedPath != null && File.Exists(tempPatchedPath))
+            {
+                try { File.Delete(tempPatchedPath); } catch { }
+            }
+        }
     }
 
     [Fact]
