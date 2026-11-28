@@ -101,5 +101,7 @@
 	"optimum-userfeedback-tooltip": "Open the UserFeedback panel pre-selected for Optimum bug reports and suggestions.",
 	"optimum-profiler-button": "Open Profiler",
 	"optimum-profiler-tooltip": "Open the opt-in Optimum GPU/CPU/GC profiler window (zero overhead while closed).",
-	"optimum-cmd-profiler": "Open or control the opt-in Optimum in-game profiler (ui, hud, record, snapshot, glcounters, off)"
+	"optimum-cmd-profiler": "Open or control the opt-in Optimum in-game profiler (ui, hud, record, snapshot, glcounters, off)",
+	"setting-name-fasterstartup": "Off-thread mipmaps (no effect with Optimum)",
+	"setting-hover-fasterstartup":"No effect with Optimum. Texture atlas mipmaps are always built on the main thread, because a worker thread has no OpenGL context and building them there left the atlases without mipmaps or crashed on some setups."
 }

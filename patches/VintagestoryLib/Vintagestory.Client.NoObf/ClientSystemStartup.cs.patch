@@ -1,5 +1,5 @@
 diff --git a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
-index f437458..1006c8b 100644
+index f437458..78d0709 100644
 --- a/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 +++ b/VintagestoryLib/Vintagestory.Client.NoObf/ClientSystemStartup.cs
 @@ -226,23 +226,27 @@ public class ClientSystemStartup : ClientSystem
@@ -76,7 +76,7 @@ index f437458..1006c8b 100644
  
  	private void LoadEntityTypes()
  	{
-@@ -738,11 +740,14 @@ public class ClientSystemStartup : ClientSystem
+@@ -738,41 +740,43 @@ public class ClientSystemStartup : ClientSystem
  	}
  
  	internal void FinaliseTextureAtlas(TextureAtlasManager manager, string type, Action onCompleted)
@@ -87,11 +87,29 @@ index f437458..1006c8b 100644
 +		long stageAElapsed = Stopwatch.GetTimestamp() - stageAStart;
 +		logger.Notification("[Optimum] Atlas {0} StageA (upload): {1:F1} ms", type, stageAElapsed * 1000.0 / Stopwatch.Frequency);
  		logger.VerboseDebug("Server assets - done " + type + " textures composition");
- 		if (ClientSettings.OffThreadMipMapCreation)
+-		if (ClientSettings.OffThreadMipMapCreation)
+-		{
+-			TyronThreadPool.QueueTask(delegate
+-			{
+-				FinaliseTextureAtlas_StageB(manager, "off-thread " + type);
+-			}, "FinaliseTextureAtlas_StageB_" + type);
+-		}
+-		else
++		// Optimum: GL calls need the thread that owns the GL context, and a thread pool worker has none, so
++		// mipmaps stay on the main thread and "Faster startup" (OffThreadMipMapCreation) is ignored on purpose.
++		// Off the main thread the calls left the atlases without mipmaps, and #792 crashed in GL.BindTexture.
++		game.EnqueueGameLaunchTask(delegate
  		{
- 			TyronThreadPool.QueueTask(delegate
- 			{
-@@ -762,17 +767,23 @@ public class ClientSystemStartup : ClientSystem
+-			game.EnqueueGameLaunchTask(delegate
+-			{
+-				FinaliseTextureAtlas_StageB(manager, type);
+-			}, "ServerAssetsReceived");
+-		}
++			FinaliseTextureAtlas_StageB(manager, type);
++		}, "ServerAssetsReceived");
+ 		TyronThreadPool.QueueTask(delegate
+ 		{
+ 			FinaliseTextureAtlas_StageC(manager, type, onCompleted);
  		}, "FinaliseTextureAtlas_StageC_" + type);
  	}
  
@@ -115,7 +133,7 @@ index f437458..1006c8b 100644
  	}
  
  	internal void BeginItemTesselation()
-@@ -1019,17 +1030,26 @@ public class ClientSystemStartup : ClientSystem
+@@ -1019,17 +1023,26 @@ public class ClientSystemStartup : ClientSystem
  		game.EnqueueGameLaunchTask(WaitForBlockTesselation, "blockTesselation");
  	}
  
@@ -145,7 +163,7 @@ index f437458..1006c8b 100644
  
  	internal void OnAllAssetsLoadedAndClientJoined()
  	{
-@@ -1037,10 +1057,11 @@ public class ClientSystemStartup : ClientSystem
+@@ -1037,10 +1050,11 @@ public class ClientSystemStartup : ClientSystem
  		game.BlocksReceivedAndLoaded = true;
  		CompositeTexture.basicTexturesCache = null;
  		CompositeTexture.wildcardsCache = null;
